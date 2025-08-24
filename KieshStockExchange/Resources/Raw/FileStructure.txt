@@ -1,0 +1,142 @@
+KieshStockExchange
+- NuGet Packages (Not included in the repository)
+--- CommunityToolkit.Mvvm (8.4.0)
+--- ExcelDataReader (3.7.0)
+--- ExcelDataReader.DataSet (3.7.0)
+--- Microsoft.Extensions.Logging.Debug (9.0.8)
+--- Microsoft.Maui.Controls (9.0.82)
+--- Microsoft.NET.ILLink.Tasks (9.0.7)
+--- sqlite-net-pcl (1.9.172)
+--- SQLitePCLRaw.bundle_e_sqlite3 (3.0.1)
+
+- Dependencies
+--- net9.0-android
+--- net9.0-ios
+--- net9.0-maccatalyst
+--- net9.0-windows10.0.19041.0
+
+- Properties
+--- launchSettings.json
+
+- Helpers
+--- SecerityHelper.cs
+--- StringNotEmptyConverter.cs
+
+- Models
+--- AIUser.cs
+--- Fund.cs
+--- IValidatable.cs
+--- Order.cs
+--- Portfolio.cs
+--- Stock.cs
+--- StockPrice.cs
+--- Transaction.cs
+--- User.cs
+
+- Platforms
+--- Android
+--- iOS
+--- MacCatalyst
+--- Tizen
+--- Windows 
+
+- Resources
+--- AppIcon
+--- Fonts
+--- Images
+--- Raw
+--- Splash
+--- Styles
+----- Colors.xaml
+----- Styles.xaml
+----- MyStyles.xaml
+
+- Services
+--- Implementations
+----- AuthService.cs
+----- LocalDBService.cs 
+----- OnlineDBService.cs (TODO)
+----- ExcelImportService.cs
+----- MarketOrderService.cs (TODO)
+----- PortfolioService.cs (TODO)
+----- ProfileService.cs (TODO)
+----- StockPriceService.cs (TODO)
+----- TransactionService.cs (TODO)
+----- TrendingService.cs (TODO)
+----- UserOrderService.cs (TODO)
+----- UserSessionService.cs (TODO)
+--- Interfaces
+----- IAuthService.cs
+----- IDataBaseService.cs
+----- IExcelImportService.cs
+----- IMarketOrderService.cs
+----- IPortfolioService.cs
+----- IProfileService.cs
+----- IStockPriceService.cs
+----- ITransactionService.cs
+----- ITrendingService.cs
+----- IUserOrderService.cs
+----- IUserSessionService.cs
+
+- ViewModels
+--- AccountViewModels (TODO)
+----- AccountViewModel.cs
+--- AdminViewModels
+----- AdminViewModel.cs
+----- BaseAdminTableViewModel.cs
+----- OrderTableViewModel.cs  (TODO)
+----- StockTableViewModel.cs
+----- TransactionTableViewModel.cs (TODO)
+----- UserTableViewModel.cs
+--- MarketViewModels (TODO)
+----- MarketViewModel.cs
+--- OtherViewModels
+----- BaseViewModel.cs
+--- PortfolioViewModels (TODO)
+----- PortfolioViewModel.cs
+--- TradeViewModels (TODO)
+----- ChartViewModel.cs
+----- OpenOrderTableViewModel.cs 
+----- OrderBookViewModel.cs
+----- OrderHistoryTableViewModel.cs
+----- PlaceOrderViewModel.cs
+----- PositionsTableViewModel.cs
+----- TradeViewModel.cs
+--- UserViewModels
+----- LoginViewModel.cs
+----- RegisterViewModel.cs
+
+- Views (Each .xaml file has a .xaml.cs file attached to it)
+--- AccountPageViews (TODO)
+----- AccountPage.xaml
+--- AdminPageViews
+----- AdminPage.xaml
+----- OrderTableView.xaml (TODO)
+----- StockTableView.xaml
+----- TransactionTableView.xaml (TODO)
+----- UserTableView.xaml
+--- MarketPageViews (TODO)
+----- MarketPage.xaml 
+--- OtherViews
+----- TopNavBarView.xaml
+----- SegmentedTabView.xaml
+--- PortfolioPageViews (TODO)
+----- PortfolioPage.xaml 
+--- TradePageViews 
+----- ChartView.xaml (TODO)
+----- OpenOrdersView.xaml (TODO)
+----- OrderBookView.xaml (TODO)
+----- OrderHistoryView.xaml (TODO)
+----- PlaceOrderView.xaml (TODO)
+----- PositionsView.xaml (TODO)
+----- TradePage.xaml 
+--- UserViews
+----- LoginPage.xaml
+----- RegisterPage.xaml
+----- ForgotPasswordPage.xaml (TODO)
+
+- App.xaml
+-- App.xaml.cs
+- AppShell.xaml
+-- App.xaml.cs
+- MauiProgram.cs

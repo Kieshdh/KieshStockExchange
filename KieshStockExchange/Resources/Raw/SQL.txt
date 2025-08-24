@@ -1,0 +1,76 @@
+CREATE TABLE Users (
+    UserId INTEGER PRIMARY KEY AUTOINCREMENT,
+    Username TEXT NOT NULL UNIQUE,
+    PasswordHash TEXT NOT NULL,
+    Email TEXT NOT NULL UNIQUE,
+    FullName TEXT NOT NULL,
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    BirthDate DATETIME NOT NULL,
+    IsAdmin BOOL
+);
+
+CREATE TABLE Stocks (
+    StockId INTEGER PRIMARY KEY AUTOINCREMENT,
+    Symbol TEXT NOT NULL UNIQUE,
+    CompanyName TEXT NOT NULL
+);
+
+CREATE TABLE StockPrices (
+    PriceId INTEGER PRIMARY KEY AUTOINCREMENT,
+    StockId INTEGER NOT NULL,
+    Price REAL NOT NULL,
+    Currency TEXT NOT NULL,
+    Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (StockId) REFERENCES Stocks(StockId)
+);
+
+CREATE TABLE Orders (
+    OrderId INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserId INTEGER NOT NULL,
+    StockId INTEGER NOT NULL,
+    OrderType TEXT CHECK(OrderType IN ('MarketBuy', 'MarketSell', 'LimitBuy', 'LimitSell')) NOT NULL,
+    Quantity INTEGER NOT NULL,
+    Price REAL NOT NULL,
+    Currency TEXT NOT NULL,
+    Status TEXT CHECK(Status IN ('Open', 'Filled', 'Cancelled')) DEFAULT 'OPEN',
+    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (UserId)  REFERENCES Users(UserId),
+    FOREIGN KEY (StockId) REFERENCES Stocks(StockId)
+);
+
+CREATE TABLE Transactions (
+    TransactionId INTEGER PRIMARY KEY AUTOINCREMENT,
+    StockId INTEGER NOT NULL,
+    BuyOrderId INTEGER NOT NULL,
+    SellOrderId INTEGER NOT NULL,
+    BuyerId INTEGER NOT NULL,
+    SellerId INTEGER NOT NULL,
+    Quantity INTEGER NOT NULL,
+    Price REAL NOT NULL,
+    Currency TEXT NOT NULL,
+    Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (BuyOrderId)  REFERENCES Orders(OrderId),
+    FOREIGN KEY (SellOrderId) REFERENCES Orders(OrderId),
+    FOREIGN KEY (BuyerId)     REFERENCES Users(UserId),
+    FOREIGN KEY (SellerId)    REFERENCES Users(UserId),
+    FOREIGN KEY (StockId)     REFERENCES Stocks(StockId)
+);
+
+CREATE TABLE Portfolios (
+    PortfolioId INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserId INTEGER NOT NULL,
+    StockId INTEGER NOT NULL,
+    Quantity INTEGER NOT NULL,
+    FOREIGN KEY (UserId)  REFERENCES Users(UserId),
+    FOREIGN KEY (StockId) REFERENCES Stocks(StockId),
+    UNIQUE(UserId, StockId)
+);
+
+CREATE TABLE Funds (
+    FundId INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserId INTEGER NOT NULL UNIQUE,
+    TotalBalance REAL NOT NULL DEFAULT 0.0,
+    ReservedBalance REAL NOT NULL DEFAULT 0.0,
+    AvailableBalance AS (TotalBalance - ReservedBalance) STORED,
+    FOREIGN KEY (UserId) REFERENCES Users(UserId)
+);

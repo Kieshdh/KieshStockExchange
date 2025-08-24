@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="KieshStockExchange.Views.MarketPageViews.MarketPage"
+             xmlns:local="clr-namespace:KieshStockExchange.ViewModels.MarketViewModels"
+             xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
+             Title="Stocks">
+    <ScrollView>
+        <Grid Style="{StaticResource MainGrid}">
+
+            <!-- Navigation bar at the Top -->
+            <navbar:TopNavBarView Title="Stock" Grid.Row="0"/>
+
+            <!-- Main section -->
+
+
+        </Grid>
+    </ScrollView>
+</ContentPage>

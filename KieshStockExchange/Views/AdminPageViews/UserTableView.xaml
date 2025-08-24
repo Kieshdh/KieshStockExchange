@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="KieshStockExchange.Views.AdminPageViews.UserTableView" 
+             x:Name="UserTableRoot">
+    <Grid RowDefinitions="Auto,* ,Auto">
+
+        <!-- Labels -->
+        <Grid ColumnDefinitions="50, 1.5*, 2*, 2*, *, *, *, 60, 3" 
+              Style="{StaticResource TableHeaderGrid}" >
+            <Label Text="ID" Grid.Column="0" 
+                   Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="Username" Grid.Column="1" 
+                   Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="Full Name" Grid.Column="2" 
+                   Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="Email" Grid.Column="3" 
+                   Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="Birthdate" Grid.Column="4" 
+                   Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="Balance" Grid.Column="5" 
+                   Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="TotalBalance" Grid.Column="6" 
+                   Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="Edit" Grid.Column="7" 
+                   Style="{StaticResource TableHeaderLabel}" />
+        </Grid>
+
+        <Label Text="{Binding PagedItems.Count, StringFormat='Rows: {0}'}"
+               Margin="10,0" TextColor="White" Grid.Row="1"/>
+
+        <!-- CollectionView for displaying user data -->
+        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1" >
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Grid ColumnDefinitions="50, 1.5*, 2*, 2*, *, *, *, 60, 3"
+                          Style="{StaticResource TableRowGrid}">
+                        <!-- Viewing Mode Labels -->
+                        <Label Text="{Binding UserId}" Grid.Column="0" 
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding Username}" Grid.Column="1" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding FullName}" Grid.Column="2" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding Email}" Grid.Column="3" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding BirthDate}" Grid.Column="4" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding Funds}" Grid.Column="5" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding TotalBalance}" Grid.Column="6"
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding EditText}" Grid.Column="7"
+                               Style="{StaticResource TableEditLabel}" >
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Command="{Binding ChangeEditCommand}" NumberOfTapsRequired="1" />
+                            </Label.GestureRecognizers>
+                        </Label>
+
+                        <!-- Editing Mode Entries -->
+                        <Entry Text="{Binding Username, Mode=TwoWay}" Grid.Column="1" 
+                               Style="{StaticResource TableRowEntry}" 
+                               IsVisible="{Binding IsEditing}" />
+                        <Entry Text="{Binding FullName, Mode=TwoWay}" Grid.Column="2" 
+                               Style="{StaticResource TableRowEntry}" 
+                               IsVisible="{Binding IsEditing}" />
+                        <Entry Text="{Binding Email, Mode=TwoWay}" Grid.Column="3" 
+                               Style="{StaticResource TableRowEntry}" 
+                               IsVisible="{Binding IsEditing}" />
+                        <Entry Text="{Binding BirthDate, Mode=TwoWay}" Grid.Column="4" 
+                               Style="{StaticResource TableRowEntry}" 
+                               IsVisible="{Binding IsEditing}" />
+                        <Entry Text="{Binding Funds, Mode=TwoWay}" Grid.Column="5" 
+                               Style="{StaticResource TableRowEntry}" 
+                               IsVisible="{Binding IsEditing}" />
+
+                        <!-- Vertical Lines -->
+                        <BoxView Grid.Column="0" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="1" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="2" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="3" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="4" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="5" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="6" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="7" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="8" Style="{StaticResource TableVerticalSeparator}" />
+
+                        <!-- Horizontal line (bottom of the row) -->
+                        <BoxView Style="{StaticResource TableHorizontalSeparator}" />
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <!-- Table Page Navigation -->
+        <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}" Grid.Row="2" 
+                    BindableLayout.ItemsSource="{Binding VisiblePageNumbers}" >
+            <BindableLayout.ItemTemplate>
+                <DataTemplate>
+                    <Button Text="{Binding .}"
+                            Command="{Binding Source={x:Reference UserTableRoot}, 
+                            Path=BindingContext.GoToPageCommand}"
+                            CommandParameter="{Binding .}"
+                            Style="{StaticResource PageNumberButton}"/>
+                </DataTemplate>
+            </BindableLayout.ItemTemplate>
+        </HorizontalStackLayout>
+    </Grid>
+</ContentView>

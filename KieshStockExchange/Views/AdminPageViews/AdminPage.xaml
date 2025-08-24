@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="KieshStockExchange.Views.AdminPageViews.AdminPage"
+             x:Name="AdminPageRoot"
+             xmlns:local="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews"
+             xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
+             Title="Admin" >
+    <Grid RowDefinitions="Auto,*" Style="{StaticResource MainGrid}">
+
+        <!-- Navigation bar at the Top -->
+        <navbar:TopNavBarView Title="Admin" Grid.Row="0"/>
+
+        <!-- Main section -->
+        <VerticalStackLayout Grid.Row="1">
+            <!-- Table picker -->
+            <Picker HorizontalOptions="Center"
+                    HorizontalTextAlignment="Center"
+                    ItemsSource="{Binding TableTypes}"
+                    SelectedItem="{Binding SelectedTableType, Mode=TwoWay}" 
+                    MaximumWidthRequest="200" MinimumWidthRequest="150"/>
+
+            <!-- The Data Table -->
+            <Grid>
+                <Label Text="{Binding LoadingText}" TextColor="White" Padding="50"
+                       FontSize="25" IsVisible="{Binding IsLoading}"
+                       VerticalOptions="Center" HorizontalOptions="Center" />
+
+                <adminViews:UserTableView 
+                    BindingContext="{Binding UsersVm}"
+                    IsVisible="{Binding Source={x:Reference AdminPageRoot},
+                                Path=BindingContext.IsUsersSelected}" />
+                <adminViews:StockTableView 
+                    BindingContext="{Binding StocksVm}"
+                    IsVisible="{Binding Source={x:Reference AdminPageRoot},
+                                Path=BindingContext.IsStocksSelected}" />
+                <adminViews:OrderTableView 
+                    BindingContext="{Binding OrdersVm}"
+                    IsVisible="{Binding Source={x:Reference AdminPageRoot},
+                                Path=BindingContext.IsOrdersSelected}" />
+                <adminViews:TransactionTableView 
+                    BindingContext="{Binding TransactionsVm}"
+                    IsVisible="{Binding Source={x:Reference AdminPageRoot},
+                                Path=BindingContext.IsTransactionsSelected}" />
+            </Grid>
+        </VerticalStackLayout>
+    </Grid>
+</ContentPage>

@@ -1,0 +1,217 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+            xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml" 
+            xmlns:converters="clr-namespace:KieshStockExchange.Helpers"
+            xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels">
+    <!-- Others -->
+    <Style x:Key="MainGrid" TargetType="Grid">
+        <Setter Property="BackgroundColor"   Value="{StaticResource DarkNavy}"  />
+        <Setter Property="RowDefinitions"    Value="Auto,*" />
+    </Style>
+    <Style x:Key="MainPath" TargetType="Path">
+        <Setter Property="Fill"   Value="{StaticResource DarkGreen}" />
+        <Setter Property="Data"   Value="m0,0l200,0l0,246c-190,0 -190,93 -381,40l0,-286z" />
+        <Setter Property="Stroke" Value="Transparent"/>
+        <Setter Property="Aspect" Value="Fill"/>
+        <Setter Property="HorizontalOptions"    Value="FillAndExpand"/>
+        <Setter Property="VerticalOptions"      Value="FillAndExpand"/>
+    </Style>
+    <Style x:Key="LogoImage"                    TargetType="Image">
+        <Setter Property="Source"               Value="kse_logo.png" />
+        <Setter Property="BackgroundColor"      Value="Transparent" />
+        <Setter Property="HeightRequest"        Value="80"/>
+        <Setter Property="WidthRequest"         Value="80"/>
+        <Setter Property="HorizontalOptions"    Value="Center"/>
+        <Setter Property="VerticalOptions"      Value="Center"/>
+    </Style>
+    
+    <!-- Navbar -->
+    <Style x:Key="NavBarButton" TargetType="Button">
+        <Setter Property="WidthRequest"  Value="100" />
+        <Setter Property="HeightRequest" Value="50" />
+        <Setter Property="BackgroundColor" Value="{StaticResource MutedGrey}" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="FontAttributes" Value="Bold" />
+    </Style>
+
+    <!-- SegmentButtons -->
+    <Style x:Key="SegmentButtonBase" TargetType="Button">
+        <Setter Property="Margin" Value="0,8,0,0" />
+        <Setter Property="Padding" Value="4" />
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="BorderWidth" Value="1" />
+        <Setter Property="BorderColor" Value="Transparent" />
+        <Setter Property="HeightRequest" Value="36" />
+        <Setter Property="MinimumWidthRequest" Value="72" />
+    </Style>
+    <Style x:Key="SegmentButton.Unselected" TargetType="Button" BasedOn="{StaticResource SegmentButtonBase}">
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor" Value="White" />
+        <Setter Property="BorderColor" Value="Grey" />
+    </Style>
+    <Style x:Key="SegmentButton.Selected" TargetType="Button" BasedOn="{StaticResource SegmentButtonBase}">
+        <Setter Property="BackgroundColor" Value="LightGrey" />
+        <Setter Property="TextColor" Value="White" />
+        <Setter Property="BorderColor" Value="Grey" />
+    </Style>
+
+    <!-- Admin Table -->
+    <Style x:Key="TableHeaderLabel"             TargetType="Label">
+        <Setter Property="TextColor"            Value="White"  />
+        <Setter Property="FontAttributes"       Value="Bold"   />
+        <Setter Property="HorizontalOptions"    Value="Center" />
+    </Style>
+    <Style x:Key="TableRowLabel"                TargetType="Label">
+        <Setter Property="TextColor"            Value="White"  />
+        <Setter Property="FontAttributes"       Value="None"   />
+        <Setter Property="HorizontalOptions"    Value="Center" />
+        <Setter Property="VerticalOptions"      Value="Center" />
+    </Style>
+    <Style x:Key="TableRowEntry"                TargetType="Entry">
+        <Setter Property="TextColor"            Value="White"  />
+        <Setter Property="FontAttributes"       Value="None"   />
+        <Setter Property="VerticalOptions"      Value="Fill" />
+        <Setter Property="HorizontalOptions"    Value="Fill" />
+        <Setter Property="HorizontalTextAlignment"   Value="Center" />
+        <Setter Property="Background"   Value="{StaticResource DarkGreen}" />
+    </Style>
+    <Style x:Key="TableEditLabel"            TargetType="Label">
+        <Setter Property="TextColor"         Value="{StaticResource DarkGreen}"  />
+        <Setter Property="FontAttributes"    Value="None"   />
+        <Setter Property="HorizontalOptions" Value="Center" />
+        <Setter Property="VerticalOptions"   Value="Center" />
+        <Setter Property="FontAttributes"    Value="Bold" />
+    </Style>
+    <Style x:Key="TableVerticalSeparator"       TargetType="BoxView">
+        <Setter Property="BackgroundColor"      Value="Gray" />
+        <Setter Property="WidthRequest"         Value="3"    />
+        <Setter Property="HorizontalOptions"    Value="Start"/>
+    </Style>
+    <Style x:Key="TableHorizontalSeparator"  TargetType="BoxView" >
+        <Setter Property="BackgroundColor"   Value="Gray" />
+        <Setter Property="HeightRequest"     Value="1"    />
+        <Setter Property="HorizontalOptions" Value="Fill"/>
+        <Setter Property="VerticalOptions"   Value="End"/>
+        <Setter Property="Grid.ColumnSpan"   Value="10"/>
+    </Style>
+    <Style x:Key="TableRowGrid"             TargetType="Grid">
+        <Setter Property="BackgroundColor"  Value="Transparent" />
+        <Setter Property="RowDefinitions"   Value="Auto"    />
+        <Setter Property="Padding"          Value="0"/>
+        <Setter Property="Margin"           Value="0"/>
+    </Style>
+    <Style x:Key="TableHeaderGrid"          TargetType="Grid">
+        <Setter Property="BackgroundColor"  Value="DarkGray" />
+        <Setter Property="RowDefinitions"   Value="Auto"    />
+        <Setter Property="Padding"          Value="8"/>
+        <Setter Property="Margin"           Value="10,10,10,-10"/>
+    </Style>
+    <Style x:Key="PageNumberStackLayout"        TargetType="HorizontalStackLayout">
+        <Setter Property="HorizontalOptions"    Value="Center" />
+        <Setter Property="Spacing"              Value="10"    />
+        <Setter Property="Margin"               Value="0,0,0,10"/>
+    </Style>
+    <Style x:Key="PageNumberButton"         TargetType="Button">
+        <Setter Property="WidthRequest"     Value="40" />
+        <Setter Property="HeightRequest"    Value="30" />
+        <Setter Property="CornerRadius"     Value="15" />
+        <Setter Property="Padding"          Value="5,0"/>
+        <Setter Property="FontAttributes"   Value="Bold" />
+        <Setter Property="TextColor"        Value="White" />
+        <Setter Property="BackgroundColor"  Value="Grey" />
+    </Style>
+    
+    <!-- User Pages -->
+    <Style x:Key="RegistrationLabel"                TargetType="Label" >
+        <Setter Property="VerticalTextAlignment"    Value="Center" />
+        <Setter Property="TextColor"                Value="White" />
+        <Setter Property="Grid.Column"              Value="0" />
+    </Style>
+    <Style x:Key="RegistrationEntry"        TargetType="Entry">
+        <Setter Property="TextColor"        Value="White" />
+        <Setter Property="FontAttributes"   Value="Bold" />
+        <Setter Property="Grid.Column"      Value="1" />
+        <Setter Property="PlaceholderColor" Value="Grey" />
+    </Style>
+    <Style x:Key="RegistrationErrorLabel" TargetType="Label">
+        <Setter Property="TextColor"      Value="Red" />
+    </Style>
+    <Style x:Key="LoginBaseFrame" TargetType="Frame" >
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="BorderColor" Value="ForestGreen" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="30" />
+        <Setter Property="HorizontalOptions" Value="FillAndExpand" />
+    </Style>
+    <Style x:Key="LoginImageFrame" TargetType="Frame" >
+        <Setter Property="BackgroundColor" Value="White" />
+        <Setter Property="BorderColor" Value="Black" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="5" />
+        <Setter Property="CornerRadius" Value="30" />
+        <Setter Property="HeightRequest" Value="40" />
+        <Setter Property="WidthRequest" Value="40" />
+    </Style>
+    <Style x:Key="LoginFrameImage" TargetType="Image" >
+        <Setter Property="BackgroundColor" Value="White" />
+        <Setter Property="Aspect" Value="AspectFit" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="VerticalOptions" Value="Center" />
+        <Setter Property="HorizontalOptions" Value="Center" />
+        <Setter Property="HeightRequest" Value="25" />
+        <Setter Property="WidthRequest" Value="25" />
+    </Style>
+    <Style x:Key="LoginEntry" TargetType="Entry" >
+        <Setter Property="TextColor" Value="White" />
+        <Setter Property="FontAttributes" Value="Bold" />
+        <Setter Property="Margin" Value="0,0,20,0" />
+        <Setter Property="VerticalOptions" Value="Center" />
+        <Setter Property="HorizontalOptions" Value="FillAndExpand" />
+    </Style>
+    <Style x:Key="ConfirmButton" TargetType="Button" >
+        <Setter Property="TextColor" Value="White" />
+        <Setter Property="FontAttributes" Value="Bold" />
+        <Setter Property="Margin" Value="0,15,0,0" />
+        <Setter Property="CornerRadius" Value="30" />
+        <Setter Property="WidthRequest" Value="200" />
+        <Setter Property="BackgroundColor" Value="{StaticResource DarkGreen}" />
+        <Setter Property="FontSize" Value="Small" />
+    </Style>
+
+    <!-- Trade page -->
+    <Style x:Key="StockPlacerButton" TargetType="Button" >
+        <Setter Property="WidthRequest" Value="100" />
+        <Setter Property="Padding" Value="5" />
+        <Setter Property="TextColor" Value="Black" />
+        <Setter Property="FontAttributes" Value="Bold" />
+        <Setter Property="CornerRadius" Value="20" />
+    </Style>
+    <Style x:Key="TradeContentOutline" TargetType="Frame">
+        <Setter Property="BorderColor" Value="Black" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="HasShadow" Value="False" />
+        <Setter Property="Padding" Value="8" />
+        <Setter Property="Margin" Value="4" />
+    </Style>
+    <Style x:Key="StockPlacerEntry" TargetType="Entry" >
+        
+    </Style>
+    <Style x:Key="StockPlacerLabel" TargetType="Label">
+        
+    </Style>
+    <Style x:Key="StockSelectorPicker" TargetType="Picker">
+        <Setter Property="MinimumWidthRequest" Value="80" />
+        <Setter Property="BackgroundColor" Value="Grey" />
+        <Setter Property="TextColor" Value="Black" />
+        <Setter Property="FontSize" Value="Medium" />
+        <Setter Property="VerticalOptions" Value="Center" />
+        <Setter Property="FontAttributes" Value="Bold" />
+    </Style>
+    <Style x:Key="SelectedStockDisplayLabel" TargetType="Picker">
+        <Setter Property="TextColor" Value="White" />
+        <Setter Property="MinimumWidthRequest" Value="100" />
+        <Setter Property="FontSize" Value="Large" />
+        <Setter Property="VerticalOptions" Value="Center" />
+    </Style>
+
+</ResourceDictionary>

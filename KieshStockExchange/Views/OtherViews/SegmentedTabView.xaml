@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="KieshStockExchange.Views.OtherViews.SegmentedTabView"
+             x:Name="Root">
+    <Grid RowDefinitions="Auto,*" ColumnDefinitions="*">
+        <!-- Header strip -->
+        <Border x:Name="HeaderPill"
+                Grid.Row="0"
+                Style="{StaticResource SegmentedPillContainerStyle}"
+                HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContainerHorizontalOptions}"
+                VerticalOptions="Start">
+
+            <!-- The header buttons are injected here from code-behind -->
+            <HorizontalStackLayout
+                x:Name="HeaderStrip"
+                Spacing="6"
+                Padding="0"
+                HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContentHorizontalOptions}"
+                VerticalOptions="Center" />
+        </Border>
+
+        <!-- Content area -->
+        <ContentPresenter
+            x:Name="ContentHost"
+            Grid.Row="1"
+            Padding="0"
+            HorizontalOptions="Fill"
+            VerticalOptions="Fill" />
+    </Grid>
+</ContentView>

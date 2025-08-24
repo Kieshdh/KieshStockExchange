@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Shell
+    x:Class="KieshStockExchange.AppShell"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:local="clr-namespace:KieshStockExchange"
+    xmlns:admin="clr-namespace:KieshStockExchange.Views.AdminPageViews"
+    xmlns:portfolio="clr-namespace:KieshStockExchange.Views.PortfolioPageViews"
+    xmlns:market="clr-namespace:KieshStockExchange.Views.MarketPageViews"
+    xmlns:trade="clr-namespace:KieshStockExchange.Views.TradePageViews"
+    xmlns:account="clr-namespace:KieshStockExchange.Views.AccountPageViews"
+    xmlns:user="clr-namespace:KieshStockExchange.Views.UserViews"
+    Shell.FlyoutBehavior="Disabled"
+    Title="KieshStockExchange">
+
+    <ShellContent Title="Login" Route="LoginPage"
+        ContentTemplate="{DataTemplate user:LoginPage}" />
+    <ShellContent Title="Register" Route="RegisterPage"
+        ContentTemplate="{DataTemplate user:RegisterPage}" />
+    <ShellContent Title="Account" Route="AccountPage"
+        ContentTemplate="{DataTemplate account:AccountPage}" />
+    <ShellContent Title="Admin" Route="AdminPage"
+        ContentTemplate="{DataTemplate admin:AdminPage}" />
+    <ShellContent Title="Admin" Route="PortfolioPage"
+        ContentTemplate="{DataTemplate portfolio:PortfolioPage}" />
+    <ShellContent Title="Admin" Route="StocksPage"
+        ContentTemplate="{DataTemplate market:MarketPage}" />
+    <ShellContent Title="Admin" Route="TradePage"
+        ContentTemplate="{DataTemplate trade:TradePage}" />
+
+</Shell>

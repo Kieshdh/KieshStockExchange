@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="KieshStockExchange.Views.UserViews.LoginPage"
+             xmlns:vm="KieshStockExchange.ViewModels.UserViewModels.LoginViewModel"
+             Title="Login">
+    <Grid BackgroundColor="{StaticResource DarkNavy}"
+          RowDefinitions="180, *">
+
+        <!-- Top Part with Logo -->
+        <Path Style="{StaticResource MainPath}" />
+
+        <StackLayout Padding="50">
+            <Image Style="{StaticResource LogoImage}"/>
+        </StackLayout>
+
+        <!-- Bottom Part -->
+        <Grid RowSpacing="5" Grid.Row="1" Margin="20,20,20,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="50" />
+                <RowDefinition Height="50" />
+                <RowDefinition Height="auto" />
+                <RowDefinition Height="40" />
+                <RowDefinition Height="40" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Opening Labels -->
+            <Label Grid.Row="1" Text="Welcome!" 
+                   FontSize="Title" FontAttributes="Bold" 
+                   HorizontalOptions="Center" Padding="0" Margin="0"/>
+            <Label Grid.Row="2" Text="Sign in to continue"
+                   HorizontalOptions="Center" FontSize="Subtitle"/>
+            
+            <!-- Login form -->
+            <VerticalStackLayout Grid.Row="3"  MinimumWidthRequest="300"
+                                 HorizontalOptions="CenterAndExpand" >
+                <!-- Username Entry -->
+                <Frame Style="{StaticResource LoginBaseFrame}" Margin="0,0,0,0" >
+                    <StackLayout Orientation="Horizontal">
+                        <Frame Style="{StaticResource LoginImageFrame}" >
+                            <Image Source="user_icon.png" 
+                                   Style="{StaticResource LoginFrameImage}"/>
+                        </Frame>
+                        <Entry Text="{Binding Username}" Placeholder="Username"
+                               Style="{StaticResource LoginEntry}" />
+                    </StackLayout>
+                </Frame>
+                
+                <!-- Password Entry -->
+                <Frame Style="{StaticResource LoginBaseFrame}" Margin="0,15,0,0" >
+                    <StackLayout Orientation="Horizontal">
+                        <Frame Style="{StaticResource LoginImageFrame}"  >
+                            <Image Source="password_icon.png" 
+                                   Style="{StaticResource LoginFrameImage}"/>
+                        </Frame>
+                        <Entry Text="{Binding Password}" Placeholder="Password" 
+                               Style="{StaticResource LoginEntry}" IsPassword="True" />
+                    </StackLayout>
+                </Frame>
+                <!-- Remember me & Forgot Password -->
+                <StackLayout Orientation="Horizontal" Margin="0,0,0,0" Padding="0" Spacing="-10">
+                    <CheckBox IsChecked="False" />
+                    <Label Text="Remember me" TextColor="White" FontSize="Micro"
+                           VerticalTextAlignment="Center" HorizontalTextAlignment="Center" />
+                    <Label Text="Forgot Password" TextColor="{StaticResource DarkGreen}" 
+                           FontAttributes="Bold" FontSize="Micro" HorizontalOptions="EndAndExpand" 
+                           VerticalTextAlignment="Center" HorizontalTextAlignment="Center" />
+                </StackLayout>
+
+                <!-- Sign in Button -->
+                <Button Text="SIGN IN" Command="{Binding LoginCommand}"
+                        Style="{StaticResource ConfirmButton}"  />
+
+                <!-- Register new user -->
+                <HorizontalStackLayout HorizontalOptions="CenterAndExpand"
+                                       Margin="0,20,0,0" Padding="0">
+                    <Label Text="New user?"  TextColor="White" FontSize="Small"/>
+                    <Label Text=" Sign Up" TextColor="{StaticResource DarkGreen}"
+                           FontAttributes="Bold" FontSize="Small" >
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnRegisterClicked" NumberOfTapsRequired="1" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Grid>
+    </Grid>
+</ContentPage>

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:views="clr-namespace:KieshStockExchange.Views.OtherViews"
+             x:Class="KieshStockExchange.Views.TradePageViews.PlaceOrderView">
+
+    <Grid WidthRequest="250" RowSpacing="10"
+          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+
+        <!-- BUY / SELL -->
+        <views:SegmentedTabView Grid.Row="0"
+                                SelectedIndex="{Binding SideIndex, Mode=TwoWay}"
+                                HeaderContainerHorizontalOptions="Center"
+                                SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
+                                UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}">
+            <views:SegmentedTabView.Tabs>
+                <views:SegmentedTabItem Header="Buy"/>
+                <views:SegmentedTabItem Header="Sell"/>
+            </views:SegmentedTabView.Tabs>
+        </views:SegmentedTabView>
+
+        <!-- LIMIT / MARKET -->
+        <views:SegmentedTabView Grid.Row="1"
+                                SelectedIndex="{Binding OrderTypeIndex, Mode=TwoWay}"
+                                SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
+                                UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}">
+            <views:SegmentedTabView.Tabs>
+                <views:SegmentedTabItem Header="Limit"/>
+                <views:SegmentedTabItem Header="Market"/>
+            </views:SegmentedTabView.Tabs>
+        </views:SegmentedTabView>
+
+        <!-- Limit price input -->
+        <Entry Grid.Row="2"
+               Style="{StaticResource StockPlacerEntry}"
+               Placeholder="Enter Limit Price"
+               Keyboard="Numeric"
+               Text="{Binding LimitPrice, Mode=TwoWay}"
+               IsVisible="{Binding IsLimitOrder}"/>
+
+        <!-- Market price display -->
+        <Label Grid.Row="3"
+               Style="{StaticResource StockPlacerLabel}"
+               HorizontalOptions="Center"
+               Text="{Binding PriceDisplay}"
+               IsVisible="{Binding IsMarketOrder}"/>
+
+        <!-- Slippage only for market -->
+        <Grid Grid.Row="4" ColumnDefinitions="Auto,*"
+              IsVisible="{Binding IsMarketOrder}">
+            <Label Text="Slippage %" VerticalOptions="Center"
+                   Style="{StaticResource StockPlacerLabel}"/>
+            <Entry Grid.Column="1"
+                   Style="{StaticResource StockPlacerEntry}"
+                   Placeholder="0.5"
+                   Keyboard="Numeric"
+                   Text="{Binding SlippagePercent, Mode=TwoWay}"/>
+        </Grid>
+
+        <!-- Quantity -->
+        <Entry Grid.Row="5"
+               Style="{StaticResource StockPlacerEntry}"
+               Placeholder="Enter Amount"
+               Keyboard="Numeric"
+               Text="{Binding Quantity, Mode=TwoWay}"/>
+
+        <!-- Position percent helper -->
+        <Slider Grid.Row="6" Minimum="0" Maximum="100"
+                Value="{Binding PositionPercent, Mode=TwoWay}"/>
+
+        <!-- Total -->
+        <Label Grid.Row="7"
+               Style="{StaticResource StockPlacerLabel}"
+               HorizontalOptions="Center"
+               Text="{Binding TotalPriceDisplay}"/>
+
+        <!-- Submit -->
+        <Button Grid.Row="8"
+                Text="{Binding SubmitText}"
+                Command="{Binding PlaceOrderCommand}"
+                IsEnabled="{Binding CanSubmit}"
+                Style="{StaticResource StockPlacerButton}"/>
+    </Grid>
+</ContentView>

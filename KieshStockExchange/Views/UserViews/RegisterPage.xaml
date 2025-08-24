@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:toolkit="http://communitytoolkit.maui.behaviors"
+             x:Class="KieshStockExchange.Views.UserViews.RegisterPage"
+             xmlns:vm="KieshStockExchange.ViewModels.UserViewModels.RegisterViewModel"
+             Title="Register">
+    <Grid BackgroundColor="{StaticResource DarkNavy}"
+          RowDefinitions="180, *, 50" >
+
+        <!-- Top Part with Logo -->
+        <Path Style="{StaticResource MainPath}"/>
+
+        <StackLayout Padding="50">
+            <Image Style="{StaticResource LogoImage}" /> 
+        </StackLayout>
+
+        <!-- Bottom Part -->
+        <VerticalStackLayout Grid.Row="1">
+            <!-- Opening Label -->
+            <Label Grid.Row="1" Text="Create a new account" 
+                   FontSize="Title" FontAttributes="Bold" 
+                   HorizontalOptions="Center" Padding="20" Margin="0"/>
+
+            <!-- Register form -->
+            <Grid Padding="20,0,20,0" RowSpacing="10" ColumnSpacing="15"
+                  ColumnDefinitions="*,*" RowDefinitions="Auto, Auto, Auto, Auto" >
+
+                <!-- Username -->
+                <VerticalStackLayout Grid.Row="0" Grid.Column="0">
+                    <Grid ColumnDefinitions="90,*">
+                        <Label Text="Username:" Style="{StaticResource RegistrationLabel}"/>
+                        <Entry Text="{Binding Username}" Placeholder="Enter username"
+                               Style="{StaticResource RegistrationEntry}" />
+                    </Grid>
+                    <Label Text="Username must be 5–20 alphanumeric characters." 
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsUsernameInvalid}"/>
+                </VerticalStackLayout>
+                
+                <!-- Email -->
+                <VerticalStackLayout Grid.Row="0" Grid.Column="1">
+                    <Grid ColumnDefinitions="125,*">
+                        <Label Text="Email:" Style="{StaticResource RegistrationLabel}" />
+                        <Entry Text="{Binding Email}" Placeholder="Enter email" 
+                               Style="{StaticResource RegistrationEntry}" />
+                    </Grid>
+                    <Label Text="Enter a valid email." 
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsEmailInvalid}"/>
+                </VerticalStackLayout>
+
+                <!-- Password -->
+                <VerticalStackLayout Grid.Row="1" Grid.Column="0">
+                    <Grid ColumnDefinitions="90,*">
+                        <Label Text="Password:" Style="{StaticResource RegistrationLabel}"  />
+                        <Entry Text="{Binding Password}" Placeholder="Enter password" 
+                               IsPassword="True" 
+                               Style="{StaticResource RegistrationEntry}" />
+                    </Grid>
+                    <Label Text="Password must be at least 8 characters."
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsPasswordInvalid}"/>
+                </VerticalStackLayout>
+
+                <!-- Confirm Password -->
+                <VerticalStackLayout Grid.Row="1" Grid.Column="1">
+                    <Grid ColumnDefinitions="125,*">
+                        <Label Text="Repeat Password:" Style="{StaticResource RegistrationLabel}"  />
+                        <Entry Text="{Binding ConfirmPassword}" 
+                               Placeholder="Confirm password" IsPassword="True" 
+                               Style="{StaticResource RegistrationEntry}" />
+                    </Grid>
+                    <Label Text="Passwords do not match."
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsConfirmPasswordInvalid}"/>
+                </VerticalStackLayout>
+
+                <!-- First Name -->
+                <VerticalStackLayout Grid.Row="2" Grid.Column="0">
+                    <Grid ColumnDefinitions="90,*">
+                        <Label Text="First Name:" Style="{StaticResource RegistrationLabel}" />
+                        <Entry Text="{Binding FirstName}" Placeholder="Enter first name" 
+                               Style="{StaticResource RegistrationEntry}"  />
+                    </Grid>
+                    <Label Text="Only letters, spaces and some punctuation allowed."
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsFirstNameInvalid}"/>
+                </VerticalStackLayout>
+
+                <!-- Last Name -->
+                <VerticalStackLayout Grid.Row="2" Grid.Column="1">
+                    <Grid ColumnDefinitions="125,*">
+                        <Label Text="Last Name:" Style="{StaticResource RegistrationLabel}" />
+                        <Entry Text="{Binding LastName}" Placeholder="Last Name"  
+                               Style="{StaticResource RegistrationEntry}" />
+                    </Grid>
+                    <Label Text="Only letters, spaces and some punctuation allowed." 
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsLastNameInvalid}"/>
+                </VerticalStackLayout>
+
+                <!-- Middle Name -->
+                <VerticalStackLayout Grid.Row="3" Grid.Column="1">
+                    <Grid ColumnDefinitions="125,*">
+                        <Label Text="Middle Name(s):" Style="{StaticResource RegistrationLabel}"/>
+                        <Entry Text="{Binding MiddleName}" Placeholder="Enter middle name(s)" 
+                               Style="{StaticResource RegistrationEntry}" />
+                    </Grid>
+                    <Label Text="Only letters, spaces and some punctuation allowed." 
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsMiddleNameInvalid}"/>
+                </VerticalStackLayout>
+
+                <!-- Birthdate -->
+                <Grid Grid.Row="3" Grid.Column="0" ColumnDefinitions="90,*">
+                    <Label Text="Birthday:" Style="{StaticResource RegistrationLabel}"  />
+                    <Grid Grid.Column="1" ColumnSpacing="10"
+                          ColumnDefinitions="3*,4*,3*">
+                        <Picker Grid.Column="0" ItemsSource="{Binding DayOptions}" 
+                                TextColor="White" SelectedItem="{Binding BirthDay, Mode=TwoWay}" />
+                        <Picker Grid.Column="1" ItemsSource="{Binding MonthOptions}" 
+                                TextColor="White" SelectedItem="{Binding BirthMonth, Mode=TwoWay}" />
+                        <Picker Grid.Column="2" ItemsSource="{Binding YearOptions}" 
+                                TextColor="White" SelectedItem="{Binding BirthYear, Mode=TwoWay}" />
+                    </Grid>
+                    <Label Text="Select a valid birth date (18+)." 
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsBirthDateInvalid}"/>
+                </Grid>
+            </Grid>
+            
+            <!-- Register Button -->
+            <Button Text="Register" Command="{Binding RegisterCommand}"
+                    Style="{StaticResource ConfirmButton}" />
+        </VerticalStackLayout>
+    </Grid>
+
+</ContentPage>
