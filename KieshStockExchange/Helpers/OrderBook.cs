@@ -55,14 +55,14 @@ public class OrderBook
     /// <summary>
     /// Peeks or removes the best order on the buy side.
     /// </summary>
-    public Order PeekBestBuy()
+    public Order? PeekBestBuy()
     {
         if (_buyBook.Count == 0) return null;
         var bestPrice = _buyBook.First().Key;
         return _buyBook[bestPrice].Peek();
     }
 
-    public Order RemoveBestBuy()
+    public Order? RemoveBestBuy()
     {
         if (_buyBook.Count == 0) return null;
         var kv = _buyBook.First();
@@ -75,14 +75,14 @@ public class OrderBook
     /// <summary>
     /// Peeks or removes the best order on the sell side.
     /// </summary>
-    public Order PeekBestSell()
+    public Order? PeekBestSell()
     {
         if (_sellBook.Count == 0) return null;
         var bestPrice = _sellBook.First().Key;
         return _sellBook[bestPrice].Peek();
     }
 
-    public Order RemoveBestSell()
+    public Order? RemoveBestSell()
     {
         if (_sellBook.Count == 0) return null;
         var kv = _sellBook.First();

@@ -19,15 +19,17 @@ KieshStockExchange
 --- launchSettings.json
 
 - Helpers
---- SecerityHelper.cs
---- StringNotEmptyConverter.cs
+--- SecurityHelper.cs (For hashing passwords)
+--- CurrencyHelper.cs (Formats currency values)
+--- OrderBook.cs (For order matching)
+--- OrderResult.cs (Shows result of order operations)
 
 - Models
 --- AIUser.cs
 --- Fund.cs
 --- IValidatable.cs
 --- Order.cs
---- Portfolio.cs
+--- Position.cs
 --- Stock.cs
 --- StockPrice.cs
 --- Transaction.cs
@@ -50,6 +52,7 @@ KieshStockExchange
 ----- Colors.xaml
 ----- Styles.xaml
 ----- MyStyles.xaml
+----- SegmentedTabStyles.xaml
 
 - Services
 --- Implementations
@@ -57,26 +60,26 @@ KieshStockExchange
 ----- LocalDBService.cs 
 ----- OnlineDBService.cs (TODO)
 ----- ExcelImportService.cs
------ MarketOrderService.cs (TODO)
+----- MarketOrderService.cs 
 ----- PortfolioService.cs (TODO)
 ----- ProfileService.cs (TODO)
------ StockPriceService.cs (TODO)
+----- SelectedStockService.cs
 ----- TransactionService.cs (TODO)
 ----- TrendingService.cs (TODO)
------ UserOrderService.cs (TODO)
+----- UserOrderService.cs
 ----- UserSessionService.cs (TODO)
 --- Interfaces
------ IAuthService.cs
------ IDataBaseService.cs
------ IExcelImportService.cs
------ IMarketOrderService.cs
------ IPortfolioService.cs
------ IProfileService.cs
------ IStockPriceService.cs
------ ITransactionService.cs
------ ITrendingService.cs
------ IUserOrderService.cs
------ IUserSessionService.cs
+----- IAuthService.cs (Login, registration)
+----- IDataBaseService.cs (Local and online DB operations)
+----- IExcelImportService.cs (Imports Data from Excel files)
+----- IMarketOrderService.cs (Market operations and order matching)
+----- IPortfolioService.cs (Portfolio Overview and history)
+----- IProfileService.cs (User profile management)
+----- ISelectedStockService.cs (Holds the currently selected stock)
+----- ITransactionService.cs (Tansaction history and details)
+----- ITrendingService.cs (Trending stocks and market data)`
+----- IUserOrderService.cs (User-specific order management)
+----- IUserSessionService.cs (User session management and authentication)
 
 - ViewModels
 --- AccountViewModels (TODO)

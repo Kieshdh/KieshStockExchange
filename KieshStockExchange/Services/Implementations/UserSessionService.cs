@@ -7,8 +7,7 @@ public class UserSessionService : IUserSessionService
 {
     public string UserName { get; }
     public int UserId { get; }
-    public bool IsAuthenticated { get; }
-    public bool IsAdmin { get; }
+    public bool IsAuthenticated { get; } = false;
     public string FullName { get; }
     public bool KeepLoggedIn { get; }
     public int CurrentStockId { get; }

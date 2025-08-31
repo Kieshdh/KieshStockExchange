@@ -6,7 +6,8 @@
              xmlns:local="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
              xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
-             Title="Admin" >
+             xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
+             Title="Admin">
     <Grid RowDefinitions="Auto,*" Style="{StaticResource MainGrid}">
 
         <!-- Navigation bar at the Top -->
@@ -14,35 +15,50 @@
 
         <!-- Main section -->
         <VerticalStackLayout Grid.Row="1">
-            <!-- Table picker -->
-            <Picker HorizontalOptions="Center"
-                    HorizontalTextAlignment="Center"
-                    ItemsSource="{Binding TableTypes}"
-                    SelectedItem="{Binding SelectedTableType, Mode=TwoWay}" 
-                    MaximumWidthRequest="200" MinimumWidthRequest="150"/>
-
+            
+            <!-- Show loading text-->
+            <Label Text="{Binding LoadingText}" TextColor="White" Padding="50"
+                    FontSize="25" IsVisible="{Binding IsLoading}"
+                    VerticalOptions="Center" HorizontalOptions="Center" />
             <!-- The Data Table -->
-            <Grid>
-                <Label Text="{Binding LoadingText}" TextColor="White" Padding="50"
-                       FontSize="25" IsVisible="{Binding IsLoading}"
-                       VerticalOptions="Center" HorizontalOptions="Center" />
+            <Grid IsVisible="{Binding DoneLoading}">
+                <other:SegmentedTabView HeaderContainerHorizontalOptions="Center"
+                            SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
+                            UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}" >
+                    <other:SegmentedTabView.Tabs>
+                        <!-- User Table -->
+                        <other:SegmentedTabItem Header="Users">
+                            <other:SegmentedTabItem.Content>
+                                <adminViews:UserTableView BindingContext="{Binding Source=
+                                    {x:Reference AdminPageRoot}, Path=BindingContext.UsersVm}" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
 
-                <adminViews:UserTableView 
-                    BindingContext="{Binding UsersVm}"
-                    IsVisible="{Binding Source={x:Reference AdminPageRoot},
-                                Path=BindingContext.IsUsersSelected}" />
-                <adminViews:StockTableView 
-                    BindingContext="{Binding StocksVm}"
-                    IsVisible="{Binding Source={x:Reference AdminPageRoot},
-                                Path=BindingContext.IsStocksSelected}" />
-                <adminViews:OrderTableView 
-                    BindingContext="{Binding OrdersVm}"
-                    IsVisible="{Binding Source={x:Reference AdminPageRoot},
-                                Path=BindingContext.IsOrdersSelected}" />
-                <adminViews:TransactionTableView 
-                    BindingContext="{Binding TransactionsVm}"
-                    IsVisible="{Binding Source={x:Reference AdminPageRoot},
-                                Path=BindingContext.IsTransactionsSelected}" />
+                        <!-- Stock Table -->
+                        <other:SegmentedTabItem Header="Stocks">
+                            <other:SegmentedTabItem.Content>
+                                <adminViews:StockTableView BindingContext="{Binding Source=
+                                    {x:Reference AdminPageRoot}, Path=BindingContext.StocksVm}" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
+
+                        <!-- Orders Table -->
+                        <other:SegmentedTabItem Header="Orders">
+                            <other:SegmentedTabItem.Content>
+                                <adminViews:OrderTableView BindingContext="{Binding Source=
+                                    {x:Reference AdminPageRoot}, Path=BindingContext.OrdersVm}" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
+
+                        <!-- Transactions Table -->
+                        <other:SegmentedTabItem Header="Transactions">
+                            <other:SegmentedTabItem.Content>
+                                <adminViews:TransactionTableView BindingContext="{Binding Source=
+                                    {x:Reference AdminPageRoot}, Path=BindingContext.TransactionsVm}" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
+                    </other:SegmentedTabView.Tabs>
+                </other:SegmentedTabView>
             </Grid>
         </VerticalStackLayout>
     </Grid>

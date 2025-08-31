@@ -10,11 +10,8 @@
                 <ResourceDictionary Source="Resources/Styles/Colors.xaml" />
                 <ResourceDictionary Source="Resources/Styles/Styles.xaml" />
                 <ResourceDictionary Source="Resources/Styles/MyStyles.xaml" />
-                <ResourceDictionary Source="Resources/Styles/OtherStyles.xaml" />
+                <ResourceDictionary Source="Resources/Styles/SegmentedTabStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            
-            <Helpers:EqualsConverter x:Key="EqualsConverter" />
-            <Helpers:NotLastIndexConverter x:Key="NotLastIndexConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

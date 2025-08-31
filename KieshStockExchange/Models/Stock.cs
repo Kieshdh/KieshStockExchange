@@ -44,13 +44,12 @@ public class Stock : IValidatable
         return CompanyName.Length > 0 && CompanyName.Length <= 100;
     }
 
-    public bool IsValid()
-    {
-        return IsValidSymbol() && IsValidCompanyName();
-    }
+    public bool IsValid() => IsValidSymbol() && IsValidCompanyName();
     #endregion
 
+    #region String Representations
     public override string ToString() =>
         $"Stock #{StockId}: {Symbol} - {CompanyName}";
-
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    #endregion
 }

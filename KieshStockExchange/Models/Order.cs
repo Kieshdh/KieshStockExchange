@@ -1,9 +1,5 @@
 ﻿using SQLite;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
@@ -25,12 +21,6 @@ public class Order : IValidatable
         public const string Filled = "Filled";
         public const string Cancelled = "Cancelled";
     }
-
-    public static class Currencies
-    {
-        public const string USD = "USD";
-        public const string EUR = "EURO";
-    }
     #endregion
 
     #region Properties
@@ -45,14 +35,21 @@ public class Order : IValidatable
 
     [Column("Price")] public decimal Price { get; set; }
 
-    // "USD", "EUR"
-    [Column("Currency")] public string Currency { get; set; }
+    [Ignore] public decimal TotalAmount => Price * Quantity;
+
+    [Ignore] public CurrencyType CurrencyType { get; set; }
+    [Column("Currency")] public string Currency
+    {
+        get => CurrencyType.ToString();
+        set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
+    }
 
     // "MarketBuy", "MarketSell", "LimitBuy", "LimitSell"
     [Column("OrderType")] public string OrderType { get; set; }
 
     // "Open", "Filled", "Cancelled"
     [Column("Status")] public string Status { get; set; }
+
     [Column("AmountFilled")] public int AmountFilled { get; set; }
 
     [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
@@ -64,40 +61,36 @@ public class Order : IValidatable
     {
         CreatedAt = DateTime.UtcNow;
         Status = Statuses.Open; // Default status when order is created
-        Currency = Currencies.USD; // Default currency
+        CurrencyType = CurrencyType.USD; // Default currency
         AmountFilled = 0;
     }
 
     #region IValidatable Implementation
-    public bool IsValid() => (UserId > 0 && StockId > 0 && Quantity > 0 && Price > 0 &&
-                              IsValidOrderType() && IsValidStatus()) && IsValidCurrency();
+    public bool IsValid() => UserId > 0 && StockId > 0 && Quantity > 0 && Price > 0 &&
+        IsValidOrderType() && IsValidStatus() && IsValidCurrency() && IsValidAmount();
 
     private bool IsValidOrderType() =>
         OrderType == Types.MarketBuy || OrderType == Types.MarketSell ||
         OrderType == Types.LimitBuy || OrderType == Types.LimitSell;
     private bool IsValidStatus() =>
         Status == Statuses.Open || Status == Statuses.Filled || Status == Statuses.Cancelled;
-    private bool IsValidCurrency() =>
-        Currency == Currencies.USD || Currency == Currencies.EUR;
+    private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
+
+    private bool IsValidAmount() =>
+        (IsFilled() && AmountFilled == Quantity) || 
+        (IsOpen() && RemainingQuantity() > 0) || 
+        (IsCancelled() && AmountFilled != Quantity);
 
     #endregion
 
     #region String Representations
     public override string ToString() =>
-        $"Order #{OrderId} - {OrderType} {Quantity} @ {Price} - Status: {Status}";
-
-    public string CreatedAtString() =>
-        CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
-    public string UpdatedAtString() =>
-        UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss");
-
-    public string PriceString() =>
-        Currency switch
-        {
-            Currencies.USD => $"${Price:F2}",
-            Currencies.EUR => $"€{Price:F2}",
-            _ => $"{Price:F2} {Currency}"
-        };
+        $"Order #{OrderId} - {OrderType} {Quantity} @ {PriceDisplay} - Status: {Status}";
+    [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
+    [Ignore] public string TotalAmountDisplay => CurrencyHelper.Format(TotalAmount, CurrencyType);
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string AmountFilledDisplay => $"{AmountFilled}/{Quantity}";
     #endregion
 
     #region Helper Methods

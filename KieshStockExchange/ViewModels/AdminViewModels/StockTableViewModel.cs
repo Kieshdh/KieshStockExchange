@@ -2,6 +2,7 @@
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -30,25 +31,12 @@ public partial class StockTableViewModel
 public partial class StockTableObject : ObservableObject
 {
     public Stock Stock { get; set; }
-    public List<StockPrice> StockPrices { get; set; }
-    public string PriceUSD
-    {
-        get
-        {
-            if (StockPrices != null && StockPrices.Count > 0)
-                return "$ " + StockPrices.Last().PriceUSD.ToString();
-            return "$ 0";
-        }
-    }
-    public string PriceEUR
-    {
-        get
-        {
-            if (StockPrices != null && StockPrices.Count > 0)
-                return "€ " +  StockPrices.Last().PriceEUR.ToString();
-            return "€ 0";
-        }
-    }
+    private List<StockPrice> StockPrices { get; set; }
+    private StockPrice? CurrentStockPrice => StockPrices.Last();
+    private decimal CurrentPrice => CurrentStockPrice?.Price ?? 0m;
+
+    public string PriceUSD { get => Price(CurrencyType.USD); }
+    public string PriceEUR { get => Price(CurrencyType.EUR); }
 
     private IDataBaseService _dbService;
 
@@ -60,6 +48,13 @@ public partial class StockTableObject : ObservableObject
         StockPrices = stockPrices;
         OnPropertyChanged(nameof(PriceUSD));
         OnPropertyChanged(nameof(PriceEUR));
+    }
+
+    private string Price(CurrencyType currencyType)
+    {
+        if (StockPrices.Count > 0 && CurrentStockPrice != null)
+            return CurrencyHelper.FormatConverted(CurrentPrice, CurrentStockPrice.CurrencyType, currencyType);
+        return "-";
     }
 
 }

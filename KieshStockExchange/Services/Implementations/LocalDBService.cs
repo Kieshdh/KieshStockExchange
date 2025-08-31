@@ -31,7 +31,7 @@ public class LocalDBService: IDataBaseService
             await _db.CreateTableAsync<StockPrice>();
             await _db.CreateTableAsync<Order>();
             await _db.CreateTableAsync<Transaction>();
-            await _db.CreateTableAsync<Portfolio>();
+            await _db.CreateTableAsync<Position>();
             await _db.CreateTableAsync<Fund>();
 
             _initialized = true;
@@ -193,30 +193,30 @@ public class LocalDBService: IDataBaseService
     }
     #endregion
 
-    #region Portfolio operations
-    public async Task<List<Portfolio>> GetPortfoliosAsync() {
+    #region Position operations
+    public async Task<List<Position>> GetPositionsAsync() {
         await InitializeAsync();
-        return await _db.Table<Portfolio>().ToListAsync();
+        return await _db.Table<Position>().ToListAsync();
     }
-    public async Task<Portfolio> GetPortfolioById(int portfolioId) {
+    public async Task<Position> GetPositionById(int positionId) {
         await InitializeAsync();
-        return await _db.Table<Portfolio>().Where(p => p.PortfolioId == portfolioId).FirstOrDefaultAsync();
+        return await _db.Table<Position>().Where(p => p.PositionId == positionId).FirstOrDefaultAsync();
     }
-    public async Task<List<Portfolio>> GetPortfoliosByUserId(int userId) {
+    public async Task<List<Position>> GetPositionsByUserId(int userId) {
         await InitializeAsync();
-        return await _db.Table<Portfolio>().Where(p => p.UserId == userId).ToListAsync();
+        return await _db.Table<Position>().Where(p => p.UserId == userId).ToListAsync();
     }
-    public async Task CreatePortfolio(Portfolio portfolio) {
+    public async Task CreatePosition(Position position) {
         await InitializeAsync();
-        await _db.InsertAsync(portfolio);
+        await _db.InsertAsync(position);
     }
-    public async Task UpdatePortfolio(Portfolio portfolio) {
+    public async Task UpdatePosition(Position position) {
         await InitializeAsync();
-        await _db.UpdateAsync(portfolio);
+        await _db.UpdateAsync(position);
     }
-    public async Task DeletePortfolio(Portfolio portfolio) {
+    public async Task DeletePosition(Position position) {
         await InitializeAsync();
-        await _db.DeleteAsync(portfolio);
+        await _db.DeleteAsync(position);
     }
     #endregion
 
@@ -229,9 +229,9 @@ public class LocalDBService: IDataBaseService
         await InitializeAsync();
         return await _db.Table<Fund>().Where(f => f.FundId == fundId).FirstOrDefaultAsync();
     }
-    public async Task<Fund> GetFundByUserId(int userId) {
+    public async Task<List<Fund>> GetFundsByUserId(int userId) {
         await InitializeAsync();
-        return await _db.Table<Fund>().Where(f => f.UserId == userId).FirstOrDefaultAsync();
+        return await _db.Table<Fund>().Where(f => f.UserId == userId).ToListAsync();
     }
     public async Task CreateFund(Fund fund) {
         await InitializeAsync();

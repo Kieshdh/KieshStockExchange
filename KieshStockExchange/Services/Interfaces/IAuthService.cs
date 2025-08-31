@@ -11,5 +11,6 @@ public interface IAuthService
     Task LoginAsync(string username, string password);
     Task LogoutAsync();
     bool IsLoggedIn { get; }
+    bool IsAdmin { get; }
     User CurrentUser { get; }
 }

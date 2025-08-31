@@ -56,8 +56,8 @@ CREATE TABLE Transactions (
     FOREIGN KEY (StockId)     REFERENCES Stocks(StockId)
 );
 
-CREATE TABLE Portfolios (
-    PortfolioId INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE Positions (
+    PositionId INTEGER PRIMARY KEY AUTOINCREMENT,
     UserId INTEGER NOT NULL,
     StockId INTEGER NOT NULL,
     Quantity INTEGER NOT NULL,

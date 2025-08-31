@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml" >
+    
+    <!-- Colors you can tweak to match your app -->
+    <Color x:Key="SegmentedPillBackgroundColor">#E6EAF2</Color>
+    <Color x:Key="SegmentedPillStrokeColor">#D0D6E2</Color>
+    <Color x:Key="SegmentSelectedTextColor">#111111</Color>
+    <Color x:Key="SegmentUnselectedTextColor">#4A5568</Color>
+    <Color x:Key="SegmentDividerColor">#C9D1E2</Color>
+
+    <!-- Outer container: the full pill strip -->
+    <Style x:Key="SegmentedPillContainerStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource SegmentedPillBackgroundColor}" />
+        <Setter Property="Stroke" Value="{StaticResource SegmentedPillStrokeColor}" />
+        <Setter Property="StrokeThickness" Value="1" />
+        <Setter Property="Padding" Value="3" />
+        <Setter Property="StrokeShape">
+            <Setter.Value>
+                <RoundRectangle CornerRadius="100" />
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Unselected button inside the pill -->
+    <Style x:Key="UnselectedSegmentButtonStyle" TargetType="Button">
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor" Value="{StaticResource SegmentUnselectedTextColor}" />
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="CornerRadius" Value="20" />
+        <Setter Property="BorderColor" Value="Transparent" />
+        <Setter Property="BorderWidth" Value="1" />
+        <Setter Property="FontSize" Value="14" />
+    </Style>
+
+    <!-- Selected button (white, slightly raised) -->
+    <Style x:Key="SelectedSegmentButtonStyle" TargetType="Button" 
+           BasedOn="{StaticResource UnselectedSegmentButtonStyle}">
+        <Setter Property="BackgroundColor" Value="{StaticResource DarkGreen}" />
+        <Setter Property="TextColor" Value="{StaticResource SegmentSelectedTextColor}" />
+        <Setter Property="BorderColor" Value="#E9E9EA" />
+        <Setter Property="Shadow">
+            <Setter.Value>
+                <Shadow Radius="8" Opacity="0.15" />
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>

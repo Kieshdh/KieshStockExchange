@@ -33,12 +33,12 @@ public partial class TradeViewModel : BaseViewModel
     #endregion
 
     #region ViewModel Properties
-    public PlaceOrderViewModel placingVm { get; }
-    public HistoryTableViewModel historyVm { get; }
-    public OpenOrdersTableViewModel openOrdersVm { get; }
-    public PositionsTableViewModel positionsVm { get; }
-    public ChartViewModel chartVm { get; }
-    public OrderBookViewModel orderBookVm { get; }
+    public PlaceOrderViewModel PlacingVm { get; }
+    public HistoryTableViewModel HistoryVm { get; }
+    public OpenOrdersTableViewModel OpenOrdersVm { get; }
+    public PositionsTableViewModel PositionsVm { get; }
+    public ChartViewModel ChartVm { get; }
+    public OrderBookViewModel OrderBookVm { get; }
     #endregion
 
     #region Constructor
@@ -55,9 +55,9 @@ public partial class TradeViewModel : BaseViewModel
         OrderBookViewModel orderBookVm)
     {
         // Initialize services
-        _marketService = marketService ?? 
+        _marketService = marketService ??
             throw new ArgumentNullException(nameof(marketService));
-        _logger = logger ?? 
+        _logger = logger ??
             throw new ArgumentNullException(nameof(logger));
         _stockService = stockService ??
             throw new ArgumentNullException(nameof(stockService));
@@ -65,13 +65,12 @@ public partial class TradeViewModel : BaseViewModel
             throw new ArgumentNullException(nameof(userSession));
 
         // Initialize ViewModels
-        this.placingVm = placingVm;
-        this.historyVm = historyVm;
-        this.openOrdersVm = openOrdersVm;
-        this.positionsVm = positionsVm;
-        this.chartVm = chartVm;
-        this.orderBookVm = orderBookVm;
-
+        PlacingVm = placingVm;
+        HistoryVm = historyVm;
+        OpenOrdersVm = openOrdersVm;
+        PositionsVm = positionsVm;
+        ChartVm = chartVm;
+        OrderBookVm = orderBookVm;
 
         // Set default parameters
         Title = "Trade";
@@ -84,6 +83,7 @@ public partial class TradeViewModel : BaseViewModel
         IsBusy = true;
         try
         {
+            _logger.LogInformation("TradeViewModel initializing for stock #{StockId}", stockId);
             // Fill the Stocks picker with the available stocks
             await LoadStocksAsync();
 
@@ -102,20 +102,24 @@ public partial class TradeViewModel : BaseViewModel
             // Subscribe to the service current price
             _stockServiceChangedHandler ??= (_, e) =>
             {
-                if (e.PropertyName == nameof(_stockService.CurrentPrice))
-                    CurrentPrice = _stockService.CurrentPrice;
-                else if (e.PropertyName == nameof(_stockService.CompanyName))
-                    CompanyName = _stockService.CompanyName;
-                else if (e.PropertyName == nameof(_stockService.Symbol))
-                    Symbol = _stockService.Symbol;
+                var name = e.PropertyName;
+
+                // Handle single-property updates and "refresh-all" notifications
+                if (string.IsNullOrEmpty(name) ||
+                    name == nameof(ISelectedStockService.CurrentPrice) ||
+                    name == nameof(ISelectedStockService.CurrentPriceDisplay) ||
+                    name == nameof(ISelectedStockService.PriceUpdatedAt) ||
+                    name == nameof(_stockService.CompanyName) ||
+                    name == nameof(_stockService.Symbol))
+                {
+                    ApplyStockServiceSnapshot();
+                }
             };
             _stockService.PropertyChanged -= _stockServiceChangedHandler; // avoid double subscribe
             _stockService.PropertyChanged += _stockServiceChangedHandler;
 
             // Kick off background price polling at a given timeinterval
             await SwitchStockAsync(stock);
-
-            _logger.LogInformation("TradeViewModel initialized for stock ID {StockId}", stockId);
         }
         catch (Exception ex)
         {
@@ -148,8 +152,6 @@ public partial class TradeViewModel : BaseViewModel
         IsBusy = true;
         try
         {
-            // Assuming your market service can return all stocks.
-            // If you don't have this yet, add an API like GetAllStocksAsync().
             var stocks = await _marketService.GetAllStocksAsync();
             Stocks.Clear();
             foreach (var stock in stocks)
@@ -160,7 +162,7 @@ public partial class TradeViewModel : BaseViewModel
     #endregion
 
     #region Switching Stocks Logic
-    private async Task SwitchStockAsync(Stock? stock)
+    private async Task SwitchStockAsync(Stock stock)
     {
         if (stock is null) return;
         IsBusy = true;
@@ -172,22 +174,20 @@ public partial class TradeViewModel : BaseViewModel
             // Set the new stock in the service
             await _stockService.Set(stock);
 
-            // Change binding context
-            CompanyName = _stockService.CompanyName;
-            Symbol = _stockService.Symbol;
-            CurrentPrice = _stockService.CurrentPrice;
-            Title = $"Trade - {CompanyName} ({Symbol})";
+            // Apply the new snapshot (thread-safe)
+            ApplyStockServiceSnapshot();
 
             // Start live price updates for the new stock
             _stockService.StartPriceUpdates(TimeSpan.FromSeconds(2));
 
             // Refresh components 
-            await placingVm.InitializeAsync();
-            await historyVm.InitializeAsync();
-            await openOrdersVm.InitializeAsync();
-            await positionsVm.InitializeAsync();
-            await chartVm.InitializeAsync();
-            await orderBookVm.InitializeAsync();
+            await PlacingVm.InitializeAsync();
+            await HistoryVm.InitializeAsync();
+            await OpenOrdersVm.InitializeAsync();
+            await PositionsVm.InitializeAsync();
+            await ChartVm.InitializeAsync();
+            await OrderBookVm.InitializeAsync();
+            _logger.LogInformation("Succesfully switched stocks to {StocksId}", stock.StockId);
         }
         catch (Exception ex)
         {
@@ -203,4 +203,20 @@ public partial class TradeViewModel : BaseViewModel
     }
     #endregion
 
+    #region Helpers
+    // Apply current values from _stockService to bindable VM properties on the UI thread
+    private void ApplyStockServiceSnapshot()
+    {
+        void apply()
+        {
+            CompanyName = _stockService.CompanyName;
+            Symbol = _stockService.Symbol;
+            CurrentPrice = _stockService.CurrentPrice;
+            Title = $"Trade - {CompanyName} ({Symbol})";
+        }
+
+        if (MainThread.IsMainThread) apply();
+        else MainThread.BeginInvokeOnMainThread(apply);
+    }
+    #endregion
 }

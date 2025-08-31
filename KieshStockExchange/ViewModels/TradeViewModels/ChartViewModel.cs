@@ -33,5 +33,7 @@ public partial class ChartViewModel : BaseViewModel
     }
 
     public async Task InitializeAsync()
-    { }
+    { 
+        
+    }
 }

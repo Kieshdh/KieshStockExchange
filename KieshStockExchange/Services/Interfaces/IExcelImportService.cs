@@ -10,5 +10,5 @@ public interface IExcelImportService
     Task AddFundsFromExcelAsync();
     Task AddAIUserBehaviourDataFromExcelAsync();
     Task AddStocksFromExcelAsync();
-    Task AddPortfoliosFromExcelAsync();
+    Task AddPositionsFromExcelAsync();
 }

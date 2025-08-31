@@ -50,18 +50,18 @@ public interface IDataBaseService
     Task UpdateTransaction(Transaction transaction);
     Task DeleteTransaction(Transaction transaction);
 
-    // Portfolio operations
-    Task<List<Portfolio>> GetPortfoliosAsync();
-    Task<Portfolio> GetPortfolioById(int portfolioId);
-    Task<List<Portfolio>> GetPortfoliosByUserId(int userId);
-    Task CreatePortfolio(Portfolio portfolio);
-    Task UpdatePortfolio(Portfolio portfolio);
-    Task DeletePortfolio(Portfolio portfolio);
+    // Position operations
+    Task<List<Position>> GetPositionsAsync();
+    Task<Position> GetPositionById(int positionId);
+    Task<List<Position>> GetPositionsByUserId(int userId);
+    Task CreatePosition(Position position);
+    Task UpdatePosition(Position position);
+    Task DeletePosition(Position position);
 
     // Fund operations
     Task<List<Fund>> GetFundsAsync();
     Task<Fund> GetFundById(int fundId);
-    Task<Fund> GetFundByUserId(int userId);
+    Task<List<Fund>> GetFundsByUserId(int userId);
     Task CreateFund(Fund fund);
     Task UpdateFund(Fund fund);
     Task DeleteFund(Fund fund);

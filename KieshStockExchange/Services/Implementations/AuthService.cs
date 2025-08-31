@@ -8,8 +8,9 @@ public class AuthService : IAuthService
 {
     
     private readonly IDataBaseService _db;
-    public User CurrentUser { get; private set; }
+    public User? CurrentUser { get; private set; }
     public bool IsLoggedIn => CurrentUser != null;
+    public bool IsAdmin => CurrentUser?.IsAdmin ?? false;
 
     public AuthService(IDataBaseService db)
     {

@@ -14,6 +14,9 @@ namespace KieshStockExchange.Services
     {
         // ---- Core selection --------------------------------------------------
 
+        /// <summary> Check if there has been a stock selected and it is fully loaded.</summary>
+        bool HasSelectedStock { get; }
+
         /// <summary>The fully loaded Stock currently selected (or null if none).</summary>
         Stock? SelectedStock { get; }
 
@@ -21,15 +24,16 @@ namespace KieshStockExchange.Services
         int? StockId { get; }
 
         /// <summary>The selected stock's symbol (if available).</summary>
-        string? Symbol { get; }
+        string Symbol { get; }
 
-        /// <summary>The selected stock's company name (if available).</summary>
-        string? CompanyName { get; }
+        /// <summary>The selected stock's company name.</summary>
+        string CompanyName { get; }
 
         // ---- Live price ------------------------------------------------------
 
-        /// <summary>The most recently fetched current price (or null if not yet fetched).</summary>
-        decimal? CurrentPrice { get; }
+        /// <summary>The most recently fetched current price</summary>
+        decimal CurrentPrice { get; }
+        string CurrentPriceDisplay { get; }
 
         /// <summary>When the current price was last updated (local time).</summary>
         DateTimeOffset? PriceUpdatedAt { get; }

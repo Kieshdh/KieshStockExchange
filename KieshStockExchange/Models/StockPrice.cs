@@ -1,20 +1,11 @@
 ﻿using SQLite;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
 [Table("StockPrices")]
 public class StockPrice : IValidatable
 {
-    #region Constants
-    public static class Currencies
-    {
-        public const string Usd = "USD";
-        public const string Eur = "EUR";
-    }
-
-    private const decimal ConversionRate = 1.1611378m;
-    #endregion
-
     #region Properties
     [PrimaryKey, AutoIncrement]
     [Column("PriceId")] public int PriceId { get; set; }
@@ -23,8 +14,12 @@ public class StockPrice : IValidatable
 
     [Column("Price")] public decimal Price { get; set; }
 
-    // "USD", "EUR"
-    [Column("Currency")] public string Currency { get; set; } 
+    [Ignore] public CurrencyType CurrencyType { get; set; }
+    [Column("Currency")] public string Currency
+    {
+        get => CurrencyType.ToString();
+        set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
+    }
 
     [Column("Timestamp")] public DateTime Timestamp { get; set; }
     #endregion
@@ -32,28 +27,20 @@ public class StockPrice : IValidatable
     public StockPrice()
     {
         Timestamp = DateTime.UtcNow;
-        Currency = Currencies.Usd; // Default currency
+        CurrencyType = CurrencyType.USD; // Default currency
     }
 
     #region IValidatable Implementation
-    public bool IsValid() => 
-        Price > 0 && StockId > 0 && (Currency == "USD" || Currency == "EUR");
+    public bool IsValid() => Price > 0 && StockId > 0 && IsValidCurrency();
+
+    private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
     #endregion
 
     #region String Representations
-    public decimal PriceUSD => Currency == "USD" ?
-          Math.Round(Price, 2) : Math.Round(Price * ConversionRate, 2);
-
-    public decimal PriceEUR => Currency == "EUR" ?
-          Math.Round(Price, 2) : Math.Round(Price / ConversionRate, 2);
-
-    private string _currencySymbol => (Currency == "USD") ? "$" : "€"; 
     public override string ToString() =>
-        $"StockPrice #{PriceId}: StockId #{StockId} - Price: {PriceString(true)} at {Timestamp}";
-    public string PriceString(bool includeCurrencySymbol) =>
-        includeCurrencySymbol ? 
-        $"{_currencySymbol} {Math.Round(Price, 2)}" :
-        $"{Math.Round(Price, 2)}";
+        $"StockPrice #{PriceId}: StockId #{StockId} - Price: {PriceDisplay} at {Timestamp}";
+    [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
+    [Ignore] public string TimestampDisplay => Timestamp.ToString("dd/MM/yyyy HH:mm:ss");
     #endregion
 
 }

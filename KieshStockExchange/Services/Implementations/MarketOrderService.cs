@@ -2,6 +2,7 @@
 using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Text;
 
 namespace KieshStockExchange.Services.Implementations;
 
@@ -23,8 +24,9 @@ public class MarketOrderService : IMarketOrderService
     // Buy: highest price first; Sell: lowest price first
     private readonly ConcurrentDictionary<int, OrderBook> _orderBooks
         = new ConcurrentDictionary<int, OrderBook>();
-    #endregion 
+    #endregion
 
+    #region Constructor
     public MarketOrderService(
         IDataBaseService dbService,
         IAuthService authService,
@@ -34,6 +36,7 @@ public class MarketOrderService : IMarketOrderService
         _authService = authService ?? throw new ArgumentNullException(nameof(authService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+    #endregion
 
     #region public methods
     public async Task<decimal> GetMarketPriceAsync(int stockId)
@@ -45,7 +48,6 @@ public class MarketOrderService : IMarketOrderService
             return 0m;
         }
         return stockPrice.Price;
-
     }
 
     public async Task<OrderResult> MatchOrderAsync(Order incoming)
@@ -56,26 +58,22 @@ public class MarketOrderService : IMarketOrderService
         var book = GetOrderBook(incoming.StockId);
         var fills = new List<Transaction>();
 
-        // Market = always match, Limit = match only if crossed
-        bool isMarket = incoming.IsMarketOrder();
-
         // pop best opposite once per iteration
         while (incoming.RemainingQuantity() > 0)
         {
+            // Get best opposite order (removes it from book)
             var opposite = TryGetBestOpposite(book, incoming); // REMOVE from book
             if (opposite == null) break;
 
             // if limit order and not crossed, put the opposite back and stop
-            if (!isMarket && !IsPriceCrossed(incoming, opposite))
+            if (!IsPriceCrossed(incoming, opposite))
             {
                 book.AddLimitOrder(opposite); // put it back unchanged
                 break;
             }
 
-            int qty = Math.Min(incoming.RemainingQuantity(), opposite.RemainingQuantity());
-            decimal tradePrice = opposite.Price; // price-time: take maker’s price
-
-            var tx = await ExecuteFillAsync(incoming, opposite, qty, tradePrice);
+            // Execute fill and create transaction record
+            var tx = await ExecuteFillAsync(incoming, opposite);
             fills.Add(tx);
 
             // if opposite still has remainder, re-add it
@@ -83,17 +81,17 @@ public class MarketOrderService : IMarketOrderService
                 book.AddLimitOrder(opposite);
         }
 
-        // if it’s a limit order and still has remainder, place it on the book
-        if (!isMarket && incoming.RemainingQuantity() > 0)
+        // if it still has remainder, place it on the book
+        if (incoming.RemainingQuantity() > 0)
             book.AddLimitOrder(incoming);
 
         return new OrderResult
         {
             PlacedOrder = incoming,
-            Status = (fills.Count == 0 && isMarket) ?
+            Status = (fills.Count == 0) ?
                 OrderStatus.NoMarketPrice : OrderStatus.Success,
             FillTransactions = fills,
-            ErrorMessage = fills.Count == 0 && isMarket ? "No market price available." : null
+            Message = fills.Count == 0 ? "No market price available." : null
         };
     }
 
@@ -170,11 +168,17 @@ public class MarketOrderService : IMarketOrderService
             ? incoming.Price >= opposite.Price
             : incoming.Price <= opposite.Price;
 
-    private async Task<Transaction> ExecuteFillAsync(Order taker, Order maker, int qty, decimal price)
+    private async Task<Transaction> ExecuteFillAsync(Order taker, Order maker)
     {
+        // Determine fill quantity and price
+        int qty = Math.Min(taker.RemainingQuantity(), maker.RemainingQuantity());
+        decimal price = maker.Price; // price-time: take maker’s price
+
+        // Fill both orders
         taker.Fill(qty);
         maker.Fill(qty);
 
+        // Create transaction record
         var tx = new Transaction
         {
             StockId = taker.StockId,
@@ -196,7 +200,7 @@ public class MarketOrderService : IMarketOrderService
         };
         if (!sp.IsValid()) throw new InvalidOperationException("Invalid stock price.");
 
-
+        // Persist changes
         await _dbService.CreateTransaction(tx);
         await _dbService.UpdateOrder(taker);
         await _dbService.UpdateOrder(maker);
@@ -212,17 +216,17 @@ public class MarketOrderService : IMarketOrderService
 
     #region Result helpers
     private OrderResult NotAuthResult() =>
-        new() { Status = OrderStatus.NotAuthenticated, ErrorMessage = "User not authenticated." };
+        new() { Status = OrderStatus.NotAuthenticated, Message = "User not authenticated." };
     private OrderResult OperationFailedResult() =>
-        new() { Status = OrderStatus.OperationFailed, ErrorMessage = "An unexpected error occurred." };
+        new() { Status = OrderStatus.OperationFailed, Message = "An unexpected error occurred." };
     private OrderResult ParamError(string msg) =>
-        new() { Status = OrderStatus.InvalidParameters, ErrorMessage = msg };
+        new() { Status = OrderStatus.InvalidParameters, Message = msg };
     private OrderResult NoMarketPriceResult(Order order, List<Transaction> transactions) =>
         new() {
             PlacedOrder = order,
             FillTransactions = transactions,
             Status = OrderStatus.NoMarketPrice,
-            ErrorMessage = "No market price available."
+            Message = "No market price available."
         };
     #endregion
 }

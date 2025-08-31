@@ -7,12 +7,12 @@ using System.Threading.Tasks;
 
 namespace KieshStockExchange.Models;
 
-[Table("Portfolios")]
-public class Portfolio : IValidatable
+[Table("Positions")]
+public class Position : IValidatable
 {
     #region Properties
     [PrimaryKey, AutoIncrement]
-    [Column("PortfolioId")] public int PortfolioId { get; set; }
+    [Column("PositionId")] public int PositionId { get; set; }
 
     [Column("UserId")] public int UserId { get; set; }
 
@@ -20,16 +20,16 @@ public class Portfolio : IValidatable
 
     [Column("Quantity")] public int Quantity { get; set; }
 
-    [Column("ReservedQuantity")] 
-    public int ReservedQuantity { get; set; } = 0;
+    [Column("ReservedQuantity")] public int ReservedQuantity { get; set; }
 
-    public int RemainingQuantity => Quantity - ReservedQuantity;
+    [Ignore] public int RemainingQuantity => Quantity - ReservedQuantity;
 
     [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; }
+
     [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
     #endregion
 
-    public Portfolio()
+    public Position()
     {
         UpdatedAt = DateTime.UtcNow;
         CreatedAt = DateTime.UtcNow;
@@ -40,9 +40,14 @@ public class Portfolio : IValidatable
     #region IValidatable Implementation
     public bool IsValid() => UserId > 0 && StockId > 0 && 
         Quantity >= 0 && ReservedQuantity >= 0 && RemainingQuantity >= 0;
+    #endregion
 
+    #region String Representations
     public override string ToString() =>
-        $"Portfolio #{PortfolioId}: User #{UserId} - Stock {StockId} with Quantity {Quantity}";
+        $"Position #{PositionId}: User #{UserId} - Stock {StockId} | Qty {Quantity} (Reserved {ReservedQuantity})";
+
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss");
     #endregion
 
     #region Helper Methods

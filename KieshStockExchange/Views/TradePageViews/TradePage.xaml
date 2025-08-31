@@ -37,13 +37,13 @@
             <!-- The chart that displays the price-->
             <Frame Style="{StaticResource TradeContentOutline}"
                    Grid.Row="2" Grid.Column="0" >
-                <views:ChartView BindingContext="{Binding chartVm}"/>
+                <views:ChartView BindingContext="{Binding ChartVm}"/>
             </Frame>
 
             <!-- The Orderbook that displays current orders-->
             <Frame Style="{StaticResource TradeContentOutline}"
                    Grid.Row="1" Grid.Column="1" Grid.RowSpan="2" >
-                <views:OrderBookView BindingContext="{Binding orderBookVm}"/>
+                <views:OrderBookView BindingContext="{Binding OrderBookVm}"/>
             </Frame>
 
             <!-- Shows the current orders, order history and current positions -->
@@ -53,21 +53,27 @@
                         SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
                         UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}" >
                     <other:SegmentedTabView.Tabs>
+                        <!-- Current Positions Table -->
                         <other:SegmentedTabItem Header="Positions">
                             <other:SegmentedTabItem.Content>
-                                <views:PositionsTableView BindingContext="{Binding positionsVm}" />
+                                <views:PositionsTableView BindingContext="{Binding Source=
+                                    {x:Reference TradePageRoot}, Path=BindingContext.PositionsVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 
+                        <!-- Open Orders Table-->
                         <other:SegmentedTabItem Header="Open Orders">
                             <other:SegmentedTabItem.Content>
-                                <views:OpenOrdersTableView BindingContext="{Binding openOrdersVm}" />
+                                <views:OpenOrdersTableView BindingContext="{Binding Source=
+                                    {x:Reference TradePageRoot}, Path=BindingContext.OpenOrdersVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 
+                        <!-- Order History Table-->
                         <other:SegmentedTabItem Header="History">
                             <other:SegmentedTabItem.Content>
-                                <views:HistoryTableView BindingContext="{Binding historyVm}" />
+                                <views:HistoryTableView BindingContext="{Binding Source=
+                                    {x:Reference TradePageRoot}, Path=BindingContext.HistoryVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
                     </other:SegmentedTabView.Tabs>
@@ -77,7 +83,7 @@
             <!-- Section for placing orders -->
             <Frame Style="{StaticResource TradeContentOutline}"
                    Grid.Column="2" Grid.Row="1" Grid.RowSpan="3" >
-                <views:PlaceOrderView BindingContext="{Binding placingVm}"/>
+                <views:PlaceOrderView BindingContext="{Binding PlacingVm}"/>
             </Frame>
         </Grid>
     </ScrollView>

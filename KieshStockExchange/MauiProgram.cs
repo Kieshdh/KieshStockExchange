@@ -36,7 +36,7 @@ public static class MauiProgram
         builder.Services.AddTransient<TradePage>();
         // Services
         builder.Services.AddSingleton<IDataBaseService, LocalDBService>();
-        builder.Services.AddSingleton<IExcelImportService, AddExcelService>();
+        builder.Services.AddSingleton<IExcelImportService, ExcelImportService>();
         builder.Services.AddSingleton<IAuthService, AuthService>();
         builder.Services.AddSingleton<IMarketOrderService, MarketOrderService>();
         builder.Services.AddSingleton<IUserOrderService, UserOrderService>();

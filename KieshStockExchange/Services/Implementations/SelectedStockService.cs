@@ -1,8 +1,7 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
-using Microsoft.Maui.Dispatching;
-using System.Threading;
+using KieshStockExchange.Helpers;
+using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.Implementations;
 
@@ -10,21 +9,35 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 {
     #region Properties
     private readonly IMarketOrderService _marketService;
+    private readonly ILogger<SelectedStockService> _logger;
     private CancellationTokenSource? _pollCts;
 
-    [ObservableProperty] private Stock? selectedStock;
-    [ObservableProperty] private int? stockId;
-    [ObservableProperty] private string symbol;
-    [ObservableProperty] private string companyName;
-    [ObservableProperty] private decimal? currentPrice;
-    [ObservableProperty] private DateTimeOffset? priceUpdatedAt;
+    [ObservableProperty] private Stock? _selectedStock;
+    [ObservableProperty] private int? _stockId;
+    [ObservableProperty] private string _symbol = string.Empty;
+    [ObservableProperty] private string _companyName = string.Empty;
+    [ObservableProperty] private decimal _currentPrice = 0m;
+    [ObservableProperty] private CurrencyType _currency = CurrencyType.USD;
+    public string CurrentPriceDisplay => CurrencyHelper.Format(CurrentPrice, Currency);
+
+    [ObservableProperty] private DateTimeOffset? _priceUpdatedAt;
+
+    public bool HasSelectedStock => SelectedStock != null && 
+        StockId.HasValue && SelectedStock.StockId == StockId;
+    #endregion
+
+    #region Constructor and core
+    public SelectedStockService(IMarketOrderService marketService, ILogger<SelectedStockService> logger)
+    {
+        _marketService = marketService;
+        _logger = logger;
+    }
 
     private TaskCompletionSource<Stock> _firstSelectionTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
-    #endregion
 
-    public SelectedStockService(IMarketOrderService marketService)
-        => _marketService = marketService;
+    public Task<Stock> WaitForSelectionAsync() => _firstSelectionTcs.Task;
+    #endregion
 
     #region Set and reset
     // Parent already knows the id
@@ -33,11 +46,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         StockId = stockId;
         SelectedStock = await _marketService.GetStockByIdAsync(stockId)
                            ?? throw new InvalidOperationException($"Stock {stockId} not found.");
-        CompanyName = SelectedStock.CompanyName;
-        Symbol = SelectedStock.Symbol;
-        if (!_firstSelectionTcs.Task.IsCompleted)
-            _firstSelectionTcs.SetResult(SelectedStock);
-        await UpdatePrice();
+        await Set(SelectedStock);
     }
 
     // Overload to avoid re-fetching the stock when the parent already has it
@@ -50,6 +59,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         Symbol = stock.Symbol;
         if (!_firstSelectionTcs.Task.IsCompleted)
             _firstSelectionTcs.SetResult(stock);
+        _logger.LogInformation($"SelectedStockService Starting Price Updates for {stock.Symbol} #{stock.StockId}");
         await UpdatePrice();
     }
 
@@ -58,22 +68,20 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         StopPriceUpdates();
         SelectedStock = null;
         StockId = null;
-        CompanyName = null;
-        Symbol = null;
-        CurrentPrice = null;
+        CompanyName = string.Empty;
+        Symbol = string.Empty;
+        CurrentPrice = 0m;
         PriceUpdatedAt = null;
         _firstSelectionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
-
-    public Task<Stock> WaitForSelectionAsync() => _firstSelectionTcs.Task;
     #endregion
 
     #region Update Pricing
     public async Task UpdatePrice(CancellationToken ct = default)
     {
-        if (StockId is not int id)
+        if (!HasSelectedStock)
             throw new InvalidOperationException("No stock selected.");
-        var price = await _marketService.GetMarketPriceAsync(id); // one service call here
+        var price = await _marketService.GetMarketPriceAsync(StockId.Value); // one service call here
         MainThread.BeginInvokeOnMainThread(() =>
         {
             decimal factor = 0.99m + (decimal)Random.Shared.NextDouble() * 0.02m;
@@ -104,7 +112,8 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
             // ignore errors, they will be logged by the service
             // but we don't want to crash the polling loop
             catch { }
-            try { await Task.Delay(every, ct); } catch { break; }
+            try { await Task.Delay(every, ct); } 
+            catch { break; }
         }
     }
     #endregion

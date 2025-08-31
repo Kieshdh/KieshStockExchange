@@ -26,9 +26,6 @@
                    Style="{StaticResource TableHeaderLabel}" />
         </Grid>
 
-        <Label Text="{Binding PagedItems.Count, StringFormat='Rows: {0}'}"
-               Margin="10,0" TextColor="White" Grid.Row="1"/>
-
         <!-- CollectionView for displaying user data -->
         <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1" >
             <CollectionView.ItemTemplate>
@@ -50,9 +47,8 @@
                         <Label Text="{Binding BirthDate}" Grid.Column="4" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Funds}" Grid.Column="5" 
-                               Style="{StaticResource TableRowLabel}" 
-                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding TotalFunds}" Grid.Column="5" 
+                               Style="{StaticResource TableRowLabel}" />
                         <Label Text="{Binding TotalBalance}" Grid.Column="6"
                                Style="{StaticResource TableRowLabel}" />
                         <Label Text="{Binding EditText}" Grid.Column="7"
@@ -73,9 +69,6 @@
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
                         <Entry Text="{Binding BirthDate, Mode=TwoWay}" Grid.Column="4" 
-                               Style="{StaticResource TableRowEntry}" 
-                               IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding Funds, Mode=TwoWay}" Grid.Column="5" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
 

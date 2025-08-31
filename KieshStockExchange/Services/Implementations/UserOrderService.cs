@@ -17,7 +17,9 @@ public class UserOrderService : IUserOrderService
     private readonly ILogger<UserOrderService> _logger;
 
     private User CurrentUser => _authService.CurrentUser;
-    private Fund CurrentFund;
+    private Fund? CurrentFund;
+    private List<Position> CurrentPositions = new();
+
     private int UserId => CurrentUser?.UserId ?? 0;
     private bool IsAuthenticated => _authService.IsLoggedIn && UserId > 0;
     #endregion
@@ -85,7 +87,7 @@ public class UserOrderService : IUserOrderService
             {
                 PlacedOrder = order,
                 Status = OrderStatus.Success,
-                ErrorMessage = "Order has been cancelled."
+                Message = "Order has been cancelled."
             };
         }
         catch (Exception ex)
@@ -121,7 +123,7 @@ public class UserOrderService : IUserOrderService
                 return ParamError("Cannot change price of a market order.");
 
             // Ensure fund is loaded
-            await EnsureFundLoadedAsync();
+            await LoadFundsAsync();
             if (order.IsBuyOrder() && newQuantity.HasValue)
             {
                 // For buy orders, check if we have enough funds
@@ -133,7 +135,7 @@ public class UserOrderService : IUserOrderService
             else if (order.IsSellOrder() && newQuantity.HasValue)
             {
                 // For sell orders, check if we have enough shares
-                var holding = (await _dbService.GetPortfoliosByUserId(UserId))
+                var holding = (await _dbService.GetPositionsByUserId(UserId))
                               .FirstOrDefault(p => p.StockId == order.StockId);
                 if (holding == null || holding.Quantity < newQuantity.Value)
                     return ParamError("Insufficient shares to sell.");
@@ -154,7 +156,7 @@ public class UserOrderService : IUserOrderService
             {
                 PlacedOrder = order,
                 Status = OrderStatus.Success,
-                ErrorMessage = "Order has been successfully edited."
+                Message = "Order has been successfully edited."
             };
         }
         catch (Exception ex)
@@ -171,16 +173,16 @@ public class UserOrderService : IUserOrderService
     public Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int qty, decimal limitPrice) =>
         PlaceOrderAsync(stockId, qty, false, true, limitPrice);
 
-    public Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int qty) =>
-        PlaceOrderAsync(stockId, qty, true, false, null);
+    public Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int qty, decimal maxPrice) =>
+        PlaceOrderAsync(stockId, qty, true, false, maxPrice);
 
-    public Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int qty) =>
-        PlaceOrderAsync(stockId, qty, false, false, null);
+    public Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int qty, decimal minPrice) =>
+        PlaceOrderAsync(stockId, qty, false, false, minPrice);
     #endregion
 
     #region Private Helpers
     private async Task<OrderResult> PlaceOrderAsync(
-        int stockId, int quantity, bool buyOrder, bool limitOrder, decimal? limitPrice)
+        int stockId, int quantity, bool buyOrder, bool limitOrder, decimal price)
     {
         if (!IsAuthenticated)
             return NotAuthResult();
@@ -194,48 +196,56 @@ public class UserOrderService : IUserOrderService
                 return ParamError("Stock not found.");
 
             // Determine price
-            decimal price;
             var latestPrice = await _dbService.GetLatestStockPriceByStockId(stockId);
             if (latestPrice == null)
-                return new OrderResult
-                {
-                    Status = OrderStatus.NoMarketPrice,
-                    ErrorMessage = "No market price available."
-                };
+                return NoMarketPriceResult();
 
-            if (limitPrice.HasValue && limitOrder)
-            {
-                // Validate limit price vs market price
-                if ((buyOrder && limitPrice < latestPrice.Price) ||
-                    (!buyOrder && limitPrice > latestPrice.Price))
-                    return ParamError("Limit price outside market bounds.");
-                price = limitPrice.Value;
-            }
-            else price = latestPrice.Price;
+            /* Validate limit price
+            if (limitOrder && ((buyOrder && price < latestPrice.Price) ||
+                (!buyOrder && price > latestPrice.Price)))
+                return ParamError("Limit price outside market bounds."); */
 
             // Check user assets
-            await EnsureFundLoadedAsync();
-            if (buyOrder && CurrentFund.AvailableBalance < price * quantity)
-                return ParamError("Insufficient funds.");
-            if (!buyOrder)
+            await LoadFundsAsync(); // Ensure fund is loaded
+            await LoadPositionsAsync();
+            Position? holding = CurrentPositions.FirstOrDefault(p => p.StockId == stockId);
+            if (buyOrder) // Check funds
             {
-                var holding = (await _dbService.GetPortfoliosByUserId(UserId))
-                              .FirstOrDefault(p => p.StockId == stockId);
-                if (holding == null || holding.Quantity < quantity)
+                if (CurrentFund.AvailableBalance < price * quantity)
+                {
+                    _logger.LogWarning("User {UserId} has insufficient funds: {Available} needed {Required}",
+                        UserId, CurrentFund.AvailableBalance, price * quantity);
+                    return ParamError("Insufficient funds.");
+                }
+            }
+            else // Check shares
+            {
+                if (holding == null || holding.RemainingQuantity < quantity)
+                {
+                    _logger.LogWarning("User {UserId} has insufficient shares of stock {StockId}", UserId, stockId);
                     return ParamError("Insufficient shares.");
+                }
             }
 
-            // Create and persist
+            // Create the order
             var order = CreateOrder(stockId, quantity, price, buyOrder, limitOrder);
             if (!order.IsValid())
                 return ParamError("Invalid order parameters.");
 
+            // Update assets
             if (buyOrder)
             {
                 CurrentFund.ReservedBalance += price * quantity;
                 await _dbService.UpdateFund(CurrentFund);
             }
-
+            else
+            {
+                if (holding == null)
+                    throw new InvalidOperationException("Holding should not be null here.");
+                holding.Quantity -= quantity;
+                await _dbService.UpdatePosition(holding);
+            }
+            // Persist the order
             await _dbService.CreateOrder(order);
             UserAllOrders.Add(order);
 
@@ -244,7 +254,7 @@ public class UserOrderService : IUserOrderService
             return new OrderResult
             {
                 Status = OrderStatus.Success,
-                ErrorMessage = "Order executed successfully.",
+                Message = "Order executed successfully.",
                 PlacedOrder = order
             };
         }
@@ -255,21 +265,24 @@ public class UserOrderService : IUserOrderService
         }
     }
 
-    private async Task<Order> UpdateAndFindOrderAsync(int orderId)
+    private async Task<Order?> UpdateAndFindOrderAsync(int orderId)
     {
         await RefreshOrdersAsync();
         return UserOpenOrders.FirstOrDefault(o => o.OrderId == orderId);
     }
 
-    private async Task EnsureFundLoadedAsync()
+    private async Task LoadFundsAsync()
     {
-        if (CurrentFund == null)
-        {
-            CurrentFund = await _dbService.GetFundByUserId(UserId)
-                 ?? new Fund { UserId = UserId, TotalBalance = 0m , ReservedBalance = 0m};
-            if (CurrentFund.FundId == 0) // New fund, add it to the database
-                await _dbService.CreateFund(CurrentFund);
-        }
+        CurrentFund = await _dbService.GetFundByUserId(UserId)
+            ?? new Fund { UserId = UserId, TotalBalance = 0m, ReservedBalance = 0m };
+        if (CurrentFund.FundId == 0) // New fund, add it to the database
+            await _dbService.CreateFund(CurrentFund);
+    }
+
+    private async Task LoadPositionsAsync()
+    {
+        CurrentPositions = (await _dbService.GetPositionsByUserId(UserId)).ToList()
+            ?? new List<Position>();
     }
 
     private Order CreateOrder(
@@ -288,16 +301,15 @@ public class UserOrderService : IUserOrderService
     #endregion
 
     #region Helper Results
-    private OrderResult NotAuthResult() =>
-        new() { Status = OrderStatus.NotAuthenticated, ErrorMessage = "User not authenticated." };
-    private OrderResult ParamError(string msg) =>
-        new() { Status = OrderStatus.InvalidParameters, ErrorMessage = msg };
-    private OrderResult AuthError(string msg) =>
-        new() { Status = OrderStatus.NotAuthorized, ErrorMessage = msg };
-    private OrderResult OperationFailedResult() => new()
-    {
-        Status = OrderStatus.OperationFailed,
-        ErrorMessage = "An unexpected error occurred."
-    };
+    private OrderResult NotAuthResult() => new()
+        { Status = OrderStatus.NotAuthenticated, Message = "User not authenticated." };
+    private OrderResult ParamError(string msg) => new()
+        { Status = OrderStatus.InvalidParameters, Message = msg };
+    private OrderResult AuthError(string msg) => new()
+        { Status = OrderStatus.NotAuthorized, Message = msg };
+    private OrderResult OperationFailedResult() => new()  
+        { Status = OrderStatus.OperationFailed, Message = "An unexpected error occurred." };
+    private OrderResult NoMarketPriceResult() => new() 
+        { Status = OrderStatus.NoMarketPrice, Message = "No market price available." };
     #endregion
 }

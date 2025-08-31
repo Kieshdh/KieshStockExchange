@@ -5,23 +5,27 @@
 
     <!-- Labels -->
     <VerticalStackLayout>
-        <Grid ColumnDefinitions="2*, 2*, *, *, 2*, *, 2*, *" 
+        <Grid ColumnDefinitions="50, 3*, 3*, 2*, 3*, 3*, 3*, 3*, 3*, 3*, 3" 
               Style="{StaticResource TableHeaderGrid}" >
-            <Label Text="CreatedAt" Grid.Column="0" 
+            <Label Text="ID" Grid.Column="0" 
                    Style="{StaticResource TableHeaderLabel}"/>
-            <Label Text="Username" Grid.Column="1" 
+            <Label Text="Created" Grid.Column="1" 
                    Style="{StaticResource TableHeaderLabel}"/>
-            <Label Text="Symbol" Grid.Column="2" 
+            <Label Text="Username" Grid.Column="2" 
+                   Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="Symbol" Grid.Column="3" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="OrderType" Grid.Column="3" 
+            <Label Text="OrderType" Grid.Column="4" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Price (USD)" Grid.Column="4" 
+            <Label Text="Price" Grid.Column="5" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Quantity" Grid.Column="5" 
+            <Label Text="Quantity" Grid.Column="6" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Total Price" Grid.Column="6" 
+            <Label Text="Total Price" Grid.Column="7" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Status" Grid.Column="7" 
+            <Label Text="Status" Grid.Column="8" 
+                   Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="Updated" Grid.Column="9" 
                    Style="{StaticResource TableHeaderLabel}" />
         </Grid>
 
@@ -29,19 +33,29 @@
         <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid ColumnDefinitions="*, 8*, 2*, 3*, 3*, 3"
+                    <Grid ColumnDefinitions="50, 3*, 3*, 2*, 3*, 3*, 3*, 3*, 3*, 3*, 3" 
                           Style="{StaticResource TableRowGrid}">
 
                         <!-- Content -->
-                        <Label Text="{Binding Stock.StockId}" Grid.Column="0" 
+                        <Label Text="{Binding Id}" Grid.Column="0" 
                                Style="{StaticResource TableRowLabel}"/>
-                        <Label Text="{Binding Stock.CompanyName}" Grid.Column="1" 
+                        <Label Text="{Binding CreatedAt}" Grid.Column="1" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Stock.Symbol}" Grid.Column="2" 
+                        <Label Text="{Binding Username}" Grid.Column="2" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding PriceUSD}" Grid.Column="3" 
+                        <Label Text="{Binding Symbol}" Grid.Column="3" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding PriceEUR}" Grid.Column="4" 
+                        <Label Text="{Binding OrderType}" Grid.Column="4" 
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding Price}" Grid.Column="5" 
+                               Style="{StaticResource TableRowLabel}"/>
+                        <Label Text="{Binding Quantity}" Grid.Column="6" 
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding TotalPrice}" Grid.Column="7" 
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding Status}" Grid.Column="8" 
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding UpdatedAt}" Grid.Column="9" 
                                Style="{StaticResource TableRowLabel}" />
 
                         <!-- Vertical Lines -->
@@ -51,6 +65,11 @@
                         <BoxView Grid.Column="3" Style="{StaticResource TableSeparator}" />
                         <BoxView Grid.Column="4" Style="{StaticResource TableSeparator}" />
                         <BoxView Grid.Column="5" Style="{StaticResource TableSeparator}" />
+                        <BoxView Grid.Column="6" Style="{StaticResource TableSeparator}" />
+                        <BoxView Grid.Column="7" Style="{StaticResource TableSeparator}" />
+                        <BoxView Grid.Column="8" Style="{StaticResource TableSeparator}" />
+                        <BoxView Grid.Column="9" Style="{StaticResource TableSeparator}" />
+                        <BoxView Grid.Column="10" Style="{StaticResource TableSeparator}" />
 
                         <!-- Horizontal line (bottom of the row) -->
                         <BoxView Style="{StaticResource TableHorizontalSeparator}" />

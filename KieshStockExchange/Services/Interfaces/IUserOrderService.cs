@@ -26,8 +26,8 @@ namespace KieshStockExchange.Services;
     Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int quantity, decimal limitPrice);
 
     /// <summary>Places a market‐buy order, capping at maxPrice.</summary>
-    Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int quantity);
+    Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int quantity, decimal maxPrice);
 
     /// <summary>Places a market‐sell order, floor at minPrice.</summary>
-    Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int quantity);
+    Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int quantity, decimal minPrice);
 }

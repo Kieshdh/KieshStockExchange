@@ -87,7 +87,6 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel
 
         OnPropertyChanged(nameof(TotalPages));
         OnPropertyChanged(nameof(VisiblePageNumbers));
-        Debug.WriteLine($"Paged {PagedItems.Count} items for page {PageNumber + 1}/{TotalPages}");
     }
 }
 

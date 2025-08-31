@@ -6,7 +6,6 @@ public interface IUserSessionService
     string UserName { get; }
     int UserId { get; }
     bool IsAuthenticated { get; }
-    bool IsAdmin { get; }
     string FullName { get; }
     bool KeepLoggedIn { get; }
     int CurrentStockId { get; }

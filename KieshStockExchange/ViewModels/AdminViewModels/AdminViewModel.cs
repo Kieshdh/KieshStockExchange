@@ -10,23 +10,14 @@ namespace KieshStockExchange.ViewModels.AdminViewModels;
 
 public partial class AdminViewModel : BaseViewModel
 {
-    // To set the type of the table being displayed
-    public enum TableType {
-        Users, Stocks, Orders, Transactions
-    }
-    public List<TableType> TableTypes { get; }
-    [ObservableProperty] public TableType _selectedTableType;
-    [ObservableProperty] private bool _isUsersSelected;
-    [ObservableProperty] private bool _isStocksSelected;
-    [ObservableProperty] private bool _isOrdersSelected;
-    [ObservableProperty] private bool _isTransactionsSelected;
     [ObservableProperty] private bool _isLoading = true;
+    [ObservableProperty] private bool _doneLoading = false;
     [ObservableProperty] private string _loadingText;
 
-    [ObservableProperty] private UserTableViewModel _usersVm;
-    [ObservableProperty] private StockTableViewModel _stocksVm;
-    [ObservableProperty] private TransactionTableViewModel _transactionsVm;
-    [ObservableProperty] private OrderTableViewModel _ordersVm;
+    public UserTableViewModel UsersVm { get; }
+    public StockTableViewModel StocksVm { get; }
+    public TransactionTableViewModel TransactionsVm { get; }
+    public OrderTableViewModel OrdersVm { get; }
     private readonly IExcelImportService ExcelService;
 
     // Constructor
@@ -35,7 +26,6 @@ public partial class AdminViewModel : BaseViewModel
         OrderTableViewModel ordersVm,  TransactionTableViewModel transactionsVm)
     {
         Title = "Admin Dashboard";
-        TableTypes = Enum.GetValues<TableType>().ToList();
 
         UsersVm = usersVm;
         StocksVm = stocksVm;
@@ -77,19 +67,9 @@ public partial class AdminViewModel : BaseViewModel
         { 
             IsBusy = false;
             IsLoading = false;
+            DoneLoading = true;
             LoadingText = string.Empty;
-            OnSelectedTableTypeChanged(TableType.Users);
         }
         Debug.WriteLine($"Succesfully loaded tables");
     }
-
-    partial void OnSelectedTableTypeChanged(TableType value)
-    {
-        IsUsersSelected = value == TableType.Users;
-        IsStocksSelected = value == TableType.Stocks;
-        IsOrdersSelected = value == TableType.Orders;
-        IsTransactionsSelected = value == TableType.Transactions;
-        Debug.WriteLine($"Switched tables to {value}");
-    }
-
 }

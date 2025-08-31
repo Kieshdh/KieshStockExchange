@@ -1,23 +1,11 @@
 ﻿using SQLite;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
 [Table("Transactions")]
 public class Transaction : IValidatable
 {
-    #region Constants
-    public static class Currencies
-    {
-        public const string USD = "USD";
-        public const string EUR = "EURO";
-    }
-    #endregion
-
     #region Properties
     [PrimaryKey, AutoIncrement]
     [Column("TransactionId")] public int TransactionId { get; set; }
@@ -36,8 +24,14 @@ public class Transaction : IValidatable
 
     [Column("Price")] public decimal Price { get; set; }
 
-    // "USD", "EUR"
-    [Column("Currency")] public string Currency { get; set; }
+    [Ignore] public decimal TotalAmount => Price * Quantity;
+
+    [Ignore] public CurrencyType CurrencyType { get; set; }
+    [Column("Currency")] public string Currency
+    {
+        get => CurrencyType.ToString();
+        set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
+    }
 
     [Column("Timestamp")] public DateTime Timestamp { get; set; }
     #endregion
@@ -45,25 +39,24 @@ public class Transaction : IValidatable
     public Transaction()
     {
         Timestamp = DateTime.UtcNow;
-        Currency = Currencies.USD; // Default currency
+        CurrencyType = CurrencyType.USD; // Default currency
     }
-    #region IValidatable Implementation
-    public bool IsValid() =>
-        StockId > 0 && BuyOrderId > 0 && SellOrderId > 0 && IsValidCurrency() &&
-        BuyerId > 0 && SellerId > 0 && Quantity > 0 && Price > 0;
 
-    private bool IsValidCurrency() =>
-        Currency == Currencies.USD || Currency == Currencies.EUR;
+    #region IValidatable Implementation
+    public bool IsValid() => StockId > 0 && BuyerId > 0 && SellerId > 0 && Quantity > 0 &&
+        Price > 0 && BuyOrderId > 0 && SellOrderId > 0 && IsValidCurrency(); 
+
+    private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
     #endregion
 
     #region String Representations
     public override string ToString() =>
-        $"Transaction #{TransactionId} {Quantity} @ {PriceString()} at {TimestampString()}";
+        $"Transaction #{TransactionId} {Quantity} @ {PriceDisplay} at {TimestampDisplay}";
 
-    public string TimestampString() =>
-        Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
+    [Ignore] public string TimestampDisplay => Timestamp.ToString("dd/MM/yyyy HH:mm:ss");
 
-    public string PriceString() =>
-        $"{Price.ToString("C", System.Globalization.CultureInfo.CurrentCulture)} {Currency}";
+    [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
+
+    [Ignore] public string TotalAmountDisplay => CurrencyHelper.Format(TotalAmount, CurrencyType);
     #endregion
 }

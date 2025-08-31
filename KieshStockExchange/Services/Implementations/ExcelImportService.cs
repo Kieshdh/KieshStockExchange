@@ -6,7 +6,7 @@ using System.Globalization;
 
 namespace KieshStockExchange.Services.Implementations;
 
-public class AddExcelService : IExcelImportService
+public class ExcelImportService : IExcelImportService
 {
     private readonly LocalDBService _dbService;
 
@@ -16,7 +16,7 @@ public class AddExcelService : IExcelImportService
     private DataTable StockDataTable;
     private DataTable StockInfoDataTable;
 
-    public AddExcelService()
+    public ExcelImportService()
     {
         _dbService = new LocalDBService();
 
@@ -149,7 +149,7 @@ public class AddExcelService : IExcelImportService
         }
     }
 
-    public async Task AddPortfoliosFromExcelAsync()
+    public async Task AddPositionsFromExcelAsync()
     {
         throw new NotImplementedException();
     }
