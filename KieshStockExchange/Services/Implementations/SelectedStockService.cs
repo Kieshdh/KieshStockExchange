@@ -81,7 +81,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     {
         if (!HasSelectedStock)
             throw new InvalidOperationException("No stock selected.");
-        var price = await _marketService.GetMarketPriceAsync(StockId.Value); // one service call here
+        var price = await _marketService.GetMarketPriceAsync(StockId!.Value); // one service call here
         MainThread.BeginInvokeOnMainThread(() =>
         {
             decimal factor = 0.99m + (decimal)Random.Shared.NextDouble() * 0.02m;

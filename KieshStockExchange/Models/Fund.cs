@@ -70,9 +70,9 @@ public class Fund : IValidatable
         TotalBalance += amount;
         UpdatedAt = DateTime.UtcNow;
     }
-    public void RemoveFunds(decimal amount)
+    public void WithdrawFunds(decimal amount)
     {
-        if (amount <= 0 || amount > TotalBalance)
+        if (amount <= 0 || amount > AvailableBalance)
             throw new ArgumentException("Invalid amount to remove.");
         TotalBalance -= amount;
         UpdatedAt = DateTime.UtcNow;

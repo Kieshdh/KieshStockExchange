@@ -61,6 +61,7 @@ CREATE TABLE Positions (
     UserId INTEGER NOT NULL,
     StockId INTEGER NOT NULL,
     Quantity INTEGER NOT NULL,
+    Currency TEXT NOT NULL,
     FOREIGN KEY (UserId)  REFERENCES Users(UserId),
     FOREIGN KEY (StockId) REFERENCES Stocks(StockId),
     UNIQUE(UserId, StockId)

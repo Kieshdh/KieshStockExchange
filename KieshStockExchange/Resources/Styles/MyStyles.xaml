@@ -194,10 +194,21 @@
         <Setter Property="Margin" Value="4" />
     </Style>
     <Style x:Key="StockPlacerEntry" TargetType="Entry" >
-        
+        <Setter Property="Keyboard" Value="Numeric" />
+        <Setter Property="HeightRequest" Value="20" />
+        <Setter Property="HorizontalTextAlignment" Value="Center" />
+        <Setter Property="VerticalOptions" Value="Fill" />
+        <Setter Property="HeightRequest" Value="30" />
     </Style>
     <Style x:Key="StockPlacerLabel" TargetType="Label">
-        
+        <Setter Property="FontAttributes" Value="Bold" />
+        <Setter Property="VerticalTextAlignment" Value="Center" />
+        <Setter Property="HorizontalTextAlignment" Value="Center" />
+    </Style>
+    <Style x:Key="StockPlacerGrid" TargetType="Grid" >
+        <Setter Property="ColumnDefinitions" Value="Auto,*" />
+        <Setter Property="ColumnSpacing" Value="10" />
+        <Setter Property="RowDefinitions" Value="60" />
     </Style>
     <Style x:Key="StockSelectorPicker" TargetType="Picker">
         <Setter Property="MinimumWidthRequest" Value="80" />
@@ -213,5 +224,6 @@
         <Setter Property="FontSize" Value="Large" />
         <Setter Property="VerticalOptions" Value="Center" />
     </Style>
+    
 
 </ResourceDictionary>

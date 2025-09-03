@@ -4,9 +4,9 @@ using KieshStockExchange.Helpers;
 namespace KieshStockExchange.Services;
 
 public sealed record PortfolioSnapshot(
-    IReadOnlyList<Fund> Funds,           // multiple rows, each with CurrencyType
-    IReadOnlyList<Position> Positions,   // one row per (User, Stock) ideally
-    CurrencyType BaseCurrency            // user’s chosen base currency
+    IReadOnlyList<Fund> Funds,
+    IReadOnlyList<Position> Positions,
+    CurrencyType BaseCurrency
 );
 
 public interface IUserPortfolioService
@@ -35,46 +35,50 @@ public interface IUserPortfolioService
     IReadOnlyList<Fund> GetFunds();
 
     /// <summary>Cash row for a specific currency (in memory), or null if none.</summary>
-    Fund? GetFunds(CurrencyType currency);
+    Fund? GetFundByCurrency(CurrencyType currency);
+
+    /// <summary> The fund in the base currency, or null if none.</summary>
+    Fund? GetBaseFund();
 
     /// <summary>All positions (in memory).</summary>
     IReadOnlyList<Position> GetPositions();
 
     /// <summary>Position for a given stockId (in memory), or null if none.</summary>
-    Position? GetPosition(int stockId);
+    Position? GetPositionByStockId(int stockId);
     #endregion
 
     #region Modifications
-    /// <summary>
-    /// Add money to a specific currency (creates row if needed), then updates Snapshot.
-    /// </summary>
-    Task AddFundsAsync(decimal amount, CurrencyType currency, string? reference = null, CancellationToken ct = default);
+    /// <summary> Add money to a specific currency (creates row if needed), then updates Snapshot. </summary>
+    Task<bool> AddFundsAsync(decimal amount, CurrencyType currency,
+        int userId = -1, CancellationToken ct = default);
 
-    /// <summary>
-    /// Withdraw from a specific currency (fails if insufficient), then updates Snapshot.
-    /// </summary>
-    Task WithdrawFundsAsync(decimal amount, CurrencyType currency, string? reference = null, CancellationToken ct = default);
+    /// <summary> Withdraw from a specific currency (fails if insufficient), then updates Snapshot. </summary>
+    Task<bool> WithdrawFundsAsync(decimal amount, CurrencyType currency,
+        int userId = -1, CancellationToken ct = default);
 
-    /// <summary>
-    /// Reserve cash for pending orders; returns false if insufficient. Updates Snapshot.
-    /// </summary>
-    Task<bool> ReserveFundsAsync(decimal amount, CurrencyType currency, CancellationToken ct = default);
+    /// <summary> Reserve cash for pending orders; returns false if insufficient. Updates Snapshot. </summary>
+    Task<bool> ReserveFundsAsync(decimal amount, CurrencyType currency,
+        int userId = -1, CancellationToken ct = default);
 
-    /// <summary>
-    /// Release previously reserved cash back to available. Updates Snapshot.
-    /// </summary>
-    Task<bool> ReleaseReservedFundsAsync(decimal amount, CurrencyType currency, CancellationToken ct = default);
+    /// <summary>  Release previously reserved cash back to available. Updates Snapshot. </summary>
+    Task<bool> ReleaseReservedFundsAsync(decimal amount, CurrencyType currency,
+        int userId = -1, CancellationToken ct = default);
 
-    /// <summary>
-    /// Upsert a position: apply a trade delta and recompute weighted average price.
-    /// Use positive quantity for buys, negative for sells. Updates Snapshot.
-    /// </summary>
-    Task UpsertPositionAsync(int stockId, decimal quantityDelta, decimal executionPrice, CancellationToken ct = default);
+    /// <summary> Add to a position (e.g., after a buy). Updates Snapshot. </summary>
+    Task<bool> AddPositionAsync(int stockId, int quantity,
+        int userId = -1, CancellationToken ct = default);
 
-    /// <summary>
-    /// Remove a position (e.g., admin fix or when quantity reaches zero). Updates Snapshot.
-    /// </summary>
-    Task RemovePositionAsync(int stockId, CancellationToken ct = default);
+    /// <summary> Removes from a position (e.g., after a sell). Updates Snapshot. </summary>
+    Task<bool> RemovePositionAsync(int stockId, int quantity,
+        int userId = -1, CancellationToken ct = default);
+
+    /// <summary> Reserve shares for pending orders. Updates Snapshot. </summary>
+    Task<bool> ReservePositionAsync(int stockId, int quantity,
+        int userId = -1, CancellationToken ct = default);
+
+    /// <summary> Release previously reserved shares back to available. Updates Snapshot. </summary>
+    Task<bool> UnreservePositionAsync(int stockId, int quantity,
+        int userId = -1, CancellationToken ct = default);
 
     /// <summary> Consolidate any duplicate fund rows per currency and duplicate positions per stock,
     /// then persist the single clean row and update Snapshot. </summary>

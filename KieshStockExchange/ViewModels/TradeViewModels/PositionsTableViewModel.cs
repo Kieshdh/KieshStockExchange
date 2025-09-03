@@ -10,9 +10,9 @@ public class PositionsTableViewModel : BaseViewModel
 {
     private readonly IMarketOrderService _marketService;
     private readonly ILogger<TradeViewModel> _logger;
-    private readonly ISelectedStockService _stockService;
-    private int _selectedStockId { get; set; }
-    private Stock _stock { get; set; }
+    private readonly ISelectedStockService _selected;
+    private int StockId  => _selected.StockId ?? 0;
+    private Stock? _stock => _selected.SelectedStock;
 
     public PositionsTableViewModel(
         IMarketOrderService marketService,
@@ -23,7 +23,7 @@ public class PositionsTableViewModel : BaseViewModel
             nameof(marketService), "Market service cannot be null.");
         _logger = logger ?? throw new ArgumentNullException(
             nameof(logger), "Logger cannot be null.");
-        _stockService = stockService ?? throw new ArgumentNullException(
+        _selected = stockService ?? throw new ArgumentNullException(
             nameof(stockService), "ISelectedStockService cannot be null.");
     }
 

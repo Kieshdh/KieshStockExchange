@@ -38,16 +38,24 @@
                     <Setter Property="Content">
                         <Setter.Value>
                             <VerticalStackLayout Spacing="10">
-                                <Label Text="Market Price:" FontAttributes="Bold"/>
-                                <Label Text="{Binding CurrentMarketPrice, StringFormat='{}{0:C}'}"/>
-
-                                <Label Text="Slippage %" FontAttributes="Bold"/>
-                                <HorizontalStackLayout>
-                                    <Button Text="0.5%" Command="{Binding SetSlippageCommand}" CommandParameter="0.5"/>
-                                    <Button Text="1%" Command="{Binding SetSlippageCommand}" CommandParameter="1"/>
-                                    <Button Text="2%" Command="{Binding SetSlippageCommand}" CommandParameter="2"/>
+                                <!-- Market Price Display -->
+                                <HorizontalStackLayout Spacing="20">
+                                    <Label Text="Market Price:" FontAttributes="Bold"/>
+                                    <Label Text="{Binding CurrentMarketPriceDisplay}"/>
                                 </HorizontalStackLayout>
-                                <Entry Placeholder="Custom %" Text="{Binding SlippagePercent}"/>
+                                <!-- Slippage Setter -->
+                                <Grid ColumnDefinitions="Auto,*,*,*,*,Auto" ColumnSpacing="5">
+                                    <Label Text="Slippage %" FontAttributes="Bold" VerticalOptions="Center"/>
+                                    <Button Text="0.5%" Command="{Binding SetSlippageCommand}" 
+                                            CommandParameter="0.5" Grid.Column="1"/>
+                                    <Button Text="1.0%" Command="{Binding SetSlippageCommand}" 
+                                            CommandParameter="1" Grid.Column="2"/>
+                                    <Button Text="1.5%" Command="{Binding SetSlippageCommand}" 
+                                            CommandParameter="2" Grid.Column="3"/>
+                                    <Entry Text="{Binding SlippagePercent, Mode=TwoWay, StringFormat='{}{0:F1}'}"
+                                           Grid.Column="4" HorizontalTextAlignment="End"/>
+                                    <Label Text="%" Grid.Column="5" VerticalOptions="Center"/>
+                                </Grid>
                             </VerticalStackLayout>
                         </Setter.Value>
                     </Setter>
@@ -59,14 +67,17 @@
                              Value="1">
                     <Setter Property="Content">
                         <Setter.Value>
-                            <VerticalStackLayout Spacing="10">
-                                <Label Text="Market Price:" FontAttributes="Bold"/>
-                                <Label Text="{Binding CurrentMarketPrice, StringFormat='{}{0:C}'}"/>
-
-                                <Label Text="Limit Price:" FontAttributes="Bold"/>
-                                <Entry Placeholder="Enter Limit Price" 
-                                       Keyboard="Numeric"
-                                       Text="{Binding LimitPrice}"/>
+                            <VerticalStackLayout>
+                                <Grid Style="{StaticResource StockPlacerGrid}" >
+                                    <Label Text="Market Price:" Style="{StaticResource StockPlacerLabel}" />
+                                    <Label Text="{Binding CurrentMarketPriceDisplay}"
+                                           Style="{StaticResource StockPlacerLabel}" Grid.Column="1"/>
+                                </Grid>
+                                <Grid Style="{StaticResource StockPlacerGrid}" >
+                                    <Label Text="Limit Price:" Style="{StaticResource StockPlacerLabel}" />
+                                    <Entry Placeholder="Enter Limit Price" Text="{Binding LimitPrice}"
+                                           Style="{StaticResource StockPlacerEntry}" Grid.Column="1"/>
+                                </Grid>
                             </VerticalStackLayout>
                         </Setter.Value>
                     </Setter>
@@ -75,24 +86,37 @@
         </ContentView>
 
         <!-- Funds/Assets -->
-        <Label Text="{Binding AvailableAssets}" FontAttributes="Bold"/>
+        <Label Text="{Binding AvailableAssets}" FontAttributes="Bold" TextColor="White"/>
 
         <!-- Quantity -->
-        <Entry Placeholder="Quantity" Keyboard="Numeric" 
-               Text="{Binding Quantity}" />
+        <Grid Style="{StaticResource StockPlacerGrid}" >
+            <Label Text="Quantity" Style="{StaticResource StockPlacerLabel}" />
+            <Entry Placeholder="Quantity" Text="{Binding Quantity}"
+                   Style="{StaticResource StockPlacerEntry}" Grid.Column="1" />
+        </Grid>
+        
 
         <!-- Percentage Bar -->
-        <HorizontalStackLayout Spacing="10" HorizontalOptions="Center">
-            <Button Text="0%" Command="{Binding SetQuantityPercentCommand}" CommandParameter="0"/>
-            <Button Text="25%" Command="{Binding SetQuantityPercentCommand}" CommandParameter="25"/>
-            <Button Text="50%" Command="{Binding SetQuantityPercentCommand}" CommandParameter="50"/>
-            <Button Text="75%" Command="{Binding SetQuantityPercentCommand}" CommandParameter="75"/>
-            <Button Text="100%" Command="{Binding SetQuantityPercentCommand}" CommandParameter="100"/>
-        </HorizontalStackLayout>
+        <Grid ColumnSpacing="10" HorizontalOptions="Center" 
+              ColumnDefinitions="*,*,*,*,*">
+            <Button Text="0%" Grid.Column="0" 
+                    Command="{Binding SetQuantityPercentCommand}" CommandParameter="0"/>
+            <Button Text="25%" Grid.Column="1" 
+                    Command="{Binding SetQuantityPercentCommand}" CommandParameter="25"/>
+            <Button Text="50%" Grid.Column="2" 
+                    Command="{Binding SetQuantityPercentCommand}" CommandParameter="50"/>
+            <Button Text="75%" Grid.Column="3" 
+                    Command="{Binding SetQuantityPercentCommand}" CommandParameter="75"/>
+            <Button Text="100%" Grid.Column="4" 
+                    Command="{Binding SetQuantityPercentCommand}" CommandParameter="100"/>
+        </Grid>
 
         <!-- Order Value -->
-        <Label Text="Order Value:" FontAttributes="Bold"/>
-        <Entry Text="{Binding OrderValue}" IsReadOnly="True"/>
+        <Grid Style="{StaticResource StockPlacerGrid}">
+            <Label Text="Total Value:" Style="{StaticResource StockPlacerLabel}" />
+            <Label Text="{Binding OrderValue}" 
+                   Style="{StaticResource StockPlacerLabel}" Grid.Column="1" />
+        </Grid>
 
         <!-- Submit Button -->
         <Button Text="{Binding SubmitButtonText}" 

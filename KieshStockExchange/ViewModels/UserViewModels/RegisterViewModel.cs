@@ -32,9 +32,9 @@ public partial class RegisterViewModel : BaseViewModel
     [ObservableProperty] private string _lastName = string.Empty;
     [ObservableProperty] private bool _isLastNameInvalid = false;
 
-    [ObservableProperty] private string _birthDay;
-    [ObservableProperty] private string _birthMonth;
-    [ObservableProperty] private string _birthYear;
+    [ObservableProperty] private string _birthDay = string.Empty;
+    [ObservableProperty] private string _birthMonth = string.Empty;
+    [ObservableProperty] private string _birthYear = string.Empty;
     [ObservableProperty] private bool _isBirthDateInvalid = false;
 
     private string FullName => 

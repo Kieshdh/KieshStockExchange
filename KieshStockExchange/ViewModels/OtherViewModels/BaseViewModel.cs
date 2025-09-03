@@ -7,7 +7,8 @@ namespace KieshStockExchange.ViewModels.OtherViewModels;
 public partial class BaseViewModel : ObservableObject
 {
     [ObservableProperty]
-    public bool _isBusy;
+    public bool _isBusy = false;
     [ObservableProperty]
-    public string _title;
+    public string _title = String.Empty;
+
 }

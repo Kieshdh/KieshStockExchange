@@ -13,9 +13,9 @@ public partial class OrderBookViewModel : BaseViewModel
     private readonly ILogger<TradeViewModel> _logger;
     private readonly ISelectedStockService _stockService;
 
-    private int _stockId { get; set; }
-    private Stock _stock { get; set; }
-    private OrderBook _orderBook { get; set; }
+    private int _stockId { get; set; } = -1;
+    private Stock? _stock { get; set; } = null;
+    private OrderBook? _orderBook { get; set; } = null;
 
 
     public OrderBookViewModel(

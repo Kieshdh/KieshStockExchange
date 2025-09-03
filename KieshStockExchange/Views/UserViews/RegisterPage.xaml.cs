@@ -5,11 +5,9 @@ namespace KieshStockExchange.Views.UserViews;
 
 public partial class RegisterPage : ContentPage
 {
-	public RegisterPage()
+	public RegisterPage(IAuthService auth)
     {
 		InitializeComponent();
-        var authService = Application.Current.Handler
-            .MauiContext.Services.GetRequiredService<IAuthService>();
-        BindingContext = new ViewModels.UserViewModels.RegisterViewModel(Navigation, authService);
+        BindingContext = new ViewModels.UserViewModels.RegisterViewModel(Navigation, auth);
     }
 }

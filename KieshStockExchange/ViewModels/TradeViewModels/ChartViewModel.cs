@@ -9,26 +9,27 @@ namespace KieshStockExchange.ViewModels.TradeViewModels;
 
 public partial class ChartViewModel : BaseViewModel
 {
-    private readonly ISelectedStockService _stockService;
+    private readonly ISelectedStockService _selected;
     private readonly ILogger<TradeViewModel> _logger;
 
-    [ObservableProperty] private string _stockCurrentPrice;
+    [ObservableProperty] private string _currentPrice = String.Empty;
 
     public ChartViewModel(
-        ISelectedStockService stockService,
+        ISelectedStockService selected,
         ILogger<TradeViewModel> logger)
     {
-        _stockService = stockService ??
-            throw new ArgumentNullException(nameof(stockService), "ISelectedStockContext cannot be null.");
+        _selected = selected ??
+            throw new ArgumentNullException(nameof(selected), "ISelectedStockContext cannot be null.");
         _logger = logger ??
             throw new ArgumentNullException(nameof(logger), "Logger cannot be null.");
 
-        if (_stockService.CurrentPrice is { } p) _stockCurrentPrice = p.ToString("F2");
+        if (_selected.CurrentPrice is { } p) 
+            CurrentPrice = CurrencyHelper.Format(p, CurrencyType.USD);
 
-        stockService.PropertyChanged += (_, e) =>
+        _selected.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(stockService.CurrentPrice) && stockService.CurrentPrice is { } px)
-                StockCurrentPrice = px.ToString("F2");
+            if (e.PropertyName == nameof(_selected.CurrentPrice) && _selected.CurrentPrice is { } px)
+                CurrentPrice = CurrencyHelper.Format(px, CurrencyType.USD);
         };
     }
 

@@ -67,6 +67,7 @@ KieshStockExchange
 ----- TransactionService.cs (TODO)
 ----- TrendingService.cs (TODO)
 ----- UserOrderService.cs
+----- UserPortfolioService.cs
 ----- UserSessionService.cs (TODO)
 --- Interfaces
 ----- IAuthService.cs (Login, registration)
@@ -79,6 +80,7 @@ KieshStockExchange
 ----- ITransactionService.cs (Tansaction history and details)
 ----- ITrendingService.cs (Trending stocks and market data)`
 ----- IUserOrderService.cs (User-specific order management)
+----- IUserPortfolioService.cs (User-specific portfolio management)
 ----- IUserSessionService.cs (User session management and authentication)
 
 - ViewModels

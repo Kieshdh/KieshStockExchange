@@ -44,11 +44,11 @@ public class ExcelImportService : IExcelImportService
             User user = new User
             {
 
-                Username = row["Username"].ToString(),
+                Username = row["Username"]?.ToString() ?? string.Empty,
                 PasswordHash = SecurityHelper.HashPassword("hallo123"),
-                Email = row["Email"].ToString(),
-                FullName = row["Full Name"].ToString(),
-                BirthDate = row["Birthdate"] is DateTime dt ? dt : DateTime.Parse(row["Birthdate"].ToString())
+                Email = row["Email"]?.ToString() ?? string.Empty,
+                FullName = row["Full Name"]?.ToString() ?? string.Empty,
+                BirthDate = row["Birthdate"] is DateTime dt ? dt : DateTime.Parse(row["Birthdate"]?.ToString() ?? "01/01/2000")
             };
             if (!user.IsValid())
             {
@@ -121,8 +121,8 @@ public class ExcelImportService : IExcelImportService
             // Create new stock
             Stock stock = new Stock
             {
-                Symbol = row["Symbol"].ToString(),
-                CompanyName = row["CompanyName"].ToString()
+                Symbol = row["Symbol"]?.ToString() ?? String.Empty,
+                CompanyName = row["CompanyName"]?.ToString() ?? String.Empty
             };
             if (!stock.IsValid())
             {

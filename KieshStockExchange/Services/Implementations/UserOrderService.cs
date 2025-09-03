@@ -14,14 +14,19 @@ public class UserOrderService : IUserOrderService
     #region Private Fields
     private readonly IDataBaseService _dbService;
     private readonly IAuthService _authService;
+    private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<UserOrderService> _logger;
 
     private User CurrentUser => _authService.CurrentUser;
-    private Fund? CurrentFund;
-    private List<Position> CurrentPositions = new();
+    private IReadOnlyList<Fund> CurrentFunds => _portfolio.GetFunds();
+    private IReadOnlyList<Position> CurrentPositions => _portfolio.GetPositions();
+    private CurrencyType CurrencyType => _portfolio.GetBaseCurrency();
+
+    private Fund CurrentFund => _portfolio.GetBaseFund()
+        ?? new Fund { UserId = UserId, CurrencyType = CurrencyType };
 
     private int UserId => CurrentUser?.UserId ?? 0;
-    private bool IsAuthenticated => _authService.IsLoggedIn && UserId > 0;
+    private bool IsAuthenticated => UserId > 0 && _authService.IsLoggedIn;
     #endregion
 
     #region Order Properties
@@ -34,15 +39,19 @@ public class UserOrderService : IUserOrderService
         UserAllOrders.Where(o => o.IsFilled()).ToList();
     #endregion
 
+    #region Constructor
     public UserOrderService(
         IDataBaseService dbService,
         IAuthService authService,
+        IUserPortfolioService portfolioService,
         ILogger<UserOrderService> logger)
     {
         _dbService = dbService ?? throw new ArgumentNullException(nameof(dbService));
         _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        _portfolio = portfolioService ?? throw new ArgumentNullException(nameof(portfolioService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+    #endregion
 
     #region Public Methods
     public async Task<bool> RefreshOrdersAsync()
@@ -81,6 +90,22 @@ public class UserOrderService : IUserOrderService
                 return AuthError("No permission to cancel this order.");
 
             order.Cancel();
+            if (!order.IsValid())
+                return OperationFailedResult();
+
+            // Release reserved funds or shares
+            await _portfolio.RefreshAsync();
+            if (order.IsBuyOrder())
+            {
+                await _portfolio.ReleaseReservedFundsAsync(
+                    order.RemainingAmount(), CurrencyType);
+            }
+            else
+            {
+                await _portfolio.UnreservePositionAsync(
+                    order.StockId, order.RemainingQuantity());
+            }
+
             await _dbService.UpdateOrder(order);
 
             return new OrderResult
@@ -123,22 +148,45 @@ public class UserOrderService : IUserOrderService
                 return ParamError("Cannot change price of a market order.");
 
             // Ensure fund is loaded
-            await LoadFundsAsync();
+            await _portfolio.RefreshAsync();
+
             if (order.IsBuyOrder() && newQuantity.HasValue)
             {
-                // For buy orders, check if we have enough funds
-                var oldCost = order.RemainingAmount();
-                var totalCost = price.HasValue ? price.Value * newQuantity.Value : order.Price * newQuantity.Value;
-                if (CurrentFund.AvailableBalance < totalCost - oldCost)
-                    return ParamError("Insufficient funds for this order.");
+                // Check funds for any increase in quantity
+                var oldQty = order.RemainingQuantity();
+                var newQty = newQuantity.Value;
+                var unit = price ?? order.Price;
+
+                if (newQty > oldQty)
+                {
+                    // need to reserve the delta
+                    var deltaQty = newQty - oldQty;
+                    var ok = await _portfolio.ReserveFundsAsync(unit * deltaQty, CurrencyType);
+                    if (!ok) return ParamError("Insufficient funds to increase quantity.");
+                }
+                else if (newQty < oldQty)
+                {
+                    // release the delta
+                    var deltaQty = oldQty - newQty;
+                    await _portfolio.ReleaseReservedFundsAsync(unit * deltaQty, CurrencyType);
+                }
             }
             else if (order.IsSellOrder() && newQuantity.HasValue)
             {
-                // For sell orders, check if we have enough shares
-                var holding = (await _dbService.GetPositionsByUserId(UserId))
-                              .FirstOrDefault(p => p.StockId == order.StockId);
-                if (holding == null || holding.Quantity < newQuantity.Value)
-                    return ParamError("Insufficient shares to sell.");
+                var oldQty = order.RemainingQuantity();
+                var newQty = newQuantity.Value;
+
+                if (newQty > oldQty)
+                {
+                    var delta = newQty - oldQty;
+                    var ok = await _portfolio.ReservePositionAsync(order.StockId, delta);
+                    if (!ok) return ParamError("Insufficient shares to increase quantity.");
+                }
+                else if (newQty < oldQty)
+                {
+                    var delta = oldQty - newQty;
+                    await _portfolio.UnreservePositionAsync(order.StockId, delta);
+                }
             }
 
             // Update order properties
@@ -200,14 +248,8 @@ public class UserOrderService : IUserOrderService
             if (latestPrice == null)
                 return NoMarketPriceResult();
 
-            /* Validate limit price
-            if (limitOrder && ((buyOrder && price < latestPrice.Price) ||
-                (!buyOrder && price > latestPrice.Price)))
-                return ParamError("Limit price outside market bounds."); */
-
             // Check user assets
-            await LoadFundsAsync(); // Ensure fund is loaded
-            await LoadPositionsAsync();
+            await _portfolio.RefreshAsync();
             Position? holding = CurrentPositions.FirstOrDefault(p => p.StockId == stockId);
             if (buyOrder) // Check funds
             {
@@ -235,15 +277,15 @@ public class UserOrderService : IUserOrderService
             // Update assets
             if (buyOrder)
             {
-                CurrentFund.ReservedBalance += price * quantity;
-                await _dbService.UpdateFund(CurrentFund);
+                // Reserve the maximum spend this user agreed to (limit or max price * qty)
+                var ok = await _portfolio.ReserveFundsAsync(price * quantity, CurrencyType);
+                if (!ok) return ParamError("Failed to reserve funds.");
             }
             else
             {
-                if (holding == null)
-                    throw new InvalidOperationException("Holding should not be null here.");
-                holding.Quantity -= quantity;
-                await _dbService.UpdatePosition(holding);
+                // Reserve the shares the user intends to sell (keeps total, moves to reserved)
+                var ok = await _portfolio.ReservePositionAsync(stockId, quantity);
+                if (!ok) return ParamError("Failed to reserve shares.");
             }
             // Persist the order
             await _dbService.CreateOrder(order);
@@ -269,20 +311,6 @@ public class UserOrderService : IUserOrderService
     {
         await RefreshOrdersAsync();
         return UserOpenOrders.FirstOrDefault(o => o.OrderId == orderId);
-    }
-
-    private async Task LoadFundsAsync()
-    {
-        CurrentFund = await _dbService.GetFundByUserId(UserId)
-            ?? new Fund { UserId = UserId, TotalBalance = 0m, ReservedBalance = 0m };
-        if (CurrentFund.FundId == 0) // New fund, add it to the database
-            await _dbService.CreateFund(CurrentFund);
-    }
-
-    private async Task LoadPositionsAsync()
-    {
-        CurrentPositions = (await _dbService.GetPositionsByUserId(UserId)).ToList()
-            ?? new List<Position>();
     }
 
     private Order CreateOrder(

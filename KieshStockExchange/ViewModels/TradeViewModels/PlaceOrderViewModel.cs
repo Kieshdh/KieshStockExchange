@@ -24,15 +24,14 @@ public partial class PlaceOrderViewModel : BaseViewModel
     [ObservableProperty] private int _selectedSideIndex; // 0 = Buy, 1 = Sell
     [ObservableProperty] private int _selectedOrderTypeIndex; // 0 = Market, 1 = Limit
 
-    [ObservableProperty] private decimal _currentMarketPrice;
+    [ObservableProperty] private decimal _currentMarketPrice = 0m;
+    [ObservableProperty] private string _currentMarketPriceDisplay;
     [ObservableProperty] private decimal _limitPrice;
     [ObservableProperty] private decimal _slippagePercent;
 
     [ObservableProperty] private int _quantity;
     [ObservableProperty] private decimal _orderValue;
     [ObservableProperty] private string _availableAssets;
-
-
 
     public string SubmitButtonText => SelectedSideIndex == 0 ? "BUY" : "SELL";
     public Color SubmitButtonColor => SelectedSideIndex == 0 ? Colors.ForestGreen : Colors.OrangeRed;
@@ -49,6 +48,24 @@ public partial class PlaceOrderViewModel : BaseViewModel
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _selected = selected ?? throw new ArgumentNullException(nameof(selected));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        if (_selected.CurrentPrice is { } p)
+        {
+            CurrentMarketPrice = p;
+            CurrentMarketPriceDisplay = CurrencyHelper.Format(p, CurrencyType.USD);  
+        }
+
+        _selected.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(_selected.CurrentPrice) && _selected.CurrentPrice is { } px)
+            {
+                CurrentMarketPriceDisplay = CurrencyHelper.Format(px, CurrencyType.USD);
+                CurrentMarketPrice = px;
+                UpdateOrderValue();
+            }
+                
+        };
+
     }
 
     // Call this from your page (e.g., OnAppearing)
@@ -72,7 +89,8 @@ public partial class PlaceOrderViewModel : BaseViewModel
             SlippagePercent = value;
     }
 
-    [RelayCommand] private void SetQuantityPercent(object? parameter)
+    [RelayCommand] 
+    private void SetQuantityPercent(object? parameter)
     {
         if (ParsingHelper.TryToDecimal(parameter, out var percent))
         {
@@ -91,19 +109,29 @@ public partial class PlaceOrderViewModel : BaseViewModel
 
     [RelayCommand] private async Task PlaceOrder()
     {
+        if (!_selected.HasSelectedStock)
+        {
+            _logger.LogWarning("No stock selected for placing order.");
+            return;
+        }
+        var stockId = _selected.StockId.Value;
+
         if (SelectedOrderTypeIndex == 0) // Market
         {
+            var price = (SelectedSideIndex == 0) ?
+                  CurrentMarketPrice * (1 + SlippagePercent / 100) 
+                : CurrentMarketPrice * (1 - SlippagePercent / 100);
             if (SelectedSideIndex == 0)
-                await _orders.PlaceMarketBuyOrderAsync(1, Quantity, CurrentMarketPrice * (1 + SlippagePercent / 100));
+                await _orders.PlaceMarketBuyOrderAsync(stockId, Quantity, price);
             else
-                await _orders.PlaceMarketSellOrderAsync(1, Quantity, CurrentMarketPrice * (1 - SlippagePercent / 100));
+                await _orders.PlaceMarketSellOrderAsync(stockId, Quantity, price);
         }
         else // Limit
         {
             if (SelectedSideIndex == 0)
-                await _orders.PlaceLimitBuyOrderAsync(1, Quantity, LimitPrice);
+                await _orders.PlaceLimitBuyOrderAsync(stockId, Quantity, LimitPrice);
             else
-                await _orders.PlaceLimitSellOrderAsync(1, Quantity, LimitPrice);
+                await _orders.PlaceLimitSellOrderAsync(stockId, Quantity, LimitPrice);
         }
     }
     #endregion

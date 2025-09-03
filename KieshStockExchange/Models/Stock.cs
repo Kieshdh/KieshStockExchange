@@ -13,18 +13,13 @@ public class Stock : IValidatable
 {
     #region Properties
     [PrimaryKey, AutoIncrement]
-    [Column("StockId")] public int StockId { get; set; }
+    [Column("StockId")] public int StockId { get; set; } = 0;
 
-    [Column("Symbol")] public string Symbol { get; set; }
+    [Column("Symbol")] public string Symbol { get; set; } = string.Empty;
 
-    [Column("CompanyName")] public string CompanyName { get; set; }
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
+    [Column("CompanyName")] public string CompanyName { get; set; } = string.Empty;
+    [Column("CreatedAt")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;    
     #endregion
-
-    public Stock()
-    {
-        CreatedAt = DateTime.UtcNow;
-    }
 
     #region IValidatable Implementation
     public bool IsValidSymbol()

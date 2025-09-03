@@ -25,19 +25,19 @@ public class Order : IValidatable
 
     #region Properties
     [PrimaryKey, AutoIncrement]
-    [Column("OrderId")] public int OrderId { get; set; }
+    [Column("OrderId")] public int OrderId { get; set; } = 0;
 
-    [Column("UserId")] public int UserId { get; set; }
+    [Column("UserId")] public int UserId { get; set; } = 0;
 
-    [Column("StockId")] public int StockId { get; set; }
+    [Column("StockId")] public int StockId { get; set; } = 0;
 
-    [Column("Quantity")] public int Quantity { get; set; }
+    [Column("Quantity")] public int Quantity { get; set; } = 0;
 
-    [Column("Price")] public decimal Price { get; set; }
+    [Column("Price")] public decimal Price { get; set; } = 0;
 
     [Ignore] public decimal TotalAmount => Price * Quantity;
 
-    [Ignore] public CurrencyType CurrencyType { get; set; }
+    [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
     [Column("Currency")] public string Currency
     {
         get => CurrencyType.ToString();
@@ -45,25 +45,17 @@ public class Order : IValidatable
     }
 
     // "MarketBuy", "MarketSell", "LimitBuy", "LimitSell"
-    [Column("OrderType")] public string OrderType { get; set; }
+    [Column("OrderType")] public string OrderType { get; set; } = String.Empty;
 
     // "Open", "Filled", "Cancelled"
-    [Column("Status")] public string Status { get; set; }
+    [Column("Status")] public string Status { get; set; } = Statuses.Open;
 
-    [Column("AmountFilled")] public int AmountFilled { get; set; }
+    [Column("AmountFilled")] public int AmountFilled { get; set; } = 0;
 
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
+    [Column("CreatedAt")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; }
+    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     #endregion
-
-    public Order()
-    {
-        CreatedAt = DateTime.UtcNow;
-        Status = Statuses.Open; // Default status when order is created
-        CurrencyType = CurrencyType.USD; // Default currency
-        AmountFilled = 0;
-    }
 
     #region IValidatable Implementation
     public bool IsValid() => UserId > 0 && StockId > 0 && Quantity > 0 && Price > 0 &&

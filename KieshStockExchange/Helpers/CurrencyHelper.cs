@@ -104,6 +104,9 @@ public static class CurrencyHelper
     }
 
     public static bool IsSupported(string? isoCode) => TryFromIsoCode(isoCode, out _);
+
+    public static bool IsSupported(CurrencyType currency)
+        => RatesPerBase.ContainsKey(currency);
     #endregion
 
     #region Rates and conversion

@@ -8,24 +8,22 @@ public class User : IValidatable
 {
     #region Properties
     [PrimaryKey, AutoIncrement]
-    [Column("UserId")] public int UserId { get; set; }
+    [Column("UserId")] public int UserId { get; set; } = 0;
 
-    [Column("Username")] public string Username { get; set; }
+    [Column("Username")] public string Username { get; set; } = string.Empty;
 
-    [Column("PasswordHash")] public string PasswordHash { get; set; }
+    [Column("PasswordHash")] public string PasswordHash { get; set; } = string.Empty;
 
-    [Column("Email")] public string Email { get; set; }
+    [Column("Email")] public string Email { get; set; } = string.Empty;
 
-    [Column("FullName")] public string FullName { get; set; }
+    [Column("FullName")] public string FullName { get; set; } = string.Empty;
 
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
+    [Column("CreatedAt")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    [Column("Birthdate")] public DateTime? BirthDate { get; set; }
+    [Column("Birthdate")] public DateTime? BirthDate { get; set; } = null;
 
     [Column("IsAdmin")] public bool IsAdmin { get; set; } = false;
     #endregion
-
-    public User() => CreatedAt = DateTime.UtcNow;
 
     #region IValidatable Implementation
     public bool IsValid() =>

@@ -41,6 +41,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IMarketOrderService, MarketOrderService>();
         builder.Services.AddSingleton<IUserOrderService, UserOrderService>();
         builder.Services.AddSingleton<ISelectedStockService, SelectedStockService>();
+        builder.Services.AddSingleton<IUserPortfolioService, UserPortfolioService>();
         builder.Services.AddSingleton<IUserSessionService, UserSessionService>();
         // Viewmodels
         // - User

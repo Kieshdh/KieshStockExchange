@@ -12,12 +12,14 @@ public class MarketOrderService : IMarketOrderService
     // Dependencies
     private readonly IDataBaseService _dbService;
     private readonly IAuthService _authService;
+    private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<MarketOrderService> _logger;
 
     // User information
     private User CurrentUser => _authService.CurrentUser;
     private int UserId => CurrentUser?.UserId ?? 0;
     private bool IsAuthenticated => _authService.IsLoggedIn && UserId > 0;
+    private CurrencyType BaseCurrency => _portfolio.GetBaseCurrency();
 
     // Order book for each stock (keyed by stock ID)
     // In-memory order books: price‐time priority
@@ -30,10 +32,12 @@ public class MarketOrderService : IMarketOrderService
     public MarketOrderService(
         IDataBaseService dbService,
         IAuthService authService,
+        IUserPortfolioService portfolio,
         ILogger<MarketOrderService> logger)
     {
         _dbService = dbService ?? throw new ArgumentNullException(nameof(dbService));
         _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -193,18 +197,42 @@ public class MarketOrderService : IMarketOrderService
         if (!tx.IsValid())  throw new InvalidOperationException("Invalid transaction.");
 
         // Create stock price record
-        var sp = new StockPrice
-        {
-            StockId = taker.StockId,
-            Price = price,
-        };
+        var sp = new StockPrice { StockId = taker.StockId, Price = price, };
         if (!sp.IsValid()) throw new InvalidOperationException("Invalid stock price.");
 
         // Persist changes
-        await _dbService.CreateTransaction(tx);
-        await _dbService.UpdateOrder(taker);
-        await _dbService.UpdateOrder(maker);
-        await _dbService.CreateStockPrice(sp);
+        await _dbService.RunInTransactionAsync(async ct =>
+        {
+            await _dbService.CreateTransaction(tx, ct);
+            await _dbService.UpdateOrder(taker, ct);
+            await _dbService.UpdateOrder(maker, ct);
+            await _dbService.CreateStockPrice(sp, ct);
+
+            // Buyer pays cash (unreserve reserved funds, then withdraw funds, then add shares)
+            var buyerLimit = await _dbService.GetOrderById(tx.BuyOrderId, ct);
+            var buyerUnit = buyerLimit!.Price;
+
+            var okRelease = await _portfolio.ReleaseReservedFundsAsync(buyerUnit * qty, BaseCurrency, tx.BuyerId, ct);
+            if (!okRelease) 
+                throw new InvalidOperationException("Buyer funds release failed.");
+            var okWithdraw = await _portfolio.WithdrawFundsAsync(price * qty, BaseCurrency, tx.BuyerId, ct);
+            if (!okWithdraw) 
+                throw new InvalidOperationException("Buyer funds withdrawal failed.");
+            var okAddPos = await _portfolio.AddPositionAsync(tx.StockId, qty, tx.BuyerId, ct);
+            if (!okAddPos) 
+                throw new InvalidOperationException("Buyer position add failed.");
+
+            // Seller delivers shares (unreserve reserved slice, then remove shares, then add cash proceeds)
+            var okUnreserve = await _portfolio.UnreservePositionAsync(tx.StockId, qty, tx.SellerId, ct);
+            if (!okUnreserve) 
+                throw new InvalidOperationException("Seller position unreserve failed.");
+            var okRemPos = await _portfolio.RemovePositionAsync(tx.StockId, qty, tx.SellerId, ct);
+            if (!okRemPos) 
+                throw new InvalidOperationException("Seller position removal failed.");
+            var okAddFunds = await _portfolio.AddFundsAsync(price * qty, BaseCurrency, tx.SellerId, ct);
+            if (!okAddFunds) 
+                throw new InvalidOperationException("Seller funds add failed.");
+        });
 
         _logger.LogInformation(
             "Matched {Taker} with {Maker} for {Qty} @ {Price}",

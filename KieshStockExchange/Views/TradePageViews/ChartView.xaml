@@ -5,7 +5,7 @@
     <Grid >
         <!-- Chart View -->
         <!-- For now just Display the price -->
-        <Label Text="{Binding StockCurrentPrice}" 
+        <Label Text="{Binding CurrentPrice}" 
                TextColor="White" FontSize="100" 
                VerticalOptions="Center" 
                HorizontalOptions="Center"/>
