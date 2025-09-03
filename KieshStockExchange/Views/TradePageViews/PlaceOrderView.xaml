@@ -110,6 +110,7 @@
             <Button Text="100%" Grid.Column="4" 
                     Command="{Binding SetQuantityPercentCommand}" CommandParameter="100"/>
         </Grid>
+        <Label Text="TestGit" />
 
         <!-- Order Value -->
         <Grid Style="{StaticResource StockPlacerGrid}">
