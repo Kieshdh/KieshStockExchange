@@ -18,7 +18,7 @@ public class MarketOrderService : IMarketOrderService
     // User information
     private User CurrentUser => _authService.CurrentUser;
     private int UserId => CurrentUser?.UserId ?? 0;
-    private bool IsAuthenticated => _authService.IsLoggedIn && (UserId > 0 || _authService.IsAdmin);
+    private bool IsAuthenticated => _authService.IsLoggedIn && UserId > 0;
     private CurrencyType BaseCurrency => _portfolio.GetBaseCurrency();
 
     // Order book for each stock (keyed by stock ID)
@@ -63,7 +63,7 @@ public class MarketOrderService : IMarketOrderService
         var fills = new List<Transaction>();
 
         // pop best opposite once per iteration
-        while (incoming.RemainingQuantity > 0)
+        while (incoming.RemainingQuantity() > 0)
         {
             // Get best opposite order (removes it from book)
             var opposite = TryGetBestOpposite(book, incoming); // REMOVE from book
@@ -72,7 +72,7 @@ public class MarketOrderService : IMarketOrderService
             // if limit order and not crossed, put the opposite back and stop
             if (!IsPriceCrossed(incoming, opposite))
             {
-                book.UpsertOrder(opposite); // put it back unchanged
+                book.AddLimitOrder(opposite); // put it back unchanged
                 break;
             }
 
@@ -81,13 +81,13 @@ public class MarketOrderService : IMarketOrderService
             fills.Add(tx);
 
             // if opposite still has remainder, re-add it
-            if (opposite.RemainingQuantity > 0)
-                book.UpsertOrder(opposite);
+            if (opposite.RemainingQuantity() > 0)
+                book.AddLimitOrder(opposite);
         }
 
         // if it still has remainder, place it on the book
-        if (incoming.IsLimitOrder && incoming.RemainingQuantity > 0)
-            book.UpsertOrder(incoming);
+        if (incoming.RemainingQuantity() > 0)
+            book.AddLimitOrder(incoming);
 
         return new OrderResult
         {
@@ -125,6 +125,7 @@ public class MarketOrderService : IMarketOrderService
             throw new InvalidOperationException("No stocks available in the database.");
         return stocks;
     }
+
     #endregion
 
     #region Orderbook Management
@@ -140,11 +141,11 @@ public class MarketOrderService : IMarketOrderService
             var book = new OrderBook(stock.StockId);
 
             var orders = await _dbService.GetOrdersByStockId(stock.StockId);
-            orders = orders.Where(o => o.IsOpen).ToList();
+            orders = orders.Where(o => o.IsOpen()).ToList();
             foreach (var order in orders)
             {
-                if (order.IsLimitOrder)
-                    book.UpsertOrder(order);
+                if (order.IsLimitOrder())
+                    book.AddLimitOrder(order);
             }
             _orderBooks[stock.StockId] = book;
         }
@@ -157,23 +158,24 @@ public class MarketOrderService : IMarketOrderService
     {
         if (!IsAuthenticated) return NotAuthResult();
         if (incoming == null) return ParamError("Order is null.");
+        if (incoming.UserId != UserId) return ParamError("Order owner mismatch.");
         if (incoming.Quantity <= 0) return ParamError("Quantity must be > 0.");
-        if (incoming.IsLimitOrder && incoming.Price <= 0) return ParamError("Price must be > 0.");
+        if (incoming.IsLimitOrder() && incoming.Price <= 0) return ParamError("Price must be > 0.");
         return null;
     }
 
     private Order? TryGetBestOpposite(OrderBook book, Order incoming)
-        => incoming.IsBuyOrder ? book.RemoveBestSell() : book.RemoveBestBuy();
+        => incoming.IsBuyOrder() ? book.RemoveBestSell() : book.RemoveBestBuy();
 
     private bool IsPriceCrossed(Order incoming, Order opposite)
-        => incoming.IsBuyOrder
+        => incoming.IsBuyOrder()
             ? incoming.Price >= opposite.Price
             : incoming.Price <= opposite.Price;
 
     private async Task<Transaction> ExecuteFillAsync(Order taker, Order maker)
     {
         // Determine fill quantity and price
-        int qty = Math.Min(taker.RemainingQuantity, maker.RemainingQuantity);
+        int qty = Math.Min(taker.RemainingQuantity(), maker.RemainingQuantity());
         decimal price = maker.Price; // price-time: take maker’s price
 
         // Fill both orders
@@ -184,10 +186,10 @@ public class MarketOrderService : IMarketOrderService
         var tx = new Transaction
         {
             StockId = taker.StockId,
-            BuyOrderId = taker.IsBuyOrder ? taker.OrderId : maker.OrderId,
-            SellOrderId = taker.IsBuyOrder ? maker.OrderId : taker.OrderId,
-            BuyerId = taker.IsBuyOrder ? taker.UserId : maker.UserId,
-            SellerId = taker.IsBuyOrder ? maker.UserId : taker.UserId,
+            BuyOrderId = taker.IsBuyOrder() ? taker.OrderId : maker.OrderId,
+            SellOrderId = taker.IsBuyOrder() ? maker.OrderId : taker.OrderId,
+            BuyerId = taker.IsBuyOrder() ? taker.UserId : maker.UserId,
+            SellerId = taker.IsBuyOrder() ? maker.UserId : taker.UserId,
             Price = price,
             Quantity = qty
         };
@@ -201,42 +203,35 @@ public class MarketOrderService : IMarketOrderService
         // Persist changes
         await _dbService.RunInTransactionAsync(async ct =>
         {
-            // Get the different values 
-            var buyerLimit = await _dbService.GetOrderById(tx.BuyOrderId, ct);
-            var buyerUnit = buyerLimit!.Price;
-            var reserved = buyerUnit * qty;
-            var spend = price * qty;
-            var toRelease = reserved - spend;
-
-            // If the buyer had a different price than the spend amount,
-            // then the difference needs to be returned. 
-            if (toRelease > 0) {
-                var okRelease = await _portfolio.ReleaseReservedFundsAsync(toRelease, BaseCurrency, tx.BuyerId, ct);
-                if (!okRelease)
-                    throw new InvalidOperationException("Buyer fund release failed");
-            }
+            await _dbService.CreateTransaction(tx, ct);
+            await _dbService.UpdateOrder(taker, ct);
+            await _dbService.UpdateOrder(maker, ct);
+            await _dbService.CreateStockPrice(sp, ct);
 
             // Buyer pays cash (unreserve reserved funds, then withdraw funds, then add shares)
-            var okFund = await _portfolio.ReleaseFromReservedFundsAsync(reserved, BaseCurrency, tx.BuyerId, ct);
-            if (!okFund) 
+            var buyerLimit = await _dbService.GetOrderById(tx.BuyOrderId, ct);
+            var buyerUnit = buyerLimit!.Price;
+
+            var okRelease = await _portfolio.ReleaseReservedFundsAsync(buyerUnit * qty, BaseCurrency, tx.BuyerId, ct);
+            if (!okRelease) 
                 throw new InvalidOperationException("Buyer funds release failed.");
+            var okWithdraw = await _portfolio.WithdrawFundsAsync(price * qty, BaseCurrency, tx.BuyerId, ct);
+            if (!okWithdraw) 
+                throw new InvalidOperationException("Buyer funds withdrawal failed.");
             var okAddPos = await _portfolio.AddPositionAsync(tx.StockId, qty, tx.BuyerId, ct);
             if (!okAddPos) 
                 throw new InvalidOperationException("Buyer position add failed.");
 
-            // Seller delivers shares (unreserve reserved shares, then remove shares, then add cash)
-            var okPosition = await _portfolio.ReleaseFromReservedPositionAsync(tx.StockId, qty, tx.SellerId, ct);
-            if (!okPosition) 
+            // Seller delivers shares (unreserve reserved slice, then remove shares, then add cash proceeds)
+            var okUnreserve = await _portfolio.UnreservePositionAsync(tx.StockId, qty, tx.SellerId, ct);
+            if (!okUnreserve) 
                 throw new InvalidOperationException("Seller position unreserve failed.");
-            var okAddFunds = await _portfolio.AddFundsAsync(spend, BaseCurrency, tx.SellerId, ct);
+            var okRemPos = await _portfolio.RemovePositionAsync(tx.StockId, qty, tx.SellerId, ct);
+            if (!okRemPos) 
+                throw new InvalidOperationException("Seller position removal failed.");
+            var okAddFunds = await _portfolio.AddFundsAsync(price * qty, BaseCurrency, tx.SellerId, ct);
             if (!okAddFunds) 
                 throw new InvalidOperationException("Seller funds add failed.");
-
-            // Persist transaction, stock price and updated orders
-            await _dbService.CreateTransaction(tx, ct);
-            await _dbService.CreateStockPrice(sp, ct);
-            await _dbService.UpdateOrder(taker, ct);
-            await _dbService.UpdateOrder(maker, ct);
         });
 
         _logger.LogInformation(

@@ -16,16 +16,27 @@ public class UserOrderService : IUserOrderService
     private readonly IAuthService _authService;
     private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<UserOrderService> _logger;
+
+    private User CurrentUser => _authService.CurrentUser;
+    private IReadOnlyList<Fund> CurrentFunds => _portfolio.GetFunds();
+    private IReadOnlyList<Position> CurrentPositions => _portfolio.GetPositions();
+    private CurrencyType CurrencyType => _portfolio.GetBaseCurrency();
+
+    private Fund CurrentFund => _portfolio.GetBaseFund()
+        ?? new Fund { UserId = UserId, CurrencyType = CurrencyType };
+
+    private int UserId => CurrentUser?.UserId ?? 0;
+    private bool IsAuthenticated => UserId > 0 && _authService.IsLoggedIn;
     #endregion
 
     #region Order Properties
     public List<Order> UserAllOrders { get; private set; } = new();
     public IReadOnlyList<Order> UserOpenOrders =>
-        UserAllOrders.Where(o => o.IsOpen).ToList();
+        UserAllOrders.Where(o => o.IsOpen()).ToList();
     public IReadOnlyList<Order> UserCancelledOrders =>
-        UserAllOrders.Where(o => o.IsCancelled).ToList();
+        UserAllOrders.Where(o => o.IsCancelled()).ToList();
     public IReadOnlyList<Order> UserFilledOrders =>
-        UserAllOrders.Where(o => o.IsFilled).ToList();
+        UserAllOrders.Where(o => o.IsFilled()).ToList();
     #endregion
 
     #region Constructor
@@ -42,370 +53,274 @@ public class UserOrderService : IUserOrderService
     }
     #endregion
 
-    #region Auth Helpers
-    private User CurrentUser => _authService.CurrentUser;
-    private int CurrentUserId => CurrentUser?.UserId ?? 0;
-    private bool IsAuthenticated => CurrentUserId > 0 && _authService.IsLoggedIn;
-
-    private bool CanModifyOrder(Order order, int targetUserId)
-    {
-        // Admin can modify any; otherwise order must belong to the target user (which for non-admin == current)
-        if (_authService.CurrentUser?.IsAdmin == true) return true;
-        return order.UserId == targetUserId && targetUserId == CurrentUserId;
-    }
-
-    private int GetTargetUserIdOrFail(int? asUserId, out OrderResult? authError)
-    {
-        authError = null;
-
-        // No impersonation -> act as current user
-        if (!asUserId.HasValue || asUserId.Value == CurrentUserId)
-            return CurrentUserId;
-
-        // Impersonation requested: require admin
-        if (_authService.CurrentUser?.IsAdmin == true)
-            return asUserId.Value;
-
-        authError = AuthError("Only admins may act on behalf of other users.");
-        return 0;
-    }
-
-    #endregion
-
     #region Public Methods
-    public async Task<bool> RefreshOrdersAsync(int? asUserId = null, CancellationToken ct = default)
+    public async Task<bool> RefreshOrdersAsync()
     {
         if (!IsAuthenticated)
         {
             _logger.LogWarning("Tried to update orders without authentication.");
             return false;
         }
-        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authFail);
-        if (authFail != null) { _logger.LogWarning(authFail.Message); return false; }
 
         try
         {
-            UserAllOrders = (await _dbService.GetOrdersByUserId(targetUserId)).ToList();
+            UserAllOrders = (await _dbService.GetOrdersByUserId(UserId)).ToList();
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching orders for user #{UserId}", targetUserId);
+            _logger.LogError(ex, "Error fetching orders for user {UserId}", UserId);
             return false;
         }
     }
 
-    public async Task<OrderResult> CancelOrderAsync(int orderId, int? asUserId = null, CancellationToken ct = default)
+    public async Task<OrderResult> CancelOrderAsync(int orderId)
     {
-        // Check if able to cancel order
         if (!IsAuthenticated)
             return NotAuthResult();
 
-        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authError);
-        if (authError != null) return authError;
-
-        // If anything fails return failed result
-        OrderResult result = OperationFailedResult();
         try
         {
-            await WithTransactionAsync(async tx =>
+            var order = UserOpenOrders.FirstOrDefault(o => o.OrderId == orderId)
+                     ?? (await UpdateAndFindOrderAsync(orderId));
+            if (order == null)
+                return ParamError("Order does not exist or is not open.");
+
+            if (!_authService.CurrentUser.IsAdmin && order.UserId != UserId)
+                return AuthError("No permission to cancel this order.");
+
+            order.Cancel();
+            if (!order.IsValid())
+                return OperationFailedResult();
+
+            // Release reserved funds or shares
+            await _portfolio.RefreshAsync();
+            if (order.IsBuyOrder())
             {
-                // Find the order
-                var order = await UpdateAndFindOrderAsync(orderId, targetUserId, tx);
-                if (order == null) { result = ParamError("Order does not exist or is not open."); return; }
+                await _portfolio.ReleaseReservedFundsAsync(
+                    order.RemainingAmount(), CurrencyType);
+            }
+            else
+            {
+                await _portfolio.UnreservePositionAsync(
+                    order.StockId, order.RemainingQuantity());
+            }
 
-                // Permission check
-                if (!CanModifyOrder(order, targetUserId))
-                {
-                    result = AuthError("No permission to cancel this order.");
-                    return;
-                }
+            await _dbService.UpdateOrder(order);
 
-                // Release reservations first
-                if (order.IsBuyOrder)
-                    await _portfolio.ReleaseReservedFundsAsync(order.RemainingAmount, order.CurrencyType, targetUserId, tx);
-                else
-                    await _portfolio.UnreservePositionAsync(order.StockId, order.RemainingQuantity, targetUserId, tx);
-
-                // Cancel the order and persist
-                order.Cancel();
-                if (!order.IsValid()) { result = OperationFailedResult(); return; }
-
-                await _dbService.UpdateOrder(order, tx);
-
-                result = new OrderResult
-                {
-                    PlacedOrder = order,
-                    Status = OrderStatus.Success,
-                    Message = "Order has been cancelled."
-                };
-            }, ct);
-
-            return result;
+            return new OrderResult
+            {
+                PlacedOrder = order,
+                Status = OrderStatus.Success,
+                Message = "Order has been cancelled."
+            };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to cancel order #{OrderId} for user #{UserId}", orderId, targetUserId);
+            _logger.LogError(ex, "Failed to cancel order {OrderId} for {UserId}", orderId, UserId);
             return OperationFailedResult();
         }
     }
 
-    public async Task<OrderResult> ChangeOrderAsync(int orderId, int? newQuantity, 
-        decimal? price, int? asUserId = null, CancellationToken ct = default)
+    public async Task<OrderResult> ChangeOrderAsync(int orderId, int? newQuantity, decimal? price)
     {
-        // Check if able to place order
         if (!IsAuthenticated)
             return NotAuthResult();
-
-        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authError);
-        if (authError != null) return authError;
-
-        // If anything fails return failed result
-        OrderResult result = OperationFailedResult();
         try
         {
-            await WithTransactionAsync(async tx =>
+            // Load and find the order. Then check permissions. 
+            var order = await UpdateAndFindOrderAsync(orderId);
+            if (order == null)
+                return ParamError("Order does not exist or is not open.");
+            if (!_authService.CurrentUser.IsAdmin && order.UserId != UserId)
+                return AuthError("No permission to edit this order.");
+
+            // Check parameters
+            if (order.IsFilled() || order.IsCancelled())
+                return ParamError("Cannot edit a filled or cancelled order.");
+            if (newQuantity.HasValue && newQuantity <= order.RemainingQuantity() )
+                return ParamError("New quantity must be less than or equal to remaining quantity.");
+            if (price.HasValue && price <= 0)
+                return ParamError("Price must be greater than zero.");
+            if (newQuantity.HasValue && newQuantity == 0)
+                return ParamError("New quantity cannot be zero. Cancel order instead.");
+            if (price.HasValue && order.IsMarketOrder())
+                return ParamError("Cannot change price of a market order.");
+
+            // Ensure fund is loaded
+            await _portfolio.RefreshAsync();
+
+            if (order.IsBuyOrder() && newQuantity.HasValue)
             {
-                // Load and find the order. Then check permissions. 
-                var order = await UpdateAndFindOrderAsync(orderId, targetUserId, tx);
-                if (order == null) { result = ParamError("Order does not exist or is not open."); return; }
+                // Check funds for any increase in quantity
+                var oldQty = order.RemainingQuantity();
+                var newQty = newQuantity.Value;
+                var unit = price ?? order.Price;
 
-                // Permission check
-                if (!CanModifyOrder(order, targetUserId))
+                if (newQty > oldQty)
                 {
-                    result = AuthError("No permission to cancel this order.");
-                    return;
+                    // need to reserve the delta
+                    var deltaQty = newQty - oldQty;
+                    var ok = await _portfolio.ReserveFundsAsync(unit * deltaQty, CurrencyType);
+                    if (!ok) return ParamError("Insufficient funds to increase quantity.");
                 }
-
-                // Validate inputs (pure checks first, before any state changes)
-                var inputError = ValidateOrderChange(order, newQuantity, price);
-                if (inputError != null) { result = inputError; return; }
-
-                // Ensure portfolio is loaded
-                await _portfolio.RefreshAsync(targetUserId, tx);
-                if (newQuantity.HasValue && order.IsBuyOrder)
+                else if (newQty < oldQty)
                 {
-                    // Check funds for any change in quantity
-                    var oldQty = order.RemainingQuantity;
-                    var newQty = newQuantity.Value;
-                    var unit = price ?? order.Price;
-
-                    // If the user want to increase the order, then reserve additional funds
-                    if (newQty > oldQty) 
-                    {
-                        var deltaQty = newQty - oldQty;
-                        var ok = await _portfolio.ReserveFundsAsync(unit * deltaQty, order.CurrencyType, targetUserId, tx);
-                        if (!ok) { result = ParamError("Insufficient funds to increase quantity."); return; }
-                    }
-                    // Likewise release reserved funds
-                    else if (newQty < oldQty)
-                    {
-                        var deltaQty = oldQty - newQty;
-                        var ok = await _portfolio.ReleaseReservedFundsAsync(unit * deltaQty, order.CurrencyType, targetUserId, tx);
-                        if (!ok) { result = ParamError("Not enough reserved funds to release"); return; }
-                    }
+                    // release the delta
+                    var deltaQty = oldQty - newQty;
+                    await _portfolio.ReleaseReservedFundsAsync(unit * deltaQty, CurrencyType);
                 }
-                else if (newQuantity.HasValue && order.IsSellOrder)
-                {
-                    // Check funds for any change in quantity
-                    var oldQty = order.RemainingQuantity;
-                    var newQty = newQuantity.Value;
+            }
+            else if (order.IsSellOrder() && newQuantity.HasValue)
+            {
+                var oldQty = order.RemainingQuantity();
+                var newQty = newQuantity.Value;
 
-                    // If the user want to increase the order, then reserve additional stocks
-                    if (newQty > oldQty)
-                    {
-                        var delta = newQty - oldQty;
-                        var ok = await _portfolio.ReservePositionAsync(order.StockId, delta, targetUserId, tx);
-                        if (!ok) { result = ParamError("Insufficient shares to increase quantity."); return; }
-                    }
-                    // Likewise release reserved stocks
-                    else if (newQty < oldQty)
-                    {
-                        var delta = oldQty - newQty;
-                        var ok = await _portfolio.UnreservePositionAsync(order.StockId, delta, targetUserId, tx);
-                        if (!ok) { result = ParamError("Insufficient shares to unreserve."); return; }
-                    }
+                if (newQty > oldQty)
+                {
+                    var delta = newQty - oldQty;
+                    var ok = await _portfolio.ReservePositionAsync(order.StockId, delta);
+                    if (!ok) return ParamError("Insufficient shares to increase quantity.");
                 }
-
-                // Update order properties
-                if (newQuantity.HasValue) order.UpdateQuantity(newQuantity.Value);
-                if (price.HasValue) order.UpdatePrice(price.Value);
-                if (!order.IsValid()) { result = ParamError("Invalid order parameters after update."); return; }
-
-                // Persist changes
-                await _dbService.UpdateOrder(order);
-
-                _logger.LogInformation($"Order {orderId} for user #{targetUserId}");
-
-                result = new OrderResult
+                else if (newQty < oldQty)
                 {
-                    PlacedOrder = order,
-                    Status = OrderStatus.Success,
-                    Message = "Order has been successfully edited."
-                };
-            }, ct);
+                    var delta = oldQty - newQty;
+                    await _portfolio.UnreservePositionAsync(order.StockId, delta);
+                }
+            }
 
-            return result;
+            // Update order properties
+            if (newQuantity.HasValue)
+                order.UpdateQuantity(newQuantity.Value);
+            if (price.HasValue)
+                order.UpdatePrice(price.Value);
+            if (!order.IsValid())
+                return ParamError("Invalid order parameters after update.");
+
+            // Persist changes
+            await _dbService.UpdateOrder(order);
+            _logger.LogInformation($"Order {orderId} edited for user {UserId}");
+            return new OrderResult
+            {
+                PlacedOrder = order,
+                Status = OrderStatus.Success,
+                Message = "Order has been successfully edited."
+            };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, $"Error editing order {orderId} for user #{targetUserId}");
+            _logger.LogError(ex, $"Error editing order {orderId} for user {UserId}");
             return OperationFailedResult();
         }
     }
+
+    // Public entry points (limit vs market)
+    public Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int qty, decimal limitPrice) =>
+        PlaceOrderAsync(stockId, qty, true, true, limitPrice);
+
+    public Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int qty, decimal limitPrice) =>
+        PlaceOrderAsync(stockId, qty, false, true, limitPrice);
+
+    public Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int qty, decimal maxPrice) =>
+        PlaceOrderAsync(stockId, qty, true, false, maxPrice);
+
+    public Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int qty, decimal minPrice) =>
+        PlaceOrderAsync(stockId, qty, false, false, minPrice);
     #endregion
 
-    #region Placing Orders 
-    public Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int qty, decimal limitPrice,
-            int? asUserId = null, CancellationToken ct = default) =>
-        PlaceOrderAsync(stockId, qty, true, true, limitPrice, asUserId, ct);
-
-    public Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int qty, decimal limitPrice,
-            int? asUserId = null, CancellationToken ct = default) =>
-        PlaceOrderAsync(stockId, qty, false, true, limitPrice, asUserId, ct);
-
-    public Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int qty, decimal maxPrice,
-            int? asUserId = null, CancellationToken ct = default) =>
-        PlaceOrderAsync(stockId, qty, true, false, maxPrice, asUserId, ct);
-
-    public Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int qty, decimal minPrice,
-            int? asUserId = null, CancellationToken ct = default) =>
-        PlaceOrderAsync(stockId, qty, false, false, minPrice, asUserId, ct);
-
-    private async Task<OrderResult> PlaceOrderAsync(int stockId, int quantity, 
-        bool buyOrder, bool limitOrder, decimal price, int? asUserId, CancellationToken ct)
+    #region Private Helpers
+    private async Task<OrderResult> PlaceOrderAsync(
+        int stockId, int quantity, bool buyOrder, bool limitOrder, decimal price)
     {
-        // Check if able to place order
         if (!IsAuthenticated)
             return NotAuthResult();
         if (stockId <= 0 || quantity <= 0)
             return ParamError("StockId or quantity invalid.");
 
-        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authError);
-        if (authError != null) return authError;
-
-        // If anything fails return failed result
-        OrderResult result = OperationFailedResult();
         try
         {
-            await WithTransactionAsync(async tx =>
+            var stock = await _dbService.GetStockById(stockId);
+            if (stock == null)
+                return ParamError("Stock not found.");
+
+            // Determine price
+            var latestPrice = await _dbService.GetLatestStockPriceByStockId(stockId);
+            if (latestPrice == null)
+                return NoMarketPriceResult();
+
+            // Check user assets
+            await _portfolio.RefreshAsync();
+            Position? holding = CurrentPositions.FirstOrDefault(p => p.StockId == stockId);
+            if (buyOrder) // Check funds
             {
-                var stock = await _dbService.GetStockById(stockId, tx);
-                if (stock == null) { result = ParamError("Stock not found."); return; }
-
-                // Determine price
-                var latestPrice = await _dbService.GetLatestStockPriceByStockId(stockId);
-                if (latestPrice == null) { result = NoMarketPriceResult(); return; }
-
-                //  Load portfolio snapshot for *target user*
-                await _portfolio.RefreshAsync(targetUserId, tx);
-                var baseCurrency = _portfolio.GetBaseCurrency();
-                var fund = _portfolio.GetBaseFund() ?? 
-                    new Fund { UserId = targetUserId, CurrencyType = baseCurrency };
-                var holding = _portfolio.GetPositionByStockId(stockId) ??
-                    new Position { UserId = targetUserId, StockId = stockId};
-
-                if (buyOrder) // Check funds
+                if (CurrentFund.AvailableBalance < price * quantity)
                 {
-                    var required = price * quantity;
-                    if (fund.AvailableBalance < required)
-                    {
-                        _logger.LogWarning("User {UserId} has insufficient funds: avail {Available} " +
-                            "needed {Required}", targetUserId, fund.AvailableBalance, price * quantity);
-                        result = ParamError("Insufficient funds.");
-                        return;
-                    }
+                    _logger.LogWarning("User {UserId} has insufficient funds: {Available} needed {Required}",
+                        UserId, CurrentFund.AvailableBalance, price * quantity);
+                    return ParamError("Insufficient funds.");
                 }
-                else // Check shares
+            }
+            else // Check shares
+            {
+                if (holding == null || holding.RemainingQuantity < quantity)
                 {
-                    if (holding.RemainingQuantity < quantity)
-                    {
-                        _logger.LogWarning("User {UserId} has insufficient shares of stock #{StockId}", 
-                            targetUserId, stockId);
-                        result = ParamError("Insufficient shares.");
-                        return;
-                    }
+                    _logger.LogWarning("User {UserId} has insufficient shares of stock {StockId}", UserId, stockId);
+                    return ParamError("Insufficient shares.");
                 }
+            }
 
-                // Create the order
-                var order = CreateOrder(targetUserId, stockId, quantity, price, baseCurrency, buyOrder, limitOrder);
-                if (!order.IsValid()) { result = ParamError("Invalid order parameters."); return; }
+            // Create the order
+            var order = CreateOrder(stockId, quantity, price, buyOrder, limitOrder);
+            if (!order.IsValid())
+                return ParamError("Invalid order parameters.");
 
-                // Reserve capital / shares
-                if (buyOrder)
-                {
-                    var ok = await _portfolio.ReserveFundsAsync(price * quantity, baseCurrency, targetUserId, tx);
-                    if (!ok) { result = ParamError("Failed to reserve funds."); return; }
-                }
-                else
-                {
-                    // Reserve the shares the user intends to sell (keeps total, moves to reserved)
-                    var ok = await _portfolio.ReservePositionAsync(stockId, quantity, targetUserId, tx);
-                    if (!ok) { result = ParamError("Failed to reserve shares."); return; }
-                }
-                // Persist the order
-                await _dbService.CreateOrder(order, tx);
-                UserAllOrders.Add(order);
+            // Update assets
+            if (buyOrder)
+            {
+                // Reserve the maximum spend this user agreed to (limit or max price * qty)
+                var ok = await _portfolio.ReserveFundsAsync(price * quantity, CurrencyType);
+                if (!ok) return ParamError("Failed to reserve funds.");
+            }
+            else
+            {
+                // Reserve the shares the user intends to sell (keeps total, moves to reserved)
+                var ok = await _portfolio.ReservePositionAsync(stockId, quantity);
+                if (!ok) return ParamError("Failed to reserve shares.");
+            }
+            // Persist the order
+            await _dbService.CreateOrder(order);
+            UserAllOrders.Add(order);
 
-                _logger.LogInformation($"Order placed: {order.OrderId} for user #{targetUserId}");
+            _logger.LogInformation($"Order placed: {order.OrderId} for user {UserId}");
 
-                result = new OrderResult
-                {
-                    Status = OrderStatus.Success,
-                    Message = "Order executed successfully.",
-                    PlacedOrder = order
-                };
-            }, ct);
-
-            return result;
+            return new OrderResult
+            {
+                Status = OrderStatus.Success,
+                Message = "Order executed successfully.",
+                PlacedOrder = order
+            };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error placing order for targetUser #{UserId}", targetUserId);
+            _logger.LogError(ex, "Error placing order for user {UserId}", UserId);
             return OperationFailedResult();
         }
     }
-    #endregion
 
-    #region Private Helpers
-    /// <summary> Wrapper so we can get the orderresult while running inside a database transaction </summary>
-    private Task WithTransactionAsync(Func<CancellationToken, Task> action, CancellationToken ct)
-        => _dbService.RunInTransactionAsync(action, ct);
-
-    private async Task<Order?> UpdateAndFindOrderAsync(int orderId, int targetUserId, CancellationToken ct)
+    private async Task<Order?> UpdateAndFindOrderAsync(int orderId)
     {
-        await RefreshOrdersAsync(targetUserId, ct);
+        await RefreshOrdersAsync();
         return UserOpenOrders.FirstOrDefault(o => o.OrderId == orderId);
     }
 
-    private OrderResult? ValidateOrderChange(Order order, int? newQuantity, decimal? price)
-    {
-        if (order.IsFilled || order.IsCancelled)
-            return ParamError("Cannot edit a filled or cancelled order.");
-        if (!newQuantity.HasValue && !price.HasValue)
-            return ParamError("No changes specified.");
-        if (newQuantity.HasValue && newQuantity < 0)
-            return ParamError("Quantity cannot be negative.");
-        if (newQuantity.HasValue && newQuantity == 0)
-            return ParamError("New quantity cannot be zero. Cancel order instead.");
-        if (newQuantity.HasValue && newQuantity > order.RemainingQuantity)
-            return ParamError("New quantity must be ≤ remaining quantity.");
-        if (price.HasValue && price <= 0)
-            return ParamError("Price must be greater than zero.");
-        if (price.HasValue && order.IsMarketOrder)
-            return ParamError("Cannot change price of a market order.");
-        return null;
-    }
-
-    private Order CreateOrder( int userId, int stockId, int quantity, 
-        decimal price, CurrencyType currency, bool buyOrder, bool limitOrder)
+    private Order CreateOrder(
+        int stockId, int quantity, decimal price, bool buyOrder, bool limitOrder)
     {
         return new Order {
-            UserId = userId,
+            UserId = UserId,
             StockId = stockId,
             Quantity = quantity,
             Price = price,
-            CurrencyType = currency,
             OrderType = buyOrder ?
                 (limitOrder ? Order.Types.LimitBuy : Order.Types.MarketBuy)
               : (limitOrder ? Order.Types.LimitSell : Order.Types.MarketSell),

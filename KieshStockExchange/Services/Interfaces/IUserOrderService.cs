@@ -14,25 +14,20 @@ namespace KieshStockExchange.Services;
     IReadOnlyList<Order> UserFilledOrders { get; }
 
     /// <summary>Reloads the user's orders from the back‐end.</summary>
-    Task<bool> RefreshOrdersAsync(int? asUserId = null, CancellationToken ct = default);
+    Task<bool> RefreshOrdersAsync();
 
     /// <summary>Cancels one of the user's open orders.</summary>
-    Task<OrderResult> CancelOrderAsync(int orderId, 
-        int? asUserId = null, CancellationToken ct = default);
+    Task<OrderResult> CancelOrderAsync(int orderId);
 
     /// <summary>Places a limit‐buy order.</summary>
-    Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int quantity, 
-        decimal limitPrice, int? asUserId = null, CancellationToken ct = default);
+    Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int quantity, decimal limitPrice);
 
     /// <summary>Places a limit‐sell order.</summary>
-    Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int quantity, 
-        decimal limitPrice, int? asUserId = null, CancellationToken ct = default);
+    Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int quantity, decimal limitPrice);
 
     /// <summary>Places a market‐buy order, capping at maxPrice.</summary>
-    Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int quantity, 
-        decimal maxPricev, int? asUserId = null, CancellationToken ct = default);
+    Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int quantity, decimal maxPrice);
 
     /// <summary>Places a market‐sell order, floor at minPrice.</summary>
-    Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int quantity, 
-        decimal minPrice, int? asUserId = null, CancellationToken ct = default);
+    Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int quantity, decimal minPrice);
 }
