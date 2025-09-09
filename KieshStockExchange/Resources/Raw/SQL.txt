@@ -61,7 +61,6 @@ CREATE TABLE Positions (
     UserId INTEGER NOT NULL,
     StockId INTEGER NOT NULL,
     Quantity INTEGER NOT NULL,
-    Currency TEXT NOT NULL,
     FOREIGN KEY (UserId)  REFERENCES Users(UserId),
     FOREIGN KEY (StockId) REFERENCES Stocks(StockId),
     UNIQUE(UserId, StockId)
@@ -70,6 +69,7 @@ CREATE TABLE Positions (
 CREATE TABLE Funds (
     FundId INTEGER PRIMARY KEY AUTOINCREMENT,
     UserId INTEGER NOT NULL UNIQUE,
+    Currency TEXT NOT NULL,
     TotalBalance REAL NOT NULL DEFAULT 0.0,
     ReservedBalance REAL NOT NULL DEFAULT 0.0,
     AvailableBalance AS (TotalBalance - ReservedBalance) STORED,
