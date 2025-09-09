@@ -8,60 +8,60 @@ namespace KieshStockExchange.Services.Implementations;
 
 public class UserPortfolioService : IUserPortfolioService
 {
-    #region Constructor and Fields
-    private readonly int UserId;
+    #region Constructor & Fields
     private readonly IDataBaseService _db;
     private readonly ILogger<UserPortfolioService> _logger;
     private readonly IAuthService _auth;
 
     public PortfolioSnapshot? Snapshot { get; private set; }
     public event EventHandler<PortfolioSnapshot>? SnapshotChanged;
-    public CurrencyType BaseCurrency { get; private set; } = CurrencyType.USD;
 
     public UserPortfolioService(IAuthService auth, IDataBaseService db, ILogger<UserPortfolioService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
-
-        if (!UserAuthenticated())
-            throw new InvalidOperationException("User must be logged in to access portfolio.");
-
-        UserId = auth.CurrentUser.UserId;
     }
     #endregion
 
-    #region Refresh and Base Currency
-    public async Task<bool> RefreshAsync(CancellationToken ct = default)
+    #region Auth Helpers
+    private int CurrentUserId => _auth.CurrentUser?.UserId ?? 0;
+    private bool IsAuthenticated => _auth.IsLoggedIn && CurrentUserId > 0;
+    private bool IsAdmin => _auth.CurrentUser?.IsAdmin == true;
+
+    private int GetTargetUserIdOrFail(int? asUserId, out string? error)
     {
-        try
+        error = null;
+        if (!IsAuthenticated)
         {
-            var funds = await _db.GetFundsByUserId(UserId, ct);
-            var positions = await _db.GetPositionsByUserId(UserId, ct);
-
-            Snapshot = new PortfolioSnapshot(
-                funds.ToImmutableList(),
-                positions.ToImmutableList(),
-                BaseCurrency
-            );
-
-            SnapshotChanged?.Invoke(this, Snapshot);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to refresh portfolio for user {UserId}", UserId);
-            return false;
+            error = "User not authenticated.";
+            return 0;
         }
 
+        // No impersonation or self-targeting
+        if (!asUserId.HasValue || asUserId.Value == CurrentUserId)
+            return CurrentUserId;
+
+        if (IsAdmin)
+            return asUserId.Value;
+
+        error = "Only admins may act on behalf of other users.";
+        return 0;
     }
+
+    private bool CanModifyPortfolio(int targetUserId) =>
+        IsAdmin || targetUserId == CurrentUserId;
+    #endregion
+
+    #region Base Currency
+    private CurrencyType BaseCurrency = CurrencyType.USD;
 
     public void SetBaseCurrency(CurrencyType currency) => BaseCurrency = currency;
     public CurrencyType GetBaseCurrency() => BaseCurrency;
     #endregion
 
-    #region Funds and Positions
-    public IReadOnlyList<Fund> GetFunds() => 
+    #region Snapshot Accessors & Refresh
+    public IReadOnlyList<Fund> GetFunds() =>
         Snapshot?.Funds ?? Array.Empty<Fund>();
 
     public Fund? GetFundByCurrency(CurrencyType currency) =>
@@ -69,283 +69,103 @@ public class UserPortfolioService : IUserPortfolioService
 
     public Fund? GetBaseFund() => GetFundByCurrency(BaseCurrency);
 
-    public IReadOnlyList<Position> GetPositions() => 
+    public IReadOnlyList<Position> GetPositions() =>
         Snapshot?.Positions ?? Array.Empty<Position>();
 
     public Position? GetPositionByStockId(int stockId) =>
         Snapshot?.Positions?.FirstOrDefault(p => p.StockId == stockId);
+
+    public async Task<bool> RefreshAsync(int? asUserId, CancellationToken ct = default)
+    {
+        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authErr);
+        if (authErr != null) { _logger.LogWarning(authErr); return false; }
+
+        try
+        {
+            // Reads are wrapped too for a consistent view if you later add rowversion/concurrency.
+            await _db.RunInTransactionAsync(async tx =>
+            {
+                var funds = await _db.GetFundsByUserId(targetUserId, tx);
+                var positions = await _db.GetPositionsByUserId(targetUserId, tx);
+
+                Snapshot = new PortfolioSnapshot(
+                    funds.ToImmutableList(),
+                    positions.ToImmutableList(),
+                    BaseCurrency);
+
+                SnapshotChanged?.Invoke(this, Snapshot);
+            }, ct);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to refresh portfolio for user {UserId}", targetUserId);
+            return false;
+        }
+    }
     #endregion
 
-    #region Modifications
-    public async Task<bool> AddFundsAsync(decimal amount, CurrencyType currency, 
-        int userId = -1, CancellationToken ct = default)
-    {
-        if (userId == -1) 
-            userId = UserId;
-        if (!CheckParametersFund(
-            amount, currency,
-            "Attempted to add funds to unauthenticated user's portfolio",
-            $"Attempted to add non-positive amount {amount} to user {userId}'s portfolio",
-            $"Attempted to add funds with unsupported currency {currency} to user {userId}'s portfolio")
-        )
-            return false;
-        try
-        {
-            var fund = await GetFund(userId, currency, ct);
-            fund.AddFunds(amount);
-            await _db.UpsertFund(fund, ct);
-            await RefreshAsync(ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to add funds to user {UserId}'s portfolio", userId);
-            return false;
-        }
+    #region Public Mutations (Funds)
+    public Task<bool> AddFundsAsync(decimal amount, CurrencyType currency,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutateFundAsync(FundMutation.Add, amount, currency, asUserId, ct);
 
-    }
+    public Task<bool> WithdrawFundsAsync(decimal amount, CurrencyType currency,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutateFundAsync(FundMutation.Withdraw, amount, currency, asUserId, ct);
 
-    public async Task<bool> WithdrawFundsAsync(decimal amount, CurrencyType currency, 
-        int userId = -1, CancellationToken ct = default) 
-    {
-        if (userId == -1)
-            userId = UserId;
-        if (!CheckParametersFund(
-            amount, currency,
-            "Attempted to withdraw funds from unauthenticated user's portfolio",
-            $"Attempted to withdraw non-positive amount {amount} from user {userId}'s portfolio",
-            $"Attempted to withdraw funds with unsupported currency {currency} from user {userId}'s portfolio")
-        )
-            return false;
-        try
-        {
-            await RefreshAsync(ct);
-            var fund = await GetFund(userId, currency, ct);
-            if (fund.AvailableBalance < amount)
-            {
-                _logger.LogWarning("Insufficient funds: Attempted to withdraw {Amount} from user {UserId}'s " +
-                    "portfolio with available balance {AvailableBalance}", amount, userId, fund.AvailableBalance);
-                return false;
-            }
-            fund.WithdrawFunds(amount);
-            await _db.UpsertFund(fund, ct);
-            await RefreshAsync(ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to add funds to user {UserId}'s portfolio", userId);
-            return false;
-        }
-    }
+    public Task<bool> ReserveFundsAsync(decimal amount, CurrencyType currency,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutateFundAsync(FundMutation.Reserve, amount, currency, asUserId, ct);
 
-    public async Task<bool> ReserveFundsAsync(decimal amount, CurrencyType currency, 
-        int userId = -1, CancellationToken ct = default)
-    {
-        if (userId == -1)
-            userId = UserId;
-        if (!CheckParametersFund(
-            amount, currency,
-            "Attempted to reserve funds from unauthenticated user's portfolio",
-            $"Attempted to reserve non-positive amount {amount} from user {userId}'s portfolio",
-            $"Attempted to reserve funds with unsupported currency {currency} from user {userId}'s portfolio")
-        )
-            return false;
-        try
-        {
-            await RefreshAsync(ct);
-            var fund = await GetFund(userId, currency, ct);
-            if (fund.AvailableBalance < amount)
-            {
-                _logger.LogWarning("Insufficient funds: Attempted to reserve {Amount} from user {UserId}'s " +
-                    "portfolio with available balance {AvailableBalance}", amount, userId, fund.AvailableBalance);
-                return false;
-            }
-            fund.ReserveFunds(amount);
-            await _db.UpsertFund(fund, ct);
-            await RefreshAsync(ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to reserve funds from user {UserId}'s portfolio", userId);
-            return false;
-        }
-    }
+    public Task<bool> ReleaseReservedFundsAsync(decimal amount, CurrencyType currency,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutateFundAsync(FundMutation.Unreserve, amount, currency, asUserId, ct);
 
-    public async Task<bool> ReleaseReservedFundsAsync(decimal amount, CurrencyType currency, 
-        int userId = -1, CancellationToken ct = default)
-    {
-        if (userId == -1)
-            userId = UserId;
-        if (!CheckParametersFund(
-            amount, currency,
-            "Attempted to release reserved funds from unauthenticated user's portfolio",
-            $"Attempted to release non-positive amount {amount} from user {userId}'s portfolio",
-            $"Attempted to release reserved funds with unsupported currency {currency} from user {userId}'s portfolio")
-        )
-            return false;
-        try
-        {
-            await RefreshAsync(ct);
-            var fund = await GetFund(userId, currency, ct);
-            if (fund.ReservedBalance < amount)
-            {
-                _logger.LogWarning("Insufficient reserved funds: Attempted to release {Amount} from user {UserId}'s " +
-                    "portfolio with reserved balance {ReservedBalance}", amount, UserId, fund.ReservedBalance);
-                return false;
-            }
-            fund.UnreserveFunds(amount);
-            await _db.UpsertFund(fund, ct);
-            await RefreshAsync(ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to release reserved funds from user {UserId}'s portfolio", userId);
-            return false;
-        }
-    }
+    public Task<bool> ReleaseFromReservedFundsAsync(decimal amount, CurrencyType currency,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutateFundAsync(FundMutation.SpendReserved, amount, currency, asUserId, ct);
+    #endregion
 
-    public async Task<bool> AddPositionAsync(int stockId, int quantity, 
-        int userId = -1, CancellationToken ct = default)
-    {
-        if (userId == -1)
-            userId = UserId;
-        if (!await CheckParametersPosition(
-            stockId, quantity, 
-            $"Attempted to add to positon for stock #{stockId} from unauthenticated user #{userId}'s portfolio",
-            $"Attempted to to a non-existend stock #{stockId} positon to user #{userId}'s position ",
-            $"Attempted to add non-positive quantity {quantity} to user {userId}'s position for stock #{stockId}")
-        )
-            return false;
-        try
-        {
-            var position = await GetPosition(userId, stockId, ct);
-            position.AddStock(quantity);
-            await _db.UpsertPosition(position, ct);
-            await RefreshAsync(ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to add position for stock #{StockId} to user {UserId}'s portfolio", stockId, userId);
-            return false;
-        }
-    }
+    #region Public Mutations (Positions)
+    public Task<bool> AddPositionAsync(int stockId, int quantity,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutatePositionAsync(PositionMutation.Add, stockId, quantity, asUserId, ct);
 
-    public async Task<bool> RemovePositionAsync(int stockId, int quantity, 
-        int userId = -1, CancellationToken ct = default)
-    {
-        if (userId == -1)
-            userId = UserId;
-        if (!await CheckParametersPosition(
-            stockId, quantity,
-            $"Attempted to remove from positon for stock #{stockId} from unauthenticated user #{userId}'s portfolio",
-            $"Attempted to to a non-existend stock #{stockId} positon to user #{userId}'s position ",
-            $"Attempted to remove non-positive quantity {quantity} from user {userId}'s position for stock #{stockId}")
-        )
-            return false;
-        try
-        {
-            var position = await GetPosition(userId,stockId, ct);
-            if (position.Quantity < quantity)
-            {
-                _logger.LogWarning("Insufficient stock quantity: Attempted to remove {Quantity} from user {UserId}'s " +
-                    "position for stock #{StockId} with total quantity {TotalQuantity}", quantity, userId, stockId, position.Quantity);
-                return false;
-            }
-            position.RemoveStock(quantity);
-            await _db.UpsertPosition(position, ct);
-            await RefreshAsync(ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to remove position for stock #{StockId} from user {UserId}'s portfolio", stockId, userId);
-            return false;
-        }
-    }
+    public Task<bool> RemovePositionAsync(int stockId, int quantity,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutatePositionAsync(PositionMutation.Remove, stockId, quantity, asUserId, ct);
 
-    public async Task<bool> ReservePositionAsync(int stockId, int quantity, 
-        int userId = -1, CancellationToken ct = default)
-    {
-        if (!await CheckParametersPosition(
-            stockId, quantity,
-            $"Attempted to reserve positon for stock #{stockId} from unauthenticated user #{userId}'s portfolio",
-            $"Attempted to to a non-existend stock #{stockId} positon to user #{userId}'s position ",
-            $"Attempted to reserve non-positive quantity {quantity} from user {userId}'s position for stock #{stockId}")
-        )
-            return false;
-        try
-        {
-            var position = await GetPosition(userId, stockId, ct);
-            if (position.RemainingQuantity < quantity)
-            {
-                _logger.LogWarning("Insufficient stock quantity: Attempted to reserve {Quantity} from user {UserId}" +
-                    "'s position for stock #{StockId} with available quantity {AvailableQuantity}", 
-                    quantity, userId, stockId, position.RemainingQuantity);
-                return false;
-            }
-            position.ReserveStock(quantity);
-            await _db.UpsertPosition(position, ct);
-            await RefreshAsync(ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to reserve position for stock #{StockId} from user {UserId}'s portfolio", stockId, userId);
-            return false;
-        }
+    public Task<bool> ReservePositionAsync(int stockId, int quantity,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutatePositionAsync(PositionMutation.Reserve, stockId, quantity, asUserId, ct);
 
-    }
+    public Task<bool> UnreservePositionAsync(int stockId, int quantity,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutatePositionAsync(PositionMutation.Unreserve, stockId, quantity, asUserId, ct);
 
-    public async Task<bool> UnreservePositionAsync(int stockId, int quantity, 
-        int userId = -1, CancellationToken ct = default)
-    {
-        if (userId == -1)
-            userId = UserId;
-        if (!await CheckParametersPosition(
-            stockId, quantity,
-            $"Attempted to unreserve positon for stock #{stockId} from unauthenticated user #{userId}'s portfolio",
-            $"Attempted to to a non-existend stock #{stockId} positon to user #{userId}'s position ",
-            $"Attempted to unreserve non-positive quantity {quantity} from user {userId}'s position for stock #{stockId}")
-        )
-            return false;
-        try
-        {
-            var position = await GetPosition(userId, stockId, ct);
-            if (position.ReservedQuantity < quantity)
-            {
-                _logger.LogWarning("Insufficient reserved stock quantity: Attempted to unreserve {Quantity} from user {UserId}'s " +
-                    "position for stock #{StockId} with reserved quantity {ReservedQuantity}", quantity, userId, stockId, position.ReservedQuantity);
-                return false;
-            }
-            position.UnreserveStock(quantity);
-            await _db.UpsertPosition(position, ct);
-            await RefreshAsync(ct);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to unreserve position for stock #{StockId} from user {UserId}'s portfolio", stockId, userId);
-            return false;
-        }
-    }
+    public Task<bool> ReleaseFromReservedPositionAsync(int stockId, int quantity,
+        int? asUserId = null, CancellationToken ct = default)
+        => MutatePositionAsync(PositionMutation.SpendReserved, stockId, quantity, asUserId, ct);
     #endregion
 
     #region Normalization
-    public async Task NormalizeAsync(CancellationToken ct = default)
+    public async Task NormalizeAsync(int? asUserId = null, CancellationToken ct = default)
     {
-        await NormalizeFundsAsync(UserId, ct);
-        await NormalizePositionsAsync(UserId, ct);
+        var targetUserId = GetTargetUserIdOrFail(asUserId, out var err);
+        if (err != null) { _logger.LogWarning(err); return; }
+        if (!CanModifyPortfolio(targetUserId)) { _logger.LogWarning("Not allowed to normalize funds for user {UserId}", targetUserId); return; }
+
+        await NormalizeFundsAsync(targetUserId, ct);
+        await NormalizePositionsAsync(targetUserId, ct);
     }
 
-    public async Task NormalizeFundsAsync(int userId, CancellationToken ct = default)
+    private async Task NormalizeFundsAsync(int userId, CancellationToken ct = default)
     {
-        await _db.RunInTransactionAsync(async txCt =>
+        await _db.RunInTransactionAsync(async tx =>
         {
-            var funds = await _db.GetFundsByUserId(userId, txCt);
+            var funds = await _db.GetFundsByUserId(userId, tx);
             var groups = funds
                 .GroupBy(f => f.CurrencyType)
                 .Where(g => g.Count() > 1 || g.Any(f =>
@@ -356,7 +176,7 @@ public class UserPortfolioService : IUserPortfolioService
 
             foreach (var group in groups)
             {
-                txCt.ThrowIfCancellationRequested();
+                tx.ThrowIfCancellationRequested();
 
                 var ordered = group.OrderBy(f => f.FundId).ToList();
                 var primary = ordered.First();
@@ -373,19 +193,19 @@ public class UserPortfolioService : IUserPortfolioService
                 primary.ReservedBalance = reserved;
                 primary.UpdatedAt = DateTime.UtcNow;
 
-                await _db.UpsertFund(primary, txCt);
+                await _db.UpsertFund(primary, tx);
 
                 foreach (var dup in duplicates)
-                    await _db.DeleteFund(dup, txCt);
+                    await _db.DeleteFund(dup, tx);
             }
         }, ct);
     }
 
-    public async Task NormalizePositionsAsync(int userId, CancellationToken ct = default)
+    private async Task NormalizePositionsAsync(int userId, CancellationToken ct = default)
     {
-        await _db.RunInTransactionAsync(async txCt =>
+        await _db.RunInTransactionAsync(async tx =>
         {
-            var positions = await _db.GetPositionsByUserId(userId, txCt);
+            var positions = await _db.GetPositionsByUserId(userId, tx);
             var groups = positions
                 .GroupBy(p => p.StockId)
                 .Where(g => g.Count() > 1 || g.Any(p =>
@@ -393,9 +213,10 @@ public class UserPortfolioService : IUserPortfolioService
                     p.ReservedQuantity < 0 ||
                     p.ReservedQuantity > p.Quantity))
                 .ToList();
+
             foreach (var group in groups)
             {
-                txCt.ThrowIfCancellationRequested();
+                tx.ThrowIfCancellationRequested();
 
                 var ordered = group.OrderBy(p => p.PositionId).ToList();
                 var primary = ordered.First();
@@ -412,65 +233,166 @@ public class UserPortfolioService : IUserPortfolioService
                 primary.ReservedQuantity = reserved;
                 primary.UpdatedAt = DateTime.UtcNow;
 
-                await _db.UpsertPosition(primary, txCt);
+                await _db.UpsertPosition(primary, tx);
                 foreach (var dup in duplicates)
-                    await _db.DeletePosition(dup, txCt);
+                    await _db.DeletePosition(dup, tx);
             }
         }, ct);
     }
     #endregion
 
-    #region Helpers
-    private bool UserAuthenticated() => _auth.IsLoggedIn || _auth.IsAdmin;
+    #region Internal Mutations
+    private enum FundMutation { Add, Withdraw, Reserve, Unreserve, SpendReserved }
+    private enum PositionMutation { Add, Remove, Reserve, Unreserve, SpendReserved }
 
-    private bool CheckParametersFund(decimal amount, CurrencyType currency,
-        string msgAuth, string msgAmount, string msgCurrency)
+    private async Task<bool> MutateFundAsync(FundMutation mutation, decimal amount, CurrencyType currency,
+        int? asUserId, CancellationToken ct)
     {
-        if (!UserAuthenticated())
+        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authErr);
+        if (authErr != null) { _logger.LogWarning(authErr); return false; }
+        if (!CanModifyPortfolio(targetUserId)) { _logger.LogWarning("No permission to modify funds for user {UserId}", targetUserId); return false; }
+        if (amount <= 0) { _logger.LogWarning("Amount must be positive. Given: {Amount}", amount); return false; }
+        if (!CurrencyHelper.IsSupported(currency)) { _logger.LogWarning("Unsupported currency {Currency}", currency); return false; }
+
+        bool success = false;
+
+        await _db.RunInTransactionAsync(async tx =>
         {
-            _logger.LogWarning(msgAuth);
-            return false;
-        }
-        if (amount == 0)
-        {
-            _logger.LogWarning(msgAmount);
-            return false;
-        }
-        if (!CurrencyHelper.IsSupported(currency))
-        {
-            _logger.LogWarning(msgCurrency);
-            return false;
-        }
-        return true;
+            var fund = await _db.GetFundByUserIdAndCurrency(targetUserId, currency, tx)
+                ?? new Fund { UserId = targetUserId, CurrencyType = currency, TotalBalance = 0 };
+
+            switch (mutation)
+            {
+                case FundMutation.Add:
+                    fund.AddFunds(amount);
+                    break;
+
+                case FundMutation.Withdraw:
+                    if (fund.AvailableBalance < amount)
+                    {
+                        _logger.LogWarning("Insufficient funds to withdraw {Amount} for user {UserId}. Available={Avail}",
+                            amount, targetUserId, fund.AvailableBalance);
+                        return;
+                    }
+                    fund.WithdrawFunds(amount);
+                    break;
+
+                case FundMutation.Reserve:
+                    if (fund.AvailableBalance < amount)
+                    {
+                        _logger.LogWarning("Insufficient funds to reserve {Amount} for user {UserId}. Available={Avail}",
+                            amount, targetUserId, fund.AvailableBalance);
+                        return;
+                    }
+                    fund.ReserveFunds(amount);
+                    break;
+
+                case FundMutation.Unreserve:
+                    if (fund.ReservedBalance < amount)
+                    {
+                        _logger.LogWarning("Insufficient reserved to unreserve {Amount} for user {UserId}. Reserved={Res}",
+                            amount, targetUserId, fund.ReservedBalance);
+                        return;
+                    }
+                    fund.UnreserveFunds(amount);
+                    break;
+
+                case FundMutation.SpendReserved:
+                    if (fund.ReservedBalance < amount)
+                    {
+                        _logger.LogWarning("Insufficient reserved to spend {Amount} for user {UserId}. Reserved={Res}",
+                            amount, targetUserId, fund.ReservedBalance);
+                        return;
+                    }
+                    fund.ReleaseFromReservedFunds(amount);
+                    break;
+            }
+
+            await _db.UpsertFund(fund, tx);
+            await RefreshAsync(targetUserId, tx);
+            success = true;
+
+        }, ct);
+
+        return success;
     }
 
-    private async Task<bool> CheckParametersPosition(int stockId, int quantity,
-        string msgAuth, string msgStock, string msgAmount, CancellationToken ct = default)
+    private async Task<bool> MutatePositionAsync(PositionMutation mutation, int stockId, int quantity,
+        int? asUserId, CancellationToken ct)
     {
-        if (!UserAuthenticated())
+        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authErr);
+        if (authErr != null) { _logger.LogWarning(authErr); return false; }
+        if (!CanModifyPortfolio(targetUserId)) { _logger.LogWarning("No permission to modify positions for user {UserId}", targetUserId); return false; }
+        if (quantity <= 0) { _logger.LogWarning("Quantity must be positive. Given: {Qty}", quantity); return false; }
+
+        bool success = false;
+
+        await _db.RunInTransactionAsync(async tx =>
         {
-            _logger.LogWarning(msgAuth);
-            return false;
-        }
-        if (!await _db.StockExist(stockId))
-        {
-            _logger.LogWarning(msgStock);
-            return false;
-        }
-        if (quantity <= 0)
-        {
-            _logger.LogWarning(msgAmount);
-            return false;
-        }
-        return true;
+            if (!await _db.StockExist(stockId))
+            {
+                _logger.LogWarning("Stock #{StockId} does not exist.", stockId);
+                return;
+            }
+
+            var position = await _db.GetPositionByUserIdAndStockId(targetUserId, stockId, tx)
+                ?? new Position { UserId = targetUserId, StockId = stockId, Quantity = 0 };
+
+            switch (mutation)
+            {
+                case PositionMutation.Add:
+                    position.AddStock(quantity);
+                    break;
+
+                case PositionMutation.Remove:
+                    if (position.Quantity < quantity)
+                    {
+                        _logger.LogWarning("Insufficient shares to remove {Qty} for user {UserId} on stock #{StockId}. Have={Have}",
+                            quantity, targetUserId, stockId, position.Quantity);
+                        return;
+                    }
+                    position.RemoveStock(quantity);
+                    break;
+
+                case PositionMutation.Reserve:
+                    if (position.RemainingQuantity < quantity)
+                    {
+                        _logger.LogWarning("Insufficient remaining shares to reserve {Qty} for user {UserId} on stock #{StockId}. Remaining={Rem}",
+                            quantity, targetUserId, stockId, position.RemainingQuantity);
+                        return;
+                    }
+                    position.ReserveStock(quantity);
+                    break;
+
+                case PositionMutation.Unreserve:
+                    if (position.ReservedQuantity < quantity)
+                    {
+                        _logger.LogWarning("Insufficient reserved shares to unreserve {Qty} for user {UserId} on stock #{StockId}. Reserved={Res}",
+                            quantity, targetUserId, stockId, position.ReservedQuantity);
+                        return;
+                    }
+                    position.UnreserveStock(quantity);
+                    break;
+
+                case PositionMutation.SpendReserved:
+                    if (position.ReservedQuantity < quantity)
+                    {
+                        _logger.LogWarning("Insufficient reserved shares to spend {Qty} for user {UserId} on stock #{StockId}. Reserved={Res}",
+                            quantity, targetUserId, stockId, position.ReservedQuantity);
+                        return;
+                    }
+                    // Note: method name in your model appears to be 'ReleaseFromReservedstock' (lowercase 's')
+                    position.ReleaseFromReservedstock(quantity);
+                    break;
+            }
+
+            await _db.UpsertPosition(position, tx);
+            await RefreshAsync(targetUserId, tx);
+            success = true;
+
+        }, ct);
+
+        return success;
     }
-
-    private async Task<Fund> GetFund(int userId, CurrencyType currency, CancellationToken ct = default)
-        => await _db.GetFundByUserIdAndCurrency(userId, currency, ct)
-           ?? new Fund { UserId = userId, CurrencyType = currency, TotalBalance = 0 };
-
-    private async Task<Position> GetPosition(int userId, int stockId, CancellationToken ct = default)
-        => await _db.GetPositionByUserIdAndStockId(userId, stockId, ct)
-           ?? new Position { UserId = userId, StockId = stockId, Quantity = 0 };
     #endregion
 }

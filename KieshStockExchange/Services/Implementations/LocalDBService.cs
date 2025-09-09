@@ -20,15 +20,6 @@ public class LocalDBService: IDataBaseService
         _db = new SQLiteAsyncConnection(dbPath);
         _ = InitializePragmasAsync();
     }
-
-    private async Task InitializePragmasAsync()
-    {
-        // These improve reliability under concurrency and ensure constraints are enforced.
-        await _db.ExecuteAsync("PRAGMA foreign_keys = ON;");
-        await _db.ExecuteAsync("PRAGMA journal_mode = WAL;");     // better concurrent reads
-        await _db.ExecuteAsync("PRAGMA synchronous = NORMAL;");
-        await _db.ExecuteAsync("PRAGMA busy_timeout = 5000;");    // wait up to 5s on writer lock
-    }
     #endregion
 
     #region Generic operations
@@ -45,11 +36,12 @@ public class LocalDBService: IDataBaseService
         await RunDbAsync(() => _db.InsertAllAsync(items), ct);
     }
 
-    public async Task DeleteAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default) 
+    /*public async Task DeleteAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
-        await RunDbAsync(() => _db.DeleteAllAsync((TableMapping)items), ct);
-    }
+        await RunDbAsync(() => _db.DeleteAllAsync(items), ct);
+    }*/
+
 
     public async Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default) 
     {
@@ -210,6 +202,7 @@ public class LocalDBService: IDataBaseService
 
     public async Task UpdateStock(Stock stock, CancellationToken cancellationToken = default)
     {
+        await InitializeAsync(cancellationToken);
         await RunDbAsync(() => _db.UpdateAsync(stock), cancellationToken);
     }
 
@@ -476,7 +469,7 @@ public class LocalDBService: IDataBaseService
         await InitializeAsync(cancellationToken);
         return await RunDbAsync(() =>
             _db.Table<Fund>()
-               .Where(f => f.UserId == userId && f.CurrencyType == currency)
+               .Where(f => f.UserId == userId && f.Currency == currency.ToString())
                .FirstOrDefaultAsync(),
             cancellationToken);
     }
@@ -521,13 +514,13 @@ public class LocalDBService: IDataBaseService
             // Wrap each DB call so cancellation is checked before
             cancellationToken.ThrowIfCancellationRequested();
 
-            await Task.Run(() => _db.CreateTableAsync<User>(), cancellationToken);
-            await Task.Run(() => _db.CreateTableAsync<Stock>(), cancellationToken);
-            await Task.Run(() => _db.CreateTableAsync<StockPrice>(), cancellationToken);
-            await Task.Run(() => _db.CreateTableAsync<Order>(), cancellationToken);
-            await Task.Run(() => _db.CreateTableAsync<Transaction>(), cancellationToken);
-            await Task.Run(() => _db.CreateTableAsync<Position>(), cancellationToken);
-            await Task.Run(() => _db.CreateTableAsync<Fund>(), cancellationToken);
+            await _db.CreateTableAsync<User>();
+            await _db.CreateTableAsync<Stock>();
+            await _db.CreateTableAsync<StockPrice>();
+            await _db.CreateTableAsync<Order>();
+            await _db.CreateTableAsync<Transaction>();
+            await _db.CreateTableAsync<Position>();
+            await _db.CreateTableAsync<Fund>();
 
             _initialized = true;
         }
@@ -550,5 +543,14 @@ public class LocalDBService: IDataBaseService
             ct.ThrowIfCancellationRequested();
             await action();
         }, ct);
+
+    private async Task InitializePragmasAsync()
+    {
+        // These improve reliability under concurrency and ensure constraints are enforced.
+        await _db.ExecuteAsync("PRAGMA foreign_keys = ON;");
+        await _db.ExecuteAsync("PRAGMA journal_mode = WAL;");     // better concurrent reads
+        await _db.ExecuteAsync("PRAGMA synchronous = NORMAL;");
+        await _db.ExecuteAsync("PRAGMA busy_timeout = 5000;");    // wait up to 5s on writer lock
+    }
     #endregion
 }

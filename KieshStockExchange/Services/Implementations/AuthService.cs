@@ -55,9 +55,8 @@ public class AuthService : IAuthService
         CurrentUser = user;
     }
 
-    public Task LogoutAsync()
+    public async Task LogoutAsync()
     {
         CurrentUser = null;
-        return Task.CompletedTask;
     }
 }
