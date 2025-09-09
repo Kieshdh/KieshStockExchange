@@ -15,6 +15,7 @@ public enum OrderStatus
     InsufficientStocks,
     InsufficientFunds,
     NoMarketPrice,
+    NoLiquidity,
     AlreadyClosed,
     NotAuthorized,
     OperationFailed,
