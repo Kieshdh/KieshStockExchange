@@ -1,106 +1,187 @@
 ﻿using KieshStockExchange.Models;
+using System.Diagnostics;
 
 namespace KieshStockExchange.Helpers;
 
-public class OrderBook
+public sealed class OrderBook
 {
-    #region Properties
-    private int StockId { get; }
+    #region Properties and Constructor
+    public readonly int StockId;
+
+    // Lock to prevent multiple users from unsynchronized decisions
+    private readonly object _gate = new();
 
     // Buy side: highest price first (so we invert the default comparer)
-    private readonly SortedDictionary<decimal, Queue<Order>> _buyBook
-        = new SortedDictionary<decimal, Queue<Order>>(
-            Comparer<decimal>.Create((a, b) => b.CompareTo(a))
-        );
+    private readonly SortedDictionary<decimal, LinkedList<Order>> _buyBook
+        = new (Comparer<decimal>.Create((a, b) => b.CompareTo(a)));
 
     // Sell side: lowest price first (default ascending order)
-    private readonly SortedDictionary<decimal, Queue<Order>> _sellBook
-        = new SortedDictionary<decimal, Queue<Order>>();
-    #endregion
+    private readonly SortedDictionary<decimal, LinkedList<Order>> _sellBook = new();
+
+    // Fast index by OrderId so we can find & move/remove quickly
+    private sealed class IndexEntry
+    {
+        public bool IsBuy;
+        public decimal Price;
+        public LinkedListNode<Order> Node = null!;
+    }
+    private readonly Dictionary<int, IndexEntry> _index = new();
 
     public OrderBook(int stockId)
         => StockId = stockId;
+    #endregion
 
     #region Order management
     /// <summary>
-    /// Adds a new limit order into the appropriate side of the book.
-    /// Throws if it isn’t a limit order.
+    /// Insert if new and if it already exists, then it will update its price/side (and position).
+    /// If the order is not an Open Limit order, it is removed from the book.
     /// </summary>
-    public void AddLimitOrder(Order order)
+    public void UpsertOrder(Order incoming)
     {
-        if (order == null)
-            throw new ArgumentNullException(nameof(order), "Order cannot be null.");
-        if (order.StockId != StockId)
-            throw new ArgumentException($"Order must match the book's stock ID {StockId}.", nameof(order));
-        if (!order.IsLimitOrder())
-            throw new ArgumentException("Only limit orders can be added to the book.", nameof(order));
+        if (incoming == null)
+            throw new ArgumentNullException(nameof(incoming), "Order cannot be null.");
+        if (incoming.StockId != StockId)
+            throw new ArgumentException($"Order must match the book's stock ID {StockId}.", nameof(incoming));
 
-        // Choose buy or sell book
-        var book = order.IsBuyOrder() ? _buyBook : _sellBook;
-
-        // If this price level doesn’t exist yet, create its FIFO queue
-        if (!book.TryGetValue(order.Price, out var queue))
+        lock (_gate)
         {
-            queue = new Queue<Order>();
-            book[order.Price] = queue;
+            // If this OrderId already lives in the book, we have an entry to update or remove.
+            if (_index.TryGetValue(incoming.OrderId, out var idx))
+            {
+                // If it’s no longer an Open Limit order, drop it from the book.
+                if (!incoming.IsOpen && incoming.IsLimitOrder)
+                {
+                    RemoveIndexEntry(idx);
+                    _index.Remove(incoming.OrderId);
+                    return;
+                }
+
+                // Set the object reference
+                idx.Node.Value = incoming;
+
+                // Check if the side or the price has changed
+                if (idx.IsBuy != incoming.IsBuyOrder || idx.Price != incoming.Price)
+                {
+                    // Remove from the old index entry
+                    RemoveIndexEntry(idx);
+
+                    // Reinsert at the tail of the new (side, price) level
+                    var book = incoming.IsBuyOrder ? _buyBook : _sellBook;
+                    var list = GetOrCreateLevel(book, incoming.Price);
+                    list.AddLast(idx.Node);
+
+                    // 3) Update index metadata
+                    idx.IsBuy = incoming.IsBuyOrder;
+                    idx.Price = incoming.Price;
+                }
+
+                return;
+            }
+
+            // If it gets here the order in not in the book.
+            // But only add Open Limit orders to the book.
+            if (!incoming.IsOpen && incoming.IsLimitOrder) 
+                return;
+
+            var newNode = new LinkedListNode<Order>(incoming);
+            var targetBook = incoming.IsBuyOrder ? _buyBook : _sellBook;
+            var level = GetOrCreateLevel(targetBook, incoming.Price);
+            level.AddLast(newNode);
+
+            _index[incoming.OrderId] = new IndexEntry
+            {
+                IsBuy = incoming.IsBuyOrder,
+                Price = incoming.Price,
+                Node = newNode
+            };
         }
-        // Check for existing order with same ID
-        if (queue.Any(o => o.OrderId == order.OrderId))
-            return; // Ignore duplicates
-
-        // Enqueue—this preserves time priority within the same price
-        queue.Enqueue(order);
     }
 
     /// <summary>
-    /// Peeks or removes the best order on the buy side.
+    /// Cheap, immutable snapshot of price levels for UI binding.
+    /// Quantity is the sum of remaining quantities at each level.
     /// </summary>
-    public Order? PeekBestBuy()
+    public BookSnapshot Snapshot()
     {
-        if (_buyBook.Count == 0) return null;
-        var bestPrice = _buyBook.First().Key;
-        return _buyBook[bestPrice].Peek();
+        lock (_gate)
+        {
+            return new BookSnapshot
+            {
+                StockId = StockId,
+                Buys = _buyBook.Select(
+                    kv => new PriceLevel( kv.Key, kv.Value.Sum(o => o.RemainingQuantity) )
+                ).ToList(),
+                Sells = _sellBook.Select(
+                    kv => new PriceLevel( kv.Key, kv.Value.Sum(o => o.RemainingQuantity) )
+                ).ToList()
+            };
+        }
     }
 
-    public Order? RemoveBestBuy()
+    public bool RemoveById(int orderId)
     {
-        if (_buyBook.Count == 0) return null;
-        var kv = _buyBook.First();
-        var order = kv.Value.Dequeue();
-        if (kv.Value.Count == 0)
-            _buyBook.Remove(kv.Key);
-        return order;
+        lock (_gate)
+        {
+            if (!_index.TryGetValue(orderId, out var idx)) return false;
+            RemoveIndexEntry(idx);
+            _index.Remove(orderId);
+            return true;
+        }
     }
 
-    /// <summary>
-    /// Peeks or removes the best order on the sell side.
-    /// </summary>
-    public Order? PeekBestSell()
-    {
-        if (_sellBook.Count == 0) return null;
-        var bestPrice = _sellBook.First().Key;
-        return _sellBook[bestPrice].Peek();
-    }
+    public Order? RemoveBestBuy() => RemoveBest(_buyBook);
+    public Order? RemoveBestSell() => RemoveBest(_sellBook);
 
-    public Order? RemoveBestSell()
-    {
-        if (_sellBook.Count == 0) return null;
-        var kv = _sellBook.First();
-        var order = kv.Value.Dequeue();
-        if (kv.Value.Count == 0)
-            _sellBook.Remove(kv.Key);
-        return order;
-    }
     #endregion
 
-    #region Getters for book state
-    /// <summary>
-    /// Enumerates all live orders on each side in execution priority.
-    /// </summary>
-    public IEnumerable<Order> AllBuyOrders() => 
-        _buyBook.SelectMany(k => k.Value);
-    public IEnumerable<Order> AllSellOrders() => 
-        _sellBook.SelectMany(k => k.Value);
+    #region Helpers
+    private Order? RemoveBest(SortedDictionary<decimal, LinkedList<Order>> side)
+    {
+        lock (_gate)
+        {
+            if (side.Count == 0) 
+                return null;
+            var kv = side.First();
+            var node = kv.Value.First;
+            var order = node!.Value;
+
+            if (kv.Value.Count == 0)
+                side.Remove(kv.Key);
+
+            _index.Remove(order.OrderId);
+            return order;
+        }
+    }
+
+    private static LinkedList<Order> GetOrCreateLevel(SortedDictionary<decimal, LinkedList<Order>> book, decimal price)
+    {
+        if (!book.TryGetValue(price, out var list))
+        {
+            list = new LinkedList<Order>();
+            book[price] = list;
+        }
+        return list;
+    }
+
+    private void RemoveIndexEntry(IndexEntry idx)
+    {
+        var book = idx.IsBuy ? _buyBook : _sellBook;
+        if (book.TryGetValue(idx.Price, out var list))
+        {
+            list.Remove(idx.Node);
+            if (list.Count == 0) book.Remove(idx.Price);
+        }
+    }
+
+
     #endregion
+}
+
+public sealed record PriceLevel(decimal Price, int Quantity);
+public sealed record BookSnapshot
+{
+    public int StockId { get; init; }
+    public List<PriceLevel> Buys { get; init; } = new();
+    public List<PriceLevel> Sells { get; init; } = new();
 }
 

@@ -10,7 +10,7 @@ public interface IDataBaseService
     // Generic operations
     Task ResetTableAsync<T>(CancellationToken cancellationToken = default) where T : new();
     Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
-    Task DeleteAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
+    //Task DeleteAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
     Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
     Task RunInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken = default);
 

@@ -69,9 +69,9 @@ public class Order : IValidatable
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
     private bool IsValidAmount() =>
-        (IsFilled() && AmountFilled == Quantity) || 
-        (IsOpen() && RemainingQuantity() > 0) || 
-        (IsCancelled() && AmountFilled != Quantity);
+        (IsFilled && AmountFilled == Quantity) || 
+        (IsOpen && RemainingQuantity > 0) || 
+        (IsCancelled && AmountFilled != Quantity);
 
     #endregion
 
@@ -86,22 +86,22 @@ public class Order : IValidatable
     #endregion
 
     #region Helper Methods
-    public bool IsBuyOrder() =>
+    public bool IsBuyOrder =>
         OrderType == Types.MarketBuy || OrderType == Types.LimitBuy;
-    public bool IsSellOrder() =>
+    public bool IsSellOrder =>
         OrderType == Types.MarketSell || OrderType == Types.LimitSell;
-    public bool IsLimitOrder() =>
+    public bool IsLimitOrder =>
         OrderType == Types.LimitBuy || OrderType == Types.LimitSell;
-    public bool IsMarketOrder() =>
+    public bool IsMarketOrder =>
         OrderType == Types.MarketBuy || OrderType == Types.MarketSell;
-    public bool IsOpen() => Status == Statuses.Open;
-    public bool IsFilled() => Status == Statuses.Filled;
-    public bool IsCancelled() => Status == Statuses.Cancelled;
-    public int RemainingQuantity() => Quantity - AmountFilled;
-    public decimal RemainingAmount() => RemainingQuantity() * Price;
+    public bool IsOpen => Status == Statuses.Open;
+    public bool IsFilled => Status == Statuses.Filled;
+    public bool IsCancelled => Status == Statuses.Cancelled;
+    public int RemainingQuantity => Quantity - AmountFilled;
+    public decimal RemainingAmount => RemainingQuantity * Price;
     public void Fill(int quantity)
     {
-        if (quantity <= 0 || quantity > RemainingQuantity())
+        if (quantity <= 0 || quantity > RemainingQuantity)
             throw new ArgumentException("Invalid fill quantity.");
         AmountFilled += quantity;
         if (AmountFilled == Quantity)
@@ -110,14 +110,14 @@ public class Order : IValidatable
     }
     public void Cancel()
     {
-        if (!IsOpen())
+        if (!IsOpen)
             throw new InvalidOperationException("Order is already cancelled.");
         Status = Statuses.Cancelled;
         UpdatedAt = DateTime.UtcNow;
     }
     public void UpdatePrice(decimal newPrice)
     {
-        if (!IsOpen())
+        if (!IsOpen)
             throw new InvalidOperationException("Cannot update price of a non-open order.");
         if (newPrice <= 0)
             throw new ArgumentException("Price must be greater than zero.");
@@ -126,7 +126,7 @@ public class Order : IValidatable
     }
     public void UpdateQuantity(int newQuantity)
     {
-        if (!IsOpen())
+        if (!IsOpen)
             throw new InvalidOperationException("Cannot update quantity of a non-open order.");
         if (newQuantity < AmountFilled)
             throw new ArgumentException("New quantity cannot be less than amount filled.");
