@@ -66,6 +66,17 @@ public class Position : IValidatable
         UpdatedAt = DateTime.UtcNow;
     }
 
+    public void ReleaseFromReservedstock(int quantity)
+    {
+        if (quantity < 0)
+            throw new ArgumentException("Quantity must be positive.");
+        if (quantity > ReservedQuantity)
+            throw new ArgumentException("Invalid reserved quantity");
+        ReservedQuantity -= quantity;
+        Quantity -= quantity;
+        UpdatedAt = DateTime.UtcNow;
+    }
+
     public void ReserveStock(int quantity)
     {
         if (quantity <= 0 || quantity > RemainingQuantity)

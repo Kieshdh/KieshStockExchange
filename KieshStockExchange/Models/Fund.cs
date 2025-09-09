@@ -77,6 +77,16 @@ public class Fund : IValidatable
         TotalBalance -= amount;
         UpdatedAt = DateTime.UtcNow;
     }
+    public void ReleaseFromReservedFunds(decimal amount)
+    {
+        if (amount < 0) 
+            throw new ArgumentException("Amount must be positive.");
+        if (amount > ReservedBalance)
+            throw new ArgumentException("Invalid reserved amount");
+        ReservedBalance -= amount;
+        TotalBalance -= amount;
+        UpdatedAt = DateTime.UtcNow;
+    }
     public void ReserveFunds(decimal amount)
     {
         if (amount <= 0 || amount > AvailableBalance)
