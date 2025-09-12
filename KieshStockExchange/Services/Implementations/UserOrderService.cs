@@ -1,20 +1,16 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
-using Microsoft.Maui.Controls;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace KieshStockExchange.Services.Implementations;
 
 public class UserOrderService : IUserOrderService
 {
     #region Private Fields
-    private readonly IDataBaseService _dbService;
-    private readonly IAuthService _authService;
+    private readonly IDataBaseService _db;
+    private readonly IAuthService _auth;
     private readonly IUserPortfolioService _portfolio;
+    private readonly IMarketOrderService _market;
     private readonly ILogger<UserOrderService> _logger;
     #endregion
 
@@ -33,24 +29,26 @@ public class UserOrderService : IUserOrderService
         IDataBaseService dbService,
         IAuthService authService,
         IUserPortfolioService portfolioService,
+        IMarketOrderService marketService,
         ILogger<UserOrderService> logger)
     {
-        _dbService = dbService ?? throw new ArgumentNullException(nameof(dbService));
-        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        _db = dbService ?? throw new ArgumentNullException(nameof(dbService));
+        _auth = authService ?? throw new ArgumentNullException(nameof(authService));
         _portfolio = portfolioService ?? throw new ArgumentNullException(nameof(portfolioService));
+        _market = marketService ?? throw new ArgumentNullException(nameof(marketService)); 
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
 
     #region Auth Helpers
-    private User CurrentUser => _authService.CurrentUser;
+    private User CurrentUser => _auth.CurrentUser;
     private int CurrentUserId => CurrentUser?.UserId ?? 0;
-    private bool IsAuthenticated => CurrentUserId > 0 && _authService.IsLoggedIn;
+    private bool IsAuthenticated => CurrentUserId > 0 && _auth.IsLoggedIn;
 
     private bool CanModifyOrder(Order order, int targetUserId)
     {
         // Admin can modify any; otherwise order must belong to the target user (which for non-admin == current)
-        if (_authService.CurrentUser?.IsAdmin == true) return true;
+        if (_auth.CurrentUser?.IsAdmin == true) return true;
         return order.UserId == targetUserId && targetUserId == CurrentUserId;
     }
 
@@ -63,13 +61,12 @@ public class UserOrderService : IUserOrderService
             return CurrentUserId;
 
         // Impersonation requested: require admin
-        if (_authService.CurrentUser?.IsAdmin == true)
+        if (_auth.CurrentUser?.IsAdmin == true)
             return asUserId.Value;
 
         authError = AuthError("Only admins may act on behalf of other users.");
         return 0;
     }
-
     #endregion
 
     #region Public Methods
@@ -85,7 +82,7 @@ public class UserOrderService : IUserOrderService
 
         try
         {
-            UserAllOrders = (await _dbService.GetOrdersByUserId(targetUserId)).ToList();
+            UserAllOrders = (await _db.GetOrdersByUserId(targetUserId)).ToList();
             return true;
         }
         catch (Exception ex)
@@ -131,7 +128,7 @@ public class UserOrderService : IUserOrderService
                 order.Cancel();
                 if (!order.IsValid()) { result = OperationFailedResult(); return; }
 
-                await _dbService.UpdateOrder(order, tx);
+                await _db.UpdateOrder(order, tx);
 
                 result = new OrderResult
                 {
@@ -233,7 +230,7 @@ public class UserOrderService : IUserOrderService
                 if (!order.IsValid()) { result = ParamError("Invalid order parameters after update."); return; }
 
                 // Persist changes
-                await _dbService.UpdateOrder(order);
+                await _db.UpdateOrder(order);
 
                 _logger.LogInformation($"Order {orderId} for user #{targetUserId}");
 
@@ -269,7 +266,7 @@ public class UserOrderService : IUserOrderService
         PlaceOrderAsync(stockId, qty, true, false, maxPrice, asUserId, ct);
 
     public Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int qty, decimal minPrice,
-            int? asUserId = null, CancellationToken ct = default) =>
+             int? asUserId = null, CancellationToken ct = default) =>
         PlaceOrderAsync(stockId, qty, false, false, minPrice, asUserId, ct);
 
     private async Task<OrderResult> PlaceOrderAsync(int stockId, int quantity, 
@@ -290,71 +287,34 @@ public class UserOrderService : IUserOrderService
         {
             await WithTransactionAsync(async tx =>
             {
-                var stock = await _dbService.GetStockById(stockId, tx);
+                var stock = await _db.GetStockById(stockId, tx);
                 if (stock == null) { result = ParamError("Stock not found."); return; }
 
-                // Determine price
-                var latestPrice = await _dbService.GetLatestStockPriceByStockId(stockId);
-                if (latestPrice == null) { result = NoMarketPriceResult(); return; }
-
-                //  Load portfolio snapshot for *target user*
-                await _portfolio.RefreshAsync(targetUserId, tx);
                 var baseCurrency = _portfolio.GetBaseCurrency();
-                var fund = _portfolio.GetBaseFund() ?? 
-                    new Fund { UserId = targetUserId, CurrencyType = baseCurrency };
-                var holding = _portfolio.GetPositionByStockId(stockId) ??
-                    new Position { UserId = targetUserId, StockId = stockId};
 
-                if (buyOrder) // Check funds
-                {
-                    var required = price * quantity;
-                    if (fund.AvailableBalance < required)
-                    {
-                        _logger.LogWarning("User {UserId} has insufficient funds: avail {Available} " +
-                            "needed {Required}", targetUserId, fund.AvailableBalance, price * quantity);
-                        result = ParamError("Insufficient funds.");
-                        return;
-                    }
-                }
-                else // Check shares
-                {
-                    if (holding.RemainingQuantity < quantity)
-                    {
-                        _logger.LogWarning("User {UserId} has insufficient shares of stock #{StockId}", 
-                            targetUserId, stockId);
-                        result = ParamError("Insufficient shares.");
-                        return;
-                    }
-                }
+                //  Load portfolio snapshot for the target user
+                await _portfolio.RefreshAsync(targetUserId, tx);
+                var fund = GetFund(targetUserId);
+                var holding = GetHolding(targetUserId, stockId);
+
+                var OkAssets = CheckHolding(fund, holding, buyOrder, price, quantity);
+                if (OkAssets != null) { result = OkAssets; return; }
 
                 // Create the order
                 var order = CreateOrder(targetUserId, stockId, quantity, price, baseCurrency, buyOrder, limitOrder);
                 if (!order.IsValid()) { result = ParamError("Invalid order parameters."); return; }
 
                 // Reserve capital / shares
-                if (buyOrder)
-                {
-                    var ok = await _portfolio.ReserveFundsAsync(price * quantity, baseCurrency, targetUserId, tx);
-                    if (!ok) { result = ParamError("Failed to reserve funds."); return; }
-                }
-                else
-                {
-                    // Reserve the shares the user intends to sell (keeps total, moves to reserved)
-                    var ok = await _portfolio.ReservePositionAsync(stockId, quantity, targetUserId, tx);
-                    if (!ok) { result = ParamError("Failed to reserve shares."); return; }
-                }
+                var okReserve = await ReserveAssets(order, tx);
+                if (okReserve != null) { result = okReserve; return; }
+
                 // Persist the order
-                await _dbService.CreateOrder(order, tx);
+                await _db.CreateOrder(order, tx);
                 UserAllOrders.Add(order);
 
                 _logger.LogInformation($"Order placed: {order.OrderId} for user #{targetUserId}");
 
-                result = new OrderResult
-                {
-                    Status = OrderStatus.Success,
-                    Message = "Order executed successfully.",
-                    PlacedOrder = order
-                };
+                result = OrderSuccessResult(order, "Order has been successfully placed.");
             }, ct);
 
             return result;
@@ -370,7 +330,7 @@ public class UserOrderService : IUserOrderService
     #region Private Helpers
     /// <summary> Wrapper so we can get the orderresult while running inside a database transaction </summary>
     private Task WithTransactionAsync(Func<CancellationToken, Task> action, CancellationToken ct)
-        => _dbService.RunInTransactionAsync(action, ct);
+        => _db.RunInTransactionAsync(action, ct);
 
     private async Task<Order?> UpdateAndFindOrderAsync(int orderId, int targetUserId, CancellationToken ct)
     {
@@ -397,7 +357,36 @@ public class UserOrderService : IUserOrderService
         return null;
     }
 
-    private Order CreateOrder( int userId, int stockId, int quantity, 
+    private Fund GetFund(int targetUserId) =>
+        _portfolio.GetBaseFund() ?? new Fund { UserId = targetUserId, CurrencyType = _portfolio.GetBaseCurrency() };
+    private Position GetHolding(int targetUserId, int stockId) =>
+        _portfolio.GetPositionByStockId(stockId) ?? new Position { UserId = targetUserId, StockId = stockId };
+
+    private OrderResult? CheckHolding(Fund fund, Position holding, bool buyOrder, decimal price, int quantity)
+    {
+        if (buyOrder) // Check funds
+        {
+            var required = price * quantity;
+            if (fund.AvailableBalance < required)
+            {
+                _logger.LogWarning("User {UserId} has insufficient funds: avail {Available} " +
+                    "needed {Required}", fund.UserId, fund.AvailableBalance, price * quantity);
+                return ParamError("Insufficient funds.");
+            }
+        }
+        else // Check shares
+        {
+            if (holding.RemainingQuantity < quantity)
+            {
+                _logger.LogWarning("User {UserId} has insufficient shares of stock #{StockId}",
+                    fund.UserId, holding.StockId);
+                return ParamError("Insufficient shares.");
+            }
+        }
+        return null;
+    }
+    
+    private Order CreateOrder(int userId, int stockId, int quantity,
         decimal price, CurrencyType currency, bool buyOrder, bool limitOrder)
     {
         return new Order {
@@ -410,6 +399,22 @@ public class UserOrderService : IUserOrderService
                 (limitOrder ? Order.Types.LimitBuy : Order.Types.MarketBuy)
               : (limitOrder ? Order.Types.LimitSell : Order.Types.MarketSell),
         };
+    }
+
+    private async Task<OrderResult?> ReserveAssets(Order order, CancellationToken ct)
+    {
+        // Reserve capital / shares
+        if (order.IsBuyOrder)
+        {
+            var ok = await _portfolio.ReserveFundsAsync(order.Price * order.Quantity, order.CurrencyType, order.UserId, ct);
+            if (!ok) return ParamError("Failed to reserve funds.");
+        }
+        else
+        {
+            var ok = await _portfolio.ReservePositionAsync(order.StockId, order.Quantity, order.UserId, ct);
+            if (!ok) return ParamError("Failed to reserve shares.");
+        }
+        return null;
     }
     #endregion
 
@@ -424,5 +429,7 @@ public class UserOrderService : IUserOrderService
         { Status = OrderStatus.OperationFailed, Message = "An unexpected error occurred." };
     private OrderResult NoMarketPriceResult() => new() 
         { Status = OrderStatus.NoMarketPrice, Message = "No market price available." };
+    private OrderResult OrderSuccessResult(Order order, string msg) => new()
+        { Status = OrderStatus.Success, Message = msg, PlacedOrder = order };
     #endregion
 }

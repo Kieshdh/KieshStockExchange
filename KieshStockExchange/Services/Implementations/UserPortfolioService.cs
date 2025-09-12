@@ -106,7 +106,7 @@ public class UserPortfolioService : IUserPortfolioService
     }
     #endregion
 
-    #region Public Mutations (Funds)
+    #region Fund Mutations
     public Task<bool> AddFundsAsync(decimal amount, CurrencyType currency,
         int? asUserId = null, CancellationToken ct = default)
         => MutateFundAsync(FundMutation.Add, amount, currency, asUserId, ct);
@@ -128,7 +128,7 @@ public class UserPortfolioService : IUserPortfolioService
         => MutateFundAsync(FundMutation.SpendReserved, amount, currency, asUserId, ct);
     #endregion
 
-    #region Public Mutations (Positions)
+    #region Position Mutations
     public Task<bool> AddPositionAsync(int stockId, int quantity,
         int? asUserId = null, CancellationToken ct = default)
         => MutatePositionAsync(PositionMutation.Add, stockId, quantity, asUserId, ct);

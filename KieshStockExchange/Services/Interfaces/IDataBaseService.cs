@@ -35,7 +35,7 @@ public interface IDataBaseService
     Task<List<StockPrice>> GetStockPricesAsync(CancellationToken cancellationToken = default);
     Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken cancellationToken = default);
     Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken cancellationToken = default);
-    Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CancellationToken cancellationToken = default);
+    Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
     Task CreateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default);
     Task UpdateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default);
     Task DeleteStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default);
