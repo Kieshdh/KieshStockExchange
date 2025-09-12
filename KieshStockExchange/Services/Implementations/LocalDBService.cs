@@ -240,12 +240,12 @@ public class LocalDBService: IDataBaseService
             cancellationToken);
     }
 
-    public async Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CancellationToken cancellationToken = default)
+    public async Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
         return await RunDbAsync(() =>
             _db.Table<StockPrice>()
-               .Where(sp => sp.StockId == stockId)
+               .Where(sp => sp.StockId == stockId && sp.Currency == currency.ToString())
                .OrderByDescending(sp => sp.Timestamp)
                .FirstOrDefaultAsync(),
             cancellationToken);
