@@ -20,6 +20,8 @@ public enum OrderStatus
     NotAuthorized,
     OperationFailed,
     PartialFill,
+    Filled,
+    PlacedOnBook
 }
 
 /// <summary>
@@ -61,7 +63,7 @@ public class OrderResult
     /// this is the remaining quantity still outstanding.
     /// </summary>
     public int RemainingQuantity
-        => PlacedOrder?.Quantity ?? 0;
+        => PlacedOrder?.RemainingQuantity ?? 0;
 
     /// <summary>
     /// If you create a new resting order (e.g. an unfilled limit),
