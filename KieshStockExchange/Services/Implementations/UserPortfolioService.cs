@@ -77,30 +77,25 @@ public class UserPortfolioService : IUserPortfolioService
 
     public async Task<bool> RefreshAsync(int? asUserId, CancellationToken ct = default)
     {
-        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authErr);
+        var activeUserId = GetTargetUserIdOrFail(asUserId, out var authErr);
         if (authErr != null) { _logger.LogWarning(authErr); return false; }
 
         try
         {
-            // Reads are wrapped too for a consistent view if you later add rowversion/concurrency.
-            await _db.RunInTransactionAsync(async tx =>
-            {
-                var funds = await _db.GetFundsByUserId(targetUserId, tx);
-                var positions = await _db.GetPositionsByUserId(targetUserId, tx);
+            var funds = await _db.GetFundsByUserId(activeUserId, ct);
+            var positions = await _db.GetPositionsByUserId(activeUserId, ct);
 
-                Snapshot = new PortfolioSnapshot(
-                    funds.ToImmutableList(),
-                    positions.ToImmutableList(),
-                    BaseCurrency);
+            Snapshot = new PortfolioSnapshot(
+                funds.ToImmutableList(),
+                positions.ToImmutableList(),
+                BaseCurrency);
 
-                SnapshotChanged?.Invoke(this, Snapshot);
-            }, ct);
-
+            SnapshotChanged?.Invoke(this, Snapshot);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to refresh portfolio for user {UserId}", targetUserId);
+            _logger.LogError(ex, "Error refreshing portfolio snapshot for user {UserId}: {Message}", activeUserId, ex.Message);
             return false;
         }
     }
@@ -148,97 +143,6 @@ public class UserPortfolioService : IUserPortfolioService
     public Task<bool> ReleaseFromReservedPositionAsync(int stockId, int quantity,
         int? asUserId = null, CancellationToken ct = default)
         => MutatePositionAsync(PositionMutation.SpendReserved, stockId, quantity, asUserId, ct);
-    #endregion
-
-    #region Normalization
-    public async Task NormalizeAsync(int? asUserId = null, CancellationToken ct = default)
-    {
-        var targetUserId = GetTargetUserIdOrFail(asUserId, out var err);
-        if (err != null) { _logger.LogWarning(err); return; }
-        if (!CanModifyPortfolio(targetUserId)) { _logger.LogWarning("Not allowed to normalize funds for user {UserId}", targetUserId); return; }
-
-        await NormalizeFundsAsync(targetUserId, ct);
-        await NormalizePositionsAsync(targetUserId, ct);
-    }
-
-    private async Task NormalizeFundsAsync(int userId, CancellationToken ct = default)
-    {
-        await _db.RunInTransactionAsync(async tx =>
-        {
-            var funds = await _db.GetFundsByUserId(userId, tx);
-            var groups = funds
-                .GroupBy(f => f.CurrencyType)
-                .Where(g => g.Count() > 1 || g.Any(f =>
-                    f.TotalBalance < 0 ||
-                    f.ReservedBalance < 0 ||
-                    f.ReservedBalance > f.TotalBalance))
-                .ToList();
-
-            foreach (var group in groups)
-            {
-                tx.ThrowIfCancellationRequested();
-
-                var ordered = group.OrderBy(f => f.FundId).ToList();
-                var primary = ordered.First();
-                var duplicates = ordered.Skip(1).ToList();
-
-                decimal total = ordered.Sum(f => f.TotalBalance);
-                decimal reserved = ordered.Sum(f => f.ReservedBalance);
-
-                if (total < 0) total = 0;
-                if (reserved < 0) reserved = 0;
-                if (reserved > total) reserved = total;
-
-                primary.TotalBalance = total;
-                primary.ReservedBalance = reserved;
-                primary.UpdatedAt = DateTime.UtcNow;
-
-                await _db.UpsertFund(primary, tx);
-
-                foreach (var dup in duplicates)
-                    await _db.DeleteFund(dup, tx);
-            }
-        }, ct);
-    }
-
-    private async Task NormalizePositionsAsync(int userId, CancellationToken ct = default)
-    {
-        await _db.RunInTransactionAsync(async tx =>
-        {
-            var positions = await _db.GetPositionsByUserId(userId, tx);
-            var groups = positions
-                .GroupBy(p => p.StockId)
-                .Where(g => g.Count() > 1 || g.Any(p =>
-                    p.Quantity < 0 ||
-                    p.ReservedQuantity < 0 ||
-                    p.ReservedQuantity > p.Quantity))
-                .ToList();
-
-            foreach (var group in groups)
-            {
-                tx.ThrowIfCancellationRequested();
-
-                var ordered = group.OrderBy(p => p.PositionId).ToList();
-                var primary = ordered.First();
-                var duplicates = ordered.Skip(1).ToList();
-
-                int total = ordered.Sum(p => p.Quantity);
-                int reserved = ordered.Sum(p => p.ReservedQuantity);
-
-                if (total < 0) total = 0;
-                if (reserved < 0) reserved = 0;
-                if (reserved > total) reserved = total;
-
-                primary.Quantity = total;
-                primary.ReservedQuantity = reserved;
-                primary.UpdatedAt = DateTime.UtcNow;
-
-                await _db.UpsertPosition(primary, tx);
-                foreach (var dup in duplicates)
-                    await _db.DeletePosition(dup, tx);
-            }
-        }, ct);
-    }
     #endregion
 
     #region Internal Mutations
@@ -309,10 +213,12 @@ public class UserPortfolioService : IUserPortfolioService
             }
 
             await _db.UpsertFund(fund, tx);
-            await RefreshAsync(targetUserId, tx);
             success = true;
 
         }, ct);
+
+        if (success)
+            await RefreshAsync(targetUserId, ct);
 
         return success;
     }
@@ -329,7 +235,7 @@ public class UserPortfolioService : IUserPortfolioService
 
         await _db.RunInTransactionAsync(async tx =>
         {
-            if (!await _db.StockExist(stockId))
+            if (!await _db.StockExist(stockId, tx))
             {
                 _logger.LogWarning("Stock #{StockId} does not exist.", stockId);
                 return;
@@ -381,18 +287,116 @@ public class UserPortfolioService : IUserPortfolioService
                             quantity, targetUserId, stockId, position.ReservedQuantity);
                         return;
                     }
-                    // Note: method name in your model appears to be 'ReleaseFromReservedstock' (lowercase 's')
-                    position.ReleaseFromReservedstock(quantity);
+                    position.ReleaseFromReservedStock(quantity);
                     break;
             }
 
             await _db.UpsertPosition(position, tx);
-            await RefreshAsync(targetUserId, tx);
             success = true;
 
         }, ct);
 
+        if (success)
+            await RefreshAsync(targetUserId, ct);
+
         return success;
+    }
+    #endregion
+    
+    #region Normalization
+    public async Task NormalizeAsync(int? asUserId = null, CancellationToken ct = default)
+    {
+        var targetUserId = GetTargetUserIdOrFail(asUserId, out var err);
+        if (err != null) { _logger.LogWarning(err); return; }
+        if (!CanModifyPortfolio(targetUserId)) { _logger.LogWarning("Not allowed to normalize funds for user {UserId}", targetUserId); return; }
+
+        await NormalizeFundsAsync(targetUserId, ct);
+        await NormalizePositionsAsync(targetUserId, ct);
+    }
+
+    private async Task NormalizeFundsAsync(int userId, CancellationToken ct = default)
+    {
+        await _db.RunInTransactionAsync(async tx =>
+        {
+            var funds = await _db.GetFundsByUserId(userId, tx);
+            var groups = funds
+                .GroupBy(f => f.CurrencyType)
+                .Where(g => g.Count() > 1 || g.Any(f =>
+                    f.TotalBalance < 0 ||
+                    f.ReservedBalance < 0 ||
+                    f.ReservedBalance > f.TotalBalance))
+                .ToList();
+
+            foreach (var group in groups)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                _logger.LogWarning("Normalizing {Count} fund entries for user {UserId} in currency {Currency}",
+                    group.Count(), userId, group.Key);
+
+                var ordered = group.OrderBy(f => f.FundId).ToList();
+                var primary = ordered.First();
+                var duplicates = ordered.Skip(1).ToList();
+
+                decimal total = ordered.Sum(f => f.TotalBalance);
+                decimal reserved = ordered.Sum(f => f.ReservedBalance);
+
+                if (total < 0) total = 0;
+                if (reserved < 0) reserved = 0;
+                if (reserved > total) reserved = total;
+
+                primary.TotalBalance = total;
+                primary.ReservedBalance = reserved;
+                primary.UpdatedAt = DateTime.UtcNow;
+
+                await _db.UpsertFund(primary, tx);
+
+                foreach (var dup in duplicates)
+                    await _db.DeleteFund(dup, tx);
+            }
+        }, ct);
+    }
+
+    private async Task NormalizePositionsAsync(int userId, CancellationToken ct = default)
+    {
+        await _db.RunInTransactionAsync(async tx =>
+        {
+            var positions = await _db.GetPositionsByUserId(userId, tx);
+            var groups = positions
+                .GroupBy(p => p.StockId)
+                .Where(g => g.Count() > 1 || g.Any(p =>
+                    p.Quantity < 0 ||
+                    p.ReservedQuantity < 0 ||
+                    p.ReservedQuantity > p.Quantity))
+                .ToList();
+
+            foreach (var group in groups)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                _logger.LogWarning("Normalizing {Count} position entries for user {UserId} on stock #{StockId}",
+                    group.Count(), userId, group.Key);
+
+                var ordered = group.OrderBy(p => p.PositionId).ToList();
+                var primary = ordered.First();
+                var duplicates = ordered.Skip(1).ToList();
+
+                int total = ordered.Sum(p => p.Quantity);
+                int reserved = ordered.Sum(p => p.ReservedQuantity);
+
+                if (total < 0) total = 0;
+                if (reserved < 0) reserved = 0;
+                if (reserved > total) reserved = total;
+
+                primary.Quantity = total;
+                primary.ReservedQuantity = reserved;
+                primary.UpdatedAt = DateTime.UtcNow;
+
+                await _db.UpsertPosition(primary, tx);
+                foreach (var dup in duplicates)
+                    await _db.DeletePosition(dup, tx);
+            }
+        }, ct);
     }
     #endregion
 }
