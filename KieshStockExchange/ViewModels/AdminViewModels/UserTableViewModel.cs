@@ -84,7 +84,7 @@ public partial class UserTableViewModel
         var stocks = await _dbService.GetStocksAsync();
         foreach (var stock in stocks)
         {
-            var price = await _dbService.GetLatestStockPriceByStockId(stock.StockId);
+            var price = await _dbService.GetLatestStockPriceByStockId(stock.StockId, baseCurrency);
             if (price != null)
                 LatestPrices[stock.StockId] = CurrencyHelper.Convert(price.Price, price.CurrencyType, baseCurrency);
         }
@@ -166,20 +166,12 @@ public partial class UserTableObject : ObservableObject
         FullName = User.FullName;
         BirthDate = User.BirthDateDisplay;
 
-        // Get the total funds of the funds (Can be different currencies)
-        var totalFunds = 0m;
-        foreach (var fund in Funds)
-            totalFunds += CurrencyHelper.Convert(fund.TotalBalance, fund.CurrencyType, BaseCurrency);
+        // Get the total value of the funds (Can be different currencies)
+        var totalFunds = TotalFundsValue();
         TotalFunds = CurrencyHelper.Format(totalFunds, BaseCurrency);
 
         // Get the total balance from the Funds and Positions
-        var totalBalance = totalFunds;
-        foreach (var position in Positions)
-        {
-            if (LatestPrices.TryGetValue(position.StockId, out var price))
-                totalBalance += position.Quantity * price;
-        }
-        TotalBalance = CurrencyHelper.Format(totalBalance, BaseCurrency);
+        TotalBalance = CurrencyHelper.Format(totalFunds + TotalPositionsValue(), BaseCurrency);
     }
 
     public void RefreshData(CurrencyType baseCurrency)
@@ -225,6 +217,25 @@ public partial class UserTableObject : ObservableObject
             await Shell.Current.DisplayAlert("Error", "Failed to update user data.", "OK");
         }
 
+    }
+
+    private decimal TotalFundsValue()
+    {
+        var totalFunds = 0m;
+        foreach (var fund in Funds)
+            totalFunds += CurrencyHelper.Convert(fund.TotalBalance, fund.CurrencyType, BaseCurrency);
+        return totalFunds;
+    }   
+
+    private decimal TotalPositionsValue()
+    {
+        var totalValue = 0m;
+        foreach (var pos in Positions)
+        {
+            if (LatestPrices.TryGetValue(pos.StockId, out var price))
+                totalValue += pos.Quantity * price;
+        }
+        return totalValue;
     }
     #endregion
 }
