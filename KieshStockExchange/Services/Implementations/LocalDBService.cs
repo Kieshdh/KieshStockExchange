@@ -243,9 +243,10 @@ public class LocalDBService: IDataBaseService
     public async Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
         return await RunDbAsync(() =>
             _db.Table<StockPrice>()
-               .Where(sp => sp.StockId == stockId && sp.Currency == currency.ToString())
+               .Where(sp => sp.StockId == stockId && sp.Currency == currencyCode)
                .OrderByDescending(sp => sp.Timestamp)
                .FirstOrDefaultAsync(),
             cancellationToken);
@@ -467,9 +468,10 @@ public class LocalDBService: IDataBaseService
     public async Task<Fund?> GetFundByUserIdAndCurrency(int userId, CurrencyType currency, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
         return await RunDbAsync(() =>
             _db.Table<Fund>()
-               .Where(f => f.UserId == userId && f.Currency == currency.ToString())
+               .Where(f => f.UserId == userId && f.Currency == currencyCode)
                .FirstOrDefaultAsync(),
             cancellationToken);
     }
@@ -531,11 +533,11 @@ public class LocalDBService: IDataBaseService
     }
 
     private static Task<T> RunDbAsync<T>(Func<Task<T>> action, CancellationToken ct) =>
-    Task.Run(async () =>
-    {
-        ct.ThrowIfCancellationRequested();
-        return await action();
-    }, ct);
+        Task.Run(async () =>
+        {
+            ct.ThrowIfCancellationRequested();
+            return await action();
+        }, ct);
 
     private static Task RunDbAsync(Func<Task> action, CancellationToken ct) =>
         Task.Run(async () =>

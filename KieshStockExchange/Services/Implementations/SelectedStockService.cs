@@ -12,8 +12,8 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     private readonly ILogger<SelectedStockService> _logger;
     private CancellationTokenSource? _pollCts;
 
-    [ObservableProperty] private Stock? _selectedStock;
-    [ObservableProperty] private int? _stockId;
+    [ObservableProperty] private Stock? _selectedStock = null;
+    [ObservableProperty] private int? _stockId = null;
     [ObservableProperty] private string _symbol = string.Empty;
     [ObservableProperty] private string _companyName = string.Empty;
     [ObservableProperty] private decimal _currentPrice = 0m;
@@ -22,7 +22,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     [ObservableProperty] private DateTimeOffset? _priceUpdatedAt;
 
-    public bool HasSelectedStock => SelectedStock != null && 
+    public bool HasSelectedStock => SelectedStock != null &&
         StockId.HasValue && SelectedStock.StockId == StockId;
     #endregion
 
@@ -45,7 +45,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     {
         StockId = stockId;
         SelectedStock = await _marketService.GetStockByIdAsync(stockId)
-                           ?? throw new InvalidOperationException($"Stock {stockId} not found.");
+            ?? throw new InvalidOperationException($"Stock {stockId} not found.");
         await Set(SelectedStock);
     }
 
@@ -53,13 +53,14 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     public async Task Set(Stock stock)
     {
         if (stock is null) throw new ArgumentNullException(nameof(stock));
+        if (stock.StockId <= 0) throw new ArgumentNullException(nameof(stock));
         SelectedStock = stock;
         StockId = stock.StockId;
         CompanyName = stock.CompanyName;
         Symbol = stock.Symbol;
         if (!_firstSelectionTcs.Task.IsCompleted)
             _firstSelectionTcs.SetResult(stock);
-        _logger.LogInformation($"SelectedStockService Starting Price Updates for {stock.Symbol} #{stock.StockId}");
+        _logger.LogInformation("SelectedStockService Starting Price Updates for {Symbol} #{StockId}", stock.Symbol, stock.StockId);
         await UpdatePrice();
     }
 
@@ -81,7 +82,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     {
         if (!HasSelectedStock)
             throw new InvalidOperationException("No stock selected.");
-        var price = await _marketService.GetMarketPriceAsync(StockId!.Value); // one service call here
+        var price = await _marketService.GetMarketPriceAsync(StockId!.Value, Currency); // one service call here
         MainThread.BeginInvokeOnMainThread(() =>
         {
             decimal factor = 0.99m + (decimal)Random.Shared.NextDouble() * 0.02m;

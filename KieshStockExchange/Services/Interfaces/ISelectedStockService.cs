@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
 using KieshStockExchange.Models;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Services
 {
@@ -28,6 +29,9 @@ namespace KieshStockExchange.Services
 
         /// <summary>The selected stock's company name.</summary>
         string CompanyName { get; }
+
+        /// <summary>The selected stock's currency (if available).</summary>
+        CurrencyType Currency { get; }
 
         // ---- Live price ------------------------------------------------------
 
