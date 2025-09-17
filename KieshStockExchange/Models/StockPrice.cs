@@ -8,27 +8,21 @@ public class StockPrice : IValidatable
 {
     #region Properties
     [PrimaryKey, AutoIncrement]
-    [Column("PriceId")] public int PriceId { get; set; }
+    [Column("PriceId")] public int PriceId { get; set; } = 0;
 
-    [Column("StockId")] public int StockId { get; set; }
+    [Column("StockId")] public int StockId { get; set; } = 0;
 
-    [Column("Price")] public decimal Price { get; set; }
+    [Column("Price")] public decimal Price { get; set; } = 0m;
 
-    [Ignore] public CurrencyType CurrencyType { get; set; }
+    [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
     [Column("Currency")] public string Currency
     {
         get => CurrencyType.ToString();
         set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
-    [Column("Timestamp")] public DateTime Timestamp { get; set; }
+    [Column("Timestamp")] public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     #endregion
-
-    public StockPrice()
-    {
-        Timestamp = DateTime.UtcNow;
-        CurrencyType = CurrencyType.USD; // Default currency
-    }
 
     #region IValidatable Implementation
     public bool IsValid() => Price > 0 && StockId > 0 && IsValidCurrency();

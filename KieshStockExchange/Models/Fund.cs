@@ -8,37 +8,26 @@ public class Fund : IValidatable
 {
     #region Properties
     [PrimaryKey, AutoIncrement]
-    [Column("FundId")] public int FundId { get; set; }
+    [Column("FundId")] public int FundId { get; set; } = 0;
 
-    [Column("UserId")] public int UserId { get; set; }
+    [Column("UserId")] public int UserId { get; set; } = 0;
 
-    [Column("TotalBalance")] public decimal TotalBalance { get; set; }
-    
-    [Column("ReservedBalance")] public decimal ReservedBalance { get; set; }
+    [Column("TotalBalance")] public decimal TotalBalance { get; set; } = 0;
+
+    [Column("ReservedBalance")] public decimal ReservedBalance { get; set; } = 0;
 
     [Ignore] public decimal AvailableBalance => TotalBalance - ReservedBalance;
 
-    [Ignore] public CurrencyType CurrencyType { get; set; }
+    [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
     [Column("Currency")] public string Currency
     {
         get => CurrencyType.ToString();
         set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
+    [Column("CreatedAt")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; }
-    #endregion
-
-    #region Constructor
-    public Fund()
-    {
-        CreatedAt = DateTime.UtcNow;
-        UpdatedAt = DateTime.UtcNow;
-        TotalBalance = 0;
-        ReservedBalance = 0;
-        CurrencyType = CurrencyType.USD; // Default currency
-    }
+    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     #endregion
 
     #region IValidatable Implementation

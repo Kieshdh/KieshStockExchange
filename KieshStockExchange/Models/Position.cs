@@ -12,30 +12,22 @@ public class Position : IValidatable
 {
     #region Properties
     [PrimaryKey, AutoIncrement]
-    [Column("PositionId")] public int PositionId { get; set; }
+    [Column("PositionId")] public int PositionId { get; set; } = 0;
 
-    [Column("UserId")] public int UserId { get; set; }
+    [Column("UserId")] public int UserId { get; set; } = 0;
 
-    [Column("StockId")] public int StockId { get; set; }
+    [Column("StockId")] public int StockId { get; set; } = 0;
 
-    [Column("Quantity")] public int Quantity { get; set; }
+    [Column("Quantity")] public int Quantity { get; set; } = 0;
 
-    [Column("ReservedQuantity")] public int ReservedQuantity { get; set; }
+    [Column("ReservedQuantity")] public int ReservedQuantity { get; set; } = 0;
 
     [Ignore] public int RemainingQuantity => Quantity - ReservedQuantity;
 
-    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; }
+    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
+    [Column("CreatedAt")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     #endregion
-
-    public Position()
-    {
-        UpdatedAt = DateTime.UtcNow;
-        CreatedAt = DateTime.UtcNow;
-        Quantity = 0;
-        ReservedQuantity = 0;
-    }
 
     #region IValidatable Implementation
     public bool IsValid() => UserId > 0 && StockId > 0 && 
@@ -58,6 +50,7 @@ public class Position : IValidatable
         Quantity += quantity;
         UpdatedAt = DateTime.UtcNow;
     }
+    
     public void RemoveStock(int quantity)
     {
         if (quantity <= 0 || quantity > Quantity)
@@ -66,7 +59,7 @@ public class Position : IValidatable
         UpdatedAt = DateTime.UtcNow;
     }
 
-    public void ReleaseFromReservedstock(int quantity)
+    public void ReleaseFromReservedStock(int quantity)
     {
         if (quantity < 0)
             throw new ArgumentException("Quantity must be positive.");
@@ -84,6 +77,7 @@ public class Position : IValidatable
         ReservedQuantity += quantity;
         UpdatedAt = DateTime.UtcNow;
     }
+    
     public void UnreserveStock(int quantity)
     {
         if (quantity <= 0 || quantity > ReservedQuantity)

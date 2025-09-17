@@ -35,8 +35,6 @@ public class Order : IValidatable
 
     [Column("Price")] public decimal Price { get; set; } = 0;
 
-    [Ignore] public decimal TotalAmount => Price * Quantity;
-
     [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
     [Column("Currency")] public string Currency
     {
@@ -86,19 +84,20 @@ public class Order : IValidatable
     #endregion
 
     #region Helper Methods
-    public bool IsBuyOrder =>
+    [Ignore] public bool IsBuyOrder =>
         OrderType == Types.MarketBuy || OrderType == Types.LimitBuy;
-    public bool IsSellOrder =>
+    [Ignore] public bool IsSellOrder =>
         OrderType == Types.MarketSell || OrderType == Types.LimitSell;
-    public bool IsLimitOrder =>
+    [Ignore] public bool IsLimitOrder =>
         OrderType == Types.LimitBuy || OrderType == Types.LimitSell;
-    public bool IsMarketOrder =>
+    [Ignore] public bool IsMarketOrder =>
         OrderType == Types.MarketBuy || OrderType == Types.MarketSell;
-    public bool IsOpen => Status == Statuses.Open;
-    public bool IsFilled => Status == Statuses.Filled;
-    public bool IsCancelled => Status == Statuses.Cancelled;
-    public int RemainingQuantity => Quantity - AmountFilled;
-    public decimal RemainingAmount => RemainingQuantity * Price;
+    [Ignore] public bool IsOpen => Status == Statuses.Open;
+    [Ignore] public bool IsFilled => Status == Statuses.Filled;
+    [Ignore] public bool IsCancelled => Status == Statuses.Cancelled;
+    [Ignore] public decimal TotalAmount => Price * Quantity;
+    [Ignore] public int RemainingQuantity => Quantity - AmountFilled;
+    [Ignore] public decimal RemainingAmount => RemainingQuantity * Price;
     public void Fill(int quantity)
     {
         if (quantity <= 0 || quantity > RemainingQuantity)
