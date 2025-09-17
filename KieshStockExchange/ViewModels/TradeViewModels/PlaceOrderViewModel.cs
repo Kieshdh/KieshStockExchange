@@ -15,6 +15,7 @@ public partial class PlaceOrderViewModel : BaseViewModel
 {
     #region Services
     private readonly IMarketOrderService _market;
+    private readonly IUserPortfolioService _portfolio;
     private readonly IUserOrderService _orders;
     private readonly ISelectedStockService _selected;
     private readonly ILogger<TradeViewModel> _logger;
@@ -42,17 +43,23 @@ public partial class PlaceOrderViewModel : BaseViewModel
         IMarketOrderService market,
         IUserOrderService orders,
         ISelectedStockService selected,
+        IUserPortfolioService portfolio,
         ILogger<TradeViewModel> logger)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _selected = selected ?? throw new ArgumentNullException(nameof(selected));
+        _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
 
+    // Call this from your page (e.g., OnAppearing)
+    public async Task InitializeAsync()
+    {
         if (_selected.CurrentPrice is { } p)
         {
             CurrentMarketPrice = p;
-            CurrentMarketPriceDisplay = CurrencyHelper.Format(p, CurrencyType.USD);  
+            CurrentMarketPriceDisplay = CurrencyHelper.Format(p, CurrencyType.USD);
         }
 
         _selected.PropertyChanged += (_, e) =>
@@ -63,15 +70,11 @@ public partial class PlaceOrderViewModel : BaseViewModel
                 CurrentMarketPrice = px;
                 UpdateOrderValue();
             }
-                
+
         };
 
-    }
-
-    // Call this from your page (e.g., OnAppearing)
-    public async Task InitializeAsync()
-    {
-        await LoadMarketPrice();
+        // Add funds to the user's portfolio for testing
+        await _portfolio.AddFundsAsync(1000, CurrencyType.USD);
     }
     #endregion
 
@@ -79,7 +82,7 @@ public partial class PlaceOrderViewModel : BaseViewModel
     private async Task LoadMarketPrice()
     {
         // TODO: Replace with SelectedStockService
-        CurrentMarketPrice = await _market.GetMarketPriceAsync(1);
+        CurrentMarketPrice = await _market.GetMarketPriceAsync(1, CurrencyType.USD);
     }
 
     [RelayCommand]
@@ -122,16 +125,16 @@ public partial class PlaceOrderViewModel : BaseViewModel
                   CurrentMarketPrice * (1 + SlippagePercent / 100) 
                 : CurrentMarketPrice * (1 - SlippagePercent / 100);
             if (SelectedSideIndex == 0)
-                await _orders.PlaceMarketBuyOrderAsync(stockId, Quantity, price);
+                await _orders.PlaceMarketBuyOrderAsync(stockId, Quantity, price, _selected.Currency);
             else
-                await _orders.PlaceMarketSellOrderAsync(stockId, Quantity, price);
+                await _orders.PlaceMarketSellOrderAsync(stockId, Quantity, price, _selected.Currency);
         }
         else // Limit
         {
             if (SelectedSideIndex == 0)
-                await _orders.PlaceLimitBuyOrderAsync(stockId, Quantity, LimitPrice);
+                await _orders.PlaceLimitBuyOrderAsync(stockId, Quantity, LimitPrice, _selected.Currency);
             else
-                await _orders.PlaceLimitSellOrderAsync(stockId, Quantity, LimitPrice);
+                await _orders.PlaceLimitSellOrderAsync(stockId, Quantity, LimitPrice, _selected.Currency);
         }
     }
     #endregion

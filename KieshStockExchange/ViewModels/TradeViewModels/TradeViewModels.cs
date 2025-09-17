@@ -168,6 +168,7 @@ public partial class TradeViewModel : BaseViewModel
         IsBusy = true;
         try
         {
+            _logger.LogInformation("SelectedStockService Setting selection to {Symbol} #{StockId}", stock.Symbol, stock.StockId);
             // Stop previous polling (if any)
             _stockService.StopPriceUpdates();
 
@@ -201,9 +202,7 @@ public partial class TradeViewModel : BaseViewModel
         if (_suppressSelectionChange) return;
         _ = SwitchStockAsync(value);
     }
-    #endregion
 
-    #region Helpers
     // Apply current values from _stockService to bindable VM properties on the UI thread
     private void ApplyStockServiceSnapshot()
     {
