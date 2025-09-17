@@ -1,3 +1,8 @@
+Currently the database uses SQLiteAsyncConnection from the SQLite-net-pcl package.
+That handles all the async operations and mapping to C# models.
+This is just an overview of the database schema if it used one. 
+The actual database is created and managed in code.
+
 CREATE TABLE Users (
     UserId INTEGER PRIMARY KEY AUTOINCREMENT,
     Username TEXT NOT NULL UNIQUE,
