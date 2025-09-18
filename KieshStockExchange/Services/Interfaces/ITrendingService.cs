@@ -11,63 +11,36 @@ namespace KieshStockExchange.Services;
 
 public interface ITrendingService : INotifyPropertyChanged
 {
-    // ---- Core live map ------------------------------------------------------
-    // A thread-safe, read-only view: for quick lookups by StockId in ViewModels.
+    /// <summary> For quick lookups by StockId in ViewModels. </summary>
     IReadOnlyDictionary<int, LiveQuote> Quotes { get; }
 
-    // Raised for every tick that changes a LiveQuote (UI can listen if not binding).
+    /// <summary> Raised for every tick that changes a LiveQuote.</summary>
     event EventHandler<LiveQuote>? QuoteUpdated;
 
-    // Begin/stop watching specific stocks (creates/removes state lazily).
+    /// <summary> Begin watching a stock by it's ID </summary>
     Task SubscribeAsync(int stockId, CancellationToken ct = default);
+    /// <summary> Stop watching a stock by it's ID </summary>
     void Unsubscribe(int stockId);
+    /// <summary> Begin watching all stocks </summary>
+    Task SubscribeAllAsync(CancellationToken ct = default);
 
-    // Push a new tick into the service (e.g., from MarketOrderService or your AI sim).
-    // This accepts your existing StockPrice "tick" model directly.
+    /// <summary>
+    /// Push a new tick into the service, this accepts a StockPrice "tick" model directly.
+    /// </summary>
     void OnTick(StockPrice tick);
 
-    // ---- Derived views (bindable collections for MarketPage) ----------------
-    // Sorted snapshots you can bind a CollectionView to (recomputed periodically).
+    /// <summary> Sorted lists of top movers. </summary>
     IReadOnlyList<LiveQuote> TopGainers { get; }
+    /// <summary> Sorted lists of top losers. </summary>
     IReadOnlyList<LiveQuote> TopLosers { get; }
-    IReadOnlyList<LiveQuote> MostActive { get; } // if/when you add volume
+    /// <summary> Sorted list of most active (by volume). </summary>
+    IReadOnlyList<LiveQuote> MostActive { get; }
 
-    // Force a recompute of derived views (usually a timer calls this).
+    /// <summary>
+    /// Forces recomputation of the TopGainers, TopLosers, and MostActive lists.
+    /// </summary>
     void RecomputeMovers();
 
-    // ---- (Optional) Candle stream ------------------------------------------
-    // Aggregates ticks into time buckets (e.g., 1m) and emits OHLC as they close.
+    /// <summary> Streams OHLC candles for a specific stock. </summary>
     IAsyncEnumerable<Candle> StreamCandlesAsync(int stockId, TimeSpan bucket, CancellationToken ct = default);
 }
-
-public sealed partial class LiveQuote : ObservableObject
-{
-    [ObservableProperty] private int _stockId = 0;
-    [ObservableProperty] private string _symbol = "";
-    [ObservableProperty] private string _companyName = "";
-    [ObservableProperty] private DateTime _lastUpdated = DateTime.UtcNow;
-    [ObservableProperty] private CurrencyType _currency = CurrencyType.USD;
-    [ObservableProperty] private decimal _lastPrice = 0m;   // last traded/quoted price
-    [ObservableProperty] private decimal _open = 0m;        // session open (for % change)
-    [ObservableProperty] private decimal _high = 0m;        // session high
-    [ObservableProperty] private decimal _low = 0m;         // session low
-    [ObservableProperty] private decimal _changePct = 0m;   // (last - open)/open
-
-    public void ApplyTick(decimal price, DateTime utcTime)
-    {
-        // Live stats
-        LastPrice = price;
-        LastUpdated = utcTime;
-        // Session stats
-        if (Open <= 0m) Open = price;
-        if (High == 0m || price > High) High = price;
-        if (Low == 0m || price < Low) Low = price;
-        // Change %
-        ChangePct = Open > 0 ? (LastPrice - Open) / Open * 100m : 0m;
-    }
-}
-
-public readonly record struct Candle(
-    int StockId, DateTime OpenTimeUtc, TimeSpan Bucket,
-    decimal Open, decimal High, decimal Low, decimal Close
-);

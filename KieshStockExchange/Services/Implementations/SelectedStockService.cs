@@ -29,8 +29,8 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     #region Constructor and core
     public SelectedStockService(IMarketOrderService marketService, ILogger<SelectedStockService> logger)
     {
-        _marketService = marketService;
-        _logger = logger;
+        _marketService = marketService ?? throw new ArgumentNullException(nameof(marketService));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     private TaskCompletionSource<Stock> _firstSelectionTcs =

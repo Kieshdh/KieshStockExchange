@@ -252,6 +252,18 @@ public class LocalDBService: IDataBaseService
             cancellationToken);
     }
 
+    public async Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, DateTime from, DateTime to, CurrencyType currency, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
+        return await RunDbAsync(() =>
+            _db.Table<StockPrice>()
+               .Where(sp => sp.StockId == stockId && sp.Timestamp >= from && sp.Timestamp <= to && sp.Currency == currencyCode)
+               .OrderByDescending(sp => sp.Timestamp)
+               .ToListAsync(),
+            cancellationToken);
+    }
+
     public async Task CreateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
@@ -502,19 +514,19 @@ public class LocalDBService: IDataBaseService
     #endregion
 
     #region Helper Methods
-    private async Task InitializeAsync(CancellationToken cancellationToken = default)
+    private async Task InitializeAsync(CancellationToken ct = default)
     {
         if (_initialized) return;
 
         // Support cancellation while waiting for the lock
-        await _initGate.WaitAsync(cancellationToken);
+        await _initGate.WaitAsync(ct);
 
         try
         {
             if (_initialized) return;
 
             // Wrap each DB call so cancellation is checked before
-            cancellationToken.ThrowIfCancellationRequested();
+            ct.ThrowIfCancellationRequested();
 
             await _db.CreateTableAsync<User>();
             await _db.CreateTableAsync<Stock>();
