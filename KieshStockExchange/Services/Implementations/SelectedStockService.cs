@@ -1,7 +1,7 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Models;
-using KieshStockExchange.Helpers;
 using Microsoft.Extensions.Logging;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Services.Implementations;
 

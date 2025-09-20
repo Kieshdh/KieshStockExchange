@@ -1,5 +1,5 @@
-﻿using KieshStockExchange.Models;
-using KieshStockExchange.Helpers;
+﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 
 namespace KieshStockExchange.Services;
 

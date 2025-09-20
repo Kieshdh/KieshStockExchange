@@ -2,8 +2,8 @@
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
-using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 
 namespace KieshStockExchange.Services
 {
