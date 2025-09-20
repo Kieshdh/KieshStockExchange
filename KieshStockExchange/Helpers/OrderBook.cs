@@ -305,7 +305,7 @@ public sealed class OrderBook
                     removedInvalid++;
                     continue;
                 }
-                if (!order.IsOpen || !order.IsLimitOrder || (order.IsBuyOrder != isBuySide))
+                if (!order.IsOpen || !order.IsLimitOrder || order.IsBuyOrder != isBuySide)
                 {
                     Debug.WriteLine($"[OrderBook] Non-open-limit or wrong-side order #{order.OrderId} at {price}, removing.");
                     nodesToRemove.Add(node);
@@ -417,10 +417,10 @@ public sealed class OrderBook
         // Set the object reference
         idx.Node.Value = order;
 
-        bool sideChanged = (oldIsBuy != order.IsBuyOrder);
-        bool priceChanged = (oldPrice != order.Price);
-        bool increasedSize = (!sideChanged && !priceChanged) &&
-                             (order.RemainingQuantity > oldRemaining);
+        bool sideChanged = oldIsBuy != order.IsBuyOrder;
+        bool priceChanged = oldPrice != order.Price;
+        bool increasedSize = !sideChanged && !priceChanged &&
+                             order.RemainingQuantity > oldRemaining;
 
         // Check if the side or the price has changed
         if (sideChanged || priceChanged || increasedSize)
