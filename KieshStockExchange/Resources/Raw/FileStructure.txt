@@ -19,13 +19,16 @@ KieshStockExchange
 --- launchSettings.json
 
 - Helpers
---- SecurityHelper.cs (For hashing passwords)
 --- CurrencyHelper.cs (Formats currency values)
+--- LiveQuote.cs (For ViewModel binding of a stock)
 --- OrderBook.cs (For order matching)
 --- OrderResult.cs (Shows result of order operations)
+--- ParsingHelper.cs (For parsing data)
+--- SecurityHelper.cs (For hashing passwords)
 
 - Models
 --- AIUser.cs
+--- Candle.cs
 --- Fund.cs
 --- IValidatable.cs
 --- Order.cs
@@ -65,7 +68,7 @@ KieshStockExchange
 ----- ProfileService.cs (TODO)
 ----- SelectedStockService.cs
 ----- TransactionService.cs (TODO)
------ TrendingService.cs (TODO)
+----- TrendingService.cs
 ----- UserOrderService.cs
 ----- UserPortfolioService.cs
 ----- UserSessionService.cs (TODO)
@@ -101,6 +104,7 @@ KieshStockExchange
 ----- PortfolioViewModel.cs
 --- TradeViewModels (TODO)
 ----- ChartViewModel.cs
+----- HistoryTableViewModel.cs
 ----- OpenOrderTableViewModel.cs 
 ----- OrderBookViewModel.cs
 ----- OrderHistoryTableViewModel.cs
@@ -129,6 +133,7 @@ KieshStockExchange
 ----- PortfolioPage.xaml 
 --- TradePageViews 
 ----- ChartView.xaml (TODO)
+----- HistoryTableView.xaml (TODO)
 ----- OpenOrdersView.xaml (TODO)
 ----- OrderBookView.xaml (TODO)
 ----- OrderHistoryView.xaml (TODO)
