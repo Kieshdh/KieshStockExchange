@@ -24,16 +24,50 @@ public class Order : IValidatable
     #endregion
 
     #region Properties
+    private int _orderId = 0;
     [PrimaryKey, AutoIncrement]
-    [Column("OrderId")] public int OrderId { get; set; } = 0;
+    [Column("OrderId")] public int OrderId {
+        get => _orderId;
+        set {
+            if (_orderId != 0) throw new InvalidOperationException("OrderId is immutable once set.");
+            _orderId = value < 0 ? 0 : value;
+        }
+    }
 
-    [Column("UserId")] public int UserId { get; set; } = 0;
+    private int _userId = 0;
+    [Indexed(Name = "IX_Orders_User_Status", Order = 1)]
+    [Column("UserId")] public int UserId { 
+        get => _userId; 
+        set {
+            if (_userId != 0) throw new InvalidOperationException("UserId is immutable once set.");
+            _userId = value;
+        }
+    }
 
-    [Column("StockId")] public int StockId { get; set; } = 0;
+    private int _stockId = 0;
+    [Indexed(Name = "IX_Orders_Stock_Status", Order = 1)]
+    [Column("StockId")] public int StockId { 
+        get => _stockId; 
+        set {
+            if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
+            _stockId = value;
+        }
+    }
 
-    [Column("Quantity")] public int Quantity { get; set; } = 0;
+    private int _quantity = 0;
+    [Column("Quantity")] public int Quantity { 
+        get => _quantity; 
+        set => _quantity = value;
+    }
 
-    [Column("Price")] public decimal Price { get; set; } = 0;
+    private decimal _price = 0;
+    [Column("Price")] public decimal Price { 
+        get => _price; 
+        set {
+            if (value <= 0m) throw new ArgumentException("Price must be positive.");
+            _price = value;
+        }
+    }
 
     [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
     [Column("Currency")] public string Currency
@@ -43,16 +77,39 @@ public class Order : IValidatable
     }
 
     // "MarketBuy", "MarketSell", "LimitBuy", "LimitSell"
-    [Column("OrderType")] public string OrderType { get; set; } = String.Empty;
+    private string _orderType = String.Empty;
+    [Column("OrderType")] public string OrderType { 
+        get => _orderType; 
+        set => _orderType = value;
+    }
 
     // "Open", "Filled", "Cancelled"
-    [Column("Status")] public string Status { get; set; } = Statuses.Open;
+    private string _status = Statuses.Open;
+    [Indexed(Name = "IX_Orders_Stock_Status", Order = 2)]
 
-    [Column("AmountFilled")] public int AmountFilled { get; set; } = 0;
+    [Indexed(Name = "IX_Orders_User_Status", Order = 2)]
+    [Column("Status")] public string Status { 
+        get => _status; 
+        set => _status = value;
+    }
 
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    private int _amountFilled = 0;
+    [Column("AmountFilled")] public int AmountFilled { 
+        get => _amountFilled; 
+        set => _amountFilled = value;
+    }
 
-    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    private DateTime _createdAt = TimeHelper.NowUtc();
+    [Column("CreatedAt")] public DateTime CreatedAt {
+        get => _createdAt;
+        set => _createdAt = TimeHelper.EnsureUtc(value);
+    }
+
+    private DateTime _updatedAt = TimeHelper.NowUtc();
+    [Column("UpdatedAt")] public DateTime UpdatedAt {
+        get => _updatedAt;
+        set => _updatedAt = TimeHelper.EnsureUtc(value);
+    }
     #endregion
 
     #region IValidatable Implementation
@@ -83,7 +140,7 @@ public class Order : IValidatable
     [Ignore] public string AmountFilledDisplay => $"{AmountFilled}/{Quantity}";
     #endregion
 
-    #region Helper Methods
+    #region Helper Variables
     [Ignore] public bool IsBuyOrder =>
         OrderType == Types.MarketBuy || OrderType == Types.LimitBuy;
     [Ignore] public bool IsSellOrder =>
@@ -98,39 +155,40 @@ public class Order : IValidatable
     [Ignore] public decimal TotalAmount => Price * Quantity;
     [Ignore] public int RemainingQuantity => Quantity - AmountFilled;
     [Ignore] public decimal RemainingAmount => RemainingQuantity * Price;
+    #endregion
+
+    #region Order Operations
     public void Fill(int quantity)
     {
+        if (!IsOpen) throw new InvalidOperationException("Order is not open for filling.");
         if (quantity <= 0 || quantity > RemainingQuantity)
             throw new ArgumentException("Invalid fill quantity.");
         AmountFilled += quantity;
         if (AmountFilled == Quantity)
             Status = Statuses.Filled;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
     public void Cancel()
     {
-        if (!IsOpen)
-            throw new InvalidOperationException("Order is already cancelled.");
+        if (!IsOpen) throw new InvalidOperationException("Only open orders can be cancelled.");
         Status = Statuses.Cancelled;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
     public void UpdatePrice(decimal newPrice)
     {
-        if (!IsOpen)
-            throw new InvalidOperationException("Cannot update price of a non-open order.");
-        if (newPrice <= 0)
-            throw new ArgumentException("Price must be greater than zero.");
+        if (!IsOpen) throw new InvalidOperationException("Cannot update price of a non-open order.");
+        if (!IsLimitOrder) throw new InvalidOperationException("Only limit orders can have their price updated.");
+        if (newPrice <= 0) throw new ArgumentException("Price must be greater than zero.");
         Price = newPrice;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
     public void UpdateQuantity(int newQuantity)
     {
-        if (!IsOpen)
-            throw new InvalidOperationException("Cannot update quantity of a non-open order.");
+        if (!IsOpen) throw new InvalidOperationException("Cannot update quantity of a non-open order.");
         if (newQuantity < AmountFilled)
             throw new ArgumentException("New quantity cannot be less than amount filled.");
         Quantity = newQuantity;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
         if (AmountFilled == Quantity)
             Status = Statuses.Filled; 
     }

@@ -1,10 +1,6 @@
 ﻿using SQLite;
 using System.Text.RegularExpressions;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
@@ -12,13 +8,33 @@ namespace KieshStockExchange.Models;
 public class Stock : IValidatable
 {
     #region Properties
+    private int _stockId = 0;
     [PrimaryKey, AutoIncrement]
-    [Column("StockId")] public int StockId { get; set; } = 0;
+    [Column("StockId")] public int StockId {
+        get => _stockId;
+        set {
+            if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
+            _stockId = value < 0 ? 0 : value;
+        }
+    }
 
-    [Column("Symbol")] public string Symbol { get; set; } = string.Empty;
+    private string _symbol = string.Empty;
+    [Column("Symbol")] public string Symbol { 
+        get => _symbol;
+        set => _symbol = value?.Trim().ToUpperInvariant() ?? string.Empty;
+    }
 
-    [Column("CompanyName")] public string CompanyName { get; set; } = string.Empty;
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;    
+    private string _companyName = string.Empty;
+    [Column("CompanyName")] public string CompanyName { 
+        get => _companyName;
+        set => _companyName = value?.Trim() ?? string.Empty;
+    }
+
+    private DateTime _createdAt = TimeHelper.NowUtc();
+    [Column("CreatedAt")] public DateTime CreatedAt {
+        get => _createdAt;
+        set => _createdAt = TimeHelper.EnsureUtc(value);
+    }
     #endregion
 
     #region IValidatable Implementation
@@ -26,8 +42,8 @@ public class Stock : IValidatable
     {
         if (string.IsNullOrWhiteSpace(Symbol))
             return false;
-        // Stock symbol must be alphanumeric and between 1 to 5 characters
-        string pattern = @"^[A-Z0-9]{1,5}$";
+        // Stock symbol must be alphanumeric and between 1 to 10 characters
+        string pattern = @"^[A-Z0-9.-]{1,10}$";
         return Regex.IsMatch(Symbol, pattern);
     }
 

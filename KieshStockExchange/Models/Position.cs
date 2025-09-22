@@ -1,9 +1,5 @@
 ﻿using SQLite;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
@@ -11,22 +7,61 @@ namespace KieshStockExchange.Models;
 public class Position : IValidatable
 {
     #region Properties
+    private int _positionId = 0;
     [PrimaryKey, AutoIncrement]
-    [Column("PositionId")] public int PositionId { get; set; } = 0;
+    [Column("PositionId")] public int PositionId { 
+        get => _positionId;
+        set {
+            if (_positionId != 0) throw new InvalidOperationException("PositionId is immutable once set.");
+            _positionId = value < 0 ? 0 : value;
+        }
+    }
 
-    [Column("UserId")] public int UserId { get; set; } = 0;
+    private int _userId = 0;
+    [Indexed(Name = "IX_Positions_User_Stock", Order = 1)]
+    [Column("UserId")] public int UserId { 
+        get => _userId; 
+        set {
+            if (_userId != 0) throw new InvalidOperationException("UserId is immutable once set.");
+            _userId = value;
+        }
+    }
 
-    [Column("StockId")] public int StockId { get; set; } = 0;
+    private int _stockId = 0;
+    [Indexed(Name = "IX_Positions_User_Stock", Order = 2, Unique = true)]
+    [Column("StockId")] public int StockId {
+        get => _stockId; 
+        set {
+            if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
+            _stockId = value;
+        }
+    }
 
-    [Column("Quantity")] public int Quantity { get; set; } = 0;
+    private int _quantity = 0;
+    [Column("Quantity")] public int Quantity { 
+        get => _quantity; 
+        set => _quantity = value;
+    }
 
-    [Column("ReservedQuantity")] public int ReservedQuantity { get; set; } = 0;
+    private int _reservedQuantity = 0;
+    [Column("ReservedQuantity")] public int ReservedQuantity { 
+        get => _reservedQuantity; 
+        set => _reservedQuantity = value;
+    }
 
     [Ignore] public int RemainingQuantity => Quantity - ReservedQuantity;
 
-    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    private DateTime _createdAt = TimeHelper.NowUtc();
+    [Column("CreatedAt")] public DateTime CreatedAt {
+        get => _createdAt;
+        set => _createdAt = TimeHelper.EnsureUtc(value);
+    }
 
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    private DateTime _updatedAt = TimeHelper.NowUtc();
+    [Column("UpdatedAt")] public DateTime UpdatedAt {
+        get => _updatedAt;
+        set => _updatedAt = TimeHelper.EnsureUtc(value);
+    }
     #endregion
 
     #region IValidatable Implementation
@@ -48,18 +83,18 @@ public class Position : IValidatable
         if (quantity <= 0)
             throw new ArgumentException("Quantity must be positive.");
         Quantity += quantity;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
     
     public void RemoveStock(int quantity)
     {
-        if (quantity <= 0 || quantity > Quantity)
+        if (quantity <= 0 || quantity > RemainingQuantity)
             throw new ArgumentException("Invalid quantity to remove.");
         Quantity -= quantity;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
 
-    public void ReleaseFromReservedStock(int quantity)
+    public void ConsumeReservedStock(int quantity)
     {
         if (quantity < 0)
             throw new ArgumentException("Quantity must be positive.");
@@ -67,7 +102,7 @@ public class Position : IValidatable
             throw new ArgumentException("Invalid reserved quantity");
         ReservedQuantity -= quantity;
         Quantity -= quantity;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
 
     public void ReserveStock(int quantity)
@@ -75,7 +110,7 @@ public class Position : IValidatable
         if (quantity <= 0 || quantity > RemainingQuantity)
             throw new ArgumentException("Invalid quantity to reserve.");
         ReservedQuantity += quantity;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
     
     public void UnreserveStock(int quantity)
@@ -83,7 +118,7 @@ public class Position : IValidatable
         if (quantity <= 0 || quantity > ReservedQuantity)
             throw new ArgumentException("Invalid quantity to unreserve.");
         ReservedQuantity -= quantity;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
     #endregion
 

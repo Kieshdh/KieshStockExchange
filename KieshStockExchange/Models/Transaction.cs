@@ -7,33 +7,100 @@ namespace KieshStockExchange.Models;
 public class Transaction : IValidatable
 {
     #region Properties
+    private int _transactionId = 0;
     [PrimaryKey, AutoIncrement]
-    [Column("TransactionId")] public int TransactionId { get; set; } = 0;
+    [Column("TransactionId")] public int TransactionId { 
+        get => _transactionId;
+        set {
+            if (_transactionId != 0) throw new InvalidOperationException("TransactionId is immutable once set.");
+            _transactionId = value < 0 ? 0 : value;
+        }
+    }
 
-    [Column("StockId")] public int StockId { get; set; } = 0;
+    private int _stockId = 0;
+    [Indexed(Name = "IX_Tx_Stock_Curr_Time", Order = 1)]
+    [Column("StockId")] public int StockId { 
+        get => _stockId;
+        set {
+            if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
+            _stockId = value;
+        }
+    }
 
-    [Column("BuyOrderId")] public int BuyOrderId { get; set; } = 0;
+    private int _buyOrderId = 0;
+    [Column("BuyOrderId")] public int BuyOrderId {
+        get => _buyOrderId;
+        set {
+            if (_buyOrderId != 0) throw new InvalidOperationException("BuyOrderId is immutable once set.");
+            _buyOrderId = value;
+        }
+    }
 
-    [Column("SellOrderId")] public int SellOrderId { get; set; } = 0;
+    private int _sellOrderId = 0;
+    [Column("SellOrderId")] public int SellOrderId { 
+        get => _sellOrderId;
+        set {
+            if (_sellOrderId != 0) throw new InvalidOperationException("SellOrderId is immutable once set.");
+            _sellOrderId = value;
+        }
+    }
 
-    [Column("BuyerId")] public int BuyerId { get; set; } = 0;
+    private int _buyerId = 0;
+    [Indexed]
+    [Column("BuyerId")] public int BuyerId { 
+        get => _buyerId;
+        set {
+            if (_buyerId != 0) throw new InvalidOperationException("BuyerId is immutable once set.");
+            _buyerId = value;
+        }
+    }
 
-    [Column("SellerId")] public int SellerId { get; set; } = 0;
+    private int _sellerId = 0;
+    [Indexed]
+    [Column("SellerId")] public int SellerId { 
+        get => _sellerId;
+        set {
+            if (_sellerId != 0) throw new InvalidOperationException("SellerId is immutable once set.");
+            _sellerId = value;
+        }
+    }
 
-    [Column("Quantity")] public int Quantity { get; set; } = 0;
+    private int _quantity = 0;
+    [Column("Quantity")] public int Quantity { 
+        get => _quantity;
+        set {
+            if (_quantity != 0) throw new InvalidOperationException("Quantity is immutable once set.");
+            if (value <= 0) throw new ArgumentException("Quantity must be positive.");
+            _quantity = value <= 0 ? 0 : value;
+        }
+    }
 
-    [Column("Price")] public decimal Price { get; set; } = 0m;
+    private decimal _price = 0m;
+    [Column("Price")] public decimal Price { 
+        get => _price;
+        set {
+            if (_price != 0m) throw new InvalidOperationException("Price is immutable once set.");
+            if (value <= 0m) throw new ArgumentException("Price must be positive.");
+            _price = value;
+        }
+    }
 
     [Ignore] public decimal TotalAmount => Price * Quantity;
 
     [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
+    [Indexed(Name = "IX_Tx_Stock_Curr_Time", Order = 2)]
     [Column("Currency")] public string Currency
     {
         get => CurrencyType.ToString();
         set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
-    [Column("Timestamp")] public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    private DateTime _timeStamp = TimeHelper.NowUtc();
+    [Indexed(Name = "IX_Tx_Stock_Curr_Time", Order = 3)]
+    [Column("Timestamp")] public DateTime Timestamp {
+        get => _timeStamp;
+        set => _timeStamp = TimeHelper.EnsureUtc(value);
+    }
     #endregion
 
     #region IValidatable Implementation
