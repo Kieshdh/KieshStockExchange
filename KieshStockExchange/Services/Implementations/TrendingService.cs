@@ -32,8 +32,12 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
     private readonly IDataBaseService _db;
     private readonly IMarketDataService _market;
 
-    private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(5));
+    private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(SecondsBetweenUpdates));
     private readonly CancellationTokenSource _cts = new();
+
+    private const int MaxMovers = 5;
+    private const int SecondsBetweenUpdates = 5;
+
     public TrendingService(IDispatcher dispatcher, ILogger<TrendingService> logger, IDataBaseService db, IMarketDataService market)
     {
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -58,35 +62,28 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
             await RecomputeMoversAsync();
     }
 
-    private Task RecomputeMoversAsync()
+    public Task RecomputeMoversAsync()
     {
-        const int TAKE = 5;
-        var snap = _md.Quotes.Values.ToList();
+        var snap = _market.Quotes.Values.ToList();
 
         var gainers = snap.Where(q => q.Open > 0m)
-                          .OrderByDescending(q => q.ChangePct)
-                          .Take(TAKE)
-                          .ToList();
+            .OrderByDescending(q => q.ChangePct).Take(MaxMovers).ToList();
 
         var losers = snap.Where(q => q.Open > 0m)
-                         .OrderBy(q => q.ChangePct)
-                         .Take(TAKE)
-                         .ToList();
+            .OrderBy(q => q.ChangePct).Take(MaxMovers).ToList();
+
+        var actives = snap.Where(q => q.Volume > 0)
+            .OrderByDescending(q => q.Volume).Take(MaxMovers).ToList();
 
         _dispatcher.Dispatch(() =>
         {
             Replace(_topGainers, gainers);
             Replace(_topLosers, losers);
-            // TODO: MostActive once you track volume
+            Replace(_mostActive, actives);
         });
 
         return Task.CompletedTask;
 
-        static void Replace(ObservableCollection<LiveQuote> target, IList<LiveQuote> src)
-        {
-            target.Clear();
-            foreach (var x in src) target.Add(x);
-        }
     }
 
     public void Dispose()
@@ -94,6 +91,13 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
         _cts.Cancel();
         _cts.Dispose();
         _timer.Dispose();
+    }
+
+    private static void Replace(ObservableCollection<LiveQuote> target, IList<LiveQuote> src)
+    {
+        target.Clear();
+        foreach (var x in src) 
+            target.Add(x);
     }
     #endregion
 }
