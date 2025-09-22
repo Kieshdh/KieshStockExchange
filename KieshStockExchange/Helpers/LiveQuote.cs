@@ -1,6 +1,7 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services;
+using System;
 using static SQLite.TableMapping;
 
 namespace KieshStockExchange.Helpers;
@@ -14,7 +15,8 @@ public sealed partial class LiveQuote : ObservableObject
     [ObservableProperty] private CurrencyType _currency = CurrencyType.USD;
 
     // Timestamps
-    [ObservableProperty] private DateTime _lastUpdated = DateTime.UtcNow;
+    [ObservableProperty] private DateTime _lastUpdated = DateTime.MinValue;
+    [ObservableProperty] private DateTime _sessionStartUtc = DateTime.UtcNow.Date;
 
     // Live stats
     [ObservableProperty] private decimal _lastPrice = 0m;       // Latest Price
@@ -31,12 +33,10 @@ public sealed partial class LiveQuote : ObservableObject
     [ObservableProperty] private string _lowPriceDisplay = "-";
     [ObservableProperty] private string _changePctDisplay = "-";
 
-    public LiveQuote(int stockId, CurrencyType currency)//, string symbol, string companyName)
+    public LiveQuote(int stockId, CurrencyType currency)
     {
         StockId = stockId;
         Currency = currency;
-        //Symbol = symbol;
-        //CompanyName = companyName;
     }
 
 
@@ -46,13 +46,30 @@ public sealed partial class LiveQuote : ObservableObject
             return; // ignore invalid prices
 
         // Live stats
-        if (utcTime > LastUpdated) LastPrice = price;
-        if (utcTime > LastUpdated) LastUpdated = utcTime;
+        if (utcTime > LastUpdated)
+        {
+            LastPrice = price;
+            LastUpdated = utcTime;
+        }
 
         // Session stats
-        if (Open <= 0m) Open = price;
-        if (High == 0m || price > High) High = price;
-        if (Low == 0m || price < Low) Low = price;
+        if (utcTime.Date > SessionStartUtc.Date)
+        {
+            // Start of a new session
+            SessionStartUtc = utcTime.Date;
+            Open = price;
+            High = price;
+            Low = price;
+            Volume = 0;
+        }
+        else if (utcTime.Date == SessionStartUtc.Date)
+        {
+            // Continuing the same session
+            if (Open <= 0m) Open = price;
+            if (High == 0m || price > High) High = price;
+            if (Low == 0m || price < Low) Low = price;
+        }
+        else { return; } // ignore out-of-order ticks
         ChangePct = Open > 0 ? (LastPrice - Open) / Open * 100m : 0m;
         Volume += shares;
 
@@ -68,5 +85,5 @@ public sealed partial class LiveQuote : ObservableObject
         ChangePctDisplay = ChangePct >= 0 ? $"+{ChangePct:F2}%" : $"{ChangePct:F2}%";
     }
 
-    public override string ToString() => $"LiveQuote: ({Symbol}, {Currency.ToString()}";
+    public override string ToString() => $"LiveQuote: ({Symbol}, {Currency})";
 }
