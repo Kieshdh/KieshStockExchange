@@ -17,7 +17,7 @@ public interface IMarketDataService
     Task BuildFromHistoryAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
 
     IAsyncEnumerable<Candle> StreamCandlesAsync(int stockId, CurrencyType currency, TimeSpan bucket,
-                                                CancellationToken ct = default);
+                                                bool fillGaps, CancellationToken ct = default);
 
     // Convenience lookups -----------------------------------------------------
     Task<decimal> GetLastPriceAsync(int stockId, CurrencyType currency, CancellationToken ct = default);

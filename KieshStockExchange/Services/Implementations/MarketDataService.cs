@@ -37,14 +37,20 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
     public event EventHandler<LiveQuote>? QuoteUpdated;
 
     private readonly ConcurrentDictionary<(int, CurrencyType), int> _subRefCount = new();
-    private readonly ConcurrentDictionary<(int, CurrencyType), int> _subscribed = new();
-    public IReadOnlyCollection<(int, CurrencyType)> Subscribed => _subscribed.Keys.ToList().AsReadOnly();
+    private readonly ConcurrentDictionary<(int, CurrencyType), IDispatcherTimer> _timers = new();
+
+    public IReadOnlyCollection<(int, CurrencyType)> Subscribed => 
+        _subRefCount.Where(kv => kv.Value > 0).Select(kv => kv.Key).ToList().AsReadOnly();
+
+    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(250);
     #endregion
 
     #region Internal ring buffer
     // ring buffer per stock for simple rolling metrics (prices + timestamps)
     private sealed class Ring
     {
+        private readonly object _gate = new();
+
         public readonly decimal[] Prices;
         public readonly DateTime[] Times;
         public int Head = 0;
@@ -58,10 +64,23 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
 
         public void Add(decimal price, DateTime time)
         {
-            Prices[Head] = price;
-            Times[Head] = time;
-            Head = (Head + 1) % Prices.Length;
-            Count = Math.Min(Count + 1, Prices.Length);
+            lock (_gate)
+            {
+                Prices[Head] = price;
+                Times[Head] = time;
+                Head = (Head + 1) % Prices.Length;
+                Count = Math.Min(Count + 1, Prices.Length);
+            }
+        }
+
+        public (decimal price, DateTime time)? TryPeekNewest()
+        {
+            lock (_gate)
+            {
+                if (Count == 0) return null;
+                int idx = (Head - 1 + Prices.Length) % Prices.Length;
+                return (Prices[idx], Times[idx]);
+            }
         }
 
         public void SortByTime() => Array.Sort(Times, Prices, 0, Count);
@@ -77,6 +96,10 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
     }
 
     private readonly ConcurrentDictionary<(int, CurrencyType), Ring> _rings = new();
+
+    private static readonly TimeSpan StoreDuration = TimeSpan.FromMinutes(5);
+    private static int RingCapacity => 
+        (int)(StoreDuration.TotalMilliseconds / TickerInterval.TotalMilliseconds);
     #endregion
 
     #region Stock details
@@ -84,11 +107,13 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
 
     public async Task<Stock?> GetStockAsync(int stockId, CancellationToken ct = default)
     {
+        // Try cache first
         if (_stockCache.TryGetValue(stockId, out var stock))
             return stock;
-        stock = await _db.GetStockById(stockId, ct);
-        if (stock != null)
-            _stockCache[stockId] = stock;
+        // Refresh cache
+        await GetAllStocksAsync(ct);
+        // Try again
+        _stockCache.TryGetValue(stockId, out stock);
         return stock;
     }
 
@@ -99,6 +124,12 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
             _stockCache[stock.StockId] = stock;
         return stocks.AsReadOnly();
     }
+
+    public async Task<decimal> GetLastPriceAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
+    {
+        var quote = await GetOrAddQuote(stockId, currency, ct);
+        return quote.LastPrice;
+    }
     #endregion
 
     #region Subscribe/Unsubscribe
@@ -106,22 +137,18 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
     {
         await GetOrAddQuote(stockId, currency, ct);
         _subRefCount.AddOrUpdate((stockId, currency), 1, (_, c) => c + 1);
-        _subscribed[(stockId, currency)] = 0;
     }
 
     public void Unsubscribe(int stockId, CurrencyType currency)
     {
-        if (_subRefCount.TryGetValue((stockId, currency), out var c))
+        var key = (stockId, currency);
+        var count = _subRefCount.AddOrUpdate(key, 0, (_, c) => Math.Max(0, c - 1));
+        if (count == 0)
         {
-            if (c <= 1)
-            {
-                _subRefCount.TryRemove((stockId, currency), out _);
-                _subscribed.TryRemove((stockId, currency), out _);
-            }
-            else
-            {
-                _subRefCount[(stockId, currency)] = c - 1;
-            }
+            _quotes.TryRemove(key, out _);
+            _rings.TryRemove(key, out _);
+            if (_timers.TryRemove(key, out var timer))
+                _dispatcher.Dispatch(() => timer.Stop());
         }
     }
 
@@ -134,7 +161,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
     #endregion
 
     #region Build LiveQuote from ticks
-    public async Task OnTick(StockPrice tick)
+    public async Task OnTick(Transaction tick)
     {
         if (!tick.IsValid())
         {
@@ -147,57 +174,143 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
 
         // Update live quote
         var quote = await GetOrAddQuote(stockId, currency);
-        var utc = ToUtc(tick.Timestamp);
+        var utc = TimeHelper.EnsureUtc(tick.Timestamp);
 
         // Keep ring for rolling stats
-        var ring = _rings.GetOrAdd((stockId, currency), _ => new Ring(600));
+        var ring = GetRing(stockId, currency);
         ring.Add(tick.Price, utc);
 
         // Marshal property changes to UI thread
+        if (_subRefCount.TryGetValue((stockId, currency), out var c) && c > 0)
+        {
+            // Debounce rapid updates to avoid UI flooding
+            var timer = _timers.GetOrAdd((stockId, currency), _ => {
+                var t = _dispatcher.CreateTimer();
+                t.Interval = TickerInterval;
+                t.IsRepeating = false;
+                t.Tick += (_, __) => {
+                    if (_quotes.TryGetValue((stockId, currency), out var q)) 
+                        QuoteUpdated?.Invoke(this, q);
+                };
+                return t;
+            });
+            // Dispatch the update
+            _dispatcher.Dispatch(() => {
+                quote.ApplyTick(tick.Price, tick.Quantity, utc);
+                if (timer.IsRunning) timer.Stop();
+                timer.Start();
+            });
+        }
+            
+    }
+
+    public async Task BuildFromHistoryAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
+    {
+        // Get the quote and ring
+        var quote = await GetOrAddQuote(stockId, currency, ct);
+        var ring = GetRing(stockId, currency);
+
+        // If we already have data, skip
+        if (ring.Count > 0)
+            return;
+
+        // Load last 24 hours of historical prices
+        var history = await GetHistoricalTicksAsync(stockId, currency, ct);
+        if (history.Count == 0)
+        {
+            _logger.LogWarning("No historical ticks found for stock {StockId} in {Currency}", stockId, currency);
+            return;
+        }
+
+        // Set initial OHLC from history
+        decimal open = history[0].Price;
+        decimal high = history[0].Price;
+        decimal low = history[0].Price;
+
+        // Fill the ring and compute OHLC
+        foreach (var tick in history)
+        {
+            var dt = TimeHelper.EnsureUtc(tick.Timestamp);
+            ring.Add(tick.Price, dt);
+            if (tick.Price > high) high = tick.Price;
+            if (tick.Price < low) low = tick.Price;
+        }
+
         _dispatcher.Dispatch(() =>
         {
-            quote.ApplyTick(tick.Price, 0, utc);
+            var LastUtc = TimeHelper.EnsureUtc(history[^1].Timestamp);
+            var volume = history.Sum(t => t.Quantity);
+            var last = history[^1].Price;
+
+            // Apply data to quote
+            quote.SessionStartUtc = LastUtc.Date;
+            quote.Open = open;
+            quote.High = high;
+            quote.Low = low;
+            quote.ApplyTick(last, volume, LastUtc);
+
+            // Notify listeners
             QuoteUpdated?.Invoke(this, quote);
         });
     }
 
     public async IAsyncEnumerable<Candle> StreamCandlesAsync(
-        int stockId, CurrencyType currency, TimeSpan bucket, [EnumeratorCancellation] CancellationToken ct = default)
+        int stockId, CurrencyType currency, TimeSpan bucket, bool fillGaps, [EnumeratorCancellation] CancellationToken ct = default)
     {
         // Simple aggregator: compute OHLC for each completed bucket.
         DateTime? bucketStart = null;
         decimal o = 0, h = 0, l = 0, c = 0;
-
-        // Feed from the ring rather than a channel for simplicity; in a real impl,
-        // hook this to a Channel<StockPrice> per stock.
-        DateTime lastEmitted = DateTime.MinValue;
 
         while (!ct.IsCancellationRequested)
         {
             // Poll the latest ring entry and aggregate
             if (_rings.TryGetValue((stockId, currency), out var ring) && ring.Count > 0)
             {
-                var (p, t) = ring.EnumerateNewestFirst().First();
-                var start = Align(t, bucket);
-                if (bucketStart == null) { bucketStart = start; o = h = l = c = p; }
-                if (start == bucketStart) { c = p; h = Math.Max(h, p); l = Math.Min(l, p); }
-                else
+                var peek = ring.TryPeekNewest();
+                if (peek is { } value)
                 {
-                    // emit the finished candle
-                    yield return new Candle(stockId, bucketStart.Value, bucket, o, h, l, c);
-                    // start new bucket
-                    bucketStart = start; o = h = l = c = p;
-                    lastEmitted = DateTime.UtcNow;
+                    var price = value.price;
+                    var time = value.time;
+                    var start = Align(time, bucket);
+                    if (bucketStart == null) 
+                    { 
+                        bucketStart = start; 
+                        o = h = l = c = price; 
+                    }
+                    if (start == bucketStart) 
+                    { 
+                        c = price; 
+                        h = Math.Max(h, price); 
+                        l = Math.Min(l, price); 
+                    }
+                    else
+                    {
+                        // emit the finished candle
+                        yield return new Candle(stockId, bucketStart.Value, bucket, o, h, l, c);
+                        // start new bucket
+                        bucketStart = start; 
+                        o = h = l = c = price;
+                    }
                 }
             }
-            await Task.Delay(250, ct);
+            // Fill gaps with flat candles if requested
+            if (fillGaps && bucketStart is not null)
+            {
+                // Use wall-clock to fill empty buckets with flat candles
+                var nowAligned = Align(DateTime.UtcNow, bucket);
+                while (nowAligned > bucketStart)
+                {
+                    yield return new Candle(stockId, bucketStart.Value, bucket, c, c, c, c);
+                    bucketStart = bucketStart.Value + bucket;
+                    o = h = l = c; // carry forward last close
+                }
+            }
+            // Wait a bit before polling again
+            await Task.Delay(TickerInterval, ct);
         }
 
-        static DateTime Align(DateTime t, TimeSpan bucket)
-        {
-            var ticks = (t.Ticks / bucket.Ticks) * bucket.Ticks;
-            return new DateTime(ticks, DateTimeKind.Utc);
-        }
+        static DateTime Align(DateTime t, TimeSpan b) => 
+            new(((t.Ticks / b.Ticks) * b.Ticks), DateTimeKind.Utc);
     }
     #endregion
 
@@ -206,7 +319,6 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
     {
         // Get or create the LiveQuote
         var quote = _quotes.GetOrAdd((stockId, currency), _ => new LiveQuote(stockId, currency));
-        _rings.GetOrAdd((stockId, currency), _ => new Ring(600));
 
         try
         {
@@ -233,59 +345,34 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
         return quote;
     }
 
-    private async Task BuildFromHistoryAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
+    private Ring GetRing(int stockId, CurrencyType currency)
+        => _rings.GetOrAdd((stockId, currency), _ => new Ring(RingCapacity));
+
+    private async Task<List<Transaction>> GetHistoricalTicksAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
-        // Load last 24 hours of historical prices
-        var history = await _db.GetStockPricesByStockIdAndTimeRange(
-            stockId, DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, currency, ct);
-        if (history == null || history.Count == 0)
+        // Load last day of historical transactions
+        var history = await _db.GetTransactionsByStockIdAndTimeRange( stockId, currency, 
+            DateTime.UtcNow - TimeSpan.FromDays(1), DateTime.UtcNow, ct);
+        // If no history, fallback to latest StockPrice as a zero-quantity tick
+        if (history.Count == 0)
         {
-            _logger.LogWarning("No historical prices found for stock {StockId} in {Currency}", stockId, currency);
-            // Try to get the latest price as a fallback
-            history = new List<StockPrice>();
-            var latest = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
-            if (latest != null) history.Add(latest);
-            else throw new InvalidOperationException($"No prices found for stock {stockId} in {currency}");
+            _logger.LogWarning("No transactions found for stock {StockId} in {Currency}, falling back to StockPrice", stockId, currency);
+            var latestPrice = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
+            if (latestPrice != null)
+                history.Add(new Transaction
+                {
+                    StockId = stockId,
+                    CurrencyType = currency,
+                    Price = latestPrice.Price,
+                    Quantity = 0,
+                    Timestamp = latestPrice.Timestamp
+                });
+            else
+                _logger.LogWarning("No fallback price found for stock {StockId} in {Currency}", stockId, currency);
         }
         // Sort by time ascending
         history.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
-
-        // Get the quote and ring
-        var quote = await GetOrAddQuote(stockId, currency);
-        var ring = _rings.GetOrAdd((stockId, currency), _ => new Ring(600));
-
-        // Set initial OHLC from history
-        decimal open = history[0].Price;
-        decimal high = history[0].Price;
-        decimal low = history[0].Price;
-        decimal last = history[^1].Price;
-        DateTime lastUtc = DateTime.MinValue;
-
-        foreach (var tick in history)
-        {
-            var utc = ToUtc(tick.Timestamp);
-            ring.Add(tick.Price, utc);
-            if (tick.Price > high) high = tick.Price;
-            if (tick.Price < low) low = tick.Price;
-            lastUtc = utc;
-        }
-
-        _dispatcher.Dispatch(() =>
-        {
-            if (quote.Open <= 0m) quote.Open = open;
-            quote.High = Math.Max(quote.High, high);
-            quote.Low = quote.Low == 0m ? low : Math.Min(quote.Low, low);
-            quote.ApplyTick(last, 0, lastUtc);
-            QuoteUpdated?.Invoke(this, quote);
-        });
+        return history;
     }
-
-    private DateTime ToUtc(DateTime dt) =>
-        dt.Kind switch
-        {
-            DateTimeKind.Utc => dt,
-            DateTimeKind.Local => dt.ToUniversalTime(),
-            _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc),
-        };
     #endregion
 }
