@@ -208,7 +208,7 @@ public class UserPortfolioService : IUserPortfolioService
                             amount, targetUserId, fund.ReservedBalance);
                         return;
                     }
-                    fund.ReleaseFromReservedFunds(amount);
+                    fund.ConsumeReservedFunds(amount);
                     break;
             }
 
@@ -235,7 +235,7 @@ public class UserPortfolioService : IUserPortfolioService
 
         await _db.RunInTransactionAsync(async tx =>
         {
-            if (!await _db.StockExist(stockId, tx))
+            if (!await _db.StockExists(stockId, tx))
             {
                 _logger.LogWarning("Stock #{StockId} does not exist.", stockId);
                 return;
@@ -287,7 +287,7 @@ public class UserPortfolioService : IUserPortfolioService
                             quantity, targetUserId, stockId, position.ReservedQuantity);
                         return;
                     }
-                    position.ReleaseFromReservedStock(quantity);
+                    position.ConsumeReservedStock(quantity);
                     break;
             }
 
