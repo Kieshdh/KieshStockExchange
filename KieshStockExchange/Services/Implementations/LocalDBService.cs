@@ -146,18 +146,24 @@ public class LocalDBService: IDataBaseService
     public async Task CreateUser(User user, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!user.IsValid())
+            throw new ArgumentException("User entity is not valid", nameof(user));
         await RunDbAsync(() => _db.InsertAsync(user), cancellationToken);
     }
 
     public async Task UpdateUser(User user, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!user.IsValid())
+            throw new ArgumentException("User entity is not valid", nameof(user));
         await RunDbAsync(() => _db.UpdateAsync(user), cancellationToken);
     }
 
     public async Task DeleteUser(User user, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (user.UserId == 0)
+            throw new ArgumentException("User entity must have a valid UserId", nameof(user));
         await RunDbAsync(() => _db.DeleteAsync(user), cancellationToken);
     }
 
@@ -185,7 +191,7 @@ public class LocalDBService: IDataBaseService
             cancellationToken);
     }
 
-    public async Task<bool> StockExist(int stockId, CancellationToken cancellationToken = default)
+    public async Task<bool> StockExists(int stockId, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
         var count = await RunDbAsync(() =>
@@ -197,18 +203,24 @@ public class LocalDBService: IDataBaseService
     public async Task CreateStock(Stock stock, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!stock.IsValid())
+            throw new ArgumentException("Stock entity is not valid", nameof(stock));
         await RunDbAsync(() => _db.InsertAsync(stock), cancellationToken);
     }
 
     public async Task UpdateStock(Stock stock, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!stock.IsValid())
+            throw new ArgumentException("Stock entity is not valid", nameof(stock));
         await RunDbAsync(() => _db.UpdateAsync(stock), cancellationToken);
     }
 
     public async Task DeleteStock(Stock stock, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (stock.StockId == 0)
+            throw new ArgumentException("Stock entity must have a valid StockId", nameof(stock));
         await RunDbAsync(() => _db.DeleteAsync(stock), cancellationToken);
     }
     #endregion
@@ -252,7 +264,8 @@ public class LocalDBService: IDataBaseService
             cancellationToken);
     }
 
-    public async Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, DateTime from, DateTime to, CurrencyType currency, CancellationToken cancellationToken = default)
+    public async Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, CurrencyType currency,
+        DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
         var currencyCode = currency.ToString();
@@ -267,18 +280,24 @@ public class LocalDBService: IDataBaseService
     public async Task CreateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!stockPrice.IsValid())
+            throw new ArgumentException("StockPrice entity is not valid", nameof(stockPrice));
         await RunDbAsync(() => _db.InsertAsync(stockPrice), cancellationToken);
     }
 
     public async Task UpdateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!stockPrice.IsValid())
+            throw new ArgumentException("StockPrice entity is not valid", nameof(stockPrice));
         await RunDbAsync(() => _db.UpdateAsync(stockPrice), cancellationToken);
     }
 
     public async Task DeleteStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (stockPrice.PriceId == 0)
+            throw new ArgumentException("StockPrice entity must have a valid PriceId", nameof(stockPrice));
         await RunDbAsync(() => _db.DeleteAsync(stockPrice), cancellationToken);
     }
     #endregion
@@ -323,18 +342,24 @@ public class LocalDBService: IDataBaseService
     public async Task CreateOrder(Order order, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!order.IsValid())
+            throw new ArgumentException("Order entity is not valid", nameof(order));
         await RunDbAsync(() => _db.InsertAsync(order), cancellationToken);
     }
 
     public async Task UpdateOrder(Order order, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!order.IsValid())
+            throw new ArgumentException("Order entity is not valid", nameof(order));
         await RunDbAsync(() => _db.UpdateAsync(order), cancellationToken);
     }
 
     public async Task DeleteOrder(Order order, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (order.OrderId == 0)
+            throw new ArgumentException("Order entity must have a valid OrderId", nameof(order));
         await RunDbAsync(() => _db.DeleteAsync(order), cancellationToken);
     }
     #endregion
@@ -366,21 +391,51 @@ public class LocalDBService: IDataBaseService
             cancellationToken);
     }
 
+    public async Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency,
+        DateTime from, DateTime to, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
+        return await RunDbAsync(() =>
+            _db.Table<Transaction>()
+               .Where(t => t.StockId == stockId && t.Timestamp >= from && t.Timestamp <= to && t.Currency == currencyCode )
+               .ToListAsync(),
+            cancellationToken);
+    }
+
+    public async Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
+        return await RunDbAsync(() =>
+            _db.Table<Transaction>()
+               .Where(t => t.StockId == stockId && t.Currency == currencyCode)
+               .OrderByDescending(t => t.Timestamp)
+               .FirstOrDefaultAsync(),
+            cancellationToken);
+    }
+
     public async Task CreateTransaction(Transaction transaction, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!transaction.IsValid())
+            throw new ArgumentException("Transaction entity is not valid", nameof(transaction));
         await RunDbAsync(() => _db.InsertAsync(transaction), cancellationToken);
     }
 
     public async Task UpdateTransaction(Transaction transaction, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!transaction.IsValid())
+            throw new ArgumentException("Transaction entity is not valid", nameof(transaction));
         await RunDbAsync(() => _db.UpdateAsync(transaction), cancellationToken);
     }
 
     public async Task DeleteTransaction(Transaction transaction, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (transaction.TransactionId == 0)
+            throw new ArgumentException("Transaction entity must have a valid TransactionId", nameof(transaction));
         await RunDbAsync(() => _db.DeleteAsync(transaction), cancellationToken);
     }
     #endregion
@@ -425,27 +480,32 @@ public class LocalDBService: IDataBaseService
     public async Task CreatePosition(Position position, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!position.IsValid())
+            throw new ArgumentException("Position entity is not valid", nameof(position));
         await RunDbAsync(() => _db.InsertAsync(position), cancellationToken);
     }
 
     public async Task UpdatePosition(Position position, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!position.IsValid())
+            throw new ArgumentException("Position entity is not valid", nameof(position));
         await RunDbAsync(() => _db.UpdateAsync(position), cancellationToken);
     }
 
     public async Task DeletePosition(Position position, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (position.PositionId == 0)
+            throw new ArgumentException("Position entity must have a valid PositionId", nameof(position));
         await RunDbAsync(() => _db.DeleteAsync(position), cancellationToken);
     }
 
     public async Task UpsertPosition(Position position, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
-
-        // If your PK is set, sqlite-net can replace; otherwise it will insert.
-        // This reduces conditionals and still keeps it simple.
+        if (!position.IsValid())
+            throw new ArgumentException("Position entity is not valid", nameof(position));
         await RunDbAsync(() => _db.InsertOrReplaceAsync(position), cancellationToken);
     }
     #endregion
@@ -491,24 +551,32 @@ public class LocalDBService: IDataBaseService
     public async Task CreateFund(Fund fund, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!fund.IsValid())
+            throw new ArgumentException("Fund entity is not valid", nameof(fund));
         await RunDbAsync(() => _db.InsertAsync(fund), cancellationToken);
     }
 
     public async Task UpdateFund(Fund fund, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!fund.IsValid())
+            throw new ArgumentException("Fund entity is not valid", nameof(fund));
         await RunDbAsync(() => _db.UpdateAsync(fund), cancellationToken);
     }
 
     public async Task DeleteFund(Fund fund, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (fund.FundId == 0)
+            throw new ArgumentException("Fund entity must have a valid FundId", nameof(fund));
         await RunDbAsync(() => _db.DeleteAsync(fund), cancellationToken);
     }
 
     public async Task UpsertFund(Fund fund, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
+        if (!fund.IsValid())
+            throw new ArgumentException("Fund entity is not valid", nameof(fund));
         await RunDbAsync(() => _db.InsertOrReplaceAsync(fund), cancellationToken);
     }
     #endregion
