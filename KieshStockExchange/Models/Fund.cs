@@ -69,6 +69,12 @@ public class Fund : IValidatable
         && ReservedBalance >= 0 && AvailableBalance >= 0 && IsValidCurrency();
 
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
+
+    private bool IsValidBalances() =>
+        TotalBalance >= 0 && ReservedBalance >= 0 && AvailableBalance >= 0;
+
+    private bool IsValidTimestamps() => CreatedAt > DateTime.MinValue &&
+        CreatedAt <= TimeHelper.NowUtc() && UpdatedAt >= CreatedAt;
     #endregion
 
     #region String Representation

@@ -104,10 +104,15 @@ public class Transaction : IValidatable
     #endregion
 
     #region IValidatable Implementation
-    public bool IsValid() => StockId > 0 && BuyerId > 0 && SellerId > 0 && Quantity > 0 &&
-        Price > 0 && BuyOrderId > 0 && SellOrderId > 0 && IsValidCurrency(); 
+    public bool IsValid() => StockId > 0 && Quantity > 0 && Price > 0 && IsValidParticipants() &&
+        BuyOrderId > 0 && SellOrderId > 0 && IsValidCurrency() && IsValidTimestamp();
 
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
+
+    private bool IsValidTimestamp() => Timestamp > DateTime.MinValue && Timestamp <= TimeHelper.NowUtc();
+    
+    private bool IsValidParticipants() => BuyerId != SellerId && BuyerId > 0 && SellerId > 0;
+
     #endregion
 
     #region String Representations

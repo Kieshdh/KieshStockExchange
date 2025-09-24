@@ -19,6 +19,7 @@ public class User : IValidatable
     }
 
     private string _username = string.Empty;
+    [Indexed(Unique = true)]
     [Column("Username")] public string Username { 
         get => _username; 
         set => _username = value.ToLowerInvariant().Trim();
@@ -31,6 +32,7 @@ public class User : IValidatable
     }
 
     private string _email = string.Empty;
+    [Indexed(Unique = true)]
     [Column("Email")] public string Email { 
         get => _email; 
         set => _email = value?.Trim().ToLowerInvariant() ?? string.Empty;
@@ -87,12 +89,9 @@ public class User : IValidatable
         string pattern = @"^[a-zA-Z0-9]{5,20}$";
         return Regex.IsMatch(Username, pattern);
     }
-    
-    public bool IsValidPassword(string password)
-    {
-        // Password must be at least 8 characters long
-        return !string.IsNullOrWhiteSpace(password) && password.Length >= 8;
-    }
+
+    public bool IsValidPassword(string password) => 
+        SecurityHelper.IsValidPassword(password);
     
     public bool IsValidName()
     {

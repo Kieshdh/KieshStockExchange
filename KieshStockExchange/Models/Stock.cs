@@ -19,6 +19,7 @@ public class Stock : IValidatable
     }
 
     private string _symbol = string.Empty;
+    [Indexed(Unique = true)]
     [Column("Symbol")] public string Symbol { 
         get => _symbol;
         set => _symbol = value?.Trim().ToUpperInvariant() ?? string.Empty;
