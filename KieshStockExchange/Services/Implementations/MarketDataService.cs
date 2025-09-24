@@ -42,7 +42,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
     public IReadOnlyCollection<(int, CurrencyType)> Subscribed => 
         _subRefCount.Where(kv => kv.Value > 0).Select(kv => kv.Key).ToList().AsReadOnly();
 
-    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(1000);
     #endregion
 
     #region Internal ring buffer
@@ -161,7 +161,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
     #endregion
 
     #region Build LiveQuote from ticks
-    public async Task OnTick(Transaction tick)
+    public async Task OnTick(Transaction tick, CancellationToken ct = default)
     {
         if (!tick.IsValid())
         {
@@ -173,7 +173,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
         var currency = tick.CurrencyType;
 
         // Update live quote
-        var quote = await GetOrAddQuote(stockId, currency);
+        var quote = await GetOrAddQuote(stockId, currency, ct);
         var utc = TimeHelper.EnsureUtc(tick.Timestamp);
 
         // Keep ring for rolling stats
@@ -322,10 +322,6 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
 
         try
         {
-            // If no price yet, try to build from history
-            if (quote.LastPrice == 0m)
-                await BuildFromHistoryAsync(stockId, currency, ct);
-
             // If still no symbol, fetch stock details
             if (quote.Symbol == "-")
             {
@@ -351,8 +347,9 @@ public partial class MarketDataService : ObservableObject, IMarketDataService
     private async Task<List<Transaction>> GetHistoricalTicksAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
         // Load last day of historical transactions
-        var history = await _db.GetTransactionsByStockIdAndTimeRange( stockId, currency, 
-            DateTime.UtcNow - TimeSpan.FromDays(1), DateTime.UtcNow, ct);
+        var (start, end) = TimeHelper.TodayUtcRange();
+
+        var history = await _db.GetTransactionsByStockIdAndTimeRange(stockId, currency, start, end, ct);
         // If no history, fallback to latest StockPrice as a zero-quantity tick
         if (history.Count == 0)
         {

@@ -38,19 +38,28 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
     private const int MaxMovers = 5;
     private const int SecondsBetweenUpdates = 5;
 
+    public CurrencyType Currency { get; set; } = CurrencyType.USD;
+
     public TrendingService(IDispatcher dispatcher, ILogger<TrendingService> logger, IDataBaseService db, IMarketDataService market)
     {
+        // Dependencies
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _market = market ?? throw new ArgumentNullException(nameof(market));
-        //_moversTimer = new Timer(_ => RecomputeMovers(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2));
 
+        // Read-only wrappers for external consumption
         _topGainersView = new ReadOnlyObservableCollection<LiveQuote>(_topGainers);
         _topLosersView = new ReadOnlyObservableCollection<LiveQuote>(_topLosers);
         _mostActiveView = new ReadOnlyObservableCollection<LiveQuote>(_mostActive);
 
-        _market.QuoteUpdated += (_, __) => _ = RecomputeMoversAsync(); // debounce via timer loop below
+        // React to live quote pushes from the single source of truth
+        _market.QuoteUpdated += (_, __) => _ = RecomputeMoversAsync();
+
+        // Subscribe to all stocks in the specified currency
+        _ = _market.SubscribeAllAsync(Currency);
+
+        // Start the periodic recompute loop
         _ = RunLoopAsync(_cts.Token);
     }
     #endregion

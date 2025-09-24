@@ -12,8 +12,11 @@ public interface IMarketDataService
     // Subscribe / Unsubscribe (keeps quotes in memory; ref-counted)
     Task SubscribeAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
     void Unsubscribe(int stockId, CurrencyType currency);
+    Task SubscribeAllAsync(CurrencyType currency, CancellationToken ct = default);
 
     // History bootstrap + candle stream --------------------------------------
+    Task OnTick(Transaction tick, CancellationToken ct = default);
+
     Task BuildFromHistoryAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
 
     IAsyncEnumerable<Candle> StreamCandlesAsync(int stockId, CurrencyType currency, TimeSpan bucket,
