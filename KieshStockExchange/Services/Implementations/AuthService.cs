@@ -33,6 +33,10 @@ public class AuthService : IAuthService
              t.Result.Any(u => u.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))) 
             return false;
 
+        // Check valid password
+        if (!SecurityHelper.IsValidPassword(password))
+            return false;
+
         // Create user
         var user = new User
         {
@@ -58,14 +62,19 @@ public class AuthService : IAuthService
 
     public async Task LoginAsync(string username, string password)
     {
+        // Check if already logged in
+        if (IsLoggedIn) return;
+        // Basic checks
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password)) 
+            return;
+        // Get the user
         var user = await _db.GetUserByUsername(username);
         if (user == null) 
             return;
-
-        var hash = SecurityHelper.HashPassword(password);
-        if (user.PasswordHash != hash) 
+        // Verify password
+        if (!SecurityHelper.VerifyPassword(password, user.PasswordHash))
             return;
-
+        // Set current user
         CurrentUser = user;
     }
 
