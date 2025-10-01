@@ -24,7 +24,10 @@ KieshStockExchange
 --- OrderBook.cs (For order matching)
 --- OrderResult.cs (Shows result of order operations)
 --- ParsingHelper.cs (For parsing data)
+--- RingBuffer.cs (A buffer for rolling metrics)
 --- SecurityHelper.cs (For hashing passwords)
+--- TimeHelper.cs (For handling UTC times)
+
 
 - Models
 --- AIUser.cs
@@ -60,10 +63,13 @@ KieshStockExchange
 - Services
 --- Implementations
 ----- AuthService.cs
+----- ChartService.cs
+----- ExcelImportService.cs
 ----- LocalDBService.cs 
 ----- OnlineDBService.cs (TODO)
------ ExcelImportService.cs
+----- MarketDataService.cs
 ----- MarketOrderService.cs 
+----- PriceSnapshotService.cs
 ----- PortfolioService.cs (TODO)
 ----- ProfileService.cs (TODO)
 ----- SelectedStockService.cs
@@ -74,14 +80,17 @@ KieshStockExchange
 ----- UserSessionService.cs (TODO)
 --- Interfaces
 ----- IAuthService.cs (Login, registration)
+----- IChartService.cs (Generates chart data)
 ----- IDataBaseService.cs (Local and online DB operations)
 ----- IExcelImportService.cs (Imports Data from Excel files)
 ----- IMarketOrderService.cs (Market operations and order matching)
+----- IMarketDataService.cs (Source of truth for market data)
+----- IPriceSnapshotService.cs (Hourly price snapshots as fallback price data)
 ----- IPortfolioService.cs (Portfolio Overview and history)
 ----- IProfileService.cs (User profile management)
 ----- ISelectedStockService.cs (Holds the currently selected stock)
 ----- ITransactionService.cs (Tansaction history and details)
------ ITrendingService.cs (Trending stocks and market data)`
+----- ITrendingService.cs (Trending stocks)
 ----- IUserOrderService.cs (User-specific order management)
 ----- IUserPortfolioService.cs (User-specific portfolio management)
 ----- IUserSessionService.cs (User session management and authentication)
