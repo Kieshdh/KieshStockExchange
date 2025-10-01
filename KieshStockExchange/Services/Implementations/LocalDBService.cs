@@ -1,6 +1,7 @@
-﻿using KieshStockExchange.Models;
-using KieshStockExchange.Helpers;
+﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 using SQLite;
+using System.Threading;
 
 namespace KieshStockExchange.Services.Implementations;
 
@@ -35,12 +36,6 @@ public class LocalDBService: IDataBaseService
         await InitializeAsync(ct);
         await RunDbAsync(() => _db.InsertAllAsync(items), ct);
     }
-
-    /*public async Task DeleteAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
-    {
-        await InitializeAsync(ct);
-        await RunDbAsync(() => _db.DeleteAllAsync(items), ct);
-    }*/
 
 
     public async Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default) 
@@ -581,6 +576,82 @@ public class LocalDBService: IDataBaseService
     }
     #endregion
 
+    #region Candle operations
+    public async Task<List<Candle>> GetCandlesAsync(CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        return await RunDbAsync(() => _db.Table<Candle>().ToListAsync(), cancellationToken);
+    }
+
+    public async Task<Candle?> GetCandleById(int candleId, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        return await RunDbAsync(() =>
+            _db.Table<Candle>()
+               .Where(c => c.CandleId == candleId)
+               .FirstOrDefaultAsync(),
+            cancellationToken);
+    }
+
+    public async Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
+        return await RunDbAsync(() =>
+            _db.Table<Candle>()
+               .Where(c => c.StockId == stockId && c.Currency == currencyCode)
+               .ToListAsync(),
+            cancellationToken);
+    }
+
+    public async Task<List<Candle>> GetCandlesByStockIdAndTimeRange(int stockId, CurrencyType currency,
+        TimeSpan resolution, DateTime from, DateTime to, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
+        var resolutionSeconds = (int)resolution.TotalSeconds;
+        return await RunDbAsync(() =>
+            _db.Table<Candle>()
+               .Where(c => c.StockId == stockId && c.Currency == currencyCode && c.ResolutionSeconds == resolutionSeconds
+                        && c.OpenTime >= from && c.OpenTime <= to)
+               .OrderByDescending(c => c.OpenTime)
+               .ToListAsync(),
+            cancellationToken);
+    }
+
+    public async Task CreateCandle(Candle candle, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        if (!candle.IsValid())
+            throw new ArgumentException("Candle entity is not valid", nameof(candle));
+        await RunDbAsync(() => _db.InsertAsync(candle), cancellationToken);
+    }
+
+    public async Task UpdateCandle(Candle candle, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        if (!candle.IsValid())
+            throw new ArgumentException("Candle entity is not valid", nameof(candle));
+        await RunDbAsync(() => _db.UpdateAsync(candle), cancellationToken);
+    }
+
+    public async Task DeleteCandle(Candle candle, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        if (candle.CandleId == 0)
+            throw new ArgumentException("Candle entity must have a valid CandleId", nameof(candle));
+        await RunDbAsync(() => _db.DeleteAsync(candle), cancellationToken);
+    }
+
+    public async Task UpsertCandle(Candle candle, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        if (!candle.IsValid())
+            throw new ArgumentException("Candle entity is not valid", nameof(candle));
+        await RunDbAsync(() => _db.InsertOrReplaceAsync(candle), cancellationToken);
+    }
+    #endregion
+
     #region Helper Methods
     private async Task InitializeAsync(CancellationToken ct = default)
     {
@@ -603,6 +674,7 @@ public class LocalDBService: IDataBaseService
             await _db.CreateTableAsync<Transaction>();
             await _db.CreateTableAsync<Position>();
             await _db.CreateTableAsync<Fund>();
+            await _db.CreateTableAsync<Candle>();
 
             _initialized = true;
         }

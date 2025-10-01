@@ -79,4 +79,16 @@ public interface IDataBaseService
     Task UpdateFund(Fund fund, CancellationToken cancellationToken = default);
     Task DeleteFund(Fund fund, CancellationToken cancellationToken = default);
     Task UpsertFund(Fund fund, CancellationToken cancellationToken = default);
+
+    // Candle operations
+    Task<List<Candle>> GetCandlesAsync(CancellationToken cancellationToken = default);
+    Task<Candle?> GetCandleById(int candleId, CancellationToken cancellationToken = default);
+    Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
+    Task<List<Candle>> GetCandlesByStockIdAndTimeRange(int stockId, CurrencyType currency,
+        TimeSpan resolution, DateTime from, DateTime to, CancellationToken cancellationToken = default);
+    Task CreateCandle(Candle candle, CancellationToken cancellationToken = default);
+    Task UpdateCandle(Candle candle, CancellationToken cancellationToken = default);
+    Task DeleteCandle(Candle candle, CancellationToken cancellationToken = default);
+    Task UpsertCandle(Candle candle, CancellationToken cancellationToken = default);
+
 }
