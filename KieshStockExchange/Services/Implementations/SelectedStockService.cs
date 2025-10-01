@@ -6,9 +6,9 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.Implementations;
 
-public partial class SelectedStockService : ObservableObject, ISelectedStockService
+public partial class SelectedStockService : ObservableObject, ISelectedStockService, IDisposable
 {
-    #region Properties & State
+    #region Active selection state
     // Holds active (stock, currency) subscription
     private (int stockId, CurrencyType currency) Key => (StockId ?? 0, Currency);
 
@@ -17,24 +17,31 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     // UI-bound state
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSelectedStock))] 
     private Stock? _selectedStock = null;
-    public bool HasSelectedStock => SelectedStock is not null && StockId.HasValue && SelectedStock.StockId == StockId;
 
-    [ObservableProperty] private int? _stockId = null;
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSelectedStock))] 
+    private int? _stockId = null;
     [ObservableProperty] private string _symbol = string.Empty;
     [ObservableProperty] private string _companyName = string.Empty;
 
-    // Live price info
+    // Convenience property for UI
+    public bool HasSelectedStock => SelectedStock is not null && StockId.HasValue && SelectedStock.StockId == StockId;
+    #endregion
+
+    #region Live price info
     [ObservableProperty, NotifyPropertyChangedFor(nameof(CurrentPriceDisplay))] 
     private decimal _currentPrice = 0m;
     [ObservableProperty, NotifyPropertyChangedFor(nameof(CurrentPriceDisplay))] 
     private CurrencyType _currency = CurrencyType.USD;
-    [ObservableProperty] private DateTimeOffset? _priceUpdatedAt = null;
+    [ObservableProperty] private DateTime? _priceUpdatedAt = null;
     public string CurrentPriceDisplay => CurrencyHelper.Format(CurrentPrice, Currency);
+    #endregion
 
+    #region First selection awaiter
     // Used by callers that need to await the very first selection
     private TaskCompletionSource<Stock> _firstSelectionTcs =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public Task<Stock> WaitForSelectionAsync() => _firstSelectionTcs.Task;
+    public Task<Stock> WaitForSelectionAsync(CancellationToken ct = default) =>
+        _firstSelectionTcs.Task.WaitAsync(ct);
     #endregion
 
     #region Fields & Constructor
@@ -65,7 +72,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         // Validation
         if (stock is null) throw new ArgumentNullException(nameof(stock));
         if (stock.StockId <= 0) throw new ArgumentException("StockId must be positive.", nameof(stock));
-        
+
         // Set new state
         await UnsubscribeAsync(); // Stop previous tracking
         SelectedStock = stock;
@@ -76,6 +83,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         // Prime quote from history and start streaming ticks for (stock, currency)
         await _market.SubscribeAsync(stock.StockId, Currency, ct);
         await _market.BuildFromHistoryAsync(stock.StockId, Currency, ct);
+        _market.StartRandomDisplayTicker(stock.StockId, Currency);
 
         // Grab the current LiveQuote snapshot so UI has immediate data
         Quote = TryGetQuote();
@@ -90,14 +98,30 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     public async Task ChangeCurrencyAsync(CurrencyType currency, CancellationToken ct = default)
     {
-        if (StockId is null) return;
+        if (StockId is null || currency == Currency) return;
+
+        var stockId = StockId.Value;
+        var prevCurrency = Currency;
+        await UnsubscribeAsync();
+
         Currency = currency;
-        await Set(SelectedStock!, ct);
+        await _market.SubscribeAsync(stockId, currency, ct);
+        await _market.BuildFromHistoryAsync(stockId, currency, ct);
+        _market.StartRandomDisplayTicker(stockId, currency);
+
+        Quote = TryGetQuote();
+        await UpdateFromLiveAsync(Quote);
+
+        _logger.LogInformation("SelectedStockService changed currency for {Symbol} #{StockId} from {PrevCurrency} to {NewCurrency}.",
+            Symbol, stockId, prevCurrency, currency);
     }
 
     public void Reset()
     {
+        // Unsubscribe from previous
         _ = UnsubscribeAsync();
+
+        // Clear state
         SelectedStock = null;
         StockId = null;
         Symbol = string.Empty;
@@ -116,26 +140,30 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     #endregion
 
     #region Private helpers
-
     private LiveQuote? TryGetQuote()
         => _market.Quotes.TryGetValue(Key, out var q) ? q : null;
 
     private async Task UpdateFromLiveAsync(LiveQuote? q)
     {
+        decimal last = 0m;
+        DateTime updated;
+        
         if (q is null)
         {
-            // fall back to an explicit read (ensures we have a number even if history was empty)
-            if (StockId is int id) CurrentPrice = await _market.GetLastPriceAsync(id, Currency);
-            PriceUpdatedAt = DateTimeOffset.UtcNow;
-            return;
+            // Fall back to an explicit read (ensures we have a number even if history was empty)
+            if (StockId is int id)
+                last = await _market.GetLastPriceAsync(id, Currency);
+            updated = TimeHelper.NowUtc();
+        } else {
+            last = q.LastPrice;
+            updated = q.LastUpdated;
         }
 
         // Push UI updates on main thread for binding safety
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            CurrentPrice = q.LastPrice;
-            // Optionally copy more live fields here (Open/High/Low/ChangePct/Volume)
-            PriceUpdatedAt = DateTimeOffset.UtcNow;
+            CurrentPrice = last;
+            PriceUpdatedAt = updated;
         });
     }
 
@@ -151,9 +179,10 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     private async Task UnsubscribeAsync()
     {
-        if (Key.stockId == 0) return;
-        try { _market.Unsubscribe(Key.stockId, Key.currency); }
-        catch (Exception ex) { _logger.LogWarning(ex, "Unsubscribe failed for {StockId}/{Currency}", Key.stockId, Key.currency); }
+        var key = (StockId ?? 0, Currency);
+        if (key.Item1 == 0) return;
+        try { _market.Unsubscribe(key.Item1, key.Item2); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Unsubscribe failed for {StockId}/{Currency}", key.Item1, key.Item2); }
         finally { Quote = null; }
         await Task.CompletedTask;
     }

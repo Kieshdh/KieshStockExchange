@@ -25,9 +25,9 @@ public interface ISelectedStockService : INotifyPropertyChanged
     decimal CurrentPrice { get; }
     string CurrentPriceDisplay { get; }
 
-    DateTimeOffset? PriceUpdatedAt { get; }
+    DateTime? PriceUpdatedAt { get; }
 
-    Task<Stock> WaitForSelectionAsync();
+    Task<Stock> WaitForSelectionAsync(CancellationToken ct = default);
 
     // ---- Methods ------------------------------------------------
 

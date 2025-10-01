@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace KieshStockExchange.Services.Implementations;
 
-public sealed partial class TrendingService : ObservableObject, ITrendingService
+public sealed partial class TrendingService : ObservableObject, ITrendingService, IDisposable
 {
     #region Movers Lists
     private readonly ObservableCollection<LiveQuote> _topGainers = new();
