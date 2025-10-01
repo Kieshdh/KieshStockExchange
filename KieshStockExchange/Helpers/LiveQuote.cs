@@ -1,8 +1,4 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
-using KieshStockExchange.Helpers;
-using KieshStockExchange.Services;
-using System;
-using static SQLite.TableMapping;
 
 namespace KieshStockExchange.Helpers;
 
@@ -16,7 +12,7 @@ public sealed partial class LiveQuote : ObservableObject
 
     // Timestamps
     [ObservableProperty] private DateTime _lastUpdated = DateTime.MinValue;
-    [ObservableProperty] private DateTime _sessionStartUtc = DateTime.UtcNow.Date;
+    [ObservableProperty] private DateTime _sessionStartUtc = TimeHelper.UtcStartOfToday();
 
     // Live stats
     [ObservableProperty] private decimal _lastPrice = 0m;       // Latest Price
@@ -39,41 +35,62 @@ public sealed partial class LiveQuote : ObservableObject
         Currency = currency;
     }
 
-
-    public void ApplyTick(decimal price, int shares, DateTime utcTime)
+    public bool ApplyTick(decimal price, int shares, DateTime utcTime)
     {
-        if (price <= 0m) 
-            return; // ignore invalid prices
+        if (price <= 0m || shares < 0) 
+            return false; // ignore invalid prices or share counts
 
-        // Live stats
-        if (utcTime > LastUpdated)
-        {
-            LastPrice = price;
-            LastUpdated = utcTime;
-        }
-
-        // Session stats
+        // New session?
         if (utcTime.Date > SessionStartUtc.Date)
         {
-            // Start of a new session
-            SessionStartUtc = utcTime.Date;
-            Open = price;
-            High = price;
-            Low = price;
+            // New session starts at UTC midnight
+            SessionStartUtc = TimeHelper.UtcStartOfDay(utcTime);
+            // Reset stats
+            Open = High = Low = price;
             Volume = 0;
         }
-        else if (utcTime.Date == SessionStartUtc.Date)
-        {
-            // Continuing the same session
-            if (Open <= 0m) Open = price;
-            if (High == 0m || price > High) High = price;
-            if (Low == 0m || price < Low) Low = price;
-        }
-        else { return; } // ignore out-of-order ticks
-        ChangePct = Open > 0 ? (LastPrice - Open) / Open * 100m : 0m;
+        else if (utcTime.Date < SessionStartUtc.Date)
+            return false; // Ignore out-of-order ticks from previous sessions
+
+        // Live stats
+        if (Open <= 0m) Open = price;
+        if (High == 0m || price > High) High = price;
+        if (Low == 0m || price < Low) Low = price;
         Volume += shares;
 
+        // Update only if the tick is newer or equal to the last update
+        if (utcTime >= LastUpdated)
+        {
+            LastUpdated = utcTime;
+            LastPrice = price;
+        }
+
+        ChangePct = Open > 0 ? (LastPrice - Open) / Open * 100m : 0m;
+
         UpdatePriceDisplays();
+        return true;
+    }
+
+    public bool ApplySnapshot(decimal lastPrice, int sessionVolume,
+        decimal open, decimal high, decimal low, DateTime lastUtc)
+    {
+        if (lastPrice <= 0m) return false; // Ignore invalid prices
+        if (sessionVolume < 0) return false; // Ignore invalid share counts
+        if (open <= 0m || high <= 0m || low <= 0m) return false; // Ignore invalid prices
+        if (lastUtc == DateTime.MinValue) return false; // Ignore invalid timestamps
+
+        // Apply the snapshot
+        SessionStartUtc = TimeHelper.UtcStartOfDay(lastUtc);
+        Open = open;
+        High = high;
+        Low = low;
+        LastUpdated = lastUtc;
+        LastPrice = lastPrice;
+        Volume = Math.Max(0, sessionVolume);
+        ChangePct = Open > 0 ? (LastPrice - Open) / Open * 100m : 0m;
+
+        UpdatePriceDisplays();
+        return true;
     }
 
     private void UpdatePriceDisplays()
@@ -85,5 +102,5 @@ public sealed partial class LiveQuote : ObservableObject
         ChangePctDisplay = ChangePct >= 0 ? $"+{ChangePct:F2}%" : $"{ChangePct:F2}%";
     }
 
-    public override string ToString() => $"LiveQuote: ({Symbol}, {Currency})";
+    public override string ToString() => $"LiveQuote: #{StockId} {Symbol} ({Currency})";
 }

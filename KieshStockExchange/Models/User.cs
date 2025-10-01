@@ -70,7 +70,8 @@ public class User : IValidatable
     #endregion
 
     #region IValidatable Implementation
-    public bool IsValid() => IsValidEmail() && IsValidUsername() && IsValidBirthdate() && IsValidName();
+    public bool IsValid() => IsValidEmail() && IsValidUsername() 
+        && IsValidBirthdate() && IsValidName() && IsValidPassword(PasswordHash);
     
     public bool IsValidEmail()
     {

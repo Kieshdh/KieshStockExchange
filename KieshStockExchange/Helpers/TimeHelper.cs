@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
+﻿
 namespace KieshStockExchange.Helpers;
 
 public static class TimeHelper
@@ -34,22 +29,35 @@ public static class TimeHelper
         return new DateTime(dt.Year, dt.Month, dt.Day, 0, 0, 0, DateTimeKind.Utc);
     }
 
-    /// <summary> Returns 23:59:59 UTC of the same day as 'dt'. </summary>
-    public static DateTime UtcEndOfDay(DateTime dt)
-    {
-        dt = EnsureUtc(dt);
-        return UtcStartOfDay(dt).AddDays(1).AddSeconds(-1);
-    }
+    /// <summary> Returns 00:00:00 UTC of the next day as 'dt'. </summary>
+    public static DateTime UtcEndOfDay(DateTime dt) =>
+        UtcStartOfDay(dt).AddDays(1);
+
+    /// <summary> Returns 00:00:00 UTC of today (the day containing NowUtc()). </summary>
+    public static DateTime UtcStartOfToday() =>
+        UtcStartOfDay(NowUtc());
+
+    /// <summary> Returns 00:00:00 UTC of tomorrow (the day after the day containing NowUtc()). </summary>
+    public static DateTime UtcEndOfToday() =>
+        UtcStartOfToday().AddDays(1);
     #endregion
 
     #region Day Ranges
-    /// <summary> Returns [startOfTodayUtc, nowUtc) for the current day. 
-    /// start = today's 00:00 UTC, end = NowUtc(). </summary>
-    public static (DateTime StartUtc, DateTime EndUtc) TodayUtcRange() => DayUtcRange(NowUtc());
 
     /// <summary> Returns the full day covering 'dt' as [start, end).  </summary>
-    public static (DateTime StartUtc, DateTime EndUtc) DayUtcRange(DateTime dt) =>
-        (UtcStartOfDay(dt), UtcEndOfDay(dt));
+    public static (DateTime StartUtc, DateTime EndUtc) DayUtcRange(DateTime dt)
+    {
+        var start = UtcStartOfDay(dt);
+        return (start, start.AddDays(1));
+    }
+
+    /// <summary> Returns [startOfTodayUtc, nowUtc) for the current day. 
+    /// start = today's 00:00 UTC, end = NowUtc(). </summary>
+    public static (DateTime StartUtc, DateTime EndUtc) TodayUtcRange()
+    {
+        var start = UtcStartOfToday();
+        return (start, NowUtc());
+    }
     #endregion
 
     #region Time Buckets
@@ -57,6 +65,8 @@ public static class TimeHelper
     /// Example: floor(12:03:41, 1m) = 12:03:00. </summary>
     public static DateTime FloorToBucketUtc(DateTime dt, TimeSpan bucket)
     {
+        if (bucket <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(bucket), "Bucket must be positive.");
         dt = EnsureUtc(dt);
         var ticks = (dt.Ticks / bucket.Ticks) * bucket.Ticks;
         return new DateTime(ticks, DateTimeKind.Utc);
@@ -69,7 +79,7 @@ public static class TimeHelper
     {
         dt = EnsureUtc(dt);
         var floor = FloorToBucketUtc(dt, bucket);
-        return floor == dt ? dt.Add(bucket) : floor.Add(bucket);
+        return floor.Add(bucket);
     }
 
     /// <summary> Returns true if dt ∈ [startInclusive, endExclusive).
