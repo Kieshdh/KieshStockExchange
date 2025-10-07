@@ -3,29 +3,28 @@ using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
+public enum CandleResolution : int
+{
+    None = 0,
+    Default = 300, // 5 minutes
+    OneSecond = 1,
+    FiveSeconds = 5,
+    FifteenSeconds = 15,
+    OneMinute = 60,
+    FiveMinutes = 300,
+    FifteenMinutes = 900,
+    ThirtyMinutes = 1800,
+    OneHour = 3600,
+    FourHours = 14400,
+    OneDay = 86400,
+    OneWeek = 604800
+}
+
 [Table("Candles")]
 public class Candle : IValidatable
 {
-    #region Constants
-    public static class Resolutions
-    {
-        public const int Default = OneMinute;
-        public const int OneSecond = 1;
-        public const int FiveSeconds = 5;
-        public const int FifteenSeconds = 15;
-        public const int OneMinute = 60;
-        public const int FiveMinutes = 300;
-        public const int FifteenMinutes = 900;
-        public const int ThirtyMinutes = 1800;
-        public const int OneHour = 3600;
-        public const int FourHours = 14400;
-        public const int OneDay = 86400;
-        public const int OneWeek = 604800;
-    }
-    #endregion
-
     #region Properties
-    // Id, StockId, Currency, ResolutionSeconds, OpenTime uniquely identify a candle
+    // Id, StockId, Currency
     private int _candleId = 0;
     [PrimaryKey, AutoIncrement]
     [Column("CandleId")] public int CandleId {
@@ -54,19 +53,28 @@ public class Candle : IValidatable
         set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
+    // Bucket resolution
+    [Ignore] public CandleResolution Resolution { get; private set; } = CandleResolution.None;
     [Ignore] public TimeSpan Bucket { get; private set; } = TimeSpan.Zero;
     [Indexed(Name = "IX_Candle_Key", Order = 3, Unique = true)]
-    [Column("ResolutionSeconds") ] public int ResolutionSeconds
+    [Column("ResolutionSeconds") ] public int BucketSeconds
     {
-        get => (int)Bucket.TotalSeconds;
+        get => (int)Resolution;
         set {
+            // Validate
             if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
-            if (Bucket > TimeSpan.Zero && (int)Bucket.TotalSeconds != value)
+            // Immutable once set
+            if (Resolution != CandleResolution.None)
                 throw new InvalidOperationException("ResolutionSeconds is immutable once set.");
+            // Check if valid resolution
+            if (!TryFromSeconds(value, out var res))
+                throw new ArgumentOutOfRangeException(nameof(value), "Unsupported resolution.");
+            Resolution = res;
             Bucket = TimeSpan.FromSeconds(value);
         }
     }
 
+    // Open time aligned to bucket
     private DateTime _openTime = TimeHelper.NowUtc();
     [Indexed(Name = "IX_Candle_Key", Order = 4, Unique = true)]
     [Column("OpenTime")] public DateTime OpenTime
@@ -76,7 +84,7 @@ public class Candle : IValidatable
     }
 
     // OHLC values, Volume and TradeCount
-    private decimal _open = 0;
+    private decimal _open = 0m;
     [Column("Open")] public decimal Open {
         get => _open;
         set {
@@ -85,7 +93,7 @@ public class Candle : IValidatable
         }
     }
 
-    private decimal _high = 0;
+    private decimal _high = 0m;
     [Column("High")] public decimal High {
         get => _high;
         set {
@@ -94,7 +102,7 @@ public class Candle : IValidatable
         }
     }
 
-    private decimal _low = 0;
+    private decimal _low = 0m;
     [Column("Low")] public decimal Low {
         get => _low;
         set {
@@ -103,7 +111,7 @@ public class Candle : IValidatable
         }
     }
 
-    private decimal _close = 0;
+    private decimal _close = 0m;
     [Column("Close")] public decimal Close {
         get => _close;
         set {
@@ -129,43 +137,59 @@ public class Candle : IValidatable
             _tradeCount = value;
         }
     }
+
+    private int? _minTransactionId = null;
+    [Column("MinTransactionId")] public int? MinTransactionId {
+        get => _minTransactionId;
+        set {
+            if (!value.HasValue) return;
+            if (value.Value <= 0) throw new ArgumentException("MinTransactionId must be positive.");
+            if (!_minTransactionId.HasValue || value < _minTransactionId)
+                _minTransactionId = value.Value;
+        }
+    }
+
+    private int? _maxTransactionId = null;
+    [Column("MaxTransactionId")] public int? MaxTransactionId {
+        get => _maxTransactionId;
+        set {
+            if (!value.HasValue) return;
+            if (value.Value <= 0) throw new ArgumentException("MaxTransactionId must be positive.");
+            if (!_maxTransactionId.HasValue || value > _maxTransactionId)
+                _maxTransactionId = value.Value;
+        }
+    }
     #endregion
 
     #region IValidatable Implementation
-    public bool IsValid() => StockId > 0 && IsValidCurrency() && IsValidResolution() &&
+    public bool IsValid() => StockId > 0 && IsValidCurrency() && Resolution != CandleResolution.None &&
         IsValidTimestamp() && IsValidPrice() && IsValidVolume();
 
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
-    private bool IsValidResolution() => ResolutionSeconds is (
-        Resolutions.OneSecond or Resolutions.FiveSeconds or Resolutions.FifteenSeconds
-        or Resolutions.OneMinute or Resolutions.FiveMinutes or Resolutions.FifteenMinutes
-        or Resolutions.ThirtyMinutes or Resolutions.OneHour or Resolutions.FourHours
-        or Resolutions.OneDay or Resolutions.OneWeek
-    );
-
-    private bool IsValidTimestamp() => ResolutionSeconds > 0 && OpenTime > DateTime.MinValue && 
+    private bool IsValidTimestamp() => BucketSeconds > 0 && OpenTime > DateTime.MinValue && 
         OpenTime <= TimeHelper.NowUtc() && TimeHelper.FloorToBucketUtc(OpenTime, Bucket) == OpenTime;
 
     private bool IsValidPrice() => Open > 0m && High > 0m && Low > 0m && Close > 0m && 
         Low <= High && Open >= Low && Open <= High && Close >= Low && Close <= High;
 
     private bool IsValidVolume() => Volume >= 0 && TradeCount >= 0 && Volume >= TradeCount;
+
     #endregion
 
     #region String Representations
     public override string ToString() =>
-        $"Candle #{CandleId}: StockId #{StockId} {Currency} {ResolutionString()} @ {OpenTime:O} ";
+        $"Candle #{CandleId}: StockId #{StockId} {Currency} {BucketString()} @ {OpenTime:O} ";
 
-    public string ResolutionString()
+    public string BucketString()
     {
-        if (ResolutionSeconds < 60)
-            return $"{ResolutionSeconds}s";
-        if (ResolutionSeconds < 3600)
-            return $"{ResolutionSeconds / 60}m";
-        if (ResolutionSeconds < 86400)
-            return $"{ResolutionSeconds / 3600}h";
-        return $"{ResolutionSeconds / 86400}d";
+        if (BucketSeconds < 60)
+            return $"{BucketSeconds}s";
+        if (BucketMinutes < 60)
+            return $"{BucketMinutes}m";
+        if (BucketHours < 24)
+            return $"{BucketHours}h";
+        return $"{BucketDays}d";
     }
 
     [Ignore] public string Summary =>
@@ -183,7 +207,9 @@ public class Candle : IValidatable
     #region Helper Variables
     // Time calculations
     [Ignore] public DateTime CloseTime => OpenTime.Add(Bucket);
-    [Ignore] public int ResolutionMinutes => ResolutionSeconds / 60;
+    [Ignore] public int BucketMinutes => BucketSeconds / 60;
+    [Ignore] public int BucketHours => BucketMinutes / 60;
+    [Ignore] public int BucketDays => BucketHours / 24;
 
     // Bool states
     [Ignore] public bool IsComplete => CloseTime <= TimeHelper.NowUtc();
@@ -198,27 +224,75 @@ public class Candle : IValidatable
 
     // Price change calculations
     [Ignore] public decimal PriceChange => Close - Open;
-    [Ignore] public decimal PriceChangeRatio => Open == 0m ? 0m : (Close - Open) / Open;
+    [Ignore] public decimal PriceChangeRatio => Open == 0m ? 0m : PriceChange / Open;
     [Ignore] public decimal PriceChangePercent => PriceChangeRatio * 100m;
     #endregion
 
     #region Helper Methods
-    public void ApplyTrade(decimal price, long quantity)
+    public void ApplyTrade(Transaction tick)
     {
-        if (price <= 0m) throw new ArgumentException("Trade price must be positive.", nameof(price));
-        if (quantity <= 0) throw new ArgumentException("Trade volume must be positive.", nameof(quantity));
-        //if (IsComplete) throw new InvalidOperationException("Cannot apply trade to a completed candle.");
+        if (!tick.IsValid()) 
+            throw new ArgumentException("Invalid tick.");
+        if (tick.StockId != StockId)
+            throw new ArgumentException("Tick stock does not match candle stock.");
+        if (tick.Currency != Currency)
+            throw new ArgumentException("Tick currency does not match candle currency.");
+        if (tick.Timestamp < OpenTime || tick.Timestamp >= CloseTime)
+            throw new ArgumentException("Tick time is outside candle time range.");
+        NoteTransactionId(tick.TransactionId);
+
         // OHLC update
+        var price = tick.Price;
         if (IsNew) Open = price;
         if (price > High || IsNew) High = price;
         if (price < Low || IsNew) Low = price;
         Close = price;
+
         // Update volume and trade count
-        Volume += quantity;
+        Volume += tick.Quantity; ;
         TradeCount += 1;
 
         if (!IsValid())
             throw new InvalidOperationException("Candle is not valid after applying trade.");
     }
+
+    public void NoteTransactionId(int transactionId)
+    {
+        if (transactionId <= 0) throw new ArgumentException("Invalid transactionId.");
+        if (!MinTransactionId.HasValue || transactionId < MinTransactionId.Value)
+            MinTransactionId = transactionId;
+        if (!MaxTransactionId.HasValue || transactionId > MaxTransactionId.Value)
+            MaxTransactionId = transactionId;
+    }
+
+    public Candle Clone() => new Candle
+    {
+        StockId = this.StockId, Currency = this.Currency,
+        BucketSeconds = this.BucketSeconds, OpenTime = this.OpenTime,
+        Open = this.Open, High = this.High, Low = this.Low, Close = this.Close,
+        Volume = this.Volume, TradeCount = this.TradeCount,
+        MinTransactionId = this.MinTransactionId, MaxTransactionId = this.MaxTransactionId,
+    };
+
+    public Candle CloneWithId()
+    {
+        var c = Clone();
+        c.CandleId = this.CandleId;
+        return c;
+    }
+
+    public static bool TryFromSeconds(int seconds, out CandleResolution resolution)
+    {
+        if (Enum.IsDefined(typeof(CandleResolution), seconds))
+        {
+            resolution = (CandleResolution)seconds;
+            return true;
+        }
+        resolution = CandleResolution.None;
+        return false;
+    }
+
+    public static bool TryFromTimeSpan(TimeSpan span, out CandleResolution resolution) =>
+        TryFromSeconds((int)span.TotalSeconds, out resolution);
     #endregion
 }

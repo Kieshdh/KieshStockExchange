@@ -46,6 +46,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IUserSessionService, UserSessionService>();
         builder.Services.AddSingleton<ITrendingService, TrendingService>();
         builder.Services.AddSingleton<IPriceSnapshotService, PriceSnapshotService>();
+        builder.Services.AddSingleton<ICandleService, CandleService>();
         // Viewmodels
         // - User
         builder.Services.AddTransient<RegisterViewModel>();

@@ -19,6 +19,8 @@ KieshStockExchange
 --- launchSettings.json
 
 - Helpers
+--- CandleAggregator.cs (Helps aggregate candle data)
+--- CandleComparer.cs (For comparing candles)
 --- CurrencyHelper.cs (Formats currency values)
 --- LiveQuote.cs (For ViewModel binding of a stock)
 --- OrderBook.cs (For order matching)
@@ -27,7 +29,6 @@ KieshStockExchange
 --- RingBuffer.cs (A buffer for rolling metrics)
 --- SecurityHelper.cs (For hashing passwords)
 --- TimeHelper.cs (For handling UTC times)
-
 
 - Models
 --- AIUser.cs
@@ -63,7 +64,7 @@ KieshStockExchange
 - Services
 --- Implementations
 ----- AuthService.cs
------ ChartService.cs
+----- CandleService.cs
 ----- ExcelImportService.cs
 ----- LocalDBService.cs 
 ----- OnlineDBService.cs (TODO)
@@ -80,7 +81,7 @@ KieshStockExchange
 ----- UserSessionService.cs (TODO)
 --- Interfaces
 ----- IAuthService.cs (Login, registration)
------ IChartService.cs (Generates chart data)
+----- ICandleService.cs (Candle data for charts)
 ----- IDataBaseService.cs (Local and online DB operations)
 ----- IExcelImportService.cs (Imports Data from Excel files)
 ----- IMarketOrderService.cs (Market operations and order matching)
