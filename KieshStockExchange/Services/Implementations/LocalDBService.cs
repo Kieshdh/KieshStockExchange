@@ -259,6 +259,18 @@ public class LocalDBService: IDataBaseService
             cancellationToken);
     }
 
+    public async Task<StockPrice?> GetLatestStockPriceBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
+        return await RunDbAsync(() =>
+            _db.Table<StockPrice>()
+               .Where(sp => sp.StockId == stockId && sp.Currency == currencyCode && sp.Timestamp <= time)
+               .OrderByDescending(sp => sp.Timestamp)
+               .FirstOrDefaultAsync(),
+            cancellationToken);
+    }
+
     public async Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, CurrencyType currency,
         DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {
@@ -405,6 +417,19 @@ public class LocalDBService: IDataBaseService
         return await RunDbAsync(() =>
             _db.Table<Transaction>()
                .Where(t => t.StockId == stockId && t.Currency == currencyCode)
+               .OrderByDescending(t => t.Timestamp)
+               .FirstOrDefaultAsync(),
+            cancellationToken);
+    }
+
+    public async Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, 
+        DateTime time, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
+        return await RunDbAsync(() =>
+            _db.Table<Transaction>()
+               .Where(t => t.StockId == stockId && t.Currency == currencyCode && t.Timestamp <= time)
                .OrderByDescending(t => t.Timestamp)
                .FirstOrDefaultAsync(),
             cancellationToken);
@@ -612,7 +637,7 @@ public class LocalDBService: IDataBaseService
         var resolutionSeconds = (int)resolution.TotalSeconds;
         return await RunDbAsync(() =>
             _db.Table<Candle>()
-               .Where(c => c.StockId == stockId && c.Currency == currencyCode && c.ResolutionSeconds == resolutionSeconds
+               .Where(c => c.StockId == stockId && c.Currency == currencyCode && c.BucketSeconds == resolutionSeconds
                         && c.OpenTime >= from && c.OpenTime <= to)
                .OrderByDescending(c => c.OpenTime)
                .ToListAsync(),

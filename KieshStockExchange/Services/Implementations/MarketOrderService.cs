@@ -580,7 +580,7 @@ public class MarketOrderService : IMarketOrderService
         finally { gate.Release(); }
     }
 
-    public async Task<FixReport> FixBookAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
+    public async Task<BookFixReport> FixBookAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
         if (!IsAdmin)
             throw new UnauthorizedAccessException("Only admins may fix order books.");

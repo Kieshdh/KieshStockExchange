@@ -132,14 +132,14 @@ public sealed class OrderBook
     /// Fixes all detected inconsistencies in the order book and index. 
     /// Sends back a report of what was fixed/removed.
     /// </summary>
-    public FixReport FixAll()
+    public BookFixReport FixAll()
     {
         lock (_gate)
         {
             var buys = FixSide(_buyBook, isBuySide: true);
             var sells = FixSide(_sellBook, isBuySide: false);
 
-            return new FixReport(
+            return new BookFixReport(
                 RemovedEmptyPriceLevelsBuys: buys.removedEmptyLevels,
                 RemovedEmptyPriceLevelsSells: sells.removedEmptyLevels,
                 RemovedOrphanedOrdersBuys: buys.removedOrphans,
@@ -447,16 +447,11 @@ public sealed record BookSnapshot
     public List<PriceLevel> Buys { get; init; } = new();
     public List<PriceLevel> Sells { get; init; } = new();
 }
-public sealed record FixReport(
-    int RemovedEmptyPriceLevelsBuys,
-    int RemovedEmptyPriceLevelsSells,
-    int RemovedOrphanedOrdersBuys,
-    int RemovedOrphanedOrdersSells,
-    int RemovedInvalidOrdersBuys,
-    int RemovedInvalidOrdersSells,
-    int RemovedNonOpenLimitBuys,
-    int RemovedNonOpenLimitSells,
-    int FixedIndexMismatchesBuys,
-    int FixedIndexMismatchesSells
+public sealed record BookFixReport(
+    int RemovedEmptyPriceLevelsBuys, int RemovedEmptyPriceLevelsSells,
+    int RemovedOrphanedOrdersBuys, int RemovedOrphanedOrdersSells,
+    int RemovedInvalidOrdersBuys, int RemovedInvalidOrdersSells,
+    int RemovedNonOpenLimitBuys, int RemovedNonOpenLimitSells,
+    int FixedIndexMismatchesBuys, int FixedIndexMismatchesSells
 );
 

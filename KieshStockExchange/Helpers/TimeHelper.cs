@@ -72,6 +72,10 @@ public static class TimeHelper
         return new DateTime(ticks, DateTimeKind.Utc);
     }
 
+    /// <summary> Floors NowUtc() to the start of a fixed bucket </summary>
+    public static DateTime FloorNowToBucketUtc(TimeSpan bucket) =>
+        FloorToBucketUtc(NowUtc(), bucket);
+
     /// <summary> The next bucket boundary strictly after 'dt'.
     /// If 'dt' is already on a boundary, returns boundary + 1 bucket.
     /// </summary>
@@ -81,6 +85,10 @@ public static class TimeHelper
         var floor = FloorToBucketUtc(dt, bucket);
         return floor.Add(bucket);
     }
+
+    /// <summary> The next bucket boundary strictly after NowUtc(). </summary>
+    public static DateTime NextNowBucketBoundaryUtc(TimeSpan bucket) =>
+        NextBucketBoundaryUtc(NowUtc(), bucket);
 
     /// <summary> Returns true if dt ∈ [startInclusive, endExclusive).
     /// Ends are exclusive to avoid double-counting boundaries. </summary>

@@ -23,10 +23,6 @@ public interface IMarketDataService
     /// <summary> Build the LiveQuote state from historical ticks stored in the database. </summary>
     Task BuildFromHistoryAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
 
-    /// <summary> Stream candles (OHLC) for the given stock and currency, aggregated into the specified time bucket. </summary>
-    IAsyncEnumerable<Candle> StreamCandlesAsync(int stockId, CurrencyType currency, TimeSpan bucket,
-                                                bool fillGaps = true, CancellationToken ct = default);
-
     /// <summary> Change the duration for which ticks are stored in the ring buffer. </summary>
     void ChangeStoreDuration(RingBufferDuration duration);
 

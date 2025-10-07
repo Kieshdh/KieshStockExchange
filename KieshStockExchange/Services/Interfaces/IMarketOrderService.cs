@@ -53,7 +53,7 @@ public interface IMarketOrderService
     /// <summary>
     /// Fixes any issues found in the order book for the given stock and currency.
     /// </summary>
-    public Task<FixReport> FixBookAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
+    public Task<BookFixReport> FixBookAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
 
     /// <summary>
     /// Rebuilds the index for the order book of the given stock and currency.

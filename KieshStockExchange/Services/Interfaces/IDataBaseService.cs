@@ -36,6 +36,7 @@ public interface IDataBaseService
     Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken cancellationToken = default);
     Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken cancellationToken = default);
     Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
+    Task<StockPrice?> GetLatestStockPriceBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken cancellationToken = default);
     Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken cancellationToken = default);
     Task CreateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default);
     Task UpdateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default);
@@ -56,6 +57,7 @@ public interface IDataBaseService
     Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken cancellationToken = default);
     Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken cancellationToken = default);
     Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
+    Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken cancellationToken = default);
     Task CreateTransaction(Transaction transaction, CancellationToken cancellationToken = default);
     Task UpdateTransaction(Transaction transaction, CancellationToken cancellationToken = default);
     Task DeleteTransaction(Transaction transaction, CancellationToken cancellationToken = default);

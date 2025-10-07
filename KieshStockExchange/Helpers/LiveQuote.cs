@@ -81,11 +81,8 @@ public sealed partial class LiveQuote : ObservableObject
 
         // Apply the snapshot
         SessionStartUtc = TimeHelper.UtcStartOfDay(lastUtc);
-        Open = open;
-        High = high;
-        Low = low;
-        LastUpdated = lastUtc;
-        LastPrice = lastPrice;
+        Open = open; High = high; Low = low;
+        LastUpdated = lastUtc; LastPrice = lastPrice;
         Volume = Math.Max(0, sessionVolume);
         ChangePct = Open > 0 ? (LastPrice - Open) / Open * 100m : 0m;
 
