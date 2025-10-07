@@ -7,37 +7,60 @@ namespace KieshStockExchange.Models;
 public class Fund : IValidatable
 {
     #region Properties
+
+    private int _fundId = 0;
     [PrimaryKey, AutoIncrement]
-    [Column("FundId")] public int FundId { get; set; }
+    [Column("FundId")] public int FundId 
+    { 
+        get => _fundId; 
+        set {
+            if (_fundId != 0) throw new InvalidOperationException("FundId is immutable once set.");
+            _fundId = value < 0 ? 0 : value;
+        }
+    }
 
-    [Column("UserId")] public int UserId { get; set; }
+    private int _userId = 0;
+    [Indexed(Name = "IX_Funds_User_Currency", Order = 1)]
+    [Column("UserId")] public int UserId { 
+        get => _userId; 
+        set {
+            if (_userId != 0) throw new InvalidOperationException("UserId is immutable once set.");
+            _userId = value;
+        }
+    }
 
-    [Column("TotalBalance")] public decimal TotalBalance { get; set; }
-    
-    [Column("ReservedBalance")] public decimal ReservedBalance { get; set; }
+    private decimal _totalBalance = 0;
+    [Column("TotalBalance")] public decimal TotalBalance { 
+        get => _totalBalance; 
+        set => _totalBalance = value; 
+    }
+
+    private decimal _reservedBalance = 0;
+    [Column("ReservedBalance")] public decimal ReservedBalance { 
+        get => _reservedBalance; 
+        set => _reservedBalance = value;
+    }
 
     [Ignore] public decimal AvailableBalance => TotalBalance - ReservedBalance;
 
-    [Ignore] public CurrencyType CurrencyType { get; set; }
+    [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
+    [Indexed(Name = "IX_Funds_User_Currency", Order = 2, Unique = true)]
     [Column("Currency")] public string Currency
     {
         get => CurrencyType.ToString();
         set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
-    [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
-
-    [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; }
-    #endregion
-
-    #region Constructor
-    public Fund()
-    {
-        CreatedAt = DateTime.UtcNow;
-        UpdatedAt = DateTime.UtcNow;
-        TotalBalance = 0;
-        ReservedBalance = 0;
-        CurrencyType = CurrencyType.USD; // Default currency
+    private DateTime _createdAt = TimeHelper.NowUtc();
+    [Column("CreatedAt")] public DateTime CreatedAt { 
+        get => _createdAt; 
+        set => _createdAt = TimeHelper.EnsureUtc(value);
+    }
+    
+    private DateTime _updatedAt = TimeHelper.NowUtc();
+    [Column("UpdatedAt")] public DateTime UpdatedAt {
+        get => _updatedAt;
+        set => _updatedAt = TimeHelper.EnsureUtc(value);
     }
     #endregion
 
@@ -46,6 +69,12 @@ public class Fund : IValidatable
         && ReservedBalance >= 0 && AvailableBalance >= 0 && IsValidCurrency();
 
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
+
+    private bool IsValidBalances() =>
+        TotalBalance >= 0 && ReservedBalance >= 0 && AvailableBalance >= 0;
+
+    private bool IsValidTimestamps() => CreatedAt > DateTime.MinValue &&
+        CreatedAt <= TimeHelper.NowUtc() && UpdatedAt >= CreatedAt;
     #endregion
 
     #region String Representation
@@ -68,28 +97,42 @@ public class Fund : IValidatable
         if (amount <= 0)
             throw new ArgumentException("Amount must be positive.");
         TotalBalance += amount;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
+    
     public void WithdrawFunds(decimal amount)
     {
         if (amount <= 0 || amount > AvailableBalance)
             throw new ArgumentException("Invalid amount to remove.");
         TotalBalance -= amount;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
+    
+    public void ConsumeReservedFunds(decimal amount)
+    {
+        if (amount < 0) 
+            throw new ArgumentException("Amount must be positive.");
+        if (amount > ReservedBalance)
+            throw new ArgumentException("Invalid reserved amount");
+        ReservedBalance -= amount;
+        TotalBalance -= amount;
+        UpdatedAt = TimeHelper.NowUtc();
+    }
+    
     public void ReserveFunds(decimal amount)
     {
         if (amount <= 0 || amount > AvailableBalance)
             throw new ArgumentException("Invalid amount to reserve.");
         ReservedBalance += amount;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
+    
     public void UnreserveFunds(decimal amount)
     {
         if (amount <= 0 || amount > ReservedBalance)
             throw new ArgumentException("Invalid amount to release.");
         ReservedBalance -= amount;
-        UpdatedAt = DateTime.UtcNow;
+        UpdatedAt = TimeHelper.NowUtc();
     }
     #endregion
 }

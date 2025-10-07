@@ -19,13 +19,20 @@ KieshStockExchange
 --- launchSettings.json
 
 - Helpers
---- SecurityHelper.cs (For hashing passwords)
+--- CandleAggregator.cs (Helps aggregate candle data)
+--- CandleComparer.cs (For comparing candles)
 --- CurrencyHelper.cs (Formats currency values)
+--- LiveQuote.cs (For ViewModel binding of a stock)
 --- OrderBook.cs (For order matching)
 --- OrderResult.cs (Shows result of order operations)
+--- ParsingHelper.cs (For parsing data)
+--- RingBuffer.cs (A buffer for rolling metrics)
+--- SecurityHelper.cs (For hashing passwords)
+--- TimeHelper.cs (For handling UTC times)
 
 - Models
 --- AIUser.cs
+--- Candle.cs
 --- Fund.cs
 --- IValidatable.cs
 --- Order.cs
@@ -57,28 +64,34 @@ KieshStockExchange
 - Services
 --- Implementations
 ----- AuthService.cs
+----- CandleService.cs
+----- ExcelImportService.cs
 ----- LocalDBService.cs 
 ----- OnlineDBService.cs (TODO)
------ ExcelImportService.cs
+----- MarketDataService.cs
 ----- MarketOrderService.cs 
+----- PriceSnapshotService.cs
 ----- PortfolioService.cs (TODO)
 ----- ProfileService.cs (TODO)
 ----- SelectedStockService.cs
 ----- TransactionService.cs (TODO)
------ TrendingService.cs (TODO)
+----- TrendingService.cs
 ----- UserOrderService.cs
 ----- UserPortfolioService.cs
 ----- UserSessionService.cs (TODO)
 --- Interfaces
 ----- IAuthService.cs (Login, registration)
+----- ICandleService.cs (Candle data for charts)
 ----- IDataBaseService.cs (Local and online DB operations)
 ----- IExcelImportService.cs (Imports Data from Excel files)
 ----- IMarketOrderService.cs (Market operations and order matching)
+----- IMarketDataService.cs (Source of truth for market data)
+----- IPriceSnapshotService.cs (Hourly price snapshots as fallback price data)
 ----- IPortfolioService.cs (Portfolio Overview and history)
 ----- IProfileService.cs (User profile management)
 ----- ISelectedStockService.cs (Holds the currently selected stock)
 ----- ITransactionService.cs (Tansaction history and details)
------ ITrendingService.cs (Trending stocks and market data)`
+----- ITrendingService.cs (Trending stocks)
 ----- IUserOrderService.cs (User-specific order management)
 ----- IUserPortfolioService.cs (User-specific portfolio management)
 ----- IUserSessionService.cs (User session management and authentication)
@@ -101,6 +114,7 @@ KieshStockExchange
 ----- PortfolioViewModel.cs
 --- TradeViewModels (TODO)
 ----- ChartViewModel.cs
+----- HistoryTableViewModel.cs
 ----- OpenOrderTableViewModel.cs 
 ----- OrderBookViewModel.cs
 ----- OrderHistoryTableViewModel.cs
@@ -129,6 +143,7 @@ KieshStockExchange
 ----- PortfolioPage.xaml 
 --- TradePageViews 
 ----- ChartView.xaml (TODO)
+----- HistoryTableView.xaml (TODO)
 ----- OpenOrdersView.xaml (TODO)
 ----- OrderBookView.xaml (TODO)
 ----- OrderHistoryView.xaml (TODO)

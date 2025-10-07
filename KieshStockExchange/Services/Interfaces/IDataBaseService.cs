@@ -10,7 +10,7 @@ public interface IDataBaseService
     // Generic operations
     Task ResetTableAsync<T>(CancellationToken cancellationToken = default) where T : new();
     Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
-    Task DeleteAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
+    //Task DeleteAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
     Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
     Task RunInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken = default);
 
@@ -26,7 +26,7 @@ public interface IDataBaseService
     // Stock operations
     Task<List<Stock>> GetStocksAsync(CancellationToken cancellationToken = default);
     Task<Stock?> GetStockById(int stockId, CancellationToken cancellationToken = default);
-    Task<bool> StockExist(int stockId, CancellationToken cancellationToken = default);
+    Task<bool> StockExists(int stockId, CancellationToken cancellationToken = default);
     Task CreateStock(Stock stock, CancellationToken cancellationToken = default);
     Task UpdateStock(Stock stock, CancellationToken cancellationToken = default);
     Task DeleteStock(Stock stock, CancellationToken cancellationToken = default);
@@ -35,7 +35,9 @@ public interface IDataBaseService
     Task<List<StockPrice>> GetStockPricesAsync(CancellationToken cancellationToken = default);
     Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken cancellationToken = default);
     Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken cancellationToken = default);
-    Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CancellationToken cancellationToken = default);
+    Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
+    Task<StockPrice?> GetLatestStockPriceBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken cancellationToken = default);
+    Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken cancellationToken = default);
     Task CreateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default);
     Task UpdateStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default);
     Task DeleteStockPrice(StockPrice stockPrice, CancellationToken cancellationToken = default);
@@ -53,6 +55,9 @@ public interface IDataBaseService
     Task<List<Transaction>> GetTransactionsAsync(CancellationToken cancellationToken = default);
     Task<Transaction?> GetTransactionById(int transactionId, CancellationToken cancellationToken = default);
     Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken cancellationToken = default);
+    Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken cancellationToken = default);
+    Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
+    Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken cancellationToken = default);
     Task CreateTransaction(Transaction transaction, CancellationToken cancellationToken = default);
     Task UpdateTransaction(Transaction transaction, CancellationToken cancellationToken = default);
     Task DeleteTransaction(Transaction transaction, CancellationToken cancellationToken = default);
@@ -76,4 +81,16 @@ public interface IDataBaseService
     Task UpdateFund(Fund fund, CancellationToken cancellationToken = default);
     Task DeleteFund(Fund fund, CancellationToken cancellationToken = default);
     Task UpsertFund(Fund fund, CancellationToken cancellationToken = default);
+
+    // Candle operations
+    Task<List<Candle>> GetCandlesAsync(CancellationToken cancellationToken = default);
+    Task<Candle?> GetCandleById(int candleId, CancellationToken cancellationToken = default);
+    Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
+    Task<List<Candle>> GetCandlesByStockIdAndTimeRange(int stockId, CurrencyType currency,
+        TimeSpan resolution, DateTime from, DateTime to, CancellationToken cancellationToken = default);
+    Task CreateCandle(Candle candle, CancellationToken cancellationToken = default);
+    Task UpdateCandle(Candle candle, CancellationToken cancellationToken = default);
+    Task DeleteCandle(Candle candle, CancellationToken cancellationToken = default);
+    Task UpsertCandle(Candle candle, CancellationToken cancellationToken = default);
+
 }

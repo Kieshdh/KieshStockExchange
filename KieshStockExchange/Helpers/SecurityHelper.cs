@@ -12,4 +12,16 @@ public static class SecurityHelper
         var hash = sha.ComputeHash(bytes);
         return Convert.ToBase64String(hash);
     }
+
+    public static bool VerifyPassword(string password, string hash)
+    {
+        var hashedInput = HashPassword(password);
+        return hashedInput == hash;
+    }
+
+    public static bool IsValidPassword(string password)
+    {
+        // Password must be at least 8 characters long
+        return !string.IsNullOrWhiteSpace(password) && password.Length >= 8;
+    }
 }

@@ -28,6 +28,14 @@
             </views:SegmentedTabView.Tabs>
         </views:SegmentedTabView>
 
+        <!-- Funds/Assets -->
+        <HorizontalStackLayout>
+            <Label Text="Available Assets" Style="{StaticResource StockPlacerLabel}" />
+            <Label Text="{Binding AvailableAssets}" Style="{StaticResource StockPlacerLabel}" 
+                   HorizontalTextAlignment="End" />
+        </HorizontalStackLayout>
+        
+
         <!-- Dynamic Content -->
         <ContentView>
             <ContentView.Triggers>
@@ -84,10 +92,7 @@
                 </DataTrigger>
             </ContentView.Triggers>
         </ContentView>
-
-        <!-- Funds/Assets -->
-        <Label Text="{Binding AvailableAssets}" FontAttributes="Bold" TextColor="White"/>
-
+        
         <!-- Quantity -->
         <Grid Style="{StaticResource StockPlacerGrid}" >
             <Label Text="Quantity" Style="{StaticResource StockPlacerLabel}" />

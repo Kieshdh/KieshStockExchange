@@ -57,6 +57,7 @@ public static class CurrencyHelper
         var culture = CultureCache[currency];
         return string.Format(culture, "{0:C}", amount);
     }
+    
     public static string Format(decimal? amount, CurrencyType currency, string fallback = "—")
         => amount.HasValue ? Format(amount.Value, currency) : fallback;
 
@@ -112,8 +113,8 @@ public static class CurrencyHelper
     #region Rates and conversion
     /// <summary>  Replace the whole rate table at once (e.g., after fetching fresh rates).
     /// The dictionary must be "1 base -> X target". This method also ensures base=1. </summary>
-    public static void SetRates(CurrencyType baseCurrency, IDictionary<CurrencyType, decimal> ratesPerBase)
-    {
+    private static void SetRates(CurrencyType baseCurrency, IDictionary<CurrencyType, decimal> ratesPerBase)
+    { // Disabled for now, as we have no live source of rates.
         BaseCurrency = baseCurrency;
         RatesPerBase.Clear();
         foreach (var kv in ratesPerBase)
