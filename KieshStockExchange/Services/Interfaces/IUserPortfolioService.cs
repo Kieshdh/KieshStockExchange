@@ -1,5 +1,6 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using System;
 
 namespace KieshStockExchange.Services;
 
@@ -11,8 +12,16 @@ public sealed record PortfolioSnapshot(
 
 public interface IUserPortfolioService
 {
-    #region Snapshot and Refresh
-        /// <summary>
+    #region Snapshot, Refresh and System Scope
+    /// <summary>
+    /// Allows infrastructure code (e.g. order matching) to temporarily bypass the
+    /// interactive authentication checks while it settles trades for multiple
+    /// users inside a single transaction. Callers must ensure they only perform
+    /// legitimate, server-side operations while the scope is active.
+    /// </summary>
+    IDisposable BeginSystemScope();
+
+    /// <summary>
     /// Last loaded portfolio snapshot (null until first RefreshAsync()).
     /// </summary>
     PortfolioSnapshot? Snapshot { get; }

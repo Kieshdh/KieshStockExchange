@@ -3,6 +3,8 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services;
 using Microsoft.Extensions.Logging;
 using System.Collections.Immutable;
+using System;
+using System.Threading;
 
 namespace KieshStockExchange.Services.Implementations;
 
@@ -12,6 +14,7 @@ public class UserPortfolioService : IUserPortfolioService
     private readonly IDataBaseService _db;
     private readonly ILogger<UserPortfolioService> _logger;
     private readonly IAuthService _auth;
+    private readonly AsyncLocal<int> _systemScopeDepth = new();
 
     public PortfolioSnapshot? Snapshot { get; private set; }
     public event EventHandler<PortfolioSnapshot>? SnapshotChanged;
@@ -32,6 +35,19 @@ public class UserPortfolioService : IUserPortfolioService
     private int GetTargetUserIdOrFail(int? asUserId, out string? error)
     {
         error = null;
+
+        // System scope: must specify a valid target user
+        if (IsSystemScope)
+        {
+            if (asUserId.HasValue && asUserId.Value > 0)
+                return asUserId.Value;
+            if (CurrentUserId > 0 && (!asUserId.HasValue || asUserId.Value == CurrentUserId))
+                return CurrentUserId;
+            error = "System scope requires a valid target user.";
+            return 0;
+        }
+
+        // Normal user scope: must be authenticated
         if (!IsAuthenticated)
         {
             error = "User not authenticated.";
@@ -50,7 +66,37 @@ public class UserPortfolioService : IUserPortfolioService
     }
 
     private bool CanModifyPortfolio(int targetUserId) =>
-        IsAdmin || targetUserId == CurrentUserId;
+        IsSystemScope || IsAdmin || targetUserId == CurrentUserId;
+    #endregion
+
+    #region System Scope
+    public IDisposable BeginSystemScope() => new SystemScope(this);
+
+    private bool IsSystemScope => _systemScopeDepth.Value > 0;
+
+    private void EnterSystemScope() => _systemScopeDepth.Value = _systemScopeDepth.Value + 1;
+
+    private void ExitSystemScope() =>
+        _systemScopeDepth.Value = Math.Max(0, _systemScopeDepth.Value - 1);
+
+    private sealed class SystemScope : IDisposable
+    {
+        private readonly UserPortfolioService _owner;
+        private bool _disposed;
+
+        public SystemScope(UserPortfolioService owner)
+        {
+            _owner = owner;
+            _owner.EnterSystemScope();
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _owner.ExitSystemScope();
+        }
+    }
     #endregion
 
     #region Base Currency
