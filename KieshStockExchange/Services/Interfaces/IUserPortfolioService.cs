@@ -4,12 +4,6 @@ using System;
 
 namespace KieshStockExchange.Services;
 
-public sealed record PortfolioSnapshot(
-    IReadOnlyList<Fund> Funds,
-    IReadOnlyList<Position> Positions,
-    CurrencyType BaseCurrency
-);
-
 public interface IUserPortfolioService
 {
     #region Snapshot, Refresh and System Scope
@@ -114,3 +108,9 @@ public interface IUserPortfolioService
         int? asUserId = null, CancellationToken ct = default);
     #endregion
 }
+
+public sealed record PortfolioSnapshot(
+    IReadOnlyList<Fund> Funds,
+    IReadOnlyList<Position> Positions,
+    CurrencyType BaseCurrency
+);
