@@ -20,11 +20,8 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSelectedStock))] 
     private int? _stockId = null;
-
-
     [ObservableProperty] private string _symbol = string.Empty;
     [ObservableProperty] private string _companyName = string.Empty;
-    [ObservableProperty] private OrderBook? _orderBook = null;
 
     // Convenience property for UI
     public bool HasSelectedStock => SelectedStock is not null && StockId.HasValue && SelectedStock.StockId == StockId;
@@ -50,21 +47,18 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     #region Fields & Constructor
     private readonly IMarketDataService _market;
     private readonly ILogger<SelectedStockService> _logger;
-    private readonly IMarketOrderService _orders;
 
-    public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger, IMarketOrderService orders)
+    public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
 
         // React to live quote pushes from the single source of truth
         _market.QuoteUpdated += OnQuoteUpdated;
-        _orders = orders;
     }
     #endregion
 
-    #region Set & Get selection
+    #region Set, ChangeCurrency, Reset, Dispose
     public async Task Set(int stockId, CancellationToken ct = default)
     {
         var stk = await _market.GetStockAsync(stockId, ct)
@@ -85,10 +79,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         StockId = stock.StockId;
         Symbol = stock.Symbol;
         CompanyName = stock.CompanyName;
-
-        // Get the order book for this stock and currency
-        _orderBook = await _orders.GetOrderBookByStockAsync(stock.StockId, Currency, ct);
-
 
         // Prime quote from history and start streaming ticks for (stock, currency)
         await _market.SubscribeAsync(stock.StockId, Currency, ct);
@@ -126,15 +116,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
             Symbol, stockId, prevCurrency, currency);
     }
 
-    public BookSnapshot GetOrderBookSnapShot()
-    {
-        if (!HasSelectedStock)
-            throw new InvalidOperationException("No stock selected.");
-        return _orderBook!.GetSnapshot();
-    }
-    #endregion
-
-    #region Reset & Dispose
     public void Reset()
     {
         // Unsubscribe from previous

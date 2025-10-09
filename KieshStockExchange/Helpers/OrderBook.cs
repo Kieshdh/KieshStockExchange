@@ -102,7 +102,7 @@ public sealed class OrderBook
     /// Cheap, immutable snapshot of price levels for UI binding.
     /// Quantity is the sum of remaining quantities at each level.
     /// </summary>
-    public BookSnapshot GetSnapshot()
+    public BookSnapshot Snapshot()
     {
         lock (_gate)
         {

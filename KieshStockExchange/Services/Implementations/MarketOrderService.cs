@@ -546,7 +546,7 @@ public class MarketOrderService : IMarketOrderService
 
         // Load the book from the database
         var book = GetOrCreateBook(stockId, currency);
-        var snapshot = book.GetSnapshot();
+        var snapshot = book.Snapshot();
 
         // Add existing open limit orders to the book
         var openLimits = await _db.GetOrdersByStockId(stockId, ct);
