@@ -77,3 +77,11 @@ public interface ICandleService
         CandleResolution targetRes, DateTime fromUtc, DateTime toUtc, bool allowPartialEdges = true, CancellationToken ct = default);
     #endregion
 }
+
+public sealed record CandleFixReport(
+    int StockId, CurrencyType Currency, CandleResolution Resolution,
+    DateTime FromUtc, DateTime ToUtc,
+    int MissingCandleCount, int FixedCandleCount,
+    int MissedTxCount, int TotalTxCount,
+    DateTime? FirstMissing, DateTime? LastMissing
+);
