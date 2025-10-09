@@ -220,30 +220,8 @@ public class MarketOrderService : IMarketOrderService
 
             // Get best opposite order
             var bestOpposite = incoming.IsBuyOrder ? book.PeekBestSell() : book.PeekBestBuy();
-            #region Check opposite order validity
             if (bestOpposite == null) break; // no more opposite orders
-            if (!bestOpposite.IsOpen || bestOpposite.RemainingQuantity <= 0)
-            {
-                // This should not happen, but if it does, remove it from the book
-                if (incoming.IsBuyOrder) book.RemoveBestSell();
-                else book.RemoveBestBuy();
-                _logger.LogWarning("Found non-open or empty opposite order #{OrderId} in book; removing it.", bestOpposite.OrderId);
-                continue;
-            }
-            if (bestOpposite.StockId != incoming.StockId || bestOpposite.CurrencyType != incoming.CurrencyType)
-            {
-                // This should never happen
-                if (incoming.IsBuyOrder) book.RemoveBestSell();
-                else book.RemoveBestBuy();
-                _logger.LogError("Data integrity error: opposite order #{OrderId} has wrong stock or currency.", bestOpposite.OrderId);
-                continue;
-            }
-            if (bestOpposite.UserId == incoming.UserId)
-            {
-                // Prevent self-trading
-                _logger.LogInformation("Skipping self-trade attempt for user #{UserId} on order #{OrderId}.", incoming.UserId, incoming.OrderId);
-            }
-            #endregion
+            if (!CheckBestOpposite(incoming, book, bestOpposite)) continue;
 
             // If The price is not crossed, stop matching
             if (!IsPriceCrossed(incoming, bestOpposite)) break;
@@ -255,12 +233,35 @@ public class MarketOrderService : IMarketOrderService
             // Delete opposite if fully filled
             if (!bestOpposite.IsOpen)
             {
-                if (incoming.IsBuyOrder) book.RemoveBestSell();
-                else book.RemoveBestBuy();
+                _ = incoming.IsBuyOrder ? book.RemoveBestSell() : book.RemoveBestBuy();
                 _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);
             }
         }
         return fills;
+    }
+
+    private bool CheckBestOpposite(Order incoming, OrderBook book, Order bestOpposite)
+    {
+        if (!bestOpposite.IsOpen || bestOpposite.RemainingQuantity <= 0)
+        {
+            // This should not happen, but if it does, remove it from the book
+            _ = incoming.IsBuyOrder ? book.RemoveBestSell() : book.RemoveBestBuy();
+            _logger.LogWarning("Found non-open or empty opposite order #{OrderId} in book; removing it.", bestOpposite.OrderId);
+            return false;
+        }
+        if (bestOpposite.StockId != incoming.StockId || bestOpposite.CurrencyType != incoming.CurrencyType)
+        {
+            // This should never happen
+            _ = incoming.IsBuyOrder ? book.RemoveBestSell() : book.RemoveBestBuy();
+            _logger.LogError("Data integrity error: opposite order #{OrderId} has wrong stock or currency.", bestOpposite.OrderId);
+            return false;
+        }
+        if (bestOpposite.UserId == incoming.UserId)
+        {
+            // Prevent self-trading
+            _logger.LogInformation("Skipping self-trade attempt for user #{UserId} on order #{OrderId}.", incoming.UserId, incoming.OrderId);
+        }
+        return true;
     }
 
     private bool IsPriceCrossed(Order taker, Order maker)
