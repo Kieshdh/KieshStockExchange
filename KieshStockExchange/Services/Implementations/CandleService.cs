@@ -132,7 +132,7 @@ public sealed class CandleService : ICandleService, IDisposable
     }
 
     public async IAsyncEnumerable<Candle> StreamClosedCandles(int stockId, CurrencyType currency,
-        CandleResolution resolution, [EnumeratorCancellation] CancellationToken ct = default)
+        CandleResolution resolution, [EnumeratorCancellation] CancellationToken ct)
     {
         var key = (stockId, currency, resolution);
         CheckKey(key);
@@ -161,11 +161,11 @@ public sealed class CandleService : ICandleService, IDisposable
         DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
     {
         CheckKey(stockId, currency, resolution);
-        var span = TimeSpan.FromSeconds((int)resolution);
 
         // Align the range to bucket boundaries to avoid partial first/last buckets
+        var span = TimeSpan.FromSeconds((int)resolution);
         var fromAligned = TimeHelper.FloorToBucketUtc(fromUtc, span);
-        var toAligned = TimeHelper.FloorToBucketUtc(toUtc, span).Add(span);
+        var toAligned = TimeHelper.NextBucketBoundaryUtc(toUtc, span);
 
         var list = await _db.GetCandlesByStockIdAndTimeRange(
             stockId, currency, span, fromAligned, toAligned, ct);
@@ -265,7 +265,7 @@ public sealed class CandleService : ICandleService, IDisposable
             if (existingCandles.TryGetValue(c, out var match) && !CandleFullComparer.Instance.Equals(match, c))
             {
                 wrong.Add(c);
-                missedTxCount += c.TradeCount - match.TradeCount;
+                missedTxCount += Math.Max(0, c.TradeCount - match.TradeCount);
             }
         }
 
@@ -349,7 +349,7 @@ public sealed class CandleService : ICandleService, IDisposable
     }
     #endregion
 
-    #region Candle creators
+    #region Candle Creation and Aggregation
     public Candle NewCandle(int stockId, CurrencyType currency, DateTime timestamp, TimeSpan resolution, decimal? flatPrice = null)
     {
         if (stockId <= 0)
@@ -374,12 +374,11 @@ public sealed class CandleService : ICandleService, IDisposable
         return c;
     }
 
-    public Candle AggregateCandles(IReadOnlyList<Candle> candles, int targetBucketSeconds, bool requireFullCoverage = true)
+    public Candle AggregateCandles(IReadOnlyList<Candle> candles, CandleResolution targetResolution, bool requireFullCoverage = true)
     {
         if (candles is null || candles.Count == 0)
             throw new ArgumentException("Source candles must not be null or empty.", nameof(candles));
-        if (targetBucketSeconds <= 0)
-            throw new ArgumentOutOfRangeException(nameof(targetBucketSeconds), "Target resolution must be positive.");
+        var targetBucketSeconds = (int)targetResolution;
 
         // Create a sorted copy by OpenTime
         var ordered = candles.OrderBy(c => c.OpenTime).ToList();
@@ -401,8 +400,8 @@ public sealed class CandleService : ICandleService, IDisposable
             Open = ordered[0].Open,                 Close = ordered[^1].Close,
             High = ordered.Max(c => c.High),        Low = ordered.Min(c => c.Low),
             Volume = ordered.Sum(c => c.Volume),    TradeCount = ordered.Sum(c => c.TradeCount),
-            MinTransactionId = ordered.Where(c => c.MinTransactionId != null).Min(c => c.MinTransactionId) ?? null,
-            MaxTransactionId = ordered.Where(c => c.MaxTransactionId != null).Max(c => c.MaxTransactionId) ?? null,
+            MaxTransactionId = ordered.Max(c => c.MaxTransactionId),
+            MinTransactionId = ordered.Min(c => c.MinTransactionId),
         };
 
         if (!candle.IsValid())
@@ -411,8 +410,69 @@ public sealed class CandleService : ICandleService, IDisposable
         return candle;
     }
 
-    public Candle AggregateCandles(IReadOnlyList<Candle> candles, TimeSpan targetResolution, bool requireFullCoverage = true)
-        => AggregateCandles(candles, (int)targetResolution.TotalSeconds, requireFullCoverage);
+    public List<Candle> AggregateMultipleCandles(IReadOnlyList<Candle> candles, CandleResolution targetResolution, 
+        bool requireFullCoverage = true, bool allowPartialEdges = true)
+    {
+        // Validate input candles
+        if (candles is null || candles.Count == 0)
+            throw new ArgumentException("Source candles must not be null or empty.", nameof(candles));
+
+        var stockId = candles[0].StockId; var currency = candles[0].CurrencyType;
+        var baseRes = candles[0].BucketSeconds; var targetRes = (int)targetResolution;
+        CheckOrdered(candles.ToList(), stockId, currency, baseRes, targetRes);
+
+        // Get targetSpan
+        var targetSpan = TimeSpan.FromSeconds((int)targetResolution);
+
+        // Group candles by target bucket
+        var grouped = candles.OrderBy(c => c.OpenTime)
+            .GroupBy(c => TimeHelper.FloorToBucketUtc(c.OpenTime, targetSpan)).OrderBy(g => g.Key)
+            .Select(g => new { BucketStart = g.Key, Items = g.ToList() }).ToList();
+
+        // Aggregate each group into one candle and add to result
+        var result = new List<Candle>();
+        for (int i = 0; i < grouped.Count; i++)
+        {
+            var group = grouped[i];
+            var isEdge = i == 0 || i == (grouped.Count - 1);
+            var requireFull = requireFullCoverage && (!allowPartialEdges || !isEdge);
+            try { result.Add(AggregateCandles(group.Items, targetResolution, requireFull)); }
+            catch (ArgumentException ex)
+            {
+                throw new ArgumentException(
+                    $"Failed to aggregate candles for bucket starting at {group.BucketStart:u}. " +
+                    $"RequireFullCoverage={requireFull}, AllowPartialEdges={allowPartialEdges}.", ex);
+            }
+
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<Candle>> AggregateAndPersistRangeAsync(
+        int stockId, CurrencyType currency, CandleResolution sourceRes, CandleResolution targetRes,
+        DateTime fromUtc, DateTime toUtc, bool allowPartialEdges = true, CancellationToken ct = default)
+    {
+        // Validate target resolution is a strict multiple of source resolution
+        if ((int)targetRes <= (int)sourceRes || ((int)targetRes % (int)sourceRes) != 0)
+            throw new ArgumentOutOfRangeException(nameof(targetRes),
+                "Target resolution must be a strict multiple of source resolution.");
+
+        // Load source candles
+        var src = await GetHistoricalCandlesAsync(stockId, currency, sourceRes, fromUtc, toUtc, ct);
+
+        // Aggregate to target resolution
+        var aggregated = AggregateMultipleCandles(src, targetRes, true, allowPartialEdges);
+
+        // Persist to DB
+        await _db.RunInTransactionAsync(async tx =>
+        {
+            foreach (var c in aggregated)
+                await _db.UpsertCandle(c, tx);
+        }, ct);
+
+        return aggregated;
+    }
     #endregion
 
     #region Checks
@@ -425,6 +485,7 @@ public sealed class CandleService : ICandleService, IDisposable
         if (!Candle.TryFromSeconds((int)resolution, out _))
             throw new ArgumentOutOfRangeException(nameof(resolution), "Unsupported resolution.");
     }
+    
     public static void CheckKey((int, CurrencyType, CandleResolution) key) =>
         CheckKey(key.Item1, key.Item2, key.Item3);
 
@@ -484,12 +545,3 @@ public sealed class CandleService : ICandleService, IDisposable
     }
     #endregion
 }
-
-
-public sealed record CandleFixReport(
-    int StockId, CurrencyType Currency, CandleResolution Resolution,
-    DateTime FromUtc, DateTime ToUtc,
-    int MissingCandleCount, int FixedCandleCount,
-    int MissedTxCount, int TotalTxCount,
-    DateTime? FirstMissing, DateTime? LastMissing
-);

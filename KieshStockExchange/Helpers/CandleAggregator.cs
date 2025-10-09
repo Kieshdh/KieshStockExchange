@@ -2,6 +2,7 @@
 using KieshStockExchange.Services;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.Helpers;
 
@@ -9,9 +10,9 @@ public sealed class CandleAggregator
 {
     #region Key and Configuration
     // If true, any gaps between candles will be filled with flat candles at last.Close
-    public bool FillGapsEnabled;
+    public readonly bool FillGapsEnabled;
     // Max number of gap candles to fill in one go
-    private int MaxGapCandles = 10;
+    private readonly int MaxGapCandles;
 
     // Key uniquely identifies this aggregator
     public (int StockId, CurrencyType Currency, int BucketSec) Key => (StockId, Currency, BucketSec);
@@ -45,19 +46,17 @@ public sealed class CandleAggregator
     private readonly object _gate = new();
 
     public CandleAggregator(int stockId, CurrencyType currency, CandleResolution resolution, 
-        ILogger log, bool fillGapsEnabled = true)
+        ILogger log, bool fillGapsEnabled = true, int maxGapCandles = 10)
     {
         if (stockId <= 0) 
             throw new ArgumentOutOfRangeException(nameof(stockId));
         if (!CurrencyHelper.IsSupported(currency)) 
             throw new ArgumentOutOfRangeException(nameof(currency), "Unsupported currency.");
         // Key properties
-        StockId = stockId; 
-        Currency = currency; 
-        Resolution = resolution;
-        BucketSec = (int)resolution;  
-        Bucket = TimeSpan.FromSeconds(BucketSec);
+        StockId = stockId; Currency = currency; Resolution = resolution; 
+        BucketSec = (int)resolution; Bucket = TimeSpan.FromSeconds(BucketSec);
         FillGapsEnabled = fillGapsEnabled;
+        MaxGapCandles = maxGapCandles > 0 ? maxGapCandles : 10;
         // Dependencies
         _log = log ?? throw new ArgumentNullException(nameof(log));
     }
@@ -192,5 +191,13 @@ public sealed class CandleAggregator
     };
     #endregion
 }
+
+public sealed record CandleFixReport(
+    int StockId, CurrencyType Currency, CandleResolution Resolution,
+    DateTime FromUtc, DateTime ToUtc,
+    int MissingCandleCount, int FixedCandleCount,
+    int MissedTxCount, int TotalTxCount,
+    DateTime? FirstMissing, DateTime? LastMissing
+);
 
 
