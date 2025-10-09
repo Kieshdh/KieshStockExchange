@@ -3,6 +3,7 @@ using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Controls;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Text;
 
 namespace KieshStockExchange.Services.Implementations;
@@ -212,6 +213,7 @@ public class MarketOrderService : IMarketOrderService
     {
         // Store all transactions
         var fills = new List<Transaction>();
+        var selfOrders = new List<Order>();
 
         // Use best opposite once per iteration
         while (incoming.IsOpen && incoming.RemainingQuantity > 0)
@@ -221,7 +223,12 @@ public class MarketOrderService : IMarketOrderService
             // Get best opposite order
             var bestOpposite = incoming.IsBuyOrder ? book.PeekBestSell() : book.PeekBestBuy();
             if (bestOpposite == null) break; // no more opposite orders
-            if (!CheckBestOpposite(incoming, book, bestOpposite)) continue;
+            if (!CheckBestOpposite(incoming, book, bestOpposite, out var selfOrder))
+            {
+                if (selfOrder != null)
+                    selfOrders.Add(selfOrder);
+                continue; // skip invalid or self-trade orders
+            }
 
             // If The price is not crossed, stop matching
             if (!IsPriceCrossed(incoming, bestOpposite)) break;
@@ -237,11 +244,16 @@ public class MarketOrderService : IMarketOrderService
                 _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);
             }
         }
+        // Return any self-trade orders to the book
+        foreach (var order in selfOrders)
+            book.UpsertOrder(order);
+
         return fills;
     }
 
-    private bool CheckBestOpposite(Order incoming, OrderBook book, Order bestOpposite)
+    private bool CheckBestOpposite(Order incoming, OrderBook book, Order bestOpposite, out Order? selfOrder)
     {
+       selfOrder = null;
         if (!bestOpposite.IsOpen || bestOpposite.RemainingQuantity <= 0)
         {
             // This should not happen, but if it does, remove it from the book
@@ -259,7 +271,10 @@ public class MarketOrderService : IMarketOrderService
         if (bestOpposite.UserId == incoming.UserId)
         {
             // Prevent self-trading
-            _logger.LogInformation("Skipping self-trade attempt for user #{UserId} on order #{OrderId}.", incoming.UserId, incoming.OrderId);
+            selfOrder = incoming.IsBuyOrder ? book.RemoveBestSell() : book.RemoveBestBuy();
+            if (selfOrder != null)
+                _logger.LogInformation("Skipping self-trade attempt for user #{UserId} on order #{OrderId}.", incoming.UserId, incoming.OrderId);
+            return false;
         }
         return true;
     }
