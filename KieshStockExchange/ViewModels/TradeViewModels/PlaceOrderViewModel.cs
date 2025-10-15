@@ -117,7 +117,7 @@ public partial class PlaceOrderViewModel : BaseViewModel
             _logger.LogWarning("No stock selected for placing order.");
             return;
         }
-        var stockId = _selected.StockId.Value;
+        var stockId = _selected.StockId!.Value;
 
         if (SelectedOrderTypeIndex == 0) // Market
         {

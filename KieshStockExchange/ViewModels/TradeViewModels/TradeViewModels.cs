@@ -9,27 +9,25 @@ using System.ComponentModel;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
-
 public partial class TradeViewModel : BaseViewModel
 {
-
-    #region Services
-    private readonly ISelectedStockService _stockService;
-    private readonly IMarketOrderService _marketService;
-    private readonly ILogger<TradeViewModel> _logger;
-    private readonly IUserSessionService _session;
-
-    private PropertyChangedEventHandler? _stockServiceChangedHandler;
-    private bool _suppressSelectionChange; // prevents double-calling when we set SelectedStock programmatically
-    #endregion
-
     #region Selected Stock variables
+    public ISelectedStockService Selected => _selected; // expose for bindings
     public ObservableCollection<Stock> Stocks { get; } = new();
-    [ObservableProperty] private Stock? _selectedStock;
 
-    [ObservableProperty] private string _companyName;
-    [ObservableProperty] private decimal? _currentPrice;
-    [ObservableProperty] private string _symbol;
+    private Stock? _pickerSelection;
+    public Stock? PickerSelection
+    {
+        get => _pickerSelection ?? _selected.SelectedStock;
+        set
+        {
+            if (value is null || value == _selected.SelectedStock) return;
+            _pickerSelection = value; // only to reflect the UI's selected item immediately
+            // Fire-and-forget is fine here; the service pushes changes via INotifyPropertyChanged
+            _ = _selected.Set(value);
+            OnPropertyChanged(); // ensures the picker reflects the new selection
+        }
+    }
     #endregion
 
     #region ViewModel Properties
@@ -41,28 +39,24 @@ public partial class TradeViewModel : BaseViewModel
     public OrderBookViewModel OrderBookVm { get; }
     #endregion
 
-    #region Constructor
+    #region Fields and Constructor
+    private readonly ISelectedStockService _selected;
+    private readonly IMarketDataService _market;
+    private readonly ILogger<TradeViewModel> _logger;
+    private readonly IUserSessionService _session;
+
     public TradeViewModel(
-        ISelectedStockService stockService,
-        IMarketOrderService marketService,
-        ILogger<TradeViewModel> logger,
-        IUserSessionService userSession,
-        PlaceOrderViewModel placingVm,
-        HistoryTableViewModel historyVm,
-        OpenOrdersTableViewModel openOrdersVm,
-        PositionsTableViewModel positionsVm,
-        ChartViewModel chartVm,
-        OrderBookViewModel orderBookVm)
+        ISelectedStockService selected, IMarketDataService market,
+        ILogger<TradeViewModel> logger, IUserSessionService userSession,
+        PlaceOrderViewModel placingVm, HistoryTableViewModel historyVm,
+        OpenOrdersTableViewModel openOrdersVm, PositionsTableViewModel positionsVm,
+        ChartViewModel chartVm, OrderBookViewModel orderBookVm)
     {
         // Initialize services
-        _marketService = marketService ??
-            throw new ArgumentNullException(nameof(marketService));
-        _logger = logger ??
-            throw new ArgumentNullException(nameof(logger));
-        _stockService = stockService ??
-            throw new ArgumentNullException(nameof(stockService));
-        _session = userSession ??
-            throw new ArgumentNullException(nameof(userSession));
+        _market = market ?? throw new ArgumentNullException(nameof(market));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _selected = selected ?? throw new ArgumentNullException(nameof(selected));
+        _session = userSession ?? throw new ArgumentNullException(nameof(userSession));
 
         // Initialize ViewModels
         PlacingVm = placingVm;
@@ -89,133 +83,39 @@ public partial class TradeViewModel : BaseViewModel
 
             // Set the initial stock
             var stock = Stocks.FirstOrDefault(s => s.StockId == stockId)
-                ?? await _marketService.GetStockByIdAsync(stockId)
+                ?? await _market.GetStockAsync(stockId)
                 ?? throw new ArgumentException($"Stock with ID {stockId} not found.");
+            // Ensure the stock is in the collection (Should be, but just in case)
             if (!Stocks.Any(s => s.StockId == stock.StockId))
                 Stocks.Add(stock);
 
-            // Set the selected item in the Picker without triggering a double switch
-            _suppressSelectionChange = true;
-            SelectedStock = stock;
-            _suppressSelectionChange = false;
+            // Set the selection in the service (this triggers data loading, subscriptions, etc.)
+            await _selected.Set(stock); 
 
-            // Subscribe to the service current price
-            _stockServiceChangedHandler ??= (_, e) =>
-            {
-                var name = e.PropertyName;
-
-                // Handle single-property updates and "refresh-all" notifications
-                if (string.IsNullOrEmpty(name) ||
-                    name == nameof(ISelectedStockService.CurrentPrice) ||
-                    name == nameof(ISelectedStockService.CurrentPriceDisplay) ||
-                    name == nameof(ISelectedStockService.PriceUpdatedAt) ||
-                    name == nameof(_stockService.CompanyName) ||
-                    name == nameof(_stockService.Symbol))
-                {
-                    ApplyStockServiceSnapshot();
-                }
-            };
-            _stockService.PropertyChanged -= _stockServiceChangedHandler; // avoid double subscribe
-            _stockService.PropertyChanged += _stockServiceChangedHandler;
-
-            // Kick off background price polling at a given timeinterval
-            await SwitchStockAsync(stock);
+            _pickerSelection = stock; // reflect in the picker UI
+            OnPropertyChanged(nameof(PickerSelection));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error initializing TradeViewModel for stock ID {StockId}", stockId);
             throw; // Re-throw the exception to be handled by the caller
         }
-        finally
-        {
-            IsBusy = false;
-        }
+        finally { IsBusy = false; }
     }
 
-    public void Cleanup()
-    {
-        try
-        {
-            _stockService.StopPriceUpdates();
-
-            if (_stockServiceChangedHandler is not null)
-                _stockService.PropertyChanged -= _stockServiceChangedHandler;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Cleanup encountered an issue, continuing.");
-        }
-    }
+    public void Cleanup() => _ = _selected.Reset();
 
     [RelayCommand] private async Task LoadStocksAsync()
     {
         IsBusy = true;
         try
         {
-            var stocks = await _marketService.GetAllStocksAsync();
+            var stocks = await _market.GetAllStocksAsync();
             Stocks.Clear();
             foreach (var stock in stocks)
                 Stocks.Add(stock);
         }
         finally { IsBusy = false; }
-    }
-    #endregion
-
-    #region Switching Stocks Logic
-    private async Task SwitchStockAsync(Stock stock)
-    {
-        if (stock is null) return;
-        IsBusy = true;
-        try
-        {
-            _logger.LogInformation("SelectedStockService Setting selection to {Symbol} #{StockId}", stock.Symbol, stock.StockId);
-            // Stop previous polling (if any)
-            _stockService.StopPriceUpdates();
-
-            // Set the new stock in the service
-            await _stockService.Set(stock);
-
-            // Apply the new snapshot (thread-safe)
-            ApplyStockServiceSnapshot();
-
-            // Start live price updates for the new stock
-            _stockService.StartPriceUpdates(TimeSpan.FromSeconds(2));
-
-            // Refresh components 
-            await PlacingVm.InitializeAsync();
-            await HistoryVm.InitializeAsync();
-            await OpenOrdersVm.InitializeAsync();
-            await PositionsVm.InitializeAsync();
-            await ChartVm.InitializeAsync();
-            await OrderBookVm.InitializeAsync();
-            _logger.LogInformation("Succesfully switched stocks to {StocksId}", stock.StockId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error switching to stock {StockId}", stock.StockId);
-        }
-        finally { IsBusy = false; }
-    }
-
-    partial void OnSelectedStockChanged(Stock? value)
-    {
-        if (_suppressSelectionChange) return;
-        _ = SwitchStockAsync(value);
-    }
-
-    // Apply current values from _stockService to bindable VM properties on the UI thread
-    private void ApplyStockServiceSnapshot()
-    {
-        void apply()
-        {
-            CompanyName = _stockService.CompanyName;
-            Symbol = _stockService.Symbol;
-            CurrentPrice = _stockService.CurrentPrice;
-            Title = $"Trade - {CompanyName} ({Symbol})";
-        }
-
-        if (MainThread.IsMainThread) apply();
-        else MainThread.BeginInvokeOnMainThread(apply);
     }
     #endregion
 }

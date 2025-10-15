@@ -10,18 +10,18 @@ namespace KieshStockExchange.ViewModels.UserViewModels;
 public partial class LoginViewModel : BaseViewModel
 {
     private readonly IAuthService _authService;
-    private readonly INavigation _navigation;
+    private readonly IExcelImportService _excel;
 
     [ObservableProperty] private string _username = String.Empty;
     [ObservableProperty] private string _password = String.Empty;
 
     public ICommand LoginCommand { get; }
 
-    public LoginViewModel(INavigation navigation, IAuthService authService)
+    public LoginViewModel(IAuthService authService, IExcelImportService excel)
     {
         Title = "Login";
-        _authService = authService;
-        _navigation = navigation;
+        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
+        _excel = excel ?? throw new ArgumentNullException(nameof(excel));
         LoginCommand = new AsyncRelayCommand(ExecuteLogin);
     }
 
@@ -29,6 +29,7 @@ public partial class LoginViewModel : BaseViewModel
     {
         Username = "kiesh";
         Password = "hallo123";
+        await LoadDataFromExcel();
         await ExecuteLogin();
     }
 
@@ -40,5 +41,13 @@ public partial class LoginViewModel : BaseViewModel
             await Shell.Current.GoToAsync("//TradePage");
         else 
             await Shell.Current.DisplayAlert("Error", "User and password combination does not exist", "OK");
+    }
+
+    public async Task LoadDataFromExcel(bool checkDataLoaded = true)
+    {
+        await _excel.AddUsersFromExcelAsync(checkDataLoaded);
+        await _excel.AddStocksFromExcelAsync(checkDataLoaded);
+        await _excel.AddHoldingsFromExcelAsync(checkDataLoaded);
+        await _excel.AddAIUserBehaviourDataFromExcelAsync(checkDataLoaded);
     }
 }

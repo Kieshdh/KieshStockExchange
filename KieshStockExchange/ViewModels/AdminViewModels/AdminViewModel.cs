@@ -46,11 +46,13 @@ public partial class AdminViewModel : BaseViewModel
             if (resetDatabases)
             {
                 LoadingText = "Importing users from Excel";
-                await ExcelService.AddUsersFromExcelAsync();
+                await ExcelService.AddUsersFromExcelAsync(false);
                 LoadingText = "Importing Funds from Excel";
-                await ExcelService.AddFundsFromExcelAsync();
+                await ExcelService.AddHoldingsFromExcelAsync(false);
                 LoadingText = "Importing Stocks from Excel";
-                await ExcelService.AddStocksFromExcelAsync();
+                await ExcelService.AddStocksFromExcelAsync(false);
+                LoadingText = "Importing AI User Behaviour from Excel";
+                await ExcelService.AddAIUserBehaviourDataFromExcelAsync(false);
             }
 
             // Initialize table viewmodels

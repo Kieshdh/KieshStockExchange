@@ -22,14 +22,14 @@
                 <Grid ColumnDefinitions="Auto, Auto, Auto" ColumnSpacing="10">
                     <!-- Stock Picker -->
                     <Picker ItemsSource="{Binding Stocks}" Grid.Column="0" 
-                            ItemDisplayBinding="{Binding Symbol}"
+                            ItemDisplayBinding="{Binding Selected.Symbol}"
                             SelectedItem="{Binding SelectedStock, Mode=TwoWay}"
                             Style="{StaticResource StockSelectorPicker}" />
                     <!-- Stock Price Display -->
-                    <Label Text="{Binding CurrentPrice}" Grid.Column="1" 
+                    <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="1" 
                            Style="{StaticResource SelectedStockDisplayLabel}" />
                     <!-- Stock Company Name Display -->
-                    <Label Text="{Binding CompanyName}" Grid.Column="2"
+                    <Label Text="{Binding Selected.CompanyName}" Grid.Column="2"
                            Style="{StaticResource SelectedStockDisplayLabel}" />
                 </Grid>
             </Frame>

@@ -5,14 +5,12 @@ namespace KieshStockExchange.Views.UserViews;
 
 public partial class LoginPage : ContentPage
 {
-    private LoginViewModel viewModel;
-    public LoginPage()
+    private LoginViewModel _vm;
+    public LoginPage(LoginViewModel vm)
     {
         InitializeComponent();
-        var authService = Application.Current.Handler
-            .MauiContext.Services.GetRequiredService<IAuthService>();
-        viewModel = new ViewModels.UserViewModels.LoginViewModel(Navigation, authService);
-        BindingContext = viewModel;
+        _vm = vm ?? throw new ArgumentNullException(nameof(vm));
+        BindingContext = _vm;
 
     }
 
@@ -24,7 +22,7 @@ public partial class LoginPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        await viewModel.AutoLogin();
+        await _vm.AutoLogin();
     }
 
 }

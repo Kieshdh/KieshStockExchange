@@ -10,6 +10,7 @@ using KieshStockExchange.Views.PortfolioPageViews;
 using KieshStockExchange.Views.TradePageViews;
 using KieshStockExchange.Views.UserViews;
 using Microsoft.Extensions.Logging;
+using SQLitePCL;
 
 namespace KieshStockExchange;
 
@@ -17,6 +18,7 @@ public static class MauiProgram
 {
     public static MauiApp CreateMauiApp()
     {
+        Batteries_V2.Init(); // Ensures the bundled e_sqlite3 is loaded everywhere
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()

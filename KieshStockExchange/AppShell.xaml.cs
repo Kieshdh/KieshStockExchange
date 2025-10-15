@@ -23,6 +23,6 @@ public partial class AppShell : Shell
         Routing.RegisterRoute(nameof(TradePage), typeof(TradePage));
 
         // Set the initial page to LoginPage
-        GoToAsync($"//{nameof(LoginPage)}");
+        Dispatcher.Dispatch(async () => await GoToAsync("///LoginPage"));
     }
 }
