@@ -105,12 +105,12 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
             {
                 ct.ThrowIfCancellationRequested();
 
-                var price = await _market.GetLastPriceAsync(stockId, currency);
+                var price = await _market.GetLastPriceAsync(stockId, currency, ct);
                 if (price <= 0m) continue; // nothing to snapshot
 
                 // Only write if we don’t already have a snapshot in this hour
                 var existing = await _db.GetStockPricesByStockIdAndTimeRange(
-                    stockId, currency, bucketStart, bucketEnd);
+                    stockId, currency, bucketStart, bucketEnd, ct);
 
                 // Create a new snapshot
                 if (existing.Count == 0)
@@ -143,7 +143,7 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
                 StockId = stockId,
                 CurrencyType = currency,
                 Price = price,
-                Timestamp = TimeHelper.NowUtc()
+                Timestamp = TimeHelper.FloorNowToBucketUtc(Interval)
             }, ct);
         }
         catch (Exception ex) {

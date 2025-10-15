@@ -41,7 +41,7 @@ public class UserOrderService : IUserOrderService
     #endregion
 
     #region Auth Helpers
-    private User CurrentUser => _auth.CurrentUser;
+    private User? CurrentUser => _auth.CurrentUser;
     private int CurrentUserId => CurrentUser?.UserId ?? 0;
     private bool IsAuthenticated => CurrentUserId > 0 && _auth.IsLoggedIn;
 
@@ -88,7 +88,7 @@ public class UserOrderService : IUserOrderService
 
         try
         {
-            UserAllOrders = (await _db.GetOrdersByUserId(targetUserId)).ToList();
+            UserAllOrders = (await _db.GetOrdersByUserId(targetUserId, ct)).ToList();
             return true;
         }
         catch (Exception ex)
@@ -144,7 +144,7 @@ public class UserOrderService : IUserOrderService
     {
         // Check if able to place order
         if (stockId <= 0 || quantity <= 0 || price <= 0)
-            return ParamError("StockId or quantity invalid.");
+            return ParamError("Order details must be positive.");
 
         var actingUserId = GetTargetUserIdOrFail(asUserId, out var authError);
         if (authError != null) return authError;

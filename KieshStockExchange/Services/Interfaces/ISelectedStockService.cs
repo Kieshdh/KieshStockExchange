@@ -41,8 +41,8 @@ public interface ISelectedStockService : INotifyPropertyChanged
     Task ChangeCurrencyAsync(CurrencyType currency, CancellationToken ct = default);
 
     /// <summary>Clear the current selection and live price.</summary>
-    void Reset();
+    Task Reset(CancellationToken ct = default);
 
     /// <summary>Dispose the service and its resources.</summary>
-    void Dispose();
+    ValueTask DisposeAsync();
 }

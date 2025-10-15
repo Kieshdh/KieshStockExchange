@@ -12,6 +12,7 @@ public interface IDataBaseService
     Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
     //Task DeleteAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
     Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken cancellationToken = default);
+    Task<ITransaction> BeginTransactionAsync(CancellationToken ct = default);
     Task RunInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken = default);
 
     // User operations
@@ -20,6 +21,7 @@ public interface IDataBaseService
     Task<User?> GetUserByUsername(string username, CancellationToken cancellationToken = default);
     Task CreateUser(User user, CancellationToken cancellationToken = default);
     Task UpdateUser(User user, CancellationToken cancellationToken = default);
+    Task UpsertUser(User user, CancellationToken cancellationToken = default);
     Task DeleteUser(User user, CancellationToken cancellationToken = default);
     Task DeleteUserById(int userId, CancellationToken cancellationToken = default);
 
@@ -29,6 +31,7 @@ public interface IDataBaseService
     Task<bool> StockExists(int stockId, CancellationToken cancellationToken = default);
     Task CreateStock(Stock stock, CancellationToken cancellationToken = default);
     Task UpdateStock(Stock stock, CancellationToken cancellationToken = default);
+    Task UpsertStock(Stock stock, CancellationToken cancellationToken = default);
     Task DeleteStock(Stock stock, CancellationToken cancellationToken = default);
 
     // StockPrice operations
@@ -47,6 +50,7 @@ public interface IDataBaseService
     Task<Order?> GetOrderById(int orderId, CancellationToken cancellationToken = default);
     Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken cancellationToken = default);
     Task<List<Order>> GetOrdersByStockId(int stockId, CancellationToken cancellationToken = default);
+    Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
     Task CreateOrder(Order order, CancellationToken cancellationToken = default);
     Task UpdateOrder(Order order, CancellationToken cancellationToken = default);
     Task DeleteOrder(Order order, CancellationToken cancellationToken = default);
@@ -93,4 +97,11 @@ public interface IDataBaseService
     Task DeleteCandle(Candle candle, CancellationToken cancellationToken = default);
     Task UpsertCandle(Candle candle, CancellationToken cancellationToken = default);
 
+}
+
+public interface ITransaction : IAsyncDisposable
+{
+    bool IsRoot { get; }
+    ValueTask CommitAsync(CancellationToken ct = default);
+    ValueTask RollbackAsync(CancellationToken ct = default);
 }

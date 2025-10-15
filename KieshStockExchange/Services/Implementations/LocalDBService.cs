@@ -1,25 +1,95 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services;
 using SQLite;
 using System.Threading;
 
 namespace KieshStockExchange.Services.Implementations;
 
-public class LocalDBService: IDataBaseService
+public class LocalDBService: IDataBaseService, IDisposable
 {
     #region Fields and Constructor
     private const string DB_NAME = "localdb.db3";
     private readonly SQLiteAsyncConnection _db;
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
-    private static readonly AsyncLocal<Stack<string>> _txSavepointStack = new();
+    private readonly AsyncLocal<Stack<LocalDbTransaction>> _txStack = new();
     private bool _initialized;
 
     public LocalDBService()
     {
         string dbPath = Path.Combine(FileSystem.AppDataDirectory, DB_NAME);
         _db = new SQLiteAsyncConnection(dbPath);
-        _ = InitializePragmasAsync();
+    }
+    #endregion
+
+    #region DBTransaction
+    private sealed class LocalDbTransaction : ITransaction
+    {
+        private readonly LocalDBService _owner;
+        private readonly SQLiteAsyncConnection _conn;
+        private readonly string? _savepoint;
+        private bool _completed; // committed or rolled back
+
+        public bool IsRoot { get; }
+
+        public LocalDbTransaction(LocalDBService owner, SQLiteAsyncConnection conn, bool isRoot, string? savepoint)
+        {
+            _owner = owner;
+            _conn = conn;
+            IsRoot = isRoot;
+            _savepoint = savepoint;
+        }
+
+        public async ValueTask CommitAsync(CancellationToken ct = default)
+        {
+            if (_completed) return;
+
+            if (IsRoot)
+                await _conn.ExecuteAsync("COMMIT;");
+            else
+                await _conn.ExecuteAsync($"RELEASE SAVEPOINT {_savepoint};");
+
+            PopFromStack();
+            _completed = true;
+        }
+
+        public async ValueTask RollbackAsync(CancellationToken ct = default)
+        {
+            if (_completed) return;
+
+            if (IsRoot)
+            {
+                await _conn.ExecuteAsync("ROLLBACK;");
+            }
+            else
+            {
+                await _conn.ExecuteAsync($"ROLLBACK TO {_savepoint};");
+                await _conn.ExecuteAsync($"RELEASE SAVEPOINT {_savepoint};");
+            }
+
+            PopFromStack();
+            _completed = true;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            // auto-rollback if caller forgot to commit/rollback
+            if (!_completed)
+                await RollbackAsync();
+        }
+
+        private void PopFromStack()
+        {
+            var stack = _owner._txStack.Value;
+            if (stack is { Count: > 0 })
+            {
+                // pop only if this is the top-most (defensive)
+                if (!ReferenceEquals(stack.Peek(), this))
+                    throw new InvalidOperationException("Transaction stack out of order.");
+                stack.Pop();
+            }
+        }
     }
     #endregion
 
@@ -27,90 +97,59 @@ public class LocalDBService: IDataBaseService
     public async Task ResetTableAsync<T>(CancellationToken cancellationToken = default) where T : new()
     {
         await InitializeAsync(cancellationToken);
-        await RunDbAsync(() => _db.DropTableAsync<T>(), cancellationToken);
-        await RunDbAsync(() => _db.CreateTableAsync<T>(), cancellationToken);
+        await _db.DropTableAsync<T>();
+        await _db.CreateTableAsync<T>();
     }
 
     public async Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
-        await RunDbAsync(() => _db.InsertAllAsync(items), ct);
+        await _db.InsertAllAsync(items);
     }
-
 
     public async Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default) 
     {
         await InitializeAsync(ct);
-        await RunDbAsync(() => _db.UpdateAllAsync(items), ct);
+        await _db.UpdateAllAsync(items);
     }
 
-    public async Task RunInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken cancellationToken = default)
+    public async Task<ITransaction> BeginTransactionAsync(CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+
+        var stack = _txStack.Value ??= new Stack<LocalDbTransaction>();
+        var isRoot = stack.Count == 0;
+
+        string? spName = null;
+        if (isRoot)
+        {
+            // take writer lock up-front to avoid deadlocks later
+            await _db.ExecuteAsync("BEGIN IMMEDIATE;");
+        }
+        else
+        {
+            spName = $"sp_{Guid.NewGuid():N}";
+            await _db.ExecuteAsync($"SAVEPOINT {spName};");
+        }
+
+        var tx = new LocalDbTransaction(this, _db, isRoot, spName);
+        stack.Push(tx);
+        return tx;
+    }
+
+    public async Task RunInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken ct = default)
     {
         if (action is null) throw new ArgumentNullException(nameof(action));
-
-        var stack = _txSavepointStack.Value ??= new Stack<string>();
-        var isOuter = stack.Count == 0;
-        string? spName = null;
-
+        await using var tx = (LocalDbTransaction)await BeginTransactionAsync(ct);
         try
         {
-            // --- open transaction (or savepoint for nesting) ---
-            if (isOuter)
-            {
-                // IMMEDIATE: take a RESERVED lock now → avoids deadlocks later on first write
-                await _db.ExecuteAsync("BEGIN IMMEDIATE;");
-            }
-            else
-            {
-                spName = $"sp_{Guid.NewGuid():N}";
-                stack.Push(spName);
-                await _db.ExecuteAsync($"SAVEPOINT {spName};");
-            }
-
-            // --- run the user's work inside the transaction ---
-            cancellationToken.ThrowIfCancellationRequested();
-            await action(cancellationToken);
-
-            // --- commit/release ---
-            if (isOuter)
-            {
-                await _db.ExecuteAsync("COMMIT;");
-            }
-            else
-            {
-                await _db.ExecuteAsync($"RELEASE SAVEPOINT {spName};");
-                stack.Pop();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // --- rollback on cancel ---
-            if (isOuter)
-            {
-                await _db.ExecuteAsync("ROLLBACK;");
-            }
-            else if (spName != null)
-            {
-                await _db.ExecuteAsync($"ROLLBACK TO {spName};");
-                await _db.ExecuteAsync($"RELEASE SAVEPOINT {spName};");
-                if (stack.Count > 0 && stack.Peek() == spName) stack.Pop();
-            }
-            throw; // bubble cancellation up
+            await action(ct);
+            await tx.CommitAsync(ct);
         }
         catch
         {
-            // --- rollback on any error ---
-            if (isOuter)
-            {
-                await _db.ExecuteAsync("ROLLBACK;");
-            }
-            else if (spName != null)
-            {
-                await _db.ExecuteAsync($"ROLLBACK TO {spName};");
-                await _db.ExecuteAsync($"RELEASE SAVEPOINT {spName};");
-                if (stack.Count > 0 && stack.Peek() == spName) stack.Pop();
-            }
-            throw; // bubble the exception up
+            await tx.RollbackAsync(ct);
+            throw;
         }
     }
     #endregion
@@ -152,6 +191,14 @@ public class LocalDBService: IDataBaseService
         if (!user.IsValid())
             throw new ArgumentException("User entity is not valid", nameof(user));
         await RunDbAsync(() => _db.UpdateAsync(user), cancellationToken);
+    }
+
+    public async Task UpsertUser(User user, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        if (!user.IsValid())
+            throw new ArgumentException("User entity is not valid", nameof(user));
+        await RunDbAsync(() => _db.InsertOrReplaceAsync(user), cancellationToken);
     }
 
     public async Task DeleteUser(User user, CancellationToken cancellationToken = default)
@@ -209,6 +256,14 @@ public class LocalDBService: IDataBaseService
         if (!stock.IsValid())
             throw new ArgumentException("Stock entity is not valid", nameof(stock));
         await RunDbAsync(() => _db.UpdateAsync(stock), cancellationToken);
+    }
+
+    public async Task UpsertStock(Stock stock, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        if (!stock.IsValid())
+            throw new ArgumentException("Stock entity is not valid", nameof(stock));
+        await RunDbAsync(() => _db.InsertOrReplaceAsync(stock), cancellationToken);
     }
 
     public async Task DeleteStock(Stock stock, CancellationToken cancellationToken = default)
@@ -278,7 +333,7 @@ public class LocalDBService: IDataBaseService
         var currencyCode = currency.ToString();
         return await RunDbAsync(() =>
             _db.Table<StockPrice>()
-               .Where(sp => sp.StockId == stockId && sp.Timestamp >= from && sp.Timestamp <= to && sp.Currency == currencyCode)
+               .Where(sp => sp.StockId == stockId && sp.Timestamp >= from && sp.Timestamp < to && sp.Currency == currencyCode)
                .OrderByDescending(sp => sp.Timestamp)
                .ToListAsync(),
             cancellationToken);
@@ -346,6 +401,18 @@ public class LocalDBService: IDataBaseService
             cancellationToken);
     }
 
+    public async Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        var currencyCode = currency.ToString();
+        return await RunDbAsync(() =>
+            _db.Table<Order>()
+               .Where(o => o.StockId == stockId && o.Currency == currencyCode && o.Status == Order.Statuses.Open &&
+               (o.OrderType == Order.Types.LimitBuy || o.OrderType == Order.Types.LimitSell)).OrderBy(o => o.CreatedAt)
+               .ToListAsync(),
+            cancellationToken);
+    }
+
     public async Task CreateOrder(Order order, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
@@ -405,7 +472,7 @@ public class LocalDBService: IDataBaseService
         var currencyCode = currency.ToString();
         return await RunDbAsync(() =>
             _db.Table<Transaction>()
-               .Where(t => t.StockId == stockId && t.Timestamp >= from && t.Timestamp <= to && t.Currency == currencyCode )
+               .Where(t => t.StockId == stockId && t.Timestamp >= from && t.Timestamp < to && t.Currency == currencyCode )
                .ToListAsync(),
             cancellationToken);
     }
@@ -638,7 +705,7 @@ public class LocalDBService: IDataBaseService
         return await RunDbAsync(() =>
             _db.Table<Candle>()
                .Where(c => c.StockId == stockId && c.Currency == currencyCode && c.BucketSeconds == resolutionSeconds
-                        && c.OpenTime >= from && c.OpenTime <= to)
+                        && c.OpenTime >= from && c.OpenTime < to)
                .OrderByDescending(c => c.OpenTime)
                .ToListAsync(),
             cancellationToken);
@@ -689,8 +756,7 @@ public class LocalDBService: IDataBaseService
         {
             if (_initialized) return;
 
-            // Wrap each DB call so cancellation is checked before
-            ct.ThrowIfCancellationRequested();
+            await Pragma();
 
             await _db.CreateTableAsync<User>();
             await _db.CreateTableAsync<Stock>();
@@ -703,10 +769,7 @@ public class LocalDBService: IDataBaseService
 
             _initialized = true;
         }
-        finally
-        {
-            _initGate.Release();
-        }
+        finally { _initGate.Release(); }
     }
 
     private static Task<T> RunDbAsync<T>(Func<Task<T>> action, CancellationToken ct) =>
@@ -723,13 +786,21 @@ public class LocalDBService: IDataBaseService
             await action();
         }, ct);
 
-    private async Task InitializePragmasAsync()
+    public void Dispose() { _db.GetConnection().Dispose(); }
+
+    private async Task Pragma()
     {
-        // These improve reliability under concurrency and ensure constraints are enforced.
-        await _db.ExecuteAsync("PRAGMA foreign_keys = ON;");
-        await _db.ExecuteAsync("PRAGMA journal_mode = WAL;");     // better concurrent reads
-        await _db.ExecuteAsync("PRAGMA synchronous = NORMAL;");
-        await _db.ExecuteAsync("PRAGMA busy_timeout = 5000;");    // wait up to 5s on writer lock
+        // Tells SQLite to actually enforce FOREIGN KEY constraints
+        await _db.ExecuteScalarAsync<string>("PRAGMA foreign_keys = ON;");
+
+        // Switch to Write-Ahead Logging, so readers don’t block writers
+        await _db.ExecuteScalarAsync<string>("PRAGMA journal_mode = WAL;");
+
+        // Reduces fsyncs compared to FULL, giving faster writes
+        await _db.ExecuteScalarAsync<string>("PRAGMA synchronous = NORMAL;");
+
+        // Wait up to max 5s on writer lock
+        await _db.ExecuteScalarAsync<string>("PRAGMA busy_timeout = 5000;"); 
     }
     #endregion
 }

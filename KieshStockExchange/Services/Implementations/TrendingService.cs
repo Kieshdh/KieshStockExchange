@@ -34,6 +34,7 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
     private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(SecondsBetweenUpdates));
     private readonly CancellationTokenSource _cts = new();
+    private readonly EventHandler<LiveQuote> _onQuoteUpdated;
 
     private const int MaxMovers = 5;
     private const int SecondsBetweenUpdates = 5;
@@ -54,7 +55,8 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
         _mostActiveView = new ReadOnlyObservableCollection<LiveQuote>(_mostActive);
 
         // React to live quote pushes from the single source of truth
-        _market.QuoteUpdated += (_, __) => _ = RecomputeMoversAsync();
+        _onQuoteUpdated = (_, __) => _ = RecomputeMoversAsync();
+        _market.QuoteUpdated += _onQuoteUpdated;
 
         // Subscribe to all stocks in the specified currency
         _ = _market.SubscribeAllAsync(Currency);
@@ -97,6 +99,7 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
     public void Dispose()
     {
+        _market.QuoteUpdated -= _onQuoteUpdated;
         _cts.Cancel();
         _cts.Dispose();
         _timer.Dispose();

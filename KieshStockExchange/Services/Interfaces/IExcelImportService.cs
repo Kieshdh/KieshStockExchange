@@ -6,9 +6,8 @@
 /// 
 public interface IExcelImportService
 {
-    Task AddUsersFromExcelAsync();
-    Task AddFundsFromExcelAsync();
-    Task AddAIUserBehaviourDataFromExcelAsync();
-    Task AddStocksFromExcelAsync();
-    Task AddPositionsFromExcelAsync();
+    Task AddUsersFromExcelAsync(bool checkDataLoaded = true);
+    Task AddAIUserBehaviourDataFromExcelAsync(bool checkDataLoaded = true);
+    Task AddStocksFromExcelAsync(bool checkDataLoaded = true);
+    Task AddHoldingsFromExcelAsync(bool checkDataLoaded = true);
 }

@@ -5,10 +5,11 @@ using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 
 namespace KieshStockExchange.Services.Implementations;
 
-public partial class MarketDataService : ObservableObject, IMarketDataService, IDisposable
+public partial class MarketDataService : ObservableObject, IMarketDataService, IAsyncDisposable
 {
     #region Fields and Constructor
     private readonly IDispatcher _dispatcher; // to marshal changes to UI thread
@@ -53,7 +54,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     private readonly ConcurrentDictionary<(int, CurrencyType), IDispatcherTimer> _simTimers = new();
 
     // Debounce interval
-    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(500);
     #endregion
 
     #region Ring buffer
@@ -195,7 +196,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         _candle.Subscribe(stockId, currency, CandleResolution.Default);
     }
 
-    public void Unsubscribe(int stockId, CurrencyType currency)
+    public async Task Unsubscribe(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
         var key = (stockId, currency);
         // Decrement ref count
@@ -221,15 +222,14 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
                 _dispatcher.Dispatch(() => sim.Stop());
 
             // Unsubscribe from candles
-            _ = _candle.Unsubscribe(stockId, currency, CandleResolution.Default);
+            await _candle.UnsubscribeAsync(stockId, currency, CandleResolution.Default, ct);
         }
     }
 
     public async Task SubscribeAllAsync(CurrencyType currency, CancellationToken ct = default)
     {
         var stocks = await GetAllStocksAsync(ct);
-        foreach (var stock in stocks)
-            await SubscribeAsync(stock.StockId, currency, ct);
+        await Task.WhenAll(stocks.Select(s => SubscribeAsync(s.StockId, currency, ct)));
     }
     #endregion
 
@@ -463,7 +463,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     #region IDisposable 
     private bool Disposed = false;
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         if (Disposed) return;
         Disposed = true;
@@ -476,6 +476,13 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
             // Stop all simulated random-tick timers used by StartRandomDisplayTicker
             foreach (var kv in _simTimers.ToArray())
                 StopAndDetachSimTimer(kv.Key, kv.Value);
+
+            // Ensure underlying candle stream is also torn down
+            foreach (var (stockId, currency) in _subRefCount.Keys.ToArray())
+            {
+                try { await _candle.UnsubscribeAsync(stockId, currency, CandleResolution.Default); }
+                catch { } // Ignore
+            }
 
             // Clear all event handlers to prevent memory leaks
             QuoteUpdated = null;
@@ -492,7 +499,6 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         {
             _logger.LogError(ex, "Error disposing MarketDataService.");
         }
-
     }
 
     private void StopAndDetachTimer((int, CurrencyType) key, IDispatcherTimer timer)

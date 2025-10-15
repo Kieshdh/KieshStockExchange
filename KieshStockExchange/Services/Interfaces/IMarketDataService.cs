@@ -13,7 +13,7 @@ public interface IMarketDataService
     // Subscribe / Unsubscribe (keeps quotes in memory; ref-counted)
     IReadOnlyCollection<(int, CurrencyType)> Subscribed { get; }
     Task SubscribeAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
-    void Unsubscribe(int stockId, CurrencyType currency);
+    Task Unsubscribe(int stockId, CurrencyType currency, CancellationToken ct = default);
     Task SubscribeAllAsync(CurrencyType currency, CancellationToken ct = default);
 
     // History bootstrap + candle stream --------------------------------------

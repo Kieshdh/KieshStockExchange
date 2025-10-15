@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.Implementations;
 
-public partial class SelectedStockService : ObservableObject, ISelectedStockService, IDisposable
+public partial class SelectedStockService : ObservableObject, ISelectedStockService, IAsyncDisposable
 {
     #region Active selection state
     // Holds active (stock, currency) subscription
@@ -116,10 +116,10 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
             Symbol, stockId, prevCurrency, currency);
     }
 
-    public void Reset()
+    public async Task Reset(CancellationToken ct = default)
     {
         // Unsubscribe from previous
-        _ = UnsubscribeAsync();
+        await UnsubscribeAsync(ct);
 
         // Clear state
         SelectedStock = null;
@@ -132,10 +132,10 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         _firstSelectionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _market.QuoteUpdated -= OnQuoteUpdated;
-        _ = UnsubscribeAsync();
+        await UnsubscribeAsync();
     }
     #endregion
 
@@ -143,7 +143,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     private LiveQuote? TryGetQuote()
         => _market.Quotes.TryGetValue(Key, out var q) ? q : null;
 
-    private async Task UpdateFromLiveAsync(LiveQuote? q)
+    private async Task UpdateFromLiveAsync(LiveQuote? q, CancellationToken ct = default)
     {
         decimal last = 0m;
         DateTime updated;
@@ -152,7 +152,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         {
             // Fall back to an explicit read (ensures we have a number even if history was empty)
             if (StockId is int id)
-                last = await _market.GetLastPriceAsync(id, Currency);
+                last = await _market.GetLastPriceAsync(id, Currency, ct);
             updated = TimeHelper.NowUtc();
         } else {
             last = q.LastPrice;
@@ -177,14 +177,12 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         _ = UpdateFromLiveAsync(q);
     }
 
-    private async Task UnsubscribeAsync()
+    private async Task UnsubscribeAsync(CancellationToken ct = default)
     {
-        var key = (StockId ?? 0, Currency);
-        if (key.Item1 == 0) return;
-        try { _market.Unsubscribe(key.Item1, key.Item2); }
-        catch (Exception ex) { _logger.LogWarning(ex, "Unsubscribe failed for {StockId}/{Currency}", key.Item1, key.Item2); }
+        if (StockId is not int id || id == 0) return;
+        try { await _market.Unsubscribe(id, Currency, ct); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Unsubscribe failed for {StockId}/{Currency}", id, Currency); }
         finally { Quote = null; }
-        await Task.CompletedTask;
     }
     #endregion
 }

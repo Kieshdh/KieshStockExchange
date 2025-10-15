@@ -148,47 +148,47 @@ public class UserPortfolioService : IUserPortfolioService
     #endregion
 
     #region Fund Mutations
-    public Task<bool> AddFundsAsync(decimal amount, CurrencyType currency,
+    public async Task<bool> AddFundsAsync(decimal amount, CurrencyType currency,
         int? asUserId = null, CancellationToken ct = default)
-        => MutateFundAsync(FundMutation.Add, amount, currency, asUserId, ct);
+        => await MutateFundAsync(FundMutation.Add, amount, currency, asUserId, ct);
 
-    public Task<bool> WithdrawFundsAsync(decimal amount, CurrencyType currency,
+    public async Task<bool> WithdrawFundsAsync(decimal amount, CurrencyType currency,
         int? asUserId = null, CancellationToken ct = default)
-        => MutateFundAsync(FundMutation.Withdraw, amount, currency, asUserId, ct);
+        => await MutateFundAsync(FundMutation.Withdraw, amount, currency, asUserId, ct);
 
-    public Task<bool> ReserveFundsAsync(decimal amount, CurrencyType currency,
+    public async Task<bool> ReserveFundsAsync(decimal amount, CurrencyType currency,
         int? asUserId = null, CancellationToken ct = default)
-        => MutateFundAsync(FundMutation.Reserve, amount, currency, asUserId, ct);
+        => await MutateFundAsync(FundMutation.Reserve, amount, currency, asUserId, ct);
 
-    public Task<bool> ReleaseReservedFundsAsync(decimal amount, CurrencyType currency,
+    public async Task<bool> ReleaseReservedFundsAsync(decimal amount, CurrencyType currency,
         int? asUserId = null, CancellationToken ct = default)
-        => MutateFundAsync(FundMutation.Unreserve, amount, currency, asUserId, ct);
+        => await MutateFundAsync(FundMutation.Unreserve, amount, currency, asUserId, ct);
 
-    public Task<bool> ReleaseFromReservedFundsAsync(decimal amount, CurrencyType currency,
+    public async Task<bool> ReleaseFromReservedFundsAsync(decimal amount, CurrencyType currency,
         int? asUserId = null, CancellationToken ct = default)
-        => MutateFundAsync(FundMutation.SpendReserved, amount, currency, asUserId, ct);
+        => await MutateFundAsync(FundMutation.SpendReserved, amount, currency, asUserId, ct);
     #endregion
 
     #region Position Mutations
-    public Task<bool> AddPositionAsync(int stockId, int quantity,
+    public async Task<bool> AddPositionAsync(int stockId, int quantity,
         int? asUserId = null, CancellationToken ct = default)
-        => MutatePositionAsync(PositionMutation.Add, stockId, quantity, asUserId, ct);
+        => await MutatePositionAsync(PositionMutation.Add, stockId, quantity, asUserId, ct);
 
-    public Task<bool> RemovePositionAsync(int stockId, int quantity,
+    public async Task<bool> RemovePositionAsync(int stockId, int quantity,
         int? asUserId = null, CancellationToken ct = default)
-        => MutatePositionAsync(PositionMutation.Remove, stockId, quantity, asUserId, ct);
+        => await MutatePositionAsync(PositionMutation.Remove, stockId, quantity, asUserId, ct);
 
-    public Task<bool> ReservePositionAsync(int stockId, int quantity,
+    public async Task<bool> ReservePositionAsync(int stockId, int quantity,
         int? asUserId = null, CancellationToken ct = default)
-        => MutatePositionAsync(PositionMutation.Reserve, stockId, quantity, asUserId, ct);
+        => await MutatePositionAsync(PositionMutation.Reserve, stockId, quantity, asUserId, ct);
 
-    public Task<bool> UnreservePositionAsync(int stockId, int quantity,
+    public async Task<bool> UnreservePositionAsync(int stockId, int quantity,
         int? asUserId = null, CancellationToken ct = default)
-        => MutatePositionAsync(PositionMutation.Unreserve, stockId, quantity, asUserId, ct);
+        => await MutatePositionAsync(PositionMutation.Unreserve, stockId, quantity, asUserId, ct);
 
-    public Task<bool> ReleaseFromReservedPositionAsync(int stockId, int quantity,
+    public async Task<bool> ReleaseFromReservedPositionAsync(int stockId, int quantity,
         int? asUserId = null, CancellationToken ct = default)
-        => MutatePositionAsync(PositionMutation.SpendReserved, stockId, quantity, asUserId, ct);
+        => await MutatePositionAsync(PositionMutation.SpendReserved, stockId, quantity, asUserId, ct);
     #endregion
 
     #region Internal Mutations
@@ -204,69 +204,61 @@ public class UserPortfolioService : IUserPortfolioService
         if (amount <= 0) { _logger.LogWarning("Amount must be positive. Given: {Amount}", amount); return false; }
         if (!CurrencyHelper.IsSupported(currency)) { _logger.LogWarning("Unsupported currency {Currency}", currency); return false; }
 
-        bool success = false;
+        var fund = await _db.GetFundByUserIdAndCurrency(targetUserId, currency, ct)
+            ?? new Fund { UserId = targetUserId, CurrencyType = currency, TotalBalance = 0 };
 
-        await _db.RunInTransactionAsync(async tx =>
+        switch (mutation)
         {
-            var fund = await _db.GetFundByUserIdAndCurrency(targetUserId, currency, tx)
-                ?? new Fund { UserId = targetUserId, CurrencyType = currency, TotalBalance = 0 };
+            case FundMutation.Add:
+                fund.AddFunds(amount);
+                break;
 
-            switch (mutation)
-            {
-                case FundMutation.Add:
-                    fund.AddFunds(amount);
-                    break;
+            case FundMutation.Withdraw:
+                if (fund.AvailableBalance < amount)
+                {
+                    _logger.LogWarning("Insufficient funds to withdraw {Amount} for user {UserId}. Available={Avail}",
+                        amount, targetUserId, fund.AvailableBalance);
+                    return false;
+                }
+                fund.WithdrawFunds(amount);
+                break;
 
-                case FundMutation.Withdraw:
-                    if (fund.AvailableBalance < amount)
-                    {
-                        _logger.LogWarning("Insufficient funds to withdraw {Amount} for user {UserId}. Available={Avail}",
-                            amount, targetUserId, fund.AvailableBalance);
-                        return;
-                    }
-                    fund.WithdrawFunds(amount);
-                    break;
+            case FundMutation.Reserve:
+                if (fund.AvailableBalance < amount)
+                {
+                    _logger.LogWarning("Insufficient funds to reserve {Amount} for user {UserId}. Available={Avail}",
+                        amount, targetUserId, fund.AvailableBalance);
+                    return false;
+                }
+                fund.ReserveFunds(amount);
+                break;
 
-                case FundMutation.Reserve:
-                    if (fund.AvailableBalance < amount)
-                    {
-                        _logger.LogWarning("Insufficient funds to reserve {Amount} for user {UserId}. Available={Avail}",
-                            amount, targetUserId, fund.AvailableBalance);
-                        return;
-                    }
-                    fund.ReserveFunds(amount);
-                    break;
+            case FundMutation.Unreserve:
+                if (fund.ReservedBalance < amount)
+                {
+                    _logger.LogWarning("Insufficient reserved to unreserve {Amount} for user {UserId}. Reserved={Res}",
+                        amount, targetUserId, fund.ReservedBalance);
+                    return false;
+                }
+                fund.UnreserveFunds(amount);
+                break;
 
-                case FundMutation.Unreserve:
-                    if (fund.ReservedBalance < amount)
-                    {
-                        _logger.LogWarning("Insufficient reserved to unreserve {Amount} for user {UserId}. Reserved={Res}",
-                            amount, targetUserId, fund.ReservedBalance);
-                        return;
-                    }
-                    fund.UnreserveFunds(amount);
-                    break;
+            case FundMutation.SpendReserved:
+                if (fund.ReservedBalance < amount)
+                {
+                    _logger.LogWarning("Insufficient reserved to spend {Amount} for user {UserId}. Reserved={Res}",
+                        amount, targetUserId, fund.ReservedBalance);
+                    return false;
+                }
+                fund.ConsumeReservedFunds(amount);
+                break;
+        }
 
-                case FundMutation.SpendReserved:
-                    if (fund.ReservedBalance < amount)
-                    {
-                        _logger.LogWarning("Insufficient reserved to spend {Amount} for user {UserId}. Reserved={Res}",
-                            amount, targetUserId, fund.ReservedBalance);
-                        return;
-                    }
-                    fund.ConsumeReservedFunds(amount);
-                    break;
-            }
+        await _db.UpsertFund(fund, ct);
 
-            await _db.UpsertFund(fund, tx);
-            success = true;
+        //await RefreshAsync(targetUserId, ct);
 
-        }, ct);
-
-        if (success)
-            await RefreshAsync(targetUserId, ct);
-
-        return success;
+        return true;
     }
 
     private async Task<bool> MutatePositionAsync(PositionMutation mutation, int stockId, int quantity,
@@ -277,75 +269,67 @@ public class UserPortfolioService : IUserPortfolioService
         if (!CanModifyPortfolio(targetUserId)) { _logger.LogWarning("No permission to modify positions for user {UserId}", targetUserId); return false; }
         if (quantity <= 0) { _logger.LogWarning("Quantity must be positive. Given: {Qty}", quantity); return false; }
 
-        bool success = false;
-
-        await _db.RunInTransactionAsync(async tx =>
+        if (!await _db.StockExists(stockId, ct))
         {
-            if (!await _db.StockExists(stockId, tx))
-            {
-                _logger.LogWarning("Stock #{StockId} does not exist.", stockId);
-                return;
-            }
+            _logger.LogWarning("Stock #{StockId} does not exist.", stockId);
+            return false;
+        }
 
-            var position = await _db.GetPositionByUserIdAndStockId(targetUserId, stockId, tx)
-                ?? new Position { UserId = targetUserId, StockId = stockId, Quantity = 0 };
+        var position = await _db.GetPositionByUserIdAndStockId(targetUserId, stockId, ct)
+            ?? new Position { UserId = targetUserId, StockId = stockId, Quantity = 0 };
 
-            switch (mutation)
-            {
-                case PositionMutation.Add:
-                    position.AddStock(quantity);
-                    break;
+        switch (mutation)
+        {
+            case PositionMutation.Add:
+                position.AddStock(quantity);
+                break;
 
-                case PositionMutation.Remove:
-                    if (position.Quantity < quantity)
-                    {
-                        _logger.LogWarning("Insufficient shares to remove {Qty} for user {UserId} on stock #{StockId}. Have={Have}",
-                            quantity, targetUserId, stockId, position.Quantity);
-                        return;
-                    }
-                    position.RemoveStock(quantity);
-                    break;
+            case PositionMutation.Remove:
+                if (position.RemainingQuantity < quantity)
+                {
+                    _logger.LogWarning("Insufficient shares to remove {Qty} for user {UserId} on stock #{StockId}. Have={Have}",
+                        quantity, targetUserId, stockId, position.Quantity);
+                    return false;
+                }
+                position.RemoveStock(quantity);
+                break;
 
-                case PositionMutation.Reserve:
-                    if (position.RemainingQuantity < quantity)
-                    {
-                        _logger.LogWarning("Insufficient remaining shares to reserve {Qty} for user {UserId} on stock #{StockId}. Remaining={Rem}",
-                            quantity, targetUserId, stockId, position.RemainingQuantity);
-                        return;
-                    }
-                    position.ReserveStock(quantity);
-                    break;
+            case PositionMutation.Reserve:
+                if (position.RemainingQuantity < quantity)
+                {
+                    _logger.LogWarning("Insufficient remaining shares to reserve {Qty} for user {UserId} on stock #{StockId}. Remaining={Rem}",
+                        quantity, targetUserId, stockId, position.RemainingQuantity);
+                    return false;
+                }
+                position.ReserveStock(quantity);
+                break;
 
-                case PositionMutation.Unreserve:
-                    if (position.ReservedQuantity < quantity)
-                    {
-                        _logger.LogWarning("Insufficient reserved shares to unreserve {Qty} for user {UserId} on stock #{StockId}. Reserved={Res}",
-                            quantity, targetUserId, stockId, position.ReservedQuantity);
-                        return;
-                    }
-                    position.UnreserveStock(quantity);
-                    break;
+            case PositionMutation.Unreserve:
+                if (position.ReservedQuantity < quantity)
+                {
+                    _logger.LogWarning("Insufficient reserved shares to unreserve {Qty} for user {UserId} on stock #{StockId}. Reserved={Res}",
+                        quantity, targetUserId, stockId, position.ReservedQuantity);
+                    return false;
+                }
+                position.UnreserveStock(quantity);
+                break;
 
-                case PositionMutation.SpendReserved:
-                    if (position.ReservedQuantity < quantity)
-                    {
-                        _logger.LogWarning("Insufficient reserved shares to spend {Qty} for user {UserId} on stock #{StockId}. Reserved={Res}",
-                            quantity, targetUserId, stockId, position.ReservedQuantity);
-                        return;
-                    }
-                    position.ConsumeReservedStock(quantity);
-                    break;
-            }
+            case PositionMutation.SpendReserved:
+                if (position.ReservedQuantity < quantity)
+                {
+                    _logger.LogWarning("Insufficient reserved shares to spend {Qty} for user {UserId} on stock #{StockId}. Reserved={Res}",
+                        quantity, targetUserId, stockId, position.ReservedQuantity);
+                    return false;
+                }
+                position.ConsumeReservedStock(quantity);
+                break;
+        }
 
-            await _db.UpsertPosition(position, tx);
-            success = true;
+        await _db.UpsertPosition(position, ct);
 
-        }, ct);
+        //await RefreshAsync(targetUserId, ct);
 
-        if (success)
-            await RefreshAsync(targetUserId, ct);
-
-        return success;
+        return true;
     }
     #endregion
     
