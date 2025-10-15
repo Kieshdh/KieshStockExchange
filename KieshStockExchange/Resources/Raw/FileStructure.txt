@@ -54,6 +54,10 @@ KieshStockExchange
 --- Fonts
 --- Images
 --- Raw
+----- FileStructure.txt (This file)
+----- SQL.txt (SQL schema and seed data)
+----- AiUserData.xlsx (Sample data for AI users)
+----- AiUserDataGenerator.py (Python script to generate sample data)
 --- Splash
 --- Styles
 ----- Colors.xaml
@@ -100,7 +104,7 @@ KieshStockExchange
 --- AccountViewModels (TODO)
 ----- AccountViewModel.cs
 --- AdminViewModels
------ AdminViewModel.cs
+----- AdminViewModel.cs (Main ViewModel for AdminPage)
 ----- BaseAdminTableViewModel.cs
 ----- OrderTableViewModel.cs  (TODO)
 ----- StockTableViewModel.cs
@@ -109,7 +113,8 @@ KieshStockExchange
 --- MarketViewModels (TODO)
 ----- MarketViewModel.cs
 --- OtherViewModels
------ BaseViewModel.cs
+----- BaseViewModel.cs (Common properties for all ViewModels)
+----- StockAwareViewModel.cs (Holds a SelectedStock property for binding)
 --- PortfolioViewModels (TODO)
 ----- PortfolioViewModel.cs
 --- TradeViewModels (TODO)
@@ -119,8 +124,8 @@ KieshStockExchange
 ----- OrderBookViewModel.cs
 ----- OrderHistoryTableViewModel.cs
 ----- PlaceOrderViewModel.cs
------ PositionsTableViewModel.cs
------ TradeViewModel.cs
+----- PositionsTableViewModel.cs 
+----- TradeViewModel.cs (Main ViewModel for TradePage)
 --- UserViewModels
 ----- LoginViewModel.cs
 ----- RegisterViewModel.cs

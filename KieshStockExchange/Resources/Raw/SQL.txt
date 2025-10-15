@@ -92,7 +92,7 @@ CREATE TABLE Candles (
     CandleId INTEGER PRIMARY KEY AUTOINCREMENT,
     StockId INTEGER NOT NULL,
     Currency TEXT NOT NULL,
-    ResolutionSeconds INTEGER NOT NULL,
+    BucketSeconds INTEGER NOT NULL,
     OpenTime DATETIME NOT NULL, 
     Open  REAL NOT NULL,
     High  REAL NOT NULL,
