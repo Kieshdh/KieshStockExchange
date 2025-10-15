@@ -13,7 +13,7 @@ public class User : IValidatable
     [Column("UserId")] public int UserId { 
         get => _userId; 
         set {
-            if (_userId != 0) throw new InvalidOperationException("UserId is immutable once set.");
+            if (_userId != 0 && value != _userId) throw new InvalidOperationException("UserId is immutable once set.");
             _userId = value < 0 ? 0 : value;
         }
     }

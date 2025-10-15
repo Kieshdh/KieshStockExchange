@@ -79,8 +79,13 @@ public class Order : IValidatable
     // "MarketBuy", "MarketSell", "LimitBuy", "LimitSell"
     private string _orderType = String.Empty;
     [Column("OrderType")] public string OrderType { 
-        get => _orderType; 
-        set => _orderType = value;
+        get => _orderType;
+        set {
+            if (value == Types.MarketBuy || value == Types.MarketSell ||
+                value == Types.LimitBuy || value == Types.LimitSell)
+                _orderType = value;
+            else throw new ArgumentException("Invalid OrderType.");
+        }
     }
 
     // "Open", "Filled", "Cancelled"
@@ -89,8 +94,13 @@ public class Order : IValidatable
 
     [Indexed(Name = "IX_Orders_User_Status", Order = 2)]
     [Column("Status")] public string Status { 
-        get => _status; 
-        set => _status = value;
+        get => _status;
+        set {
+            if (value == Statuses.Open || value == Statuses.Filled ||
+                value == Statuses.Cancelled)
+                _status = value;
+            else throw new ArgumentException("Invalid Status.");
+        }
     }
 
     private int _amountFilled = 0;
@@ -191,6 +201,28 @@ public class Order : IValidatable
         UpdatedAt = TimeHelper.NowUtc();
         if (AmountFilled == Quantity)
             Status = Statuses.Filled; 
+    }
+
+    public Order Clone() =>
+        new Order
+        {
+            UserId = this.UserId,
+            StockId = this.StockId,
+            Quantity = this.Quantity,
+            Price = this.Price,
+            CurrencyType = this.CurrencyType,
+            OrderType = this.OrderType,
+            Status = this.Status,
+            AmountFilled = this.AmountFilled,
+            CreatedAt = this.CreatedAt,
+            UpdatedAt = this.UpdatedAt
+        };
+
+    public Order CloneFull()
+    {         
+        var clone = Clone();
+        clone.OrderId = OrderId;
+        return clone;
     }
     #endregion
 }

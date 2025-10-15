@@ -57,7 +57,7 @@ public class Candle : IValidatable
     [Ignore] public CandleResolution Resolution { get; private set; } = CandleResolution.None;
     [Ignore] public TimeSpan Bucket { get; private set; } = TimeSpan.Zero;
     [Indexed(Name = "IX_Candle_Key", Order = 3, Unique = true)]
-    [Column("ResolutionSeconds") ] public int BucketSeconds
+    [Column("BucketSeconds") ] public int BucketSeconds
     {
         get => (int)Resolution;
         set {

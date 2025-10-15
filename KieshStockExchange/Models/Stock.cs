@@ -13,7 +13,7 @@ public class Stock : IValidatable
     [Column("StockId")] public int StockId {
         get => _stockId;
         set {
-            if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
+            if (_stockId != 0 && value != _stockId) throw new InvalidOperationException("StockId is immutable once set.");
             _stockId = value < 0 ? 0 : value;
         }
     }

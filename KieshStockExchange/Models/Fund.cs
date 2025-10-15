@@ -14,17 +14,17 @@ public class Fund : IValidatable
     { 
         get => _fundId; 
         set {
-            if (_fundId != 0) throw new InvalidOperationException("FundId is immutable once set.");
+            if (_fundId != 0 && value != _fundId) throw new InvalidOperationException("FundId is immutable once set.");
             _fundId = value < 0 ? 0 : value;
         }
     }
 
     private int _userId = 0;
-    [Indexed(Name = "IX_Funds_User_Currency", Order = 1)]
+    [Indexed(Name = "IX_Funds_User_Currency", Order = 1, Unique = true)]
     [Column("UserId")] public int UserId { 
         get => _userId; 
         set {
-            if (_userId != 0) throw new InvalidOperationException("UserId is immutable once set.");
+            if (_userId != 0 && value != _userId) throw new InvalidOperationException("UserId is immutable once set.");
             _userId = value;
         }
     }

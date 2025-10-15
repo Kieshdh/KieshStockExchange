@@ -12,17 +12,17 @@ public class Position : IValidatable
     [Column("PositionId")] public int PositionId { 
         get => _positionId;
         set {
-            if (_positionId != 0) throw new InvalidOperationException("PositionId is immutable once set.");
+            if (_positionId != 0 && value != _positionId) throw new InvalidOperationException("PositionId is immutable once set.");
             _positionId = value < 0 ? 0 : value;
         }
     }
 
     private int _userId = 0;
-    [Indexed(Name = "IX_Positions_User_Stock", Order = 1)]
+    [Indexed(Name = "IX_Positions_User_Stock", Order = 1, Unique = true)]
     [Column("UserId")] public int UserId { 
         get => _userId; 
         set {
-            if (_userId != 0) throw new InvalidOperationException("UserId is immutable once set.");
+            if (_userId != 0 && value != _userId) throw new InvalidOperationException("UserId is immutable once set.");
             _userId = value;
         }
     }
@@ -32,7 +32,7 @@ public class Position : IValidatable
     [Column("StockId")] public int StockId {
         get => _stockId; 
         set {
-            if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
+            if (_stockId != 0 && value != _stockId) throw new InvalidOperationException("StockId is immutable once set.");
             _stockId = value;
         }
     }
@@ -96,7 +96,7 @@ public class Position : IValidatable
 
     public void ConsumeReservedStock(int quantity)
     {
-        if (quantity < 0)
+        if (quantity <= 0)
             throw new ArgumentException("Quantity must be positive.");
         if (quantity > ReservedQuantity)
             throw new ArgumentException("Invalid reserved quantity");

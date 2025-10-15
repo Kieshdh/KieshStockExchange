@@ -12,7 +12,7 @@ public class Transaction : IValidatable
     [Column("TransactionId")] public int TransactionId { 
         get => _transactionId;
         set {
-            if (_transactionId != 0) throw new InvalidOperationException("TransactionId is immutable once set.");
+            if (_transactionId != 0 && value != _transactionId) throw new InvalidOperationException("TransactionId is immutable once set.");
             _transactionId = value < 0 ? 0 : value;
         }
     }
@@ -22,7 +22,7 @@ public class Transaction : IValidatable
     [Column("StockId")] public int StockId { 
         get => _stockId;
         set {
-            if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
+            if (_stockId != 0 && value != _stockId) throw new InvalidOperationException("StockId is immutable once set.");
             _stockId = value;
         }
     }
@@ -31,7 +31,7 @@ public class Transaction : IValidatable
     [Column("BuyOrderId")] public int BuyOrderId {
         get => _buyOrderId;
         set {
-            if (_buyOrderId != 0) throw new InvalidOperationException("BuyOrderId is immutable once set.");
+            if (_buyOrderId != 0 && value != _buyOrderId) throw new InvalidOperationException("BuyOrderId is immutable once set.");
             _buyOrderId = value;
         }
     }
@@ -40,7 +40,7 @@ public class Transaction : IValidatable
     [Column("SellOrderId")] public int SellOrderId { 
         get => _sellOrderId;
         set {
-            if (_sellOrderId != 0) throw new InvalidOperationException("SellOrderId is immutable once set.");
+            if (_sellOrderId != 0 && value != _sellOrderId) throw new InvalidOperationException("SellOrderId is immutable once set.");
             _sellOrderId = value;
         }
     }
@@ -50,7 +50,7 @@ public class Transaction : IValidatable
     [Column("BuyerId")] public int BuyerId { 
         get => _buyerId;
         set {
-            if (_buyerId != 0) throw new InvalidOperationException("BuyerId is immutable once set.");
+            if (_buyerId != 0 && value != _buyerId) throw new InvalidOperationException("BuyerId is immutable once set.");
             _buyerId = value;
         }
     }
@@ -60,7 +60,7 @@ public class Transaction : IValidatable
     [Column("SellerId")] public int SellerId { 
         get => _sellerId;
         set {
-            if (_sellerId != 0) throw new InvalidOperationException("SellerId is immutable once set.");
+            if (_sellerId != 0 && value != _sellerId) throw new InvalidOperationException("SellerId is immutable once set.");
             _sellerId = value;
         }
     }
@@ -69,7 +69,7 @@ public class Transaction : IValidatable
     [Column("Quantity")] public int Quantity { 
         get => _quantity;
         set {
-            if (_quantity != 0) throw new InvalidOperationException("Quantity is immutable once set.");
+            if (_quantity != 0 && value != _quantity) throw new InvalidOperationException("Quantity is immutable once set.");
             if (value <= 0) throw new ArgumentException("Quantity must be positive.");
             _quantity = value <= 0 ? 0 : value;
         }
@@ -79,7 +79,7 @@ public class Transaction : IValidatable
     [Column("Price")] public decimal Price { 
         get => _price;
         set {
-            if (_price != 0m) throw new InvalidOperationException("Price is immutable once set.");
+            if (_price != 0m && value != _price) throw new InvalidOperationException("Price is immutable once set.");
             if (value <= 0m) throw new ArgumentException("Price must be positive.");
             _price = value;
         }
