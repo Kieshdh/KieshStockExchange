@@ -12,5 +12,5 @@ public interface IAuthService
     Task LogoutAsync();
     bool IsLoggedIn { get; }
     bool IsAdmin { get; }
-    User CurrentUser { get; }
+    User? CurrentUser { get; }
 }

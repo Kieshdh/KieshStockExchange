@@ -29,14 +29,12 @@ public sealed class CandleService : ICandleService, IDisposable
 
     #region Fields and Constructor
     private readonly IDataBaseService _db;
-    private readonly IMarketDataService _market;
     private readonly ILogger<CandleService> _logger;
 
-    public CandleService(IDataBaseService db, ILogger<CandleService> logger, IMarketDataService market)
+    public CandleService(IDataBaseService db, ILogger<CandleService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _market = market ?? throw new ArgumentNullException(nameof(market));
     }
     #endregion
 
@@ -59,7 +57,7 @@ public sealed class CandleService : ICandleService, IDisposable
         }
     }
 
-    public async Task Unsubscribe(int stockId, CurrencyType currency, CandleResolution resolution)
+    public async Task UnsubscribeAsync(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
     {
         var key = (stockId, currency, resolution);
         CheckKey(key);
@@ -82,16 +80,14 @@ public sealed class CandleService : ICandleService, IDisposable
 
     }
 
-    public async Task SubscribeAll(CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
+    public async Task SubscribeAllAsync(CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
     {
-        var stocks = await _market.GetAllStocksAsync(ct);
-        foreach (var stock in stocks)
-            Subscribe(stock.StockId, currency, resolution);
-
+        var stocks = await _db.GetStocksAsync(ct);
+        await Task.WhenAll(stocks.Select(s => Task.Run(() => Subscribe(s.StockId, currency, resolution), ct)));
     }
 
-    public async Task SubscribeAllDefault(CurrencyType currency, CancellationToken ct = default)
-        => await SubscribeAll(currency, CandleResolution.Default, ct);
+    public async Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default)
+        => await SubscribeAllAsync(currency, CandleResolution.Default, ct);
 
     public void Dispose()
     {
@@ -144,7 +140,7 @@ public sealed class CandleService : ICandleService, IDisposable
             await foreach (var candle in stream.Reader.ReadAllAsync(ct))
                 yield return candle;
         }
-        finally { await Unsubscribe(stockId, currency, resolution); }
+        finally { await UnsubscribeAsync(stockId, currency, resolution); }
     }
 
     public Candle? TryGetLiveSnapshot(int stockId, CurrencyType currency, CandleResolution resolution)

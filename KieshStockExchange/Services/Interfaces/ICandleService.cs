@@ -22,13 +22,13 @@ public interface ICandleService
     void Subscribe(int stockId, CurrencyType currency, CandleResolution resolution);
 
     /// <summary> Unsubscribe from candle creation for the given stock, currency and resolution. </summary>
-    Task Unsubscribe(int stockId, CurrencyType currency, CandleResolution resolution);
+    Task UnsubscribeAsync(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct = default);
 
     /// <summary> Subscribe to candle creation for all stocks in the system, for the given resolution. </summary>
-    Task SubscribeAll(CurrencyType currency, CandleResolution resolution, CancellationToken ct = default);
+    Task SubscribeAllAsync(CurrencyType currency, CandleResolution resolution, CancellationToken ct = default);
 
     /// <summary> For each stock in the system, subscribe to default resolutions (5m) for candle creation. </summary>
-    Task SubscribeAllDefault(CurrencyType currency, CancellationToken ct = default);
+    Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default);
     #endregion
 
     #region Candle Operations
