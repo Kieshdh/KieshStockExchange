@@ -12,9 +12,9 @@ public class AuthService : IAuthService
     private readonly IDataBaseService _db;
     private readonly ILogger<AuthService> _logger;
 
-    public User CurrentUser { get; private set; } = new();
-    public bool IsLoggedIn => CurrentUser.UserId != 0;
-    public bool IsAdmin => CurrentUser.IsAdmin;
+    public User? CurrentUser { get; private set; } = null;
+    public bool IsLoggedIn => CurrentUser != null;
+    public bool IsAdmin => IsLoggedIn && CurrentUser!.IsAdmin;
 
     public AuthService(IDataBaseService db, ILogger<AuthService> logger)
     {
@@ -56,7 +56,6 @@ public class AuthService : IAuthService
 
         _logger.LogInformation("New user registered: #{UserId} {Username}", user.UserId, user.Username);
 
-        //CurrentUser = user;
         return true;
     }
 
@@ -80,6 +79,6 @@ public class AuthService : IAuthService
 
     public async Task LogoutAsync()
     {
-        CurrentUser = new User();
+        CurrentUser = null;
     }
 }
