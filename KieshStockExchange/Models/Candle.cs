@@ -181,7 +181,7 @@ public class Candle : IValidatable
 
     #region String Representations
     public override string ToString() =>
-        $"Candle #{CandleId}: StockId #{StockId} {Currency} {BucketString()} @ {OpenTime:O} ";
+        $"Candle #{CandleId}: StockId #{StockId} - {Currency} {BucketString()} @ {OpenTimeDisplay}";
 
     public string BucketString()
     {

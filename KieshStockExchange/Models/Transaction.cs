@@ -119,7 +119,7 @@ public class Transaction : IValidatable
 
     #region String Representations
     public override string ToString() =>
-        $"Transaction #{TransactionId} {Quantity} @ {PriceDisplay} at {TimestampDisplay}";
+        $"Transaction #{TransactionId} - {Quantity} @ {PriceDisplay} at {TimestampDisplay}";
 
     [Ignore] public string TimestampDisplay => Timestamp.ToString("dd/MM/yyyy HH:mm:ss");
 

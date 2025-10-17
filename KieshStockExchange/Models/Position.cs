@@ -49,7 +49,7 @@ public class Position : IValidatable
         set => _reservedQuantity = value;
     }
 
-    [Ignore] public int RemainingQuantity => Quantity - ReservedQuantity;
+    [Ignore] public int AvailableQuantity => Quantity - ReservedQuantity;
 
     private DateTime _createdAt = TimeHelper.NowUtc();
     [Column("CreatedAt")] public DateTime CreatedAt {
@@ -66,14 +66,14 @@ public class Position : IValidatable
 
     #region IValidatable Implementation
     public bool IsValid() => UserId > 0 && StockId > 0 && 
-        Quantity >= 0 && ReservedQuantity >= 0 && RemainingQuantity >= 0;
+        Quantity >= 0 && ReservedQuantity >= 0 && AvailableQuantity >= 0;
 
     public bool IsInvalid => !IsValid();
     #endregion
 
     #region String Representations
     public override string ToString() =>
-        $"Position #{PositionId}: User #{UserId} - Stock {StockId} | Qty {Quantity} (Reserved {ReservedQuantity})";
+        $"Position #{PositionId}: User #{UserId} - Stock {StockId} - Qty {Quantity} (Reserved {ReservedQuantity})";
 
     [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
     [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss");
@@ -90,7 +90,7 @@ public class Position : IValidatable
     
     public void RemoveStock(int quantity)
     {
-        if (quantity <= 0 || quantity > RemainingQuantity)
+        if (quantity <= 0 || quantity > AvailableQuantity)
             throw new ArgumentException("Invalid quantity to remove.");
         Quantity -= quantity;
         UpdatedAt = TimeHelper.NowUtc();
@@ -109,7 +109,7 @@ public class Position : IValidatable
 
     public void ReserveStock(int quantity)
     {
-        if (quantity <= 0 || quantity > RemainingQuantity)
+        if (quantity <= 0 || quantity > AvailableQuantity)
             throw new ArgumentException("Invalid quantity to reserve.");
         ReservedQuantity += quantity;
         UpdatedAt = TimeHelper.NowUtc();

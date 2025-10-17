@@ -64,7 +64,7 @@ public class StockPrice : IValidatable
 
     #region String Representations
     public override string ToString() =>
-        $"StockPrice #{PriceId}: StockId #{StockId} - Price: {PriceDisplay} at {Timestamp}";
+        $"StockPrice #{PriceId}: StockId #{StockId} - Price: {PriceDisplay} at {TimestampDisplay}";
     [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
     [Ignore] public string TimestampDisplay => Timestamp.ToString("dd/MM/yyyy HH:mm:ss");
     #endregion

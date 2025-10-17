@@ -64,6 +64,6 @@ public class Stock : IValidatable
     #region String Representations
     public override string ToString() =>
         $"Stock #{StockId}: {Symbol} - {CompanyName}";
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy");
     #endregion
 }

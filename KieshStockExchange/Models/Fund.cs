@@ -81,7 +81,7 @@ public class Fund : IValidatable
 
     #region String Representation
     public override string ToString() =>
-        $"Fund #{FundId}: User #{UserId} - Balance: {TotalBalanceDisplay}";
+        $"Fund #{FundId}: User #{UserId} - Balance: {TotalBalanceDisplay} - Reserved {ReservedBalanceDisplay}";
 
     private string PriceString(decimal val) => CurrencyHelper.Format(val, CurrencyType);
     [Ignore] public string TotalBalanceDisplay => PriceString(TotalBalance);

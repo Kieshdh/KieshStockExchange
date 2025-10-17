@@ -144,7 +144,7 @@ public class Order : IValidatable
 
     #region String Representations
     public override string ToString() =>
-        $"Order #{OrderId} - {OrderType} {Quantity} @ {PriceDisplay} - Status: {Status}";
+        $"Order #{OrderId} - {OrderType} - {Quantity} @ {PriceDisplay} - Status: {Status}";
     [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
     [Ignore] public string TotalAmountDisplay => CurrencyHelper.Format(TotalAmount, CurrencyType);
     [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
