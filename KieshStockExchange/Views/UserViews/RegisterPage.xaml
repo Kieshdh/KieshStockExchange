@@ -100,23 +100,10 @@
                            IsVisible="{Binding IsLastNameInvalid}"/>
                 </VerticalStackLayout>
 
-                <!-- Middle Name -->
-                <VerticalStackLayout Grid.Row="3" Grid.Column="1">
-                    <Grid ColumnDefinitions="125,*">
-                        <Label Text="Middle Name(s):" Style="{StaticResource RegistrationLabel}"/>
-                        <Entry Text="{Binding MiddleName}" Placeholder="Enter middle name(s)" 
-                               Style="{StaticResource RegistrationEntry}" />
-                    </Grid>
-                    <Label Text="Only letters, spaces and some punctuation allowed." 
-                           Style="{StaticResource RegistrationErrorLabel}"
-                           IsVisible="{Binding IsMiddleNameInvalid}"/>
-                </VerticalStackLayout>
-
                 <!-- Birthdate -->
                 <Grid Grid.Row="3" Grid.Column="0" ColumnDefinitions="90,*">
                     <Label Text="Birthday:" Style="{StaticResource RegistrationLabel}"  />
-                    <Grid Grid.Column="1" ColumnSpacing="10"
-                          ColumnDefinitions="3*,4*,3*">
+                    <Grid Grid.Column="1" ColumnSpacing="10" ColumnDefinitions="3*,4*,3*">
                         <Picker Grid.Column="0" ItemsSource="{Binding DayOptions}" 
                                 TextColor="White" SelectedItem="{Binding BirthDay, Mode=TwoWay}" />
                         <Picker Grid.Column="1" ItemsSource="{Binding MonthOptions}" 
@@ -128,10 +115,22 @@
                            Style="{StaticResource RegistrationErrorLabel}"
                            IsVisible="{Binding IsBirthDateInvalid}"/>
                 </Grid>
+
+                <!-- Middle Name -->
+                <VerticalStackLayout Grid.Row="3" Grid.Column="1">
+                    <Grid ColumnDefinitions="125,*">
+                        <Label Text="Middle Name(s):" Style="{StaticResource RegistrationLabel}"/>
+                        <Entry Text="{Binding MiddleName}" Placeholder="Enter middle name(s)" 
+                               Style="{StaticResource RegistrationEntry}" />
+                    </Grid>
+                    <Label Text="Only letters, spaces and some punctuation allowed." 
+                           Style="{StaticResource RegistrationErrorLabel}"
+                           IsVisible="{Binding IsMiddleNameInvalid}"/>
+                </VerticalStackLayout>
             </Grid>
             
             <!-- Register Button -->
-            <Button Text="Register" Command="{Binding RegisterCommand}"
+            <Button Text="Register" Command="{Binding ExecuteRegisterCommand}"
                     Style="{StaticResource ConfirmButton}" />
         </VerticalStackLayout>
     </Grid>
