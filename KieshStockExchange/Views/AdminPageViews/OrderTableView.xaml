@@ -5,7 +5,7 @@
 
     <!-- Labels -->
     <VerticalStackLayout>
-        <Grid ColumnDefinitions="50, 3*, 3*, 2*, 3*, 3*, 3*, 3*, 3*, 3*, 3" 
+        <Grid ColumnDefinitions="50, 5*, 3*, 2*, 3*, 3*, 3*, 3*, 3*, 5*, 3" 
               Style="{StaticResource TableHeaderGrid}" >
             <Label Text="ID" Grid.Column="0" 
                    Style="{StaticResource TableHeaderLabel}"/>
@@ -25,19 +25,19 @@
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Status" Grid.Column="8" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Updated" Grid.Column="9" 
+            <Label Text="LastUpdated" Grid.Column="9" 
                    Style="{StaticResource TableHeaderLabel}" />
         </Grid>
 
         <!-- CollectionView for displaying Stock data -->
-        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
+        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid ColumnDefinitions="50, 3*, 3*, 2*, 3*, 3*, 3*, 3*, 3*, 3*, 3" 
+                    <Grid ColumnDefinitions="50, 5*, 3*, 2*, 3*, 3*, 3*, 3*, 3*, 5*, 3" 
                           Style="{StaticResource TableRowGrid}">
 
                         <!-- Content -->
-                        <Label Text="{Binding Order.Id}" Grid.Column="0" 
+                        <Label Text="{Binding Order.OrderId}" Grid.Column="0" 
                                Style="{StaticResource TableRowLabel}"/>
                         <Label Text="{Binding Order.CreatedAtDisplay}" Grid.Column="1" 
                                Style="{StaticResource TableRowLabel}" />
@@ -55,21 +55,21 @@
                                Style="{StaticResource TableRowLabel}" />
                         <Label Text="{Binding Order.Status}" Grid.Column="8" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding UpdatedAt.UpdatedAtDisplay}" Grid.Column="9" 
+                        <Label Text="{Binding Order.UpdatedAtDisplay}" Grid.Column="9" 
                                Style="{StaticResource TableRowLabel}" />
 
                         <!-- Vertical Lines -->
-                        <BoxView Grid.Column="0" Style="{StaticResource TableSeparator}"/>
-                        <BoxView Grid.Column="1" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="2" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="3" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="4" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="5" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="6" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="7" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="8" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="9" Style="{StaticResource TableSeparator}" />
-                        <BoxView Grid.Column="10" Style="{StaticResource TableSeparator}" />
+                        <BoxView Grid.Column="0" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="1" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="2" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="3" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="4" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="5" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="6" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="7" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="8" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="9" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="10" Style="{StaticResource TableVerticalSeparator}" />
 
                         <!-- Horizontal line (bottom of the row) -->
                         <BoxView Style="{StaticResource TableHorizontalSeparator}" />
