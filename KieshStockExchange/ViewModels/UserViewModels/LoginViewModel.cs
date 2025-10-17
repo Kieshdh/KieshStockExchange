@@ -57,6 +57,5 @@ public partial class LoginViewModel : BaseViewModel
         await _excel.AddStocksFromExcelAsync(checkDataLoaded);
         await _excel.AddHoldingsFromExcelAsync(checkDataLoaded);
         await _excel.AddAIUserBehaviourDataFromExcelAsync(checkDataLoaded);
-
     }
 }
