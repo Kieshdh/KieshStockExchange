@@ -693,29 +693,29 @@ public class MarketOrderService : IMarketOrderService
 
     #region Result helpers
     private OrderResult NotAuthResult() =>
-        new() { Status = OrderStatus.NotAuthenticated, Message = "User not authenticated." };
+        new() { Status = OrderStatus.NotAuthenticated, ErrorMessage = "User not authenticated." };
     private OrderResult NotAuthorizedResult(string msg) =>
-        new() { Status = OrderStatus.NotAuthorized, Message = msg };
+        new() { Status = OrderStatus.NotAuthorized, ErrorMessage = msg };
     private OrderResult OperationFailedResult() =>
-        new() { Status = OrderStatus.OperationFailed, Message = "An unexpected error occurred." };
+        new() { Status = OrderStatus.OperationFailed, ErrorMessage = "An unexpected error occurred." };
     private OrderResult ParamError(string msg) =>
-        new() { Status = OrderStatus.InvalidParameters, Message = msg };
+        new() { Status = OrderStatus.InvalidParameters, ErrorMessage = msg };
     private OrderResult NoLiquidityResult(Order order, List<Transaction> transactions) =>
         new() {
             PlacedOrder = order,
             FillTransactions = transactions,
             Status = OrderStatus.NoLiquidity,
-            Message = order.IsBuyOrder
+            ErrorMessage = order.IsBuyOrder
                 ? "Not enough sell-side liquidity at or below your max price."
                 : "Not enough buy-side liquidity at or above your min price."
         };
     private OrderResult AlreadyClosedResult() =>
-        new() { Status = OrderStatus.AlreadyClosed, Message = "Order not open." };
+        new() { Status = OrderStatus.AlreadyClosed, ErrorMessage = "Order not open." };
     private OrderResult SuccessfullyCancelledResult(Order order) =>
         new() {
             PlacedOrder = order,
             Status = OrderStatus.Success,
-            Message = "Order successfully cancelled."
+            SuccesMessage = "Order successfully cancelled."
         };
     private OrderResult SuccessResult(Order order, List<Transaction> transactions) =>
         new() {
@@ -724,7 +724,7 @@ public class MarketOrderService : IMarketOrderService
                 ? (transactions.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook)
                 : (order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled),
             FillTransactions = transactions,
-            Message = order.IsOpen
+            SuccesMessage = order.IsOpen
                 ? (transactions.Count > 0 ? "Order partially filled." : "Order placed on book.")
                 : (order.RemainingQuantity > 0 ? "Order partially filled." : "Order fully filled.")
         };
@@ -735,7 +735,7 @@ public class MarketOrderService : IMarketOrderService
                 ? (fills.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook)
                 : (order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled),
             FillTransactions = fills,
-            Message = order.IsOpen
+            SuccesMessage = order.IsOpen
                 ? (fills.Count > 0 ? "Order partially filled after modification." : "Order modified and placed on book.")
                 : (order.RemainingQuantity > 0 ? "Order partially filled after modification." : "Order fully filled after modification.")
 

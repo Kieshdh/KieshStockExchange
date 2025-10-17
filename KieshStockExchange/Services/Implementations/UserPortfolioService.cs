@@ -285,7 +285,7 @@ public class UserPortfolioService : IUserPortfolioService
                 break;
 
             case PositionMutation.Remove:
-                if (position.RemainingQuantity < quantity)
+                if (position.AvailableQuantity < quantity)
                 {
                     _logger.LogWarning("Insufficient shares to remove {Qty} for user {UserId} on stock #{StockId}. Have={Have}",
                         quantity, targetUserId, stockId, position.Quantity);
@@ -295,10 +295,10 @@ public class UserPortfolioService : IUserPortfolioService
                 break;
 
             case PositionMutation.Reserve:
-                if (position.RemainingQuantity < quantity)
+                if (position.AvailableQuantity < quantity)
                 {
                     _logger.LogWarning("Insufficient remaining shares to reserve {Qty} for user {UserId} on stock #{StockId}. Remaining={Rem}",
-                        quantity, targetUserId, stockId, position.RemainingQuantity);
+                        quantity, targetUserId, stockId, position.AvailableQuantity);
                     return false;
                 }
                 position.ReserveStock(quantity);

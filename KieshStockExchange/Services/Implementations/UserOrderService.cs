@@ -84,7 +84,7 @@ public class UserOrderService : IUserOrderService
             return false;
         }
         var targetUserId = GetTargetUserIdOrFail(asUserId, out var authFail);
-        if (authFail != null) { _logger.LogWarning(authFail.Message); return false; }
+        if (authFail != null) { _logger.LogWarning(authFail.ErrorMessage); return false; }
 
         try
         {
@@ -124,19 +124,19 @@ public class UserOrderService : IUserOrderService
 
     #region Placing Orders 
     public Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int qty, decimal limitPrice,
-            CurrencyType currency, int? asUserId = null, CancellationToken ct = default) =>
+            CurrencyType currency, CancellationToken ct = default, int? asUserId = null) =>
         PlaceOrderAsync(stockId, qty, true, true, limitPrice, currency, asUserId, ct);
 
     public Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int qty, decimal limitPrice,
-            CurrencyType currency, int? asUserId = null, CancellationToken ct = default) =>
+            CurrencyType currency, CancellationToken ct = default, int? asUserId = null) =>
         PlaceOrderAsync(stockId, qty, false, true, limitPrice, currency, asUserId, ct);
 
     public Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int qty, decimal maxPrice,
-            CurrencyType currency, int? asUserId = null, CancellationToken ct = default) =>
+            CurrencyType currency, CancellationToken ct = default, int? asUserId = null) =>
         PlaceOrderAsync(stockId, qty, true, false, maxPrice, currency, asUserId, ct);
 
     public Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int qty, decimal minPrice,
-             CurrencyType currency, int? asUserId = null, CancellationToken ct = default) =>
+             CurrencyType currency, CancellationToken ct = default, int? asUserId = null) =>
         PlaceOrderAsync(stockId, qty, false, false, minPrice, currency, asUserId, ct);
 
     private async Task<OrderResult> PlaceOrderAsync(int stockId, int quantity, bool buyOrder, 
@@ -213,7 +213,7 @@ public class UserOrderService : IUserOrderService
         }
         else // Check shares
         {
-            if (holding.RemainingQuantity < quantity)
+            if (holding.AvailableQuantity < quantity)
             {
                 _logger.LogWarning("User {UserId} has insufficient shares of stock #{StockId}",
                     fund.UserId, holding.StockId);
@@ -241,12 +241,12 @@ public class UserOrderService : IUserOrderService
 
     #region Helper Results
     private OrderResult NotAuthResult() => new()
-        { Status = OrderStatus.NotAuthenticated, Message = "User not authenticated." };
+        { Status = OrderStatus.NotAuthenticated, ErrorMessage = "User not authenticated." };
     private OrderResult ParamError(string msg) => new()
-        { Status = OrderStatus.InvalidParameters, Message = msg };
+        { Status = OrderStatus.InvalidParameters, ErrorMessage = msg };
     private OrderResult AuthError(string msg) => new()
-        { Status = OrderStatus.NotAuthorized, Message = msg };
+        { Status = OrderStatus.NotAuthorized, ErrorMessage = msg };
     private OrderResult OperationFailedResult() => new()  
-        { Status = OrderStatus.OperationFailed, Message = "An unexpected error occurred." };
+        { Status = OrderStatus.OperationFailed, ErrorMessage = "An unexpected error occurred." };
     #endregion
 }

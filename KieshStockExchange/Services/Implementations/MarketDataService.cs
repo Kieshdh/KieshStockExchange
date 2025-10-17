@@ -54,7 +54,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     private readonly ConcurrentDictionary<(int, CurrencyType), IDispatcherTimer> _simTimers = new();
 
     // Debounce interval
-    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(250);
     #endregion
 
     #region Ring buffer

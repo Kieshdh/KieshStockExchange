@@ -72,9 +72,18 @@ public class OrderResult
     public int? NewOrderId
         => PlacedOrder?.OrderId > 0 ? PlacedOrder.OrderId : null;
 
+    /// <summary> Optional success message for UI display. </summary>
+    public string SuccesMessage { get; set; } = string.Empty;
+
+    /// <summary> Optional error message for UI display. </summary>
+    public string ErrorMessage { get; set; } = string.Empty;
+
     /// <summary>
-    /// (Optional) A human‐readable message for display/logging,
-    /// useful when Status!=Success to explain what went wrong.
+    /// Was the order placed successfully (fully, partially or placed on the orderbook)
     /// </summary>
-    public string Message { get; set; } = string.Empty;
+    public bool PlacedSuccesfully =>
+        Status == OrderStatus.Success ||
+        Status == OrderStatus.PartialFill ||
+        Status == OrderStatus.Filled ||
+        Status == OrderStatus.PlacedOnBook;
 }
