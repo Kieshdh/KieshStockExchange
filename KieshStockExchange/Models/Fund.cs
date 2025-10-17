@@ -29,13 +29,13 @@ public class Fund : IValidatable
         }
     }
 
-    private decimal _totalBalance = 0;
+    private decimal _totalBalance = 0m;
     [Column("TotalBalance")] public decimal TotalBalance { 
         get => _totalBalance; 
         set => _totalBalance = value; 
     }
 
-    private decimal _reservedBalance = 0;
+    private decimal _reservedBalance = 0m;
     [Column("ReservedBalance")] public decimal ReservedBalance { 
         get => _reservedBalance; 
         set => _reservedBalance = value;
@@ -68,6 +68,8 @@ public class Fund : IValidatable
     public bool IsValid() => UserId > 0 && TotalBalance >= 0
         && ReservedBalance >= 0 && AvailableBalance >= 0 && IsValidCurrency();
 
+    public bool IsInvalid => !IsValid();
+
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
     private bool IsValidBalances() =>
@@ -81,10 +83,10 @@ public class Fund : IValidatable
     public override string ToString() =>
         $"Fund #{FundId}: User #{UserId} - Balance: {TotalBalanceDisplay}";
 
-    private string priceString(decimal val) => CurrencyHelper.Format(val, CurrencyType);
-    [Ignore] public string TotalBalanceDisplay => priceString(TotalBalance);
-    [Ignore] public string ReservedBalanceDisplay => priceString(ReservedBalance);
-    [Ignore] public string AvailableBalanceDisplay => priceString(AvailableBalance);
+    private string PriceString(decimal val) => CurrencyHelper.Format(val, CurrencyType);
+    [Ignore] public string TotalBalanceDisplay => PriceString(TotalBalance);
+    [Ignore] public string ReservedBalanceDisplay => PriceString(ReservedBalance);
+    [Ignore] public string AvailableBalanceDisplay => PriceString(AvailableBalance);
 
     [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
     [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss");

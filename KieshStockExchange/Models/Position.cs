@@ -67,6 +67,8 @@ public class Position : IValidatable
     #region IValidatable Implementation
     public bool IsValid() => UserId > 0 && StockId > 0 && 
         Quantity >= 0 && ReservedQuantity >= 0 && RemainingQuantity >= 0;
+
+    public bool IsInvalid => !IsValid();
     #endregion
 
     #region String Representations

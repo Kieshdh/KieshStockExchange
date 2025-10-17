@@ -56,6 +56,8 @@ public class StockPrice : IValidatable
 
     #region IValidatable Implementation
     public bool IsValid() => Price > 0 && StockId > 0 && IsValidCurrency();
+    
+    public bool IsInvalid => !IsValid();
 
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
     #endregion

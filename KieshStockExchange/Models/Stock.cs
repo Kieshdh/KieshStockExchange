@@ -39,6 +39,10 @@ public class Stock : IValidatable
     #endregion
 
     #region IValidatable Implementation
+    public bool IsValid() => IsValidSymbol() && IsValidCompanyName();
+
+    public bool IsInvalid => !IsValid();
+
     public bool IsValidSymbol()
     {
         if (string.IsNullOrWhiteSpace(Symbol))
@@ -55,8 +59,6 @@ public class Stock : IValidatable
         // Company name must be between 1 to 100 characters
         return CompanyName.Length > 0 && CompanyName.Length <= 100;
     }
-
-    public bool IsValid() => IsValidSymbol() && IsValidCompanyName();
     #endregion
 
     #region String Representations

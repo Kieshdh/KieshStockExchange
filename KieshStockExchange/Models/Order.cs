@@ -126,6 +126,8 @@ public class Order : IValidatable
     public bool IsValid() => UserId > 0 && StockId > 0 && Quantity > 0 && Price > 0 &&
         IsValidOrderType() && IsValidStatus() && IsValidCurrency() && IsValidAmount();
 
+    public bool IsInvalid => !IsValid();
+
     private bool IsValidOrderType() =>
         OrderType == Types.MarketBuy || OrderType == Types.MarketSell ||
         OrderType == Types.LimitBuy || OrderType == Types.LimitSell;
@@ -178,12 +180,14 @@ public class Order : IValidatable
             Status = Statuses.Filled;
         UpdatedAt = TimeHelper.NowUtc();
     }
+
     public void Cancel()
     {
         if (!IsOpen) throw new InvalidOperationException("Only open orders can be cancelled.");
         Status = Statuses.Cancelled;
         UpdatedAt = TimeHelper.NowUtc();
     }
+
     public void UpdatePrice(decimal newPrice)
     {
         if (!IsOpen) throw new InvalidOperationException("Cannot update price of a non-open order.");
@@ -192,6 +196,7 @@ public class Order : IValidatable
         Price = newPrice;
         UpdatedAt = TimeHelper.NowUtc();
     }
+
     public void UpdateQuantity(int newQuantity)
     {
         if (!IsOpen) throw new InvalidOperationException("Cannot update quantity of a non-open order.");
@@ -204,8 +209,7 @@ public class Order : IValidatable
     }
 
     public Order Clone() =>
-        new Order
-        {
+        new() {
             UserId = this.UserId,
             StockId = this.StockId,
             Quantity = this.Quantity,

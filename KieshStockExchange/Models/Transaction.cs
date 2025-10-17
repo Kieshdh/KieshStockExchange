@@ -107,6 +107,8 @@ public class Transaction : IValidatable
     public bool IsValid() => StockId > 0 && Quantity > 0 && Price > 0 && IsValidParticipants() &&
         BuyOrderId > 0 && SellOrderId > 0 && IsValidCurrency() && IsValidTimestamp();
 
+    public bool IsInvalid => !IsValid();
+
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
     private bool IsValidTimestamp() => Timestamp > DateTime.MinValue && Timestamp <= TimeHelper.NowUtc();

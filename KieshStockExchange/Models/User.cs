@@ -73,6 +73,8 @@ public class User : IValidatable
     public bool IsValid() => IsValidEmail() && IsValidUsername() 
         && IsValidBirthdate() && IsValidName() && IsValidPassword(PasswordHash);
     
+    public bool IsInvalid => !IsValid();
+
     public bool IsValidEmail()
     {
         if (string.IsNullOrWhiteSpace(Email))
@@ -112,10 +114,9 @@ public class User : IValidatable
     #endregion
 
     #region String Representations
-    public override string ToString() =>
-        $"User #{UserId}: {Username} ({FullName})";
+    public override string ToString() => $"User #{UserId}: {Username} ({FullName})";
 
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy");
     [Ignore] public string BirthDateDisplay =>  BirthDate?.ToString("dd/MM/yyyy") ?? "N/A";
     #endregion
 }

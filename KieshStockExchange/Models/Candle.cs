@@ -165,6 +165,8 @@ public class Candle : IValidatable
     public bool IsValid() => StockId > 0 && IsValidCurrency() && Resolution != CandleResolution.None &&
         IsValidTimestamp() && IsValidPrice() && IsValidVolume();
 
+    public bool IsInvalid => !IsValid();
+
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
     private bool IsValidTimestamp() => BucketSeconds > 0 && OpenTime > DateTime.MinValue && 
@@ -265,7 +267,7 @@ public class Candle : IValidatable
             MaxTransactionId = transactionId;
     }
 
-    public Candle Clone() => new Candle
+    public Candle Clone() => new()
     {
         StockId = this.StockId, Currency = this.Currency,
         BucketSeconds = this.BucketSeconds, OpenTime = this.OpenTime,
