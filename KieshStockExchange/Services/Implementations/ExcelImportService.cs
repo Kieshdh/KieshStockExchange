@@ -30,6 +30,8 @@ public class ExcelImportService : IExcelImportService
     #endregion
 
     #region Importing data from Excel
+    public async Task ResetDatabase() => await _db.DropAndRecreateAsync(true);
+
     public async Task AddUsersFromExcelAsync(bool checkDataLoaded = true)
     {
         LoadDataTables();

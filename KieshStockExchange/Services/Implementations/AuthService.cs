@@ -44,7 +44,8 @@ public class AuthService : IAuthService
             FullName = fullname,
             Email = email,
             PasswordHash = SecurityHelper.HashPassword(password),
-            BirthDate = birthdate
+            BirthDate = birthdate,
+            IsAdmin = true, // Humans always admin
         };
 
         // Check validity

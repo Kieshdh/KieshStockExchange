@@ -6,6 +6,7 @@
 /// 
 public interface IExcelImportService
 {
+    Task ResetDatabase();
     Task AddUsersFromExcelAsync(bool checkDataLoaded = true);
     Task AddAIUserBehaviourDataFromExcelAsync(bool checkDataLoaded = true);
     Task AddStocksFromExcelAsync(bool checkDataLoaded = true);

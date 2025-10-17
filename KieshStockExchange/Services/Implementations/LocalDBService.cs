@@ -2,6 +2,7 @@
 using KieshStockExchange.Models;
 using KieshStockExchange.Services;
 using SQLite;
+using System;
 using System.Threading;
 
 namespace KieshStockExchange.Services.Implementations;
@@ -10,7 +11,8 @@ public class LocalDBService: IDataBaseService, IDisposable
 {
     #region Fields and Constructor
     private const string DB_NAME = "localdb.db3";
-    private readonly SQLiteAsyncConnection _db;
+    private readonly string _dbPath;
+    private SQLiteAsyncConnection _db;
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private readonly AsyncLocal<Stack<LocalDbTransaction>> _txStack = new();
@@ -18,8 +20,8 @@ public class LocalDBService: IDataBaseService, IDisposable
 
     public LocalDBService()
     {
-        string dbPath = Path.Combine(FileSystem.AppDataDirectory, DB_NAME);
-        _db = new SQLiteAsyncConnection(dbPath);
+        _dbPath = Path.Combine(FileSystem.AppDataDirectory, DB_NAME);
+        _db = new SQLiteAsyncConnection(_dbPath);
     }
     #endregion
 
@@ -152,6 +154,33 @@ public class LocalDBService: IDataBaseService, IDisposable
             throw;
         }
     }
+
+    public async Task DropAndRecreateAsync(bool keepBackup = false, CancellationToken ct = default)
+    {
+        // stop new inits while we reset
+        await _initGate.WaitAsync(ct);
+        try
+        {
+            // Close pooled connections so Windows/Android let us delete the file
+            try { await _db.CloseAsync(); } catch { /* ignore */ }
+            SQLiteAsyncConnection.ResetPool();
+
+            if (keepBackup && File.Exists(_dbPath))
+                File.Copy(_dbPath, _dbPath + ".bak", overwrite: true);
+
+            // Remove DB + WAL sidecars (you enable WAL mode at startup) 
+            //   localdb.db3, localdb.db3-wal, localdb.db3-shm
+            foreach (var p in new[] { _dbPath, _dbPath + "-wal", _dbPath + "-shm" })
+                if (File.Exists(p)) File.Delete(p);
+
+            // Recreate fresh DB and tables
+            _initialized = false;
+            _db = new SQLiteAsyncConnection(_dbPath);
+            await InitializeAsync(ct); // creates tables + PRAGMAs
+        }
+        finally { _initGate.Release(); }
+    }
+
     #endregion
 
     #region User operations
@@ -593,7 +622,14 @@ public class LocalDBService: IDataBaseService, IDisposable
         await InitializeAsync(cancellationToken);
         if (!position.IsValid())
             throw new ArgumentException("Position entity is not valid", nameof(position));
-        await RunDbAsync(() => _db.InsertOrReplaceAsync(position), cancellationToken);
+
+        var existing = await GetPositionByUserIdAndStockId(position.UserId, position.StockId, cancellationToken);
+        if (existing is not null)
+        {
+            position.PositionId = existing.PositionId;
+            await RunDbAsync(() => _db.UpdateAsync(position), cancellationToken);
+        }
+        else await RunDbAsync(() => _db.InsertAsync(position), cancellationToken);
     }
     #endregion
 
@@ -664,7 +700,14 @@ public class LocalDBService: IDataBaseService, IDisposable
         await InitializeAsync(cancellationToken);
         if (!fund.IsValid())
             throw new ArgumentException("Fund entity is not valid", nameof(fund));
-        await RunDbAsync(() => _db.InsertOrReplaceAsync(fund), cancellationToken);
+
+        var existing = await GetFundByUserIdAndCurrency(fund.UserId, fund.CurrencyType, cancellationToken);
+        if (existing is not null)
+        {
+            fund.FundId = existing.FundId;
+            await RunDbAsync(() => _db.UpdateAsync(fund), cancellationToken);
+        }
+        else await RunDbAsync(() => _db.InsertAsync(fund), cancellationToken);
     }
     #endregion
 
