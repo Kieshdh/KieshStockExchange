@@ -783,7 +783,19 @@ public class LocalDBService: IDataBaseService, IDisposable
         await InitializeAsync(cancellationToken);
         if (!candle.IsValid())
             throw new ArgumentException("Candle entity is not valid", nameof(candle));
-        await RunDbAsync(() => _db.InsertOrReplaceAsync(candle), cancellationToken);
+
+        // Check for existing candle with same StockId, Currency, Bucket, OpenTime
+        var existing = await GetCandleByStockIdAndTimeRange(candle.StockId, candle.CurrencyType,
+            candle.Bucket, candle.OpenTime, candle.CloseTime, cancellationToken);
+
+        // There should be at most one match due to uniqueness constraint
+        var match = existing.FirstOrDefault(c => c.OpenTime == candle.OpenTime);
+        if (match is not null)
+        {
+            candle.CandleId = match.CandleId;
+            await RunDbAsync(() => _db.UpdateAsync(candle), cancellationToken);
+        }
+        else await RunDbAsync(() => _db.InsertAsync(candle), cancellationToken);
     }
     #endregion
 
