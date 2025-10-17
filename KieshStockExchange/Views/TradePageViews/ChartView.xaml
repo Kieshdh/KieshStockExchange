@@ -2,13 +2,23 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartView">
-    <Grid >
-        <!-- Chart View -->
-        <!-- For now just Display the price -->
-        <Label Text="{Binding CurrentPrice}" 
-               TextColor="White" FontSize="100" 
-               VerticalOptions="Center" 
-               HorizontalOptions="Center"/>
+    <Grid Padding="12" RowDefinitions="Auto, *" >
+        <!-- Header -->
+        <Label Text="Candle feed" FontAttributes="Bold" />
+
+        <!-- A very quick visual check: newest at the end, live candle keeps changing -->
+        <CollectionView Grid.Row="1" ItemsSource="{Binding Series}"
+                        ItemsLayout="HorizontalList" HeightRequest="140">
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <VerticalStackLayout Padding="6" Spacing="4">
+                        <Label Text="{Binding OpenTimeDisplay}" FontSize="10" />
+                        <Label Text="{Binding CloseDisplay}" FontSize="14" />
+                        <Label Text="{Binding PriceChangePercentDisplay}" FontSize="10" />
+                    </VerticalStackLayout>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
         
     </Grid>
 </ContentView>

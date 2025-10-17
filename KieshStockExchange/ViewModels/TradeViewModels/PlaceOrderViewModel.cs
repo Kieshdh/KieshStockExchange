@@ -5,137 +5,230 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Reflection.Metadata;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
-public partial class PlaceOrderViewModel : BaseViewModel
+public partial class PlaceOrderViewModel : StockAwareViewModel
 {
-    #region Services
-    private readonly IMarketOrderService _market;
+    #region Observable properties
+    [ObservableProperty] private int _selectedSideIndex = 0; // 0 = Buy, 1 = Sell
+    [ObservableProperty] private int _selectedTypeIndex = 0; // 0 = Market, 1 = Limit
+
+    //[ObservableProperty]
+    [ObservableProperty] private int _quantity = 0;
+    [ObservableProperty] private decimal _limitPrice = 0m;
+    [ObservableProperty] private decimal _slippagePrc = 0.005m; // 0.5% default
+
+    [ObservableProperty] private string _submitButtonText = "Buy"; // Buy="Buy {Symbol}", Sell="Sell {Symbol}"
+    [ObservableProperty] private Color _submitButtonColor = Colors.ForestGreen; // Buy=ForestGreen, Sell=OrangeRed
+    [ObservableProperty] private string _orderValue = "-"; // Total order value based on quantity and price
+    [ObservableProperty] private string _pricePreview = "-";  // For market orders: shows computed price with slippage
+    #endregion
+
+    #region PropertyChanged events
+    partial void OnSelectedSideIndexChanged(int value) 
+    { 
+        RecomputeUi(); 
+        OnPropertyChanged(nameof(IsBuySelected));
+        OnPropertyChanged(nameof(IsSellSelected));
+    }
+    partial void OnSelectedTypeIndexChanged(int value)
+    {
+        RecomputeUi();
+        OnPropertyChanged(nameof(IsMarketSelected));
+        OnPropertyChanged(nameof(IsLimitSelected));
+    }
+    partial void OnQuantityChanged(int value) { RecomputeUi(); }
+    partial void OnLimitPriceChanged(decimal value) { RecomputeUi(); }
+    partial void OnSlippagePrcChanged(decimal value) { RecomputeUi(); }
+    #endregion
+
+    #region Services and Constructor
     private readonly IUserPortfolioService _portfolio;
     private readonly IUserOrderService _orders;
-    private readonly ISelectedStockService _selected;
-    private readonly ILogger<TradeViewModel> _logger;
-    #endregion
+    private readonly ILogger<PlaceOrderViewModel> _logger;
 
-    #region Observable properties
-    [ObservableProperty] private int _selectedSideIndex; // 0 = Buy, 1 = Sell
-    [ObservableProperty] private int _selectedOrderTypeIndex; // 0 = Market, 1 = Limit
-
-    [ObservableProperty] private decimal _currentMarketPrice = 0m;
-    [ObservableProperty] private string _currentMarketPriceDisplay;
-    [ObservableProperty] private decimal _limitPrice;
-    [ObservableProperty] private decimal _slippagePercent;
-
-    [ObservableProperty] private int _quantity;
-    [ObservableProperty] private decimal _orderValue;
-    [ObservableProperty] private string _availableAssets;
-
-    public string SubmitButtonText => SelectedSideIndex == 0 ? "BUY" : "SELL";
-    public Color SubmitButtonColor => SelectedSideIndex == 0 ? Colors.ForestGreen : Colors.OrangeRed;
-    #endregion
-
-    #region Constructor and initialization
-    public PlaceOrderViewModel(
-        IMarketOrderService market,
-        IUserOrderService orders,
-        ISelectedStockService selected,
-        IUserPortfolioService portfolio,
-        ILogger<TradeViewModel> logger)
+    public PlaceOrderViewModel(IUserOrderService orders, IUserPortfolioService portfolio, 
+        ILogger<PlaceOrderViewModel> logger, ISelectedStockService selected) : base(selected)
     {
-        _market = market ?? throw new ArgumentNullException(nameof(market));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
-        _selected = selected ?? throw new ArgumentNullException(nameof(selected));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+    #endregion
 
-    // Call this from your page (e.g., OnAppearing)
-    public async Task InitializeAsync()
+    #region StockAware Overrides
+    protected override Task OnStockChangedAsync(int? stockId, CurrencyType currency)
     {
-        if (_selected.CurrentPrice is { } p)
-        {
-            CurrentMarketPrice = p;
-            CurrentMarketPriceDisplay = CurrencyHelper.Format(p, CurrencyType.USD);
-        }
+        // Method called when selected stock changes
+        // For limit orders, set limit price to current price
+        if (IsLimitSelected)
+            LimitPrice = Selected.CurrentPrice > 0 ? Selected.CurrentPrice : 0m;
 
-        _selected.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(_selected.CurrentPrice) && _selected.CurrentPrice is { } px)
-            {
-                CurrentMarketPriceDisplay = CurrencyHelper.Format(px, CurrencyType.USD);
-                CurrentMarketPrice = px;
-                UpdateOrderValue();
-            }
+        RecomputeUi();
+        return Task.CompletedTask;
+    }
 
-        };
-
-        // Add funds to the user's portfolio for testing
-        await _portfolio.AddFundsAsync(1000, CurrencyType.USD);
+    protected override Task OnPriceChangedAsync(int? stockId, CurrencyType currency, decimal price, DateTime? updatedAt)
+    {
+        // Price moved -> update order value preview
+        RecomputeUi();
+        return Task.CompletedTask;
     }
     #endregion
 
-    #region Commands and methods
-    private async Task LoadMarketPrice()
-    {
-        // TODO: Replace with SelectedStockService
-        CurrentMarketPrice = await _market.GetMarketPriceAsync(1, CurrencyType.USD);
-    }
-
-    [RelayCommand]
-    private void SetSlippage(object? parameter)
+    #region RelayCommands
+    [RelayCommand] private void SetSlippage(object? parameter)
     {
         if (ParsingHelper.TryToDecimal(parameter, out var value))
-            SlippagePercent = value;
+            SlippagePrc = value;
     }
 
-    [RelayCommand] 
-    private void SetQuantityPercent(object? parameter)
+    [RelayCommand] private void SetQuantityPercent(object? parameter)
     {
-        if (ParsingHelper.TryToDecimal(parameter, out var percent))
-        {
-            int max = 100; // TODO: Get from user's available assets 
-        }
-            
-        Quantity = (int)((100 * percent) / 100);
-        UpdateOrderValue();
-    }
-
-    private void UpdateOrderValue()
-    {
-        var price = SelectedOrderTypeIndex == 0 ? CurrentMarketPrice : LimitPrice;
-        OrderValue = price * Quantity;
-    }
-
-    [RelayCommand] private async Task PlaceOrder()
-    {
-        if (!_selected.HasSelectedStock)
-        {
-            _logger.LogWarning("No stock selected for placing order.");
+        // Parse percentage
+        if (!ParsingHelper.TryToDecimal(parameter, out var percent))
             return;
-        }
-        var stockId = _selected.StockId!.Value;
+        percent = Math.Clamp(percent, 0m, 100m);
 
-        if (SelectedOrderTypeIndex == 0) // Market
-        {
-            var price = (SelectedSideIndex == 0) ?
-                  CurrentMarketPrice * (1 + SlippagePercent / 100) 
-                : CurrentMarketPrice * (1 - SlippagePercent / 100);
-            if (SelectedSideIndex == 0)
-                await _orders.PlaceMarketBuyOrderAsync(stockId, Quantity, price, _selected.Currency);
-            else
-                await _orders.PlaceMarketSellOrderAsync(stockId, Quantity, price, _selected.Currency);
+        // Guard: no stock selected
+        if (!Selected.HasSelectedStock) 
+        { 
+            Quantity = 0; 
+            RecomputeUi(); 
+            return; 
         }
-        else // Limit
+
+        // Determine max quantity based on side
+        int maxQty = 0;
+        if (IsBuySelected) // Buy
         {
-            if (SelectedSideIndex == 0)
-                await _orders.PlaceLimitBuyOrderAsync(stockId, Quantity, LimitPrice, _selected.Currency);
-            else
-                await _orders.PlaceLimitSellOrderAsync(stockId, Quantity, LimitPrice, _selected.Currency);
+            var fund = _portfolio.GetFundByCurrency(Selected.Currency);
+            if (fund == null || fund.AvailableBalance <= 0) maxQty = 0;
+            else maxQty = (int)(fund.AvailableBalance / PriceForOrder);
+
         }
+        else // Sell
+        {
+            var holding = _portfolio.GetPositionByStockId(Selected.StockId ?? -1);
+            if (holding == null || holding.AvailableQuantity <= 0) maxQty = 0;
+            else maxQty = holding.AvailableQuantity;
+        }
+
+        // Compute and set quantity
+        Quantity = (int)(maxQty * (percent / 100m));
+        RecomputeUi();
     }
+
+    [RelayCommand] private async Task PlaceOrderAsync()
+    {
+        if (IsBusy) return;
+
+        IsBusy = true;
+        try
+        {
+            var ok = ValidateInputs();
+            if (!ok) return;
+
+
+            var id = Selected.StockId!.Value; 
+            var cur = Selected.Currency;
+            var ct = CancellationToken.None;
+
+            OrderResult result;
+            if (IsMarketSelected)
+            {
+                _logger.LogInformation("Placing {Side} MARKET order for {Quantity} shares of {Symbol} " +
+                    "at computed price {Price} {Currency} (slippage {Slippage:P2})",
+                    IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, PriceForOrder, cur, SlippagePrc);
+                if (IsBuySelected)
+                    result = await _orders.PlaceMarketBuyOrderAsync(id, Quantity, PriceForOrder, cur, ct);
+                else
+                    result = await _orders.PlaceMarketSellOrderAsync(id, Quantity, PriceForOrder, cur, ct);
+            }
+            else
+            {
+                _logger.LogInformation("Placing {Side} LIMIT order for {Quantity} shares of {Symbol} at limit price {Price} {Currency}",
+                    IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, LimitPrice, cur);
+                if (IsBuySelected)
+                    result = await _orders.PlaceLimitBuyOrderAsync(id, Quantity, LimitPrice, cur, ct);
+                else
+                    result = await _orders.PlaceLimitSellOrderAsync(id, Quantity, LimitPrice, cur, ct);
+            }
+            // Show result
+            if (result.PlacedSuccesfully)
+                _logger.LogInformation("{Order} {Message}", result.PlacedOrder, result.SuccesMessage);
+            else _logger.LogWarning("Order placement failed: {ErrorMessage}", result.ErrorMessage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error placing order for {Symbol}", Selected.Symbol);
+        }
+        finally { IsBusy = false; }
+    }
+    #endregion
+
+    #region Helpers variables
+    public bool IsMarketSelected => SelectedTypeIndex == 0;
+    public bool IsLimitSelected => SelectedTypeIndex == 1;
+    public bool IsBuySelected => SelectedSideIndex == 0;
+    public bool IsSellSelected => SelectedSideIndex == 1;
+    private decimal PriceForOrder => IsMarketSelected ? ComputeMarketGuardPrice() : LimitPrice;
+    #endregion
+
+    #region Private Methods
+    private void RecomputeUi()
+    {
+        // Submit button text and color
+        SubmitButtonText = IsBuySelected ? $"Buy {Selected.Symbol}" : $"Sell {Selected.Symbol}";
+        SubmitButtonColor = IsBuySelected ? Colors.ForestGreen : Colors.OrangeRed;
+        
+        // Price preview
+        decimal price = IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
+        PricePreview = price > 0 ? CurrencyHelper.Format(price, Selected.Currency) : "-";
+
+        // Order value preview
+        var total = (price > 0 && Quantity > 0) ? price * Quantity : 0m;
+        OrderValue = total > 0 ? CurrencyHelper.Format(total, Selected.Currency) : "-";
+    }
+
+    private bool ValidateInputs()
+    {
+
+        if (!Selected.HasSelectedStock)
+        {
+            _logger.LogWarning("No stock selected.");
+            return false;
+        }
+        if (Quantity <= 0)
+        {
+            _logger.LogWarning("Quantity must be positive.");
+            return false;
+        }
+        if (IsMarketSelected && Selected.CurrentPrice <= 0)
+        {
+            _logger.LogWarning("No market price available for market order.");
+            return false;
+        }
+        if (PriceForOrder <= 0)
+        {
+            _logger.LogWarning("Invalid price.");
+            return false;
+        }
+        return true;
+    }
+
+    private decimal ComputeMarketGuardPrice()
+    {
+        // For market: cap (buy) or floor (sell) to protect from bad ticks
+        var prc = Math.Max(0m, SlippagePrc);
+        return IsBuySelected ? Selected.CurrentPrice * (1m + prc) : Selected.CurrentPrice * (1m - prc);
+    }
+
+    
     #endregion
 }
