@@ -58,6 +58,8 @@ public static class MauiProgram
         builder.Services.AddTransient<StockTableViewModel>();
         builder.Services.AddTransient<OrderTableViewModel>();
         builder.Services.AddTransient<TransactionTableViewModel>();
+        builder.Services.AddTransient<PositionTableViewModel>();
+        builder.Services.AddTransient<FundTableViewModel>();
         builder.Services.AddTransient<AdminViewModel>();
         // - Trade
         builder.Services.AddTransient<TradeViewModel>();

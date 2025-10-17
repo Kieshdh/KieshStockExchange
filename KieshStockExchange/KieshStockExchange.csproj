@@ -70,6 +70,15 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <Compile Update="Views\AdminPageViews\FundTableView.xaml.cs">
+	    <DependentUpon>FundTableView.xaml</DependentUpon>
+	  </Compile>
+	  <Compile Update="Views\AdminPageViews\PositionTableView.xaml.cs">
+	    <DependentUpon>PositionTableView.xaml</DependentUpon>
+	  </Compile>
+	</ItemGroup>
+
+	<ItemGroup>
 	  <MauiXaml Update="Resources\Styles\MyStyles.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>
@@ -89,6 +98,12 @@
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>
 	  <MauiXaml Update="Views\AdminPageViews\TransactionTableView.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Views\AdminPageViews\FundTableView.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Views\AdminPageViews\PositionTableView.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>
 	  <MauiXaml Update="Views\AdminPageViews\UserTableView.xaml">
