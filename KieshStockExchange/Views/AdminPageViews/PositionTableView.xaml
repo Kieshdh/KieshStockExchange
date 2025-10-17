@@ -1,26 +1,26 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="KieshStockExchange.Views.AdminPageViews.UserTableView" 
-             x:Name="UserTableRoot">
+             x:Class="KieshStockExchange.Views.AdminPageViews.PositionTableView" 
+             x:Name="PositionTableRoot">
     <Grid RowDefinitions="Auto,*,Auto">
 
         <!-- Labels -->
-        <Grid ColumnDefinitions="50, 1.5*, 2*, 2*, *, *, 60, 60, 3" 
+        <Grid ColumnDefinitions="60, 80, *, *, 2*, 2*, 2.5*, 60, 3" 
               Style="{StaticResource TableHeaderGrid}" >
-            <Label Text="ID" Grid.Column="0" 
+            <Label Text="UserId" Grid.Column="0" 
                    Style="{StaticResource TableHeaderLabel}"/>
-            <Label Text="Username" Grid.Column="1" 
+            <Label Text="Symbol" Grid.Column="1" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Full Name" Grid.Column="2" 
+            <Label Text="Quantity" Grid.Column="2" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Email" Grid.Column="3" 
+            <Label Text="Reserved" Grid.Column="3" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Birthdate" Grid.Column="4" 
+            <Label Text="Price" Grid.Column="4" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Registration Date" Grid.Column="5" 
+            <Label Text="Pos Value" Grid.Column="5" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Admin" Grid.Column="6" 
+            <Label Text="Total Value" Grid.Column="6" 
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Edit" Grid.Column="7" 
                    Style="{StaticResource TableHeaderLabel}" />
@@ -30,26 +30,24 @@
         <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1" >
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid ColumnDefinitions="50, 1.5*, 2*, 2*, *, *, 60, 60, 3"
+                    <Grid ColumnDefinitions="60, 80, *, *, 2*, 2*, 2.5*, 60, 3" 
                           Style="{StaticResource TableRowGrid}">
                         <!-- Viewing Mode Labels -->
-                        <Label Text="{Binding User.UserId}" Grid.Column="0" 
+                        <Label Text="{Binding UserId}" Grid.Column="0" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding User.Username}" Grid.Column="1" 
+                        <Label Text="{Binding StockSymbol}" Grid.Column="1" 
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding QuantityDisplay}" Grid.Column="2" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding User.FullName}" Grid.Column="2" 
+                        <Label Text="{Binding ReservedQuantityDisplay}" Grid.Column="3" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding User.Email}" Grid.Column="3" 
-                               Style="{StaticResource TableRowLabel}" 
-                               IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding User.BirthDateDisplay}" Grid.Column="4" 
-                               Style="{StaticResource TableRowLabel}" 
-                               IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding User.CreatedAtDisplay}" Grid.Column="5" 
-                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding User.IsAdmin}" Grid.Column="6"
+                        <Label Text="{Binding PriceDisplay}" Grid.Column="4" 
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding StockValueDisplay}" Grid.Column="5" 
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding TotalValueDisplay}" Grid.Column="6"
                                Style="{StaticResource TableRowLabel}" />
                         <Label Text="{Binding EditText}" Grid.Column="7"
                                Style="{StaticResource TableEditLabel}" >
@@ -59,16 +57,10 @@
                         </Label>
 
                         <!-- Editing Mode Entries -->
-                        <Entry Text="{Binding User.Username, Mode=TwoWay}" Grid.Column="1" 
+                        <Entry Text="{Binding QuantityDisplay, Mode=TwoWay}" Grid.Column="2" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding User.FullName, Mode=TwoWay}" Grid.Column="2" 
-                               Style="{StaticResource TableRowEntry}" 
-                               IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding User.Email, Mode=TwoWay}" Grid.Column="3" 
-                               Style="{StaticResource TableRowEntry}" 
-                               IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding BirthDateText, Mode=TwoWay}" Grid.Column="4" 
+                        <Entry Text="{Binding ReservedQuantityDisplay, Mode=TwoWay}" Grid.Column="3" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
 
@@ -96,7 +88,7 @@
             <BindableLayout.ItemTemplate>
                 <DataTemplate>
                     <Button Text="{Binding .}"
-                            Command="{Binding Source={x:Reference UserTableRoot}, 
+                            Command="{Binding Source={x:Reference PositionTableRoot}, 
                             Path=BindingContext.GoToPageCommand}"
                             CommandParameter="{Binding .}"
                             Style="{StaticResource PageNumberButton}"/>

@@ -57,6 +57,22 @@
                                     {x:Reference AdminPageRoot}, Path=BindingContext.TransactionsVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
+
+                        <!-- Fund Table -->
+                        <other:SegmentedTabItem Header="Funds">
+                            <other:SegmentedTabItem.Content>
+                                <adminViews:FundTableView BindingContext="{Binding Source=
+                                    {x:Reference AdminPageRoot}, Path=BindingContext.FundsVm}" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
+
+                        <!-- User Table -->
+                        <other:SegmentedTabItem Header="Positions">
+                            <other:SegmentedTabItem.Content>
+                                <adminViews:PositionTableView BindingContext="{Binding Source=
+                                    {x:Reference AdminPageRoot}, Path=BindingContext.PositionsVm}" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
                     </other:SegmentedTabView.Tabs>
                 </other:SegmentedTabView>
             </Grid>

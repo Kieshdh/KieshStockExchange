@@ -6,7 +6,7 @@
 
     <VerticalStackLayout>
         <!-- Labels -->
-        <Grid ColumnDefinitions="*, 8*, 2*, 3*, 3*, 3" 
+        <Grid ColumnDefinitions="60, 2*, *, *, 3" 
               Style="{StaticResource TableHeaderGrid}" >
             <Label Text="ID" Grid.Column="0" 
                    Style="{StaticResource TableHeaderLabel}"/>
@@ -14,9 +14,7 @@
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Symbol" Grid.Column="2" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Price (USD)" Grid.Column="3" 
-                   Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Price (EUR)" Grid.Column="4" 
+            <Label Text="Price" Grid.Column="3" 
                    Style="{StaticResource TableHeaderLabel}" />
         </Grid>
 
@@ -24,7 +22,7 @@
         <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid ColumnDefinitions="*, 8*, 2*, 3*, 3*, 3"
+                    <Grid ColumnDefinitions="60, 2*, *, *, 3"
                           Style="{StaticResource TableRowGrid}">
 
                         <!-- Content -->
@@ -34,9 +32,7 @@
                                Style="{StaticResource TableRowLabel}" />
                         <Label Text="{Binding Stock.Symbol}" Grid.Column="2" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding PriceUSD}" Grid.Column="3" 
-                               Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding PriceEUR}" Grid.Column="4" 
+                        <Label Text="{Binding PriceDisplay}" Grid.Column="3" 
                                Style="{StaticResource TableRowLabel}" />
 
                         <!-- Vertical Lines -->

@@ -2,23 +2,14 @@
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services;
-using KieshStockExchange.ViewModels.OtherViewModels;
-using System.Globalization;
 using System.Windows.Input;
 using System.Diagnostics;
 using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-public partial class UserTableViewModel
-    : BaseTableViewModel<UserTableObject>
+public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
 {
-    #region Properties
-    public Dictionary<int, decimal> LatestPrices = new();  // Id → StockPrice
-    public CurrencyType BaseCurrency = CurrencyType.USD;
-    #endregion
-
-    #region Constructor and initialization
     public UserTableViewModel(IDataBaseService dbService) : base(dbService)
     {
         Title = "Users"; // from BaseViewModel
@@ -33,35 +24,11 @@ public partial class UserTableViewModel
 
             // Fetch all data
             var users = await _dbService.GetUsersAsync();
-            var funds = await _dbService.GetFundsAsync();   
-            var positions = await _dbService.GetPositionsAsync(); 
 
-            // Create fast lookup structures in memory.
-            var userIds = users.Select(u => u.UserId).ToList();
-            var fundsByUserId = funds.ToLookup(f => f.UserId);
-            var positionsByUserId = positions.ToLookup(p => p.UserId);
-
-            // At last get the current prices for all stocks
-            await UpdateStockPrices();
-
+            // Convert to table objects
             foreach (var user in users)
-            {
-                // Get all the user's funds, create a default if none exists.
-                var userFunds = fundsByUserId[user.UserId].ToList() ?? new List<Fund>();
-                if (userFunds.Count == 0)
-                {
-                    var defaultFund = new Fund { UserId = user.UserId };
-                    userFunds.Add(defaultFund);
-                    await _dbService.CreateFund(defaultFund);
-                }
+                rows.Add(new UserTableObject(_dbService, user));
 
-                // Get the user's Positions (empty if none).
-                var userPositions = positionsByUserId[user.UserId]?.ToList() ?? new List<Position>();
-
-                // Create the table object
-                var row = new UserTableObject(_dbService, user, userPositions, userFunds, LatestPrices);
-                rows.Add(row);
-            }
             // Sort by most recent first
             rows = rows.OrderByDescending(r => r.User.CreatedAt).ToList();
             Debug.WriteLine($"The User table has {rows.Count} users.");
@@ -70,172 +37,164 @@ public partial class UserTableViewModel
         catch (Exception ex)
         {
             Debug.WriteLine($"Error loading users: {ex.Message}");
-            await Shell.Current.DisplayAlert("Error", "Failed to load users.", "OK");
             return new List<UserTableObject>();
         }
         finally { IsBusy = false; }
     }
-    #endregion
-
-    #region Price updating
-    private async Task UpdateStockPrices(CurrencyType baseCurrency = CurrencyType.USD)
-    {
-        BaseCurrency = baseCurrency;
-        var stocks = await _dbService.GetStocksAsync();
-        foreach (var stock in stocks)
-        {
-            var price = await _dbService.GetLatestStockPriceByStockId(stock.StockId, baseCurrency);
-            if (price != null)
-                LatestPrices[stock.StockId] = CurrencyHelper.Convert(price.Price, price.CurrencyType, baseCurrency);
-        }
-    }
-
-    public async Task UpdatePricesOfTableObjects(CurrencyType baseCurrency = CurrencyType.USD)
-    {
-        IsBusy = true;
-        try
-        {
-            await UpdateStockPrices(baseCurrency);
-            foreach (var user in AllItems)
-            {
-                user.RefreshData(baseCurrency);
-            }
-        }
-        finally { IsBusy = false; }
-    }
-    #endregion
 }
 
 public partial class UserTableObject : ObservableObject
 {
-    #region Data properties
-    private bool IsLoading = true;
-
-    public User User { get; set; }
-    public List<Position> Positions { get; set; }
-    public List<Fund> Funds { get; set; }
-    public Dictionary<int, decimal> LatestPrices { get; }
-
-    private CurrencyType BaseCurrency { get; set; }
-
-    public ICommand ChangeEditCommand { get; }
-    private IDataBaseService _dbService { get; }
-    #endregion
-
     #region Bindable properties
     [ObservableProperty] private bool _isEditing = false;
     [ObservableProperty] private bool _isViewing = true;
     [ObservableProperty] private string _editText = "Edit";
+    [ObservableProperty] private string _birthDateText = string.Empty;
 
-    [ObservableProperty] private int _userId = 0;
-    [ObservableProperty] private string _username = string.Empty;
-    [ObservableProperty] private string _fullName = string.Empty;
-    [ObservableProperty] private string _email = string.Empty;
-    [ObservableProperty] private string _birthDate = string.Empty;
-    [ObservableProperty] private string _totalFunds = string.Empty;
-    [ObservableProperty] private string _totalBalance = string.Empty;
+    public User User { get; private set; }
     #endregion
 
-    #region Constructor
-    public UserTableObject( IDataBaseService dbService, User user, List<Position> positions,
-          List<Fund> funds, Dictionary<int, decimal> prices, CurrencyType baseCurrency = CurrencyType.USD )
+    #region Other properties and Constructor
+    public IAsyncRelayCommand ChangeEditCommand { get; }
+
+    private readonly IDataBaseService _db;
+
+    public UserTableObject( IDataBaseService db, User user)
     {
-        _dbService = dbService;
+        _db = db;
         ChangeEditCommand = new AsyncRelayCommand(ChangeEdit);
 
         User = user;
-        Funds = funds;
-        Positions = positions;
-        LatestPrices = prices;
-        BaseCurrency = baseCurrency;
-
-        IsLoading = false;
-        UpdateBindings();
+        SetBirthDateText();
     }
     #endregion
 
     #region Methods
-    private void UpdateBindings()
-    {
-        if (IsLoading) return;
-
-        // Update all the binded properties
-        UserId = User.UserId;
-        Username = User.Username;
-        Email = User.Email;
-        FullName = User.FullName;
-        BirthDate = User.BirthDateDisplay;
-
-        // Get the total value of the funds (Can be different currencies)
-        var totalFunds = TotalFundsValue();
-        TotalFunds = CurrencyHelper.Format(totalFunds, BaseCurrency);
-
-        // Get the total balance from the Funds and Positions
-        TotalBalance = CurrencyHelper.Format(totalFunds + TotalPositionsValue(), BaseCurrency);
-    }
-
-    public void RefreshData(CurrencyType baseCurrency)
-    {
-        BaseCurrency = baseCurrency;
-        UpdateBindings();
-    }
-
     private async Task ChangeEdit()
+    {
+        if (IsViewing)
+        {
+            EditText = "Save";
+            IsViewing = false;
+            IsEditing = true;
+            return;
+        }
+
+        // Attempt to save changes
+        var saved = await SaveAsync();
+        if (!saved) // If save failed, revert changes
+        {
+            await ResetAsync();
+            SetBirthDateText();
+            return;
+        }
+
+        EditText = "Edit";
+        IsViewing = true;
+        IsEditing = false;
+        SetBirthDateText();
+    }
+
+    private async Task<bool> SaveAsync()
     {
         try
         {
-            if (IsEditing)
+            // Validate user data
+            if (!VerifyUser()) return false;
+            // Extra safety check, should not happen
+            if (User.IsInvalid) 
             {
-                // Change the data
-                User.Username = Username;
-                User.Email = Email;
-                // Parse the birthdate
-                if (DateTime.TryParseExact(
-                        BirthDate, "dd/MM/yyyy",
-                        CultureInfo.InvariantCulture, DateTimeStyles.None,
-                        out var parsed))
-                    User.BirthDate = parsed;
-                else
-                {
-                    await Shell.Current.DisplayAlert("Error", "Birthdate not formatted correcly", "OK");
-                    return;
-                }
-                // Update the screen bindings
-                UpdateBindings();
-                EditText = "Edit";
-                // Update the database
-                await _dbService.UpdateUser(User);
+                Debug.WriteLine($"User #{User.UserId} is invalid.");
+                return false;
             }
-            else EditText = "Change";
 
-            IsEditing = !IsEditing;
-            IsViewing = !IsViewing;
+            // Save to database
+            await _db.UpsertUser(User);
+            Debug.WriteLine($"User #{User.UserId} saved successfully.");
+            return true;
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error updating user: {ex.Message}");
-            await Shell.Current.DisplayAlert("Error", "Failed to update user data.", "OK");
+            Debug.WriteLine($"Error saving user #{User.UserId}: {ex.Message}");
+            return false;
         }
-
     }
 
-    private decimal TotalFundsValue()
+    private async Task<bool> ResetAsync()
     {
-        var totalFunds = 0m;
-        foreach (var fund in Funds)
-            totalFunds += CurrencyHelper.Convert(fund.TotalBalance, fund.CurrencyType, BaseCurrency);
-        return totalFunds;
-    }   
-
-    private decimal TotalPositionsValue()
-    {
-        var totalValue = 0m;
-        foreach (var pos in Positions)
+        try
         {
-            if (LatestPrices.TryGetValue(pos.StockId, out var price))
-                totalValue += pos.Quantity * price;
+            var user = await _db.GetUserById(User.UserId);
+            if (user == null)
+            {
+                Debug.WriteLine($"User #{User.UserId} no longer exists.");
+                return false;
+            }
+            User = user;
+            OnPropertyChanged(nameof(User));
+            Debug.WriteLine($"User #{User.UserId} reverted successfully.");
+            return true;
         }
-        return totalValue;
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error resetting user #{User.UserId}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private void SetBirthDateText()
+    {
+        BirthDateText = User.BirthDate.HasValue
+            ? User.BirthDate.Value.ToString("dd/MM/yyyy")
+            : string.Empty;
+    }
+    
+    private bool VerifyUser()
+    {
+        // Verify Empty text
+        if (string.IsNullOrWhiteSpace(BirthDateText) || string.IsNullOrWhiteSpace(User.Email) ||
+            string.IsNullOrWhiteSpace(User.Username) || string.IsNullOrWhiteSpace(User.FullName))
+        {
+            Debug.WriteLine("One or more required fields are empty.");
+            return false;
+        }
+
+        // Verify birth date
+        if (!DateTime.TryParseExact(BirthDateText, "dd/MM/yyyy", null, System.Globalization.DateTimeStyles.None, out var parsedDate))
+        {
+            Debug.WriteLine("Invalid birth date format.");
+            return false;
+        }
+        User.BirthDate = TimeHelper.EnsureUtc(parsedDate);
+        if (!User.IsValidBirthdate())
+        {
+            Debug.WriteLine("Birth date is not valid (must be at least 18 years old and not in the future).");
+            return false;
+        }
+
+        // Verify email
+        if (!User.IsValidEmail())
+        {
+            Debug.WriteLine("Invalid email format.");
+            return false;
+        }
+
+        // Verify username
+        if (!User.IsValidUsername())
+        {
+            Debug.WriteLine("Invalid username format (must be alphanumeric and 5-20 characters).");
+            return false;
+        }
+
+        // Verify full name
+        if (!User.IsValidName())
+        {
+            Debug.WriteLine("Invalid full name format (3-100 characters, letters and some punctuation).");
+            return false;
+        }
+
+        // All checks passed
+        return true;
     }
     #endregion
 }

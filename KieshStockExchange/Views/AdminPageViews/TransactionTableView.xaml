@@ -33,21 +33,21 @@
                           Style="{StaticResource TableRowGrid}">
 
                         <!-- Content -->
-                        <Label Text="{Binding TransactionId}" Grid.Column="0" 
+                        <Label Text="{Binding Transaction.TransactionId}" Grid.Column="0" 
                                Style="{StaticResource TableRowLabel}"/>
-                        <Label Text="{Binding CreatedAt}" Grid.Column="1" 
+                        <Label Text="{Binding Transaction.CreatedAtDisplay}" Grid.Column="1" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Symbol}" Grid.Column="2" 
+                        <Label Text="{Binding Stock.Symbol}" Grid.Column="2" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding BuyerId}" Grid.Column="3" 
+                        <Label Text="{Binding Buyer.UserId}" Grid.Column="3" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding SellerId}" Grid.Column="4" 
+                        <Label Text="{Binding Seller.UserId}" Grid.Column="4" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Price}" Grid.Column="5" 
+                        <Label Text="{Binding Transaction.PriceDisplay}" Grid.Column="5" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Quantity}" Grid.Column="6" 
+                        <Label Text="{Binding Transaction.Quantity}" Grid.Column="6" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding TotalPrice}" Grid.Column="7" 
+                        <Label Text="{Binding Transaction.TotalAmountDisplay}" Grid.Column="7" 
                            Style="{StaticResource TableRowLabel}" />
 
 

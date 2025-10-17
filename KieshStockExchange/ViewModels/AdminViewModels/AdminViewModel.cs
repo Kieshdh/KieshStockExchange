@@ -12,18 +12,21 @@ public partial class AdminViewModel : BaseViewModel
 {
     [ObservableProperty] private bool _isLoading = true;
     [ObservableProperty] private bool _doneLoading = false;
-    [ObservableProperty] private string _loadingText;
+    [ObservableProperty] private string _loadingText = String.Empty;
 
     public UserTableViewModel UsersVm { get; }
     public StockTableViewModel StocksVm { get; }
     public TransactionTableViewModel TransactionsVm { get; }
     public OrderTableViewModel OrdersVm { get; }
+    public PositionTableViewModel PositionsVm { get; }
+    public FundTableViewModel FundsVm { get; }
+
     private readonly IExcelImportService ExcelService;
 
     // Constructor
     public AdminViewModel( IExcelImportService excelService,
-        UserTableViewModel usersVm, StockTableViewModel stocksVm,
-        OrderTableViewModel ordersVm,  TransactionTableViewModel transactionsVm)
+        UserTableViewModel usersVm, TransactionTableViewModel transactionsVm, OrderTableViewModel ordersVm,
+        StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm)
     {
         Title = "Admin Dashboard";
 
@@ -31,6 +34,9 @@ public partial class AdminViewModel : BaseViewModel
         StocksVm = stocksVm;
         TransactionsVm = transactionsVm;
         OrdersVm = ordersVm;
+        PositionsVm = positionsVm;
+        FundsVm = fundsVm;
+
         ExcelService = excelService;
         Debug.WriteLine($"Succesfully created viewmodels");
     }
@@ -64,6 +70,10 @@ public partial class AdminViewModel : BaseViewModel
             await TransactionsVm.InitializeAsync();
             LoadingText = "Getting order data";
             await OrdersVm.InitializeAsync();
+            LoadingText = "Getting position data";
+            await PositionsVm.InitializeAsync();
+            LoadingText = "Getting fund data";
+            await FundsVm.InitializeAsync();
         }
         finally 
         { 

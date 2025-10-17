@@ -3,9 +3,9 @@ using KieshStockExchange.ViewModels.AdminViewModels;
 
 namespace KieshStockExchange.Views.AdminPageViews;
 
-public partial class UserTableView : ContentView
+public partial class PositionTableView : ContentView
 {
-    public UserTableView() 
+    public PositionTableView() 
     {
         InitializeComponent();
     }

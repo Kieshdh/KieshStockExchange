@@ -105,10 +105,12 @@ KieshStockExchange
 ----- AccountViewModel.cs
 --- AdminViewModels
 ----- AdminViewModel.cs (Main ViewModel for AdminPage)
------ BaseAdminTableViewModel.cs
------ OrderTableViewModel.cs  (TODO)
+----- BaseAdminTableViewModel.cs (Common properties for admin table ViewModels)
+----- FundTableViewModel.cs
+----- OrderTableViewModel.cs
+----- PositionTableViewModel.cs
 ----- StockTableViewModel.cs
------ TransactionTableViewModel.cs (TODO)
+----- TransactionTableViewModel.cs
 ----- UserTableViewModel.cs
 --- MarketViewModels (TODO)
 ----- MarketViewModel.cs
@@ -135,9 +137,11 @@ KieshStockExchange
 ----- AccountPage.xaml
 --- AdminPageViews
 ----- AdminPage.xaml
------ OrderTableView.xaml (TODO)
+----- FundTableView.xaml 
+----- OrderTableView.xam
+----- PositionTableView.xaml 
 ----- StockTableView.xaml
------ TransactionTableView.xaml (TODO)
+----- TransactionTableView.xaml
 ----- UserTableView.xaml
 --- MarketPageViews (TODO)
 ----- MarketPage.xaml 

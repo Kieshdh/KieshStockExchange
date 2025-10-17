@@ -6,23 +6,24 @@ using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-public partial class StockTableViewModel
-    : BaseTableViewModel<StockTableObject>
+public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
 {
-    public StockTableViewModel(IDataBaseService dbService)
-        : base(dbService)
+    private readonly IMarketDataService _market;
+
+    public StockTableViewModel(IDataBaseService dbService, IMarketDataService market) : base(dbService)
     {
-        Title = "Stocks"; // from BaseViewModel
+        Title = "Stocks";
+        _market = market ?? throw new ArgumentNullException(nameof(market));
     }
+
     protected override async Task<List<StockTableObject>> LoadItemsAsync()
     {
+        // Fetch all stocks and their latest prices
         var rows = new List<StockTableObject>();
-        // Fetch all stocks
-        foreach (var stock in await _dbService.GetStocksAsync())
+        foreach (var stock in await _market.GetAllStocksAsync())
         {
-            var stockPrices = await _dbService.GetStockPricesByStockId(stock.StockId)
-                ?? new List<StockPrice>();
-            rows.Add(new StockTableObject(_dbService, stock, stockPrices));
+            var price = await _market.GetLastPriceAsync(stock.StockId, CurrencyType.USD);
+            rows.Add(new StockTableObject(stock, CurrencyType.USD, price));
         }
         return rows;
     }
@@ -30,31 +31,33 @@ public partial class StockTableViewModel
 
 public partial class StockTableObject : ObservableObject
 {
-    public Stock Stock { get; set; }
-    private List<StockPrice> StockPrices { get; set; }
-    private StockPrice? CurrentStockPrice => StockPrices.Last();
-    private decimal CurrentPrice => CurrentStockPrice?.Price ?? 0m;
+    public Stock Stock { get; private set; }
 
-    public string PriceUSD { get => Price(CurrencyType.USD); }
-    public string PriceEUR { get => Price(CurrencyType.EUR); }
+    private CurrencyType _currency;
 
-    private IDataBaseService _dbService;
+    private decimal _price = 0m;
 
-    public StockTableObject(IDataBaseService dbService, 
-            Stock stock, List<StockPrice> stockPrices)
+    public string PriceDisplay => CurrencyHelper.Format(_price, _currency);
+
+    public StockTableObject(Stock stock, CurrencyType currency, decimal price)
     {
-        _dbService = dbService;
         Stock = stock;
-        StockPrices = stockPrices;
-        OnPropertyChanged(nameof(PriceUSD));
-        OnPropertyChanged(nameof(PriceEUR));
+        _currency = currency;
+        _price = price;
+        OnPropertyChanged(nameof(PriceDisplay));
     }
 
-    private string Price(CurrencyType currencyType)
+    public void UpdatePrice(decimal newPrice)
     {
-        if (StockPrices.Count > 0 && CurrentStockPrice != null)
-            return CurrencyHelper.FormatConverted(CurrentPrice, CurrentStockPrice.CurrencyType, currencyType);
-        return "-";
+        if (newPrice <= 0m) return;
+        _price = newPrice;
+        OnPropertyChanged(nameof(PriceDisplay));
+    }
+
+    public void SetBaseCurrency(CurrencyType currency)
+    {
+        _currency = currency;
+        OnPropertyChanged(nameof(PriceDisplay));
     }
 
 }

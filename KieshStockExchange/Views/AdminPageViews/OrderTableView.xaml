@@ -37,25 +37,25 @@
                           Style="{StaticResource TableRowGrid}">
 
                         <!-- Content -->
-                        <Label Text="{Binding Id}" Grid.Column="0" 
+                        <Label Text="{Binding Order.Id}" Grid.Column="0" 
                                Style="{StaticResource TableRowLabel}"/>
-                        <Label Text="{Binding CreatedAt}" Grid.Column="1" 
+                        <Label Text="{Binding Order.CreatedAtDisplay}" Grid.Column="1" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Username}" Grid.Column="2" 
+                        <Label Text="{Binding User.Username}" Grid.Column="2" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Symbol}" Grid.Column="3" 
+                        <Label Text="{Binding Stock.Symbol}" Grid.Column="3" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding OrderType}" Grid.Column="4" 
+                        <Label Text="{Binding Order.OrderType}" Grid.Column="4" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Price}" Grid.Column="5" 
+                        <Label Text="{Binding Order.PriceDisplay}" Grid.Column="5" 
                                Style="{StaticResource TableRowLabel}"/>
-                        <Label Text="{Binding Quantity}" Grid.Column="6" 
+                        <Label Text="{Binding Order.Quantity}" Grid.Column="6" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding TotalPrice}" Grid.Column="7" 
+                        <Label Text="{Binding Order.TotalAmountDisplay}" Grid.Column="7" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Status}" Grid.Column="8" 
+                        <Label Text="{Binding Order.Status}" Grid.Column="8" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding UpdatedAt}" Grid.Column="9" 
+                        <Label Text="{Binding UpdatedAt.UpdatedAtDisplay}" Grid.Column="9" 
                                Style="{StaticResource TableRowLabel}" />
 
                         <!-- Vertical Lines -->
