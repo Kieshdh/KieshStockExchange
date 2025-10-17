@@ -785,7 +785,7 @@ public class LocalDBService: IDataBaseService, IDisposable
             throw new ArgumentException("Candle entity is not valid", nameof(candle));
 
         // Check for existing candle with same StockId, Currency, Bucket, OpenTime
-        var existing = await GetCandleByStockIdAndTimeRange(candle.StockId, candle.CurrencyType,
+        var existing = await GetCandlesByStockIdAndTimeRange(candle.StockId, candle.CurrencyType,
             candle.Bucket, candle.OpenTime, candle.CloseTime, cancellationToken);
 
         // There should be at most one match due to uniqueness constraint

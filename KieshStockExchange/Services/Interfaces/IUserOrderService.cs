@@ -22,17 +22,17 @@ namespace KieshStockExchange.Services;
 
     /// <summary>Places a limit‐buy order.</summary>
     Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int quantity, 
-        decimal limitPrice, CurrencyType currency, int? asUserId = null, CancellationToken ct = default);
+        decimal limitPrice, CurrencyType currency, CancellationToken ct = default, int? asUserId = null);
 
     /// <summary>Places a limit‐sell order.</summary>
     Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int quantity, 
-        decimal limitPrice, CurrencyType currency, int? asUserId = null, CancellationToken ct = default);
+        decimal limitPrice, CurrencyType currency, CancellationToken ct = default, int? asUserId = null);
 
     /// <summary>Places a market‐buy order, capping at maxPrice.</summary>
     Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int quantity, 
-        decimal maxPrice, CurrencyType currency, int? asUserId = null, CancellationToken ct = default);
+        decimal maxPrice, CurrencyType currency, CancellationToken ct = default, int? asUserId = null);
 
     /// <summary>Places a market‐sell order, floor at minPrice.</summary>
     Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int quantity, 
-        decimal minPrice, CurrencyType currency, int? asUserId = null, CancellationToken ct = default);
+        decimal minPrice, CurrencyType currency, CancellationToken ct = default, int? asUserId = null);
 }

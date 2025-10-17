@@ -20,6 +20,7 @@ public interface ISelectedStockService : INotifyPropertyChanged
     string Symbol { get; }
     string CompanyName { get; }
     CurrencyType Currency { get; }
+    //OrderBook OrderBook { get; }
 
     // ---- Current Price info ---------------------------------------
     decimal CurrentPrice { get; }
