@@ -55,14 +55,11 @@ public partial class RegisterViewModel : BaseViewModel
     private readonly IAuthService _authService;
     private readonly INavigation _navigation;
 
-    public ICommand RegisterCommand { get; }
-
     public RegisterViewModel(INavigation navigation, IAuthService authService)
     {
         Title = "Register";
         _authService = authService; 
         _navigation = navigation;
-        RegisterCommand = new AsyncRelayCommand(ExecuteRegisterAsync);
 
         InitilizeBirtdateVariables();
     }
@@ -153,7 +150,7 @@ public partial class RegisterViewModel : BaseViewModel
             IsBirthDateInvalid || IsLastNameInvalid );
     }
 
-    private async Task ExecuteRegisterAsync()
+    [RelayCommand] private async Task ExecuteRegister()
     {
         // Validate all inputs before proceeding
         if (!ValidateAll())
