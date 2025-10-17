@@ -25,8 +25,6 @@ public static class CurrencyHelper
         {
             { CurrencyType.USD, "en-US" }, // $
             { CurrencyType.EUR, "nl-NL" }, // "€ 1.234,56"
-            //{ CurrencyType.EUR, "de-DE" }, // "1.234,56 €"
-            //{ CurrencyType.EUR, "fr-FR" }, // "1 234,56 €"
             { CurrencyType.GBP, "en-GB" }, // £
             { CurrencyType.JPY, "ja-JP" }, // ¥
             { CurrencyType.CHF, "de-CH" }, // CHF
@@ -48,6 +46,9 @@ public static class CurrencyHelper
         { CurrencyType.CHF, 0.86m },
         { CurrencyType.AUD, 1.48m }
     };
+
+    // List of supported currencies
+    public static List<CurrencyType> SupportedCurrencies => Enum.GetValues<CurrencyType>().ToList();
     #endregion
 
     #region Formatting
@@ -110,7 +111,7 @@ public static class CurrencyHelper
         => RatesPerBase.ContainsKey(currency);
     #endregion
 
-    #region Rates and conversion
+    #region Rates, conversion and parsing
     /// <summary>  Replace the whole rate table at once (e.g., after fetching fresh rates).
     /// The dictionary must be "1 base -> X target". This method also ensures base=1. </summary>
     private static void SetRates(CurrencyType baseCurrency, IDictionary<CurrencyType, decimal> ratesPerBase)
@@ -138,6 +139,15 @@ public static class CurrencyHelper
 
         var result = (amount / rFrom) * rTo;     // source → base → target
         return Math.Round(result, decimals, rounding);
+    }
+
+    public static decimal? Parse(string? input, CurrencyType currency)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+        var culture = CultureCache[currency];
+        if (decimal.TryParse(input, NumberStyles.Currency, culture, out var result))
+            return result;
+        return null;
     }
     #endregion
 }
