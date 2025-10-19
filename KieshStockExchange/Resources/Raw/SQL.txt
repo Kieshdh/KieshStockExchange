@@ -102,6 +102,6 @@ CREATE TABLE Candles (
     TradeCount INTEGER NOT NULL DEFAULT 0,
     MinTransactionId INTEGER NULL,
     MaxTransactionId INTEGER NULL,
-    UNIQUE(StockId, Currency, ResolutionSeconds, OpenTime),
+    UNIQUE(StockId, Currency, BucketSeconds, OpenTime),
     FOREIGN KEY (StockId) REFERENCES Stocks(StockId)
 );
