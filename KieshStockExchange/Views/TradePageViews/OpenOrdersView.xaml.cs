@@ -1,8 +1,8 @@
 namespace KieshStockExchange.Views.TradePageViews;
 
-public partial class OpenOrdersTableView : ContentView
+public partial class OpenOrdersView : ContentView
 {
-	public OpenOrdersTableView()
+	public OpenOrdersView()
 	{
 		InitializeComponent();
 	}

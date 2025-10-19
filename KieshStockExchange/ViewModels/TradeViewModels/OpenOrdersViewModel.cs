@@ -6,20 +6,18 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
-public class OpenOrdersTableViewModel : BaseViewModel
+public class OpenOrdersViewModel : BaseViewModel
 {
     private readonly IMarketOrderService _marketService;
-    private readonly ILogger<OpenOrdersTableViewModel> _logger;
+    private readonly ILogger<OpenOrdersViewModel> _logger;
     private readonly ISelectedStockService _stockService;
     private int _stockId { get; set; }
     private Stock _stock { get; set; }
 
     public int StockId { get; private set; }
 
-    public OpenOrdersTableViewModel(
-        IMarketOrderService marketService,
-        ILogger<OpenOrdersTableViewModel> logger,
-        ISelectedStockService stockService)
+    public OpenOrdersViewModel(IMarketOrderService marketService,
+        ILogger<OpenOrdersViewModel> logger, ISelectedStockService stockService)
     {
         _marketService = marketService ?? throw new ArgumentNullException(
             nameof(marketService), "Market service cannot be null.");

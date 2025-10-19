@@ -56,7 +56,7 @@
                         <!-- Current Positions Table -->
                         <other:SegmentedTabItem Header="Positions">
                             <other:SegmentedTabItem.Content>
-                                <views:PositionsTableView BindingContext="{Binding Source=
+                                <views:UserPositionsView BindingContext="{Binding Source=
                                     {x:Reference TradePageRoot}, Path=BindingContext.PositionsVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
@@ -64,7 +64,7 @@
                         <!-- Open Orders Table-->
                         <other:SegmentedTabItem Header="Open Orders">
                             <other:SegmentedTabItem.Content>
-                                <views:OpenOrdersTableView BindingContext="{Binding Source=
+                                <views:OpenOrdersView BindingContext="{Binding Source=
                                     {x:Reference TradePageRoot}, Path=BindingContext.OpenOrdersVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
@@ -72,7 +72,7 @@
                         <!-- Order History Table-->
                         <other:SegmentedTabItem Header="History">
                             <other:SegmentedTabItem.Content>
-                                <views:HistoryTableView BindingContext="{Binding Source=
+                                <views:OrderHistoryView BindingContext="{Binding Source=
                                     {x:Reference TradePageRoot}, Path=BindingContext.HistoryVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>

@@ -6,19 +6,17 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
-public class HistoryTableViewModel : BaseViewModel
+public class HistoryViewModel : BaseViewModel
 {
     private readonly IMarketOrderService _marketService;
-    private readonly ILogger<TradeViewModel> _logger;
+    private readonly ILogger<HistoryViewModel> _logger;
     private readonly ISelectedStockService _stockService;
 
     private int _selectedStockId { get; set; }
     private Stock _stock { get; set; }
 
-    public HistoryTableViewModel(
-        IMarketOrderService marketService,
-        ILogger<TradeViewModel> logger,
-        ISelectedStockService stockService)
+    public HistoryViewModel( IMarketOrderService marketService,
+        ILogger<HistoryViewModel> logger, ISelectedStockService stockService)
     {
         Title = "Order History";
         _marketService = marketService ?? throw new ArgumentNullException(

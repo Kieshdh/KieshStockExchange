@@ -1,8 +1,8 @@
 namespace KieshStockExchange.Views.TradePageViews;
 
-public partial class HistoryTableView : ContentView
+public partial class OrderHistoryView : ContentView
 {
-	public HistoryTableView()
+	public OrderHistoryView()
 	{
 		InitializeComponent();
 	}

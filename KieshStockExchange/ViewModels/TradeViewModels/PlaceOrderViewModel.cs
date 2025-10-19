@@ -3,7 +3,6 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services;
-using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -22,11 +21,12 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     [ObservableProperty] private int _quantity = 0;
     [ObservableProperty] private decimal _limitPrice = 0m;
     [ObservableProperty] private decimal _slippagePrc = 0.005m; // 0.5% default
+    [ObservableProperty] private string _assetText = "Available Funds"; // Buy="Available Funds", Sell="Available Shares"
+    [ObservableProperty] private string _availableAssetsText = "-"; // Based on side and portfolio
+    [ObservableProperty] private string _orderValue = "-"; // Total order value based on quantity and price
 
     [ObservableProperty] private string _submitButtonText = "Buy"; // Buy="Buy {Symbol}", Sell="Sell {Symbol}"
     [ObservableProperty] private Color _submitButtonColor = Colors.ForestGreen; // Buy=ForestGreen, Sell=OrangeRed
-    [ObservableProperty] private string _orderValue = "-"; // Total order value based on quantity and price
-    [ObservableProperty] private string _pricePreview = "-";  // For market orders: shows computed price with slippage
     #endregion
 
     #region PropertyChanged events
@@ -47,22 +47,43 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     partial void OnSlippagePrcChanged(decimal value) { RecomputeUi(); }
     #endregion
 
+    #region Assets display properties
+    private Fund UserFund => _portfolio?.GetFundByCurrency(Selected.Currency) 
+        ?? new Fund { CurrencyType = Selected.Currency };
+
+    private Position UserPosition => _portfolio?.GetPositionByStockId(Selected.StockId ?? -1) 
+        ?? new Position { StockId = Selected.StockId ?? 0 };
+
+    private IDispatcherTimer? _assetsTimer;
+    private EventHandler? _assetsTickHandler;
+    private bool _assetsRefreshRunning = false;
+
+    public TimeSpan AssetsRefreshInterval { get; set; } = TimeSpan.FromSeconds(60);
+
+    #endregion
+
     #region Services and Constructor
     private readonly IUserPortfolioService _portfolio;
     private readonly IUserOrderService _orders;
     private readonly ILogger<PlaceOrderViewModel> _logger;
+    private readonly IDispatcher _dispatcher;
 
     public PlaceOrderViewModel(IUserOrderService orders, IUserPortfolioService portfolio, 
-        ILogger<PlaceOrderViewModel> logger, ISelectedStockService selected) : base(selected)
+        ILogger<PlaceOrderViewModel> logger, ISelectedStockService selected, IDispatcher disp) : base(selected)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _dispatcher = disp ?? throw new ArgumentNullException(nameof(disp));
+
+        InitializeSelection();
+        StartAssetsAutoRefresh();
+
     }
     #endregion
 
     #region StockAware Overrides
-    protected override Task OnStockChangedAsync(int? stockId, CurrencyType currency)
+    protected override Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct)
     {
         // Method called when selected stock changes
         // For limit orders, set limit price to current price
@@ -73,7 +94,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         return Task.CompletedTask;
     }
 
-    protected override Task OnPriceChangedAsync(int? stockId, CurrencyType currency, decimal price, DateTime? updatedAt)
+    protected override Task OnPriceChangedAsync(int? stockId, CurrencyType currency, 
+        decimal price, DateTime? updatedAt, CancellationToken ct)
     {
         // Price moved -> update order value preview
         RecomputeUi();
@@ -93,29 +115,32 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         // Parse percentage
         if (!ParsingHelper.TryToDecimal(parameter, out var percent))
             return;
-        percent = Math.Clamp(percent, 0m, 100m);
+        percent = Math.Clamp(percent, 0m, 100m); // Clamp to [0,100]
 
         // Guard: no stock selected
-        if (!Selected.HasSelectedStock) 
-        { 
-            Quantity = 0; 
-            RecomputeUi(); 
-            return; 
+        if (!Selected.HasSelectedStock)
+        {
+            Quantity = 0;
+            RecomputeUi();
+            return;
         }
 
         // Determine max quantity based on side
-        int maxQty = 0;
+        int maxQty;
         if (IsBuySelected) // Buy
         {
             var fund = _portfolio.GetFundByCurrency(Selected.Currency);
-            if (fund == null || fund.AvailableBalance <= 0) maxQty = 0;
-            else maxQty = (int)(fund.AvailableBalance / PriceForOrder);
+            var price = PriceForOrder;
+            if (fund == null || fund.AvailableBalance <= 0 || price <= 0m) 
+                maxQty = 0;
+            else maxQty = (int)(fund.AvailableBalance / price);
 
         }
         else // Sell
         {
             var holding = _portfolio.GetPositionByStockId(Selected.StockId ?? -1);
-            if (holding == null || holding.AvailableQuantity <= 0) maxQty = 0;
+            if (holding == null || holding.AvailableQuantity <= 0) 
+                maxQty = 0;
             else maxQty = holding.AvailableQuantity;
         }
 
@@ -131,9 +156,11 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         IsBusy = true;
         try
         {
-            var ok = ValidateInputs();
-            if (!ok) return;
-
+            if (!ValidateInputs())
+            {
+                _logger.LogWarning("Order validation failed for {Symbol}. Order not placed.", Selected.Symbol);
+                return;
+            }
 
             var id = Selected.StockId!.Value; 
             var cur = Selected.Currency;
@@ -145,30 +172,103 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                 _logger.LogInformation("Placing {Side} MARKET order for {Quantity} shares of {Symbol} " +
                     "at computed price {Price} {Currency} (slippage {Slippage:P2})",
                     IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, PriceForOrder, cur, SlippagePrc);
-                if (IsBuySelected)
-                    result = await _orders.PlaceMarketBuyOrderAsync(id, Quantity, PriceForOrder, cur, ct);
-                else
-                    result = await _orders.PlaceMarketSellOrderAsync(id, Quantity, PriceForOrder, cur, ct);
+                
+                result = IsBuySelected
+                    ? await _orders.PlaceMarketBuyOrderAsync(id, Quantity, PriceForOrder, cur, ct)
+                    : await _orders.PlaceMarketSellOrderAsync(id, Quantity, PriceForOrder, cur, ct);
             }
             else
             {
                 _logger.LogInformation("Placing {Side} LIMIT order for {Quantity} shares of {Symbol} at limit price {Price} {Currency}",
                     IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, LimitPrice, cur);
-                if (IsBuySelected)
-                    result = await _orders.PlaceLimitBuyOrderAsync(id, Quantity, LimitPrice, cur, ct);
-                else
-                    result = await _orders.PlaceLimitSellOrderAsync(id, Quantity, LimitPrice, cur, ct);
+                
+                result = IsBuySelected
+                    ? await _orders.PlaceLimitBuyOrderAsync(id, Quantity, LimitPrice, cur, ct)
+                    : await _orders.PlaceLimitSellOrderAsync(id, Quantity, LimitPrice, cur, ct);
             }
+
             // Show result
             if (result.PlacedSuccesfully)
-                _logger.LogInformation("{Order} {Message}", result.PlacedOrder, result.SuccesMessage);
-            else _logger.LogWarning("Order placement failed: {ErrorMessage}", result.ErrorMessage);
+                _logger.LogInformation("Order placed. Id={Id}, Remaining={Rem}, Fills={Fills}, AvgPrice={Avg}",
+                result.NewOrderId, result.RemainingQuantity, result.TotalFilledQuantity, result.AverageFillPrice);
+            else
+                _logger.LogWarning("Order failed: {Message}", result.ErrorMessage);
+
+            // Refresh assets
+            await UpdateAssetsAsync();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error placing order for {Symbol}", Selected.Symbol);
         }
         finally { IsBusy = false; }
+    }
+    #endregion
+
+    #region Assets Auto-Refresh and disposal
+    private async Task UpdateAssetsAsync()
+    {
+        // Refresh portfolio after order placement
+        try { await _portfolio.RefreshAsync(null, CancellationToken.None); }
+        catch (Exception ex) { _logger.LogError(ex, "Error refreshing portfolio after order placement."); }
+    }
+
+    private void StartAssetsAutoRefresh()
+    {
+        // If already started, skip
+        if (_assetsTimer != null) return;
+
+        // Create and start timer
+        _assetsTimer = _dispatcher.CreateTimer();
+        _assetsTimer.Interval = AssetsRefreshInterval;
+
+        // Creaet Tick handler
+        _assetsTickHandler = async (s, e) =>
+        {
+            if (_assetsRefreshRunning) return;
+            _assetsRefreshRunning = true;
+            try 
+            { 
+                await UpdateAssetsAsync();
+                RecomputeUi();
+            }
+            catch (Exception ex) {
+                _logger.LogError(ex, "Assets auto-refresh tick failed.");
+            }
+            finally { _assetsRefreshRunning = false; }
+        };
+
+        // Attach handler and start
+        _assetsTimer.Tick += _assetsTickHandler;
+        _assetsTimer.Start();
+
+        // Initial update
+        _ = UpdateAssetsAsync().ContinueWith(_ => RecomputeUi());
+    }
+
+    private void StopAssetsAutoRefresh()
+    {
+        // If not started, skip
+        if (_assetsTimer == null) return;
+
+        // Detach handler and stop timer
+        try
+        {
+            if (_assetsTickHandler != null)
+            {
+                _assetsTimer.Tick -= _assetsTickHandler;
+                _assetsTickHandler = null;
+            }
+            _assetsTimer.Stop();
+        }
+        finally { _assetsTimer = null; }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            StopAssetsAutoRefresh();
+        base.Dispose(disposing);
     }
     #endregion
 
@@ -186,12 +286,15 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         // Submit button text and color
         SubmitButtonText = IsBuySelected ? $"Buy {Selected.Symbol}" : $"Sell {Selected.Symbol}";
         SubmitButtonColor = IsBuySelected ? Colors.ForestGreen : Colors.OrangeRed;
-        
-        // Price preview
-        decimal price = IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
-        PricePreview = price > 0 ? CurrencyHelper.Format(price, Selected.Currency) : "-";
+
+        // User Asset Display
+        AssetText = IsBuySelected ? "Available Funds" : "Available shares";
+        AvailableAssetsText = IsBuySelected
+            ? (UserFund.AvailableBalance > 0 ? UserFund.AvailableBalanceDisplay : "-")
+            : ($"{UserPosition.AvailableQuantity} {Selected.Symbol}");
 
         // Order value preview
+        decimal price = IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
         var total = (price > 0 && Quantity > 0) ? price * Quantity : 0m;
         OrderValue = total > 0 ? CurrencyHelper.Format(total, Selected.Currency) : "-";
     }
@@ -228,7 +331,5 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         var prc = Math.Max(0m, SlippagePrc);
         return IsBuySelected ? Selected.CurrentPrice * (1m + prc) : Selected.CurrentPrice * (1m - prc);
     }
-
-    
     #endregion
 }

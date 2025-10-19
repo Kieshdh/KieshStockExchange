@@ -1,8 +1,8 @@
 namespace KieshStockExchange.Views.TradePageViews;
 
-public partial class PositionsTableView : ContentView
+public partial class UserPositionsView : ContentView
 {
-	public PositionsTableView()
+	public UserPositionsView()
 	{
 		InitializeComponent();
 	}

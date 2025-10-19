@@ -116,18 +116,18 @@ KieshStockExchange
 ----- MarketViewModel.cs
 --- OtherViewModels
 ----- BaseViewModel.cs (Common properties for all ViewModels)
------ StockAwareViewModel.cs (Holds a SelectedStock property for binding)
 --- PortfolioViewModels (TODO)
 ----- PortfolioViewModel.cs
 --- TradeViewModels (TODO)
 ----- ChartViewModel.cs
------ HistoryTableViewModel.cs
------ OpenOrderTableViewModel.cs 
+----- StockHistoryViewModel.cs
+----- OpenOrderViewModel.cs 
 ----- OrderBookViewModel.cs
------ OrderHistoryTableViewModel.cs
+----- OrderHistoryViewModel.cs
 ----- PlaceOrderViewModel.cs
------ PositionsTableViewModel.cs 
+----- StockAwareViewModel.cs (Holds a SelectedStock property for binding)
 ----- TradeViewModel.cs (Main ViewModel for TradePage)
+----- UserPositionsViewModel.cs 
 --- UserViewModels
 ----- LoginViewModel.cs
 ----- RegisterViewModel.cs
@@ -152,13 +152,13 @@ KieshStockExchange
 ----- PortfolioPage.xaml 
 --- TradePageViews 
 ----- ChartView.xaml (TODO)
------ HistoryTableView.xaml (TODO)
 ----- OpenOrdersView.xaml (TODO)
 ----- OrderBookView.xaml (TODO)
 ----- OrderHistoryView.xaml (TODO)
 ----- PlaceOrderView.xaml (TODO)
------ PositionsView.xaml (TODO)
+----- StockHistoryView.xaml (TODO)
 ----- TradePage.xaml 
+----- UserPositionsView.xaml (TODO)
 --- UserViews
 ----- LoginPage.xaml
 ----- RegisterPage.xaml

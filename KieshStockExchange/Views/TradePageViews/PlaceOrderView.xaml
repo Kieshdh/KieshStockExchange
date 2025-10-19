@@ -28,6 +28,12 @@
             </views:SegmentedTabView.Tabs>
         </views:SegmentedTabView>
 
+        <!-- Asset Display -->
+        <Grid RowDefinitions="Auto,*" ColumnSpacing="10" >
+            <Label Text="{Binding AssetText}" Style="{StaticResource StockPlacerLabel}" />
+            <Label Grid.Row="1" Text="{Binding AvailableAssetsText}" Style="{StaticResource ValueLabel}" />
+        </Grid>
+
         <!-- MARKET pane -->
         <Grid x:Name="MarketPane" IsVisible="{Binding IsMarketSelected}"
               RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,*" Margin="0,8,0,0">
@@ -40,26 +46,18 @@
                 <Label Grid.Column="2" VerticalOptions="Center"
                        Text="{Binding SlippagePrc, StringFormat='{}{0:P2}'}" />
             </Grid>
-
-            <!-- Computed price preview -->
-            <Label Grid.Row="2" Grid.ColumnSpan="2" Text="Price (guarded)" Style="{StaticResource StockPlacerLabel}" />
-            <Label Grid.Row="3" Grid.ColumnSpan="2" Text="{Binding PricePreview}" Style="{StaticResource ValueLabel}" />
         </Grid>
 
         <!-- LIMIT pane -->
         <Grid x:Name="LimitPane" IsVisible="{Binding IsLimitSelected}"
-               RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*" Margin="0,8,0,0">
+               ColumnDefinitions="Auto,*" Margin="0,8,0,0">
             <!-- Limit Price entry -->
-            <Label Grid.Row="0" Grid.Column="0" Text="Limit price" Style="{StaticResource StockPlacerLabel}" />
-            <Entry Grid.Row="0" Grid.Column="1" Keyboard="Numeric" Style="{StaticResource StockPlacerEntry}"
-                   Text="{Binding LimitPrice, Mode=TwoWay}" Placeholder="0.00" />
-
-            <!-- Computed price preview -->
-            <Label Grid.Row="2" Grid.ColumnSpan="2" Text="Price (guarded)" Style="{StaticResource StockPlacerLabel}" />
-            <Label Grid.Row="3" Grid.ColumnSpan="2" Text="{Binding PricePreview}" Style="{StaticResource ValueLabel}" />
+            <Label Grid.Column="0" Text="Limit price" Style="{StaticResource StockPlacerLabel}" />
+            <Entry  Grid.Column="1" Keyboard="Numeric" Style="{StaticResource StockPlacerEntry}"
+                   Text="{Binding LimitPrice, Mode=TwoWay}" Placeholder="{Binding Selected.PriceDisplay}" />
         </Grid>
 
-        <!-- Shared area: Quantity, TotalValue and Submit -->
+        <!-- Quantity, TotalValue and Submit -->
         <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*" Margin="0,12,0,0">
             <!-- Quantity label-->
             <Label Grid.Row="0" Grid.Column="0" Text="Quantity" Style="{StaticResource StockPlacerLabel}" />
@@ -70,9 +68,8 @@
             <Label Grid.Row="1" Grid.Column="1" Text="{Binding OrderValue}" Style="{StaticResource ValueLabel}" />
 
             <!-- Submit button -->
-            <Button Grid.Row="2" Grid.ColumnSpan="2"
-                    Text="{Binding SubmitButtonText}"
-                    BackgroundColor="{Binding SubmitButtonColor}"
+            <Button Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding SubmitButtonText}"
+                    Style="{StaticResource StockPlacerButton}"  BackgroundColor="{Binding SubmitButtonColor}" 
                     Command="{Binding PlaceOrderCommand}" />
         </Grid>
 

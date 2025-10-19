@@ -27,11 +27,13 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
+
+        InitializeSelection();
     }
     #endregion
 
     #region Abstract Overrides
-    protected override async Task OnStockChangedAsync(int? stockId, CurrencyType currency)
+    protected override async Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct)
     {
         if (stockId is null) { Series.Clear(); return; }
 
@@ -41,7 +43,7 @@ public partial class ChartViewModel : StockAwareViewModel
             // Unsubscribe from previous stream if any
             if (Key is { } prev)
             {
-                var ct = Cts?.Token ?? default;
+                ct = Cts?.Token ?? default;
                 try { await _candles.UnsubscribeAsync(prev.StockId, prev.Currency, prev.Res, ct); }
                 catch (Exception ex) { _logger.LogWarning(ex, "Unsubscribing previous candle stream failed."); }
             }
@@ -53,7 +55,7 @@ public partial class ChartViewModel : StockAwareViewModel
             // Load historical candles for the past day
             var now = DateTime.UtcNow;
             var from = now.AddDays(-1);
-            var list = await _candles.GetHistoricalCandlesAsync(stockId.Value, currency, Resolution, from, now);
+            var list = await _candles.GetHistoricalCandlesAsync(stockId.Value, currency, Resolution, from, now, ct);
             Series.Clear();
             foreach (var c in list) Series.Add(c);
 
@@ -63,7 +65,8 @@ public partial class ChartViewModel : StockAwareViewModel
         finally { IsBusy = false; }
     }
 
-    protected override Task OnPriceChangedAsync(int? stockId, CurrencyType currency, decimal price, DateTime? updatedAt)
+    protected override Task OnPriceChangedAsync(int? stockId, CurrencyType currency, 
+        decimal price, DateTime? updatedAt, CancellationToken ct)
     {
         // If the live candle exists in ICandleService, copy it into Series (replace or append).
         if (stockId is null || Key is null || Key?.StockId != stockId.Value || Key?.Currency != currency)

@@ -32,9 +32,9 @@ public partial class TradeViewModel : BaseViewModel
 
     #region ViewModel Properties
     public PlaceOrderViewModel PlacingVm { get; }
-    public HistoryTableViewModel HistoryVm { get; }
-    public OpenOrdersTableViewModel OpenOrdersVm { get; }
-    public PositionsTableViewModel PositionsVm { get; }
+    public HistoryViewModel HistoryVm { get; }
+    public OpenOrdersViewModel OpenOrdersVm { get; }
+    public UserPositionsViewModel PositionsVm { get; }
     public ChartViewModel ChartVm { get; }
     public OrderBookViewModel OrderBookVm { get; }
     #endregion
@@ -48,8 +48,8 @@ public partial class TradeViewModel : BaseViewModel
     public TradeViewModel(
         ISelectedStockService selected, IMarketDataService market,
         ILogger<TradeViewModel> logger, IUserSessionService userSession,
-        PlaceOrderViewModel placingVm, HistoryTableViewModel historyVm,
-        OpenOrdersTableViewModel openOrdersVm, PositionsTableViewModel positionsVm,
+        PlaceOrderViewModel placingVm, HistoryViewModel historyVm,
+        OpenOrdersViewModel openOrdersVm, UserPositionsViewModel positionsVm,
         ChartViewModel chartVm, OrderBookViewModel orderBookVm)
     {
         // Initialize services
