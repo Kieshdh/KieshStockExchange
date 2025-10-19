@@ -179,19 +179,20 @@
     </Style>
 
     <!-- Trade page -->
-    <Style x:Key="StockPlacerButton" TargetType="Button" >
-        <Setter Property="WidthRequest" Value="100" />
-        <Setter Property="Padding" Value="5" />
-        <Setter Property="TextColor" Value="Black" />
-        <Setter Property="FontAttributes" Value="Bold" />
-        <Setter Property="CornerRadius" Value="20" />
-    </Style>
     <Style x:Key="TradeContentOutline" TargetType="Frame">
         <Setter Property="BorderColor" Value="Black" />
         <Setter Property="CornerRadius" Value="6" />
         <Setter Property="HasShadow" Value="False" />
         <Setter Property="Padding" Value="8" />
         <Setter Property="Margin" Value="4" />
+    </Style>
+    <Style x:Key="StockPlacerButton" TargetType="Button" >
+        <Setter Property="MinimumWidthRequest" Value="100" />
+        <Setter Property="HorizontalOptions" Value="Fill" />
+        <Setter Property="Padding" Value="5" />
+        <Setter Property="TextColor" Value="Black" />
+        <Setter Property="FontAttributes" Value="Bold" />
+        <Setter Property="CornerRadius" Value="20" />
     </Style>
     <Style x:Key="StockPlacerEntry" TargetType="Entry" >
         <Setter Property="Keyboard" Value="Numeric" />
@@ -204,11 +205,6 @@
         <Setter Property="FontAttributes" Value="Bold" />
         <Setter Property="VerticalTextAlignment" Value="Center" />
         <Setter Property="HorizontalTextAlignment" Value="Center" />
-    </Style>
-    <Style x:Key="StockPlacerGrid" TargetType="Grid" >
-        <Setter Property="ColumnDefinitions" Value="Auto,*" />
-        <Setter Property="ColumnSpacing" Value="10" />
-        <Setter Property="RowDefinitions" Value="60" />
     </Style>
     <Style x:Key="StockSelectorPicker" TargetType="Picker">
         <Setter Property="MinimumWidthRequest" Value="80" />
@@ -224,6 +220,9 @@
         <Setter Property="FontSize" Value="Large" />
         <Setter Property="VerticalOptions" Value="Center" />
     </Style>
-    
+    <Style x:Key="ValueLabel" TargetType="Label">
+        <Setter Property="FontAttributes" Value="Bold"/>
+        <Setter Property="HorizontalTextAlignment" Value="Center"/>
+    </Style>
 
 </ResourceDictionary>

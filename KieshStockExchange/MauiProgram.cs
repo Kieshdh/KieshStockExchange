@@ -9,6 +9,7 @@ using KieshStockExchange.Views.MarketPageViews;
 using KieshStockExchange.Views.PortfolioPageViews;
 using KieshStockExchange.Views.TradePageViews;
 using KieshStockExchange.Views.UserViews;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SQLitePCL;
 
@@ -49,6 +50,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ITrendingService, TrendingService>();
         builder.Services.AddSingleton<IPriceSnapshotService, PriceSnapshotService>();
         builder.Services.AddSingleton<ICandleService, CandleService>();
+        //builder.Services.AddSingleton(_ => Application.Current!.Dispatcher);
         // Viewmodels
         // - User
         builder.Services.AddTransient<RegisterViewModel>();
@@ -64,9 +66,9 @@ public static class MauiProgram
         // - Trade
         builder.Services.AddTransient<TradeViewModel>();
         builder.Services.AddTransient<PlaceOrderViewModel>();
-        builder.Services.AddTransient<HistoryTableViewModel>();
-        builder.Services.AddTransient<OpenOrdersTableViewModel>();
-        builder.Services.AddTransient<PositionsTableViewModel>();
+        builder.Services.AddTransient<HistoryViewModel>();
+        builder.Services.AddTransient<OpenOrdersViewModel>();
+        builder.Services.AddTransient<UserPositionsViewModel>();
         builder.Services.AddTransient<ChartViewModel>();
         builder.Services.AddTransient<OrderBookViewModel>();
 

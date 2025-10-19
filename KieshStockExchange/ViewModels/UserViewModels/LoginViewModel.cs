@@ -28,8 +28,9 @@ public partial class LoginViewModel : BaseViewModel
 
     public async Task AutoLogin() 
     {
-        Username = "kiesh";
+        Username = "kevin47"; // kevin47 kiesh
         Password = "hallo123";
+
         await LoadDataFromExcel();
 
         // Add default admin user if not exists
