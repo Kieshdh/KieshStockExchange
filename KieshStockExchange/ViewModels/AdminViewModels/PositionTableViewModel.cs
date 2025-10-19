@@ -5,6 +5,7 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using System;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Windows.Input;
@@ -20,7 +21,23 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
     public Dictionary<int, Stock> Stocks = new(); // Id → Stock
     public Dictionary<int, string> StockSymbols => Stocks.ToDictionary(kv => kv.Key, kv => kv.Value.Symbol);
     public CurrencyType BaseCurrency = CurrencyType.USD;
-    
+
+    public ObservableCollection<Stock> PickerStocks { get; } = new();
+    private Stock? _pickerSelection;
+    public Stock? PickerSelection
+    {
+        get => _pickerSelection ?? null;
+        set
+        {
+            if (value is null || value == _pickerSelection || value.StockId <= 0) return;
+            _pickerSelection = value; // only to reflect the UI's selected item immediately
+            // Update all table objects to the new stock
+            foreach (var item in AllItems)
+                item.CurrentStockId = value.StockId;
+            OnPropertyChanged(); // ensures the picker reflects the new selection
+        }
+    }
+
     public PositionTableViewModel(IDataBaseService dbService, IMarketDataService market) : base(dbService)
     {
         Title = "Positions"; // from BaseViewModel
@@ -40,6 +57,18 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
             var users = await _dbService.GetUsersAsync();
             var allPositions = await _dbService.GetPositionsAsync(); 
             var stocks = await _dbService.GetStocksAsync();
+
+            // Ensure at least one stock exists
+            if (stocks.Count == 0)
+            {
+                Debug.WriteLine("No stocks found in database.");
+                await Shell.Current.DisplayAlert("Error", "No stocks found in database. Please add stocks first.", "OK");
+                return rows;
+            }
+            // Add to picker and set selection
+            foreach (var stock in stocks)
+                PickerStocks.Add(stock);
+            PickerSelection = stocks[0];
 
             // Set the Stocks dictionary for easy lookup
             Stocks = stocks.ToDictionary(s => s.StockId, s => s);
@@ -121,7 +150,7 @@ public partial class PositionTableObject : ObservableObject
     #region Data properties
     private Dictionary<int, Position> PosDict;
 
-    private CurrencyType BaseCurrency;
+    public CurrencyType BaseCurrency;
 
     private Dictionary<int, decimal> Prices;
 
@@ -217,7 +246,7 @@ public partial class PositionTableObject : ObservableObject
         Prices = prices;
         Symbols = symbols;
 
-        CurrentStockId = 1;
+        CurrentStockId = 1; // default to first stock
     }
     #endregion
 
