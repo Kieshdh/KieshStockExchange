@@ -6,12 +6,14 @@
     <Grid RowDefinitions="Auto,*,Auto">
 
         <!-- Labels -->
-        <Grid ColumnDefinitions="60, 80, *, *, 2*, 2*, 2.5*, 60, 3" 
+        <Grid ColumnDefinitions="60, 95, *, *, 2*, 2*, 2.5*, 60, 3" 
               Style="{StaticResource TableHeaderGrid}" >
             <Label Text="UserId" Grid.Column="0" 
                    Style="{StaticResource TableHeaderLabel}"/>
-            <Label Text="Symbol" Grid.Column="1" 
-                   Style="{StaticResource TableHeaderLabel}" />
+            <Picker ItemsSource="{Binding PickerStocks}" Grid.Column="1" 
+                    ItemDisplayBinding="{Binding Symbol}"
+                    SelectedItem="{Binding PickerSelection, Mode=TwoWay}" />
+                    <!-- Style="{StaticResource StockSelectorPicker}" -->
             <Label Text="Quantity" Grid.Column="2" 
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Reserved" Grid.Column="3" 
@@ -30,7 +32,7 @@
         <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1" >
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid ColumnDefinitions="60, 80, *, *, 2*, 2*, 2.5*, 60, 3" 
+                    <Grid ColumnDefinitions="60, 95, *, *, 2*, 2*, 2.5*, 60, 3" 
                           Style="{StaticResource TableRowGrid}">
                         <!-- Viewing Mode Labels -->
                         <Label Text="{Binding UserId}" Grid.Column="0" 
