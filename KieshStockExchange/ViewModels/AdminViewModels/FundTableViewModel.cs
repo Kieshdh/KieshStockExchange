@@ -80,8 +80,6 @@ public partial class FundTableObject : ObservableObject
     public Fund Jpy => _fundsDict[CurrencyType.JPY];
     public Fund Chf => _fundsDict[CurrencyType.CHF];
     public Fund Aud => _fundsDict[CurrencyType.AUD];
-
-    [ObservableProperty] private string _totalFunds = String.Empty;
     #endregion
 
     #region Editing properties
@@ -174,6 +172,8 @@ public partial class FundTableObject : ObservableObject
             }
         }
     }
+
+    [ObservableProperty] private string _totalFunds = String.Empty;
     #endregion
 
     #region Other properties and constructor

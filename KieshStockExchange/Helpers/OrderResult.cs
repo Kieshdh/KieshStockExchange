@@ -69,11 +69,10 @@ public class OrderResult
     /// If you create a new resting order (e.g. an unfilled limit),
     /// this is its database‐assigned ID so the UI can reference/cancel it later.
     /// </summary>
-    public int? NewOrderId
-        => PlacedOrder?.OrderId > 0 ? PlacedOrder.OrderId : null;
+    public int? NewOrderId => PlacedOrder?.OrderId > 0 ? PlacedOrder.OrderId : null;
 
     /// <summary> Optional success message for UI display. </summary>
-    public string SuccesMessage { get; set; } = string.Empty;
+    public string SuccessMessage { get; set; } = string.Empty;
 
     /// <summary> Optional error message for UI display. </summary>
     public string ErrorMessage { get; set; } = string.Empty;
@@ -81,7 +80,7 @@ public class OrderResult
     /// <summary>
     /// Was the order placed successfully (fully, partially or placed on the orderbook)
     /// </summary>
-    public bool PlacedSuccesfully =>
+    public bool PlacedSuccessfully =>
         Status == OrderStatus.Success ||
         Status == OrderStatus.PartialFill ||
         Status == OrderStatus.Filled ||
