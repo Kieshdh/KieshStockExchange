@@ -6,25 +6,27 @@
     <Grid RowDefinitions="Auto,* ,Auto">
 
         <!-- Labels -->
-        <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, 60, 3" 
+        <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" 
               Style="{StaticResource TableHeaderGrid}" >
             <Label Text="ID" Grid.Column="0" 
                    Style="{StaticResource TableHeaderLabel}"/>
             <Label Text="USD" Grid.Column="1" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="EUR" Grid.Column="2" 
+            <Label Text="Reserved" Grid.Column="2" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="GBP" Grid.Column="3" 
+            <Label Text="EUR" Grid.Column="3" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="JPY" Grid.Column="4" 
+            <Label Text="GBP" Grid.Column="4" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="CHF" Grid.Column="5" 
+            <Label Text="JPY" Grid.Column="5" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="AUD" Grid.Column="6"
+            <Label Text="CHF" Grid.Column="6" 
+                   Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="AUD" Grid.Column="7"
                    Style="{StaticResource TableHeaderLabel}" /> 
-            <Label Text="TotalBalance (USD)" Grid.Column="7" 
+            <Label Text="TotalBalance (USD)" Grid.Column="8" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Edit" Grid.Column="8" 
+            <Label Text="Edit" Grid.Column="9" 
                    Style="{StaticResource TableHeaderLabel}" />
         </Grid>
 
@@ -32,7 +34,7 @@
         <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1" >
             <CollectionView.ItemTemplate>
                 <DataTemplate>
-                    <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, 60, 3" 
+                    <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" 
                           Style="{StaticResource TableRowGrid}">
                         <!-- Viewing Mode Labels -->
                         <Label Text="{Binding UserId}" Grid.Column="0" 
@@ -40,24 +42,26 @@
                         <Label Text="{Binding Usd.TotalBalanceDisplay}" Grid.Column="1" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Eur.TotalBalanceDisplay}" Grid.Column="2" 
-                               Style="{StaticResource TableRowLabel}" 
-                               IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Gbp.TotalBalanceDisplay}" Grid.Column="3" 
-                               Style="{StaticResource TableRowLabel}" 
-                               IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Jpy.TotalBalanceDisplay}" Grid.Column="4" 
-                               Style="{StaticResource TableRowLabel}" 
-                               IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Chf.TotalBalanceDisplay}" Grid.Column="5" 
-                               Style="{StaticResource TableRowLabel}" 
-                               IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Aud.TotalBalanceDisplay}" Grid.Column="6" 
-                               Style="{StaticResource TableRowLabel}" 
-                               IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding TotalFunds}" Grid.Column="7"
+                        <Label Text="{Binding Usd.ReservedBalanceDisplay}" Grid.Column="2" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding EditText}" Grid.Column="8"
+                        <Label Text="{Binding Eur.TotalBalanceDisplay}" Grid.Column="3" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding Gbp.TotalBalanceDisplay}" Grid.Column="4" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding Jpy.TotalBalanceDisplay}" Grid.Column="5" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding Chf.TotalBalanceDisplay}" Grid.Column="6" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding Aud.TotalBalanceDisplay}" Grid.Column="7" 
+                               Style="{StaticResource TableRowLabel}" 
+                               IsVisible="{Binding IsViewing}" />
+                        <Label Text="{Binding TotalFunds}" Grid.Column="8"
+                               Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding EditText}" Grid.Column="9"
                                Style="{StaticResource TableEditLabel}" >
                             <Label.GestureRecognizers>
                                 <TapGestureRecognizer Command="{Binding ChangeEditCommand}" NumberOfTapsRequired="1" />
@@ -68,19 +72,19 @@
                         <Entry Text="{Binding UsdBalance, Mode=TwoWay}" Grid.Column="1" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding EurBalance, Mode=TwoWay}" Grid.Column="2" 
+                        <Entry Text="{Binding EurBalance, Mode=TwoWay}" Grid.Column="3" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding GbpBalance, Mode=TwoWay}" Grid.Column="3" 
+                        <Entry Text="{Binding GbpBalance, Mode=TwoWay}" Grid.Column="4" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding JpyBalance, Mode=TwoWay}" Grid.Column="4" 
+                        <Entry Text="{Binding JpyBalance, Mode=TwoWay}" Grid.Column="5" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding ChfBalance, Mode=TwoWay}" Grid.Column="5" 
+                        <Entry Text="{Binding ChfBalance, Mode=TwoWay}" Grid.Column="6" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding AudBalance, Mode=TwoWay}" Grid.Column="6" 
+                        <Entry Text="{Binding AudBalance, Mode=TwoWay}" Grid.Column="7" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
 
@@ -95,6 +99,7 @@
                         <BoxView Grid.Column="7" Style="{StaticResource TableVerticalSeparator}" />
                         <BoxView Grid.Column="8" Style="{StaticResource TableVerticalSeparator}" />
                         <BoxView Grid.Column="9" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="10" Style="{StaticResource TableVerticalSeparator}" />
 
                         <!-- Horizontal line (bottom of the row) -->
                         <BoxView Style="{StaticResource TableHorizontalSeparator}" />
