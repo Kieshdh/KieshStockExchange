@@ -66,19 +66,21 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     private readonly IUserPortfolioService _portfolio;
     private readonly IUserOrderService _orders;
     private readonly ILogger<PlaceOrderViewModel> _logger;
+    private readonly INotificationService _notification;
     private readonly IDispatcher _dispatcher;
 
     public PlaceOrderViewModel(IUserOrderService orders, IUserPortfolioService portfolio, 
-        ILogger<PlaceOrderViewModel> logger, ISelectedStockService selected, IDispatcher disp) : base(selected)
+        INotificationService notification, ILogger<PlaceOrderViewModel> logger, 
+        ISelectedStockService selected, IDispatcher disp) : base(selected)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dispatcher = disp ?? throw new ArgumentNullException(nameof(disp));
+        _notification = notification ?? throw new ArgumentNullException(nameof(notification));
 
         InitializeSelection();
         StartAssetsAutoRefresh();
-
     }
     #endregion
 
@@ -188,7 +190,9 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             }
 
             // Show result
-            if (result.PlacedSuccesfully)
+            await _notification.NotifyOrderResultAsync(result);
+
+            if (result.PlacedSuccessfully)
                 _logger.LogInformation("Order placed. Id={Id}, Remaining={Rem}, Fills={Fills}, AvgPrice={Avg}",
                 result.NewOrderId, result.RemainingQuantity, result.TotalFilledQuantity, result.AverageFillPrice);
             else
