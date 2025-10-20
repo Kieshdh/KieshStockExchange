@@ -74,12 +74,14 @@ KieshStockExchange
 ----- OnlineDBService.cs (TODO)
 ----- MarketDataService.cs
 ----- MarketOrderService.cs 
+----- NotificationService.cs (TODO)
 ----- PriceSnapshotService.cs
 ----- PortfolioService.cs (TODO)
 ----- ProfileService.cs (TODO)
 ----- SelectedStockService.cs
------ TransactionService.cs (TODO)
+----- StockService.cs
 ----- TrendingService.cs
+----- TransactionService.cs (TODO)
 ----- UserOrderService.cs
 ----- UserPortfolioService.cs
 ----- UserSessionService.cs (TODO)
@@ -88,12 +90,14 @@ KieshStockExchange
 ----- ICandleService.cs (Candle data for charts)
 ----- IDataBaseService.cs (Local and online DB operations)
 ----- IExcelImportService.cs (Imports Data from Excel files)
------ IMarketOrderService.cs (Market operations and order matching)
 ----- IMarketDataService.cs (Source of truth for market data)
------ IPriceSnapshotService.cs (Hourly price snapshots as fallback price data)
+----- IMarketOrderService.cs (Market operations and order matching)
+----- INotificationService.cs (Displaying notifications to the user)
 ----- IPortfolioService.cs (Portfolio Overview and history)
+----- IPriceSnapshotService.cs (Hourly price snapshots as fallback price data)
 ----- IProfileService.cs (User profile management)
 ----- ISelectedStockService.cs (Holds the currently selected stock)
+----- IStockService.cs (Stock data in-memory)
 ----- ITransactionService.cs (Tansaction history and details)
 ----- ITrendingService.cs (Trending stocks)
 ----- IUserOrderService.cs (User-specific order management)

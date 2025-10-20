@@ -16,14 +16,17 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     private readonly ILogger<MarketDataService> _logger;
     private readonly IDataBaseService _db;
     private readonly ICandleService _candle;
+    private readonly IStockService _stock;
 
     public MarketDataService(IDispatcher dispatcher, ILogger<MarketDataService> logger, 
-        IDataBaseService db, ICandleService candle)
+        IDataBaseService db, ICandleService candle, IStockService stock)
     {
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _candle = candle ?? throw new ArgumentNullException(nameof(candle));
+        _stock = stock ?? throw new ArgumentNullException(nameof(stock));
+
         _quotesView = new ReadOnlyDictionary<(int, CurrencyType), LiveQuote>(_quotes);
     }
     #endregion
@@ -127,28 +130,18 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     #endregion
 
     #region Stock details
-    // Simple in-memory cache of all stocks
-    private readonly ConcurrentDictionary<int, Stock> _stockCache = new();
-
     public async Task<Stock?> GetStockAsync(int stockId, CancellationToken ct = default)
     {
-        // Try cache first
-        if (_stockCache.TryGetValue(stockId, out var stock))
-            return stock;
-        // Refresh cache
-        await GetAllStocksAsync(ct);
-        // Try again
-        if (_stockCache.TryGetValue(stockId, out stock))
-            return stock;
-        return null; // Not found
+        // Ensure loaded once, then retry
+        await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
+        _stock.TryGetById(stockId, out var stock);
+        return stock;
     }
 
     public async Task<IReadOnlyList<Stock>> GetAllStocksAsync(CancellationToken ct = default)
     {
-        var stocks = await _db.GetStocksAsync(ct);
-        foreach (var stock in stocks)
-            _stockCache[stock.StockId] = stock;
-        return stocks.AsReadOnly();
+        await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
+        return _stock.All;
     }
 
     public async Task<decimal> GetLastPriceAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
@@ -493,7 +486,6 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
             _rings.Clear();
             _ringGates.Clear();
             _subRefCount.Clear();
-            _stockCache.Clear();
         }
         catch (Exception ex)
         {

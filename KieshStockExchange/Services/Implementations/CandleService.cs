@@ -30,11 +30,13 @@ public sealed class CandleService : ICandleService, IDisposable
     #region Fields and Constructor
     private readonly IDataBaseService _db;
     private readonly ILogger<CandleService> _logger;
+    private readonly IStockService _stock;
 
-    public CandleService(IDataBaseService db, ILogger<CandleService> logger)
+    public CandleService(IDataBaseService db, ILogger<CandleService> logger, IStockService stock)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _stock = stock ?? throw new ArgumentNullException(nameof(stock));
     }
     #endregion
 
@@ -82,8 +84,8 @@ public sealed class CandleService : ICandleService, IDisposable
 
     public async Task SubscribeAllAsync(CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
     {
-        var stocks = await _db.GetStocksAsync(ct);
-        await Task.WhenAll(stocks.Select(s => Task.Run(() => Subscribe(s.StockId, currency, resolution), ct)));
+        await _stock.EnsureLoadedAsync(ct);
+        await Task.WhenAll(_stock.All.Select(s => Task.Run(() => Subscribe(s.StockId, currency, resolution), ct)));
     }
 
     public async Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default)

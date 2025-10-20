@@ -103,6 +103,7 @@ public class UserPortfolioService : IUserPortfolioService
     private CurrencyType BaseCurrency = CurrencyType.USD;
 
     public void SetBaseCurrency(CurrencyType currency) => BaseCurrency = currency;
+    
     public CurrencyType GetBaseCurrency() => BaseCurrency;
     #endregion
 
@@ -256,8 +257,6 @@ public class UserPortfolioService : IUserPortfolioService
 
         await _db.UpsertFund(fund, ct);
 
-        //await RefreshAsync(targetUserId, ct);
-
         return true;
     }
 
@@ -326,8 +325,6 @@ public class UserPortfolioService : IUserPortfolioService
         }
 
         await _db.UpsertPosition(position, ct);
-
-        //await RefreshAsync(targetUserId, ct);
 
         return true;
     }

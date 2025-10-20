@@ -6,12 +6,6 @@ namespace KieshStockExchange.Services;
 public interface IMarketOrderService
 {
     /// <summary>
-    /// Gets the latest market price for the given stock.
-    /// </summary>
-    Task<decimal> GetMarketPriceAsync(int stockId, 
-        CurrencyType currency, CancellationToken ct = default);
-
-    /// <summary>
     /// Attempts to match the incoming order; returns success/failure and any fill transactions.
     /// </summary>
     Task<OrderResult> PlaceAndMatchAsync(Order incoming, 
@@ -34,16 +28,6 @@ public interface IMarketOrderService
     /// </summary>
     Task<OrderBook> GetOrderBookByStockAsync(int stockId, 
         CurrencyType currency, CancellationToken ct = default);
-
-    /// <summary>
-    /// Retrieves the stock by its ID.
-    /// </summary>
-    Task<Stock> GetStockByIdAsync(int stockId, CancellationToken ct = default);
-
-    /// <summary>
-    /// Gets a list of all stocks.
-    /// </summary>
-    Task<List<Stock>> GetAllStocksAsync(CancellationToken ct = default);
 
     /// <summary> 
     /// Validates the order book for the given stock and currency.

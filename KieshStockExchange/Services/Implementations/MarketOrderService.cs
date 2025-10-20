@@ -17,6 +17,7 @@ public class MarketOrderService : IMarketOrderService
     private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<MarketOrderService> _logger;
     private readonly IMarketDataService _market;
+    private readonly IStockService _stock;
 
     // Order book for each stock (keyed by stock ID and CurrencyType)
     // In-memory order books: price‐time priority
@@ -29,11 +30,12 @@ public class MarketOrderService : IMarketOrderService
     // Show if the book has been loaded at least once
     private readonly ConcurrentDictionary<(int, CurrencyType), bool> _bookLoaded = new();
 
-    public MarketOrderService(IDataBaseService dbService, IAuthService authService,
+    public MarketOrderService(IDataBaseService dbService, IAuthService authService, IStockService stock,
         IUserPortfolioService portfolio, ILogger<MarketOrderService> logger, IMarketDataService market)
     {
         _db = dbService ?? throw new ArgumentNullException(nameof(dbService));
         _auth = authService ?? throw new ArgumentNullException(nameof(authService));
+        _stock = stock ?? throw new ArgumentNullException(nameof(stock));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _market = market ?? throw new ArgumentNullException(nameof(market));
@@ -66,39 +68,6 @@ public class MarketOrderService : IMarketOrderService
 
     private bool CanModifyOrder(int targetUserId) =>
         IsAdmin || targetUserId == CurrentUserId;
-    #endregion
-
-    #region Other Public Methods
-    public async Task<decimal> GetMarketPriceAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
-        => await _market.GetLastPriceAsync(stockId, currency, ct);  
-
-    public async Task<OrderBook> GetOrderBookByStockAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
-    {
-        ct.ThrowIfCancellationRequested();
-        await EnsureBookLoadedAsync(stockId, currency, ct);
-        return GetOrCreateBook(stockId, currency);
-    }
-
-    public async Task<Stock> GetStockByIdAsync(int stockId, CancellationToken ct = default)
-    {
-        ct.ThrowIfCancellationRequested();
-        var stock = await _market.GetStockAsync(stockId, ct);
-        if (stock != null) return stock;
-
-        stock = await _db.GetStockById(stockId, ct);
-        if (stock == null)
-            throw new KeyNotFoundException($"Stock with #{stockId} not found.");
-        return stock;
-    }
-
-    public async Task<List<Stock>> GetAllStocksAsync(CancellationToken ct = default)
-    {
-        ct.ThrowIfCancellationRequested();
-        var stocks = await _db.GetStocksAsync(ct);
-        if (stocks == null || stocks.Count == 0)
-            throw new InvalidOperationException("No stocks available in the database.");
-        return stocks;
-    }
     #endregion
 
     #region Place Order
@@ -602,7 +571,14 @@ public class MarketOrderService : IMarketOrderService
     }
     #endregion
 
-    #region Orderbook Helpers
+    #region Orderbook Methods
+    public async Task<OrderBook> GetOrderBookByStockAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await EnsureBookLoadedAsync(stockId, currency, ct);
+        return GetOrCreateBook(stockId, currency);
+    }
+
     private OrderBook GetOrCreateBook(int stockId, CurrencyType currency) =>
         _orderBooks.GetOrAdd((stockId, currency),
         key => new OrderBook(stockId, currency));
@@ -715,7 +691,7 @@ public class MarketOrderService : IMarketOrderService
         new() {
             PlacedOrder = order,
             Status = OrderStatus.Success,
-            SuccesMessage = "Order successfully cancelled."
+            SuccessMessage = "Order successfully cancelled."
         };
     private OrderResult SuccessResult(Order order, List<Transaction> transactions) =>
         new() {
@@ -724,7 +700,7 @@ public class MarketOrderService : IMarketOrderService
                 ? (transactions.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook)
                 : (order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled),
             FillTransactions = transactions,
-            SuccesMessage = order.IsOpen
+            SuccessMessage = order.IsOpen
                 ? (transactions.Count > 0 ? "Order partially filled." : "Order placed on book.")
                 : (order.RemainingQuantity > 0 ? "Order partially filled." : "Order fully filled.")
         };
@@ -735,7 +711,7 @@ public class MarketOrderService : IMarketOrderService
                 ? (fills.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook)
                 : (order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled),
             FillTransactions = fills,
-            SuccesMessage = order.IsOpen
+            SuccessMessage = order.IsOpen
                 ? (fills.Count > 0 ? "Order partially filled after modification." : "Order modified and placed on book.")
                 : (order.RemainingQuantity > 0 ? "Order partially filled after modification." : "Order fully filled after modification.")
 
