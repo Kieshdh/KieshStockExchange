@@ -799,6 +799,93 @@ public class LocalDBService: IDataBaseService, IDisposable
     }
     #endregion
 
+    #region Message operations
+    public async Task<List<Message>> GetMessagesAsync(CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<Message>()
+               .OrderByDescending(m => m.CreatedAt)
+               .ThenByDescending(m => m.MessageId)
+               .ToListAsync(), ct);
+    }
+
+    public async Task<Message?> GetMessageById(int messageId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<Message>().Where(m => m.MessageId == messageId).FirstOrDefaultAsync(), ct);
+    }
+
+    public async Task<List<Message>> GetMessagesByUserId(
+        int userId, bool onlyUnread = false, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+        {
+            var q = _db.Table<Message>().Where(m => m.UserId == userId);
+            if (onlyUnread) q = q.Where(m => m.ReadAt == null);
+            q = q.OrderByDescending(m => m.CreatedAt).ThenByDescending(m => m.MessageId);
+            return q.ToListAsync();
+        }, ct);
+    }
+
+    public async Task<int> GetUnreadMessageCount(int userId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<Message>()
+               .Where(m => m.UserId == userId && m.ReadAt == null)
+               .CountAsync(), ct);
+    }
+
+    public async Task CreateMessage(Message message, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!message.IsValid())
+            throw new ArgumentException("Message entity is not valid", nameof(message));
+        await RunDbAsync(() => _db.InsertAsync(message), ct);
+    }
+
+    public async Task UpdateMessage(Message message, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!message.IsValid())
+            throw new ArgumentException("Message entity is not valid", nameof(message));
+        await RunDbAsync(() => _db.UpdateAsync(message), ct);
+    }
+
+    public async Task DeleteMessage(Message message, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (message.MessageId == 0)
+            throw new ArgumentException("Message entity must have a valid MessageId", nameof(message));
+        await RunDbAsync(() => _db.DeleteAsync(message), ct);
+    }
+
+    public async Task<bool> MarkMessageRead(int messageId, DateTime? readAtUtc = null, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        var msg = await GetMessageById(messageId, ct);
+        if (msg is null) return false;
+        if (!msg.IsRead)
+        {
+            msg.MarkAsRead();
+            await RunDbAsync(() => _db.UpdateAsync(msg), ct);
+        }
+        return true;
+    }
+
+    public async Task<int> MarkAllMessagesRead(int userId, DateTime? readAtUtc = null, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        var when = readAtUtc ?? TimeHelper.NowUtc();
+        return await RunDbAsync(() =>
+            _db.ExecuteAsync("UPDATE Messages SET ReadAt = ? WHERE UserId = ? AND ReadAt IS NULL", when, userId), ct);
+    }
+    #endregion
+
+
     #region Helper Methods
     private async Task InitializeAsync(CancellationToken ct = default)
     {

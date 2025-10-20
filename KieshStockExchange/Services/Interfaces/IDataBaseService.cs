@@ -97,6 +97,16 @@ public interface IDataBaseService
     Task DeleteCandle(Candle candle, CancellationToken cancellationToken = default);
     Task UpsertCandle(Candle candle, CancellationToken cancellationToken = default);
 
+    // Message operations
+    Task<List<Message>> GetMessagesAsync(CancellationToken cancellationToken = default);
+    Task<Message?> GetMessageById(int messageId, CancellationToken cancellationToken = default);
+    Task<List<Message>> GetMessagesByUserId(int userId, bool onlyUnread = false, CancellationToken cancellationToken = default);
+    Task<int> GetUnreadMessageCount(int userId, CancellationToken ct = default);
+    Task CreateMessage(Message message, CancellationToken cancellationToken = default);
+    Task UpdateMessage(Message message, CancellationToken cancellationToken = default);
+    Task DeleteMessage(Message message, CancellationToken cancellationToken = default);
+    Task<bool> MarkMessageRead(int messageId, DateTime? readAtUtc = null, CancellationToken ct = default);
+    Task<int> MarkAllMessagesRead(int userId, DateTime? readAtUtc = null, CancellationToken ct = default);
 }
 
 public interface ITransaction : IAsyncDisposable

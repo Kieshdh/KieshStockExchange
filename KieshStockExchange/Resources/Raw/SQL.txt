@@ -4,58 +4,60 @@ This is just an overview of the database schema if it used one.
 The actual database is created and managed in code.
 
 CREATE TABLE Users (
-    UserId INTEGER PRIMARY KEY AUTOINCREMENT,
-    Username TEXT NOT NULL UNIQUE,
-    PasswordHash TEXT NOT NULL,
-    Email TEXT NOT NULL UNIQUE,
-    FullName TEXT NOT NULL,
-    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    BirthDate DATETIME NOT NULL,
-    IsAdmin BOOL
+    UserId          INTEGER PRIMARY KEY AUTOINCREMENT,
+    Username        TEXT NOT NULL UNIQUE,
+    PasswordHash    TEXT NOT NULL,
+    Email           TEXT NOT NULL UNIQUE,
+    FullName        TEXT NOT NULL,
+    CreatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    BirthDate       DATETIME NOT NULL,
+    IsAdmin         BOOL
 );
 
 CREATE TABLE Stocks (
-    StockId INTEGER PRIMARY KEY AUTOINCREMENT,
-    Symbol TEXT NOT NULL UNIQUE,
-    CompanyName TEXT NOT NULL
+    StockId         INTEGER PRIMARY KEY AUTOINCREMENT,
+    Symbol          TEXT NOT NULL UNIQUE,
+    CompanyName     TEXT NOT NULL
 );
 
 CREATE TABLE StockPrices (
-    PriceId INTEGER PRIMARY KEY AUTOINCREMENT,
-    StockId INTEGER NOT NULL,
-    Price REAL NOT NULL,
-    Currency TEXT NOT NULL,
-    Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PriceId         INTEGER PRIMARY KEY AUTOINCREMENT,
+    StockId         INTEGER NOT NULL,
+    Price           REAL NOT NULL,
+    Currency        TEXT NOT NULL,
+    Timestamp       DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (StockId) REFERENCES Stocks(StockId)
 );
 
 CREATE TABLE Orders (
-    OrderId INTEGER PRIMARY KEY AUTOINCREMENT,
-    UserId INTEGER NOT NULL,
-    StockId INTEGER NOT NULL,
-    OrderType TEXT CHECK(OrderType IN ('MarketBuy', 'MarketSell', 'LimitBuy', 'LimitSell')) NOT NULL,
-    Quantity INTEGER NOT NULL,
-    AmountFilled INTEGER NOT NULL DEFAULT 0,
-    Price REAL NOT NULL,
-    Currency TEXT NOT NULL,
-    Status TEXT CHECK(Status IN ('Open','Filled','Cancelled')) DEFAULT 'Open',
-    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    OrderId         INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserId          INTEGER NOT NULL,
+    StockId         INTEGER NOT NULL,
+    OrderType       TEXT NOT NULL,
+    Quantity        INTEGER NOT NULL,
+    AmountFilled    INTEGER NOT NULL DEFAULT 0,
+    Price           REAL NOT NULL,
+    Currency        TEXT NOT NULL DEFAULT 'USD',
+    Status          TEXT DEFAULT 'Open',
+    CreatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (UserId)  REFERENCES Users(UserId),
-    FOREIGN KEY (StockId) REFERENCES Stocks(StockId)
+    FOREIGN KEY (StockId) REFERENCES Stocks(StockId),
+    CHECK(OrderType IN ('MarketBuy', 'MarketSell', 'LimitBuy', 'LimitSell')),
+    CHECK(Status IN ('Open','Filled','Cancelled')) 
 );
 
 CREATE TABLE Transactions (
-    TransactionId INTEGER PRIMARY KEY AUTOINCREMENT,
-    StockId INTEGER NOT NULL,
-    BuyOrderId INTEGER NOT NULL,
-    SellOrderId INTEGER NOT NULL,
-    BuyerId INTEGER NOT NULL,
-    SellerId INTEGER NOT NULL,
-    Quantity INTEGER NOT NULL,
-    Price REAL NOT NULL,
-    Currency TEXT NOT NULL,
-    Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    TransactionId   INTEGER PRIMARY KEY AUTOINCREMENT,
+    StockId         INTEGER NOT NULL,
+    BuyOrderId      INTEGER NOT NULL,
+    SellOrderId     INTEGER NOT NULL,
+    BuyerId         INTEGER NOT NULL,
+    SellerId        INTEGER NOT NULL,
+    Quantity        INTEGER NOT NULL,
+    Price           REAL NOT NULL,
+    Currency        TEXT NOT NULL DEFAULT 'USD',
+    Timestamp       DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (BuyOrderId)  REFERENCES Orders(OrderId),
     FOREIGN KEY (SellOrderId) REFERENCES Orders(OrderId),
     FOREIGN KEY (BuyerId)     REFERENCES Users(UserId),
@@ -64,44 +66,56 @@ CREATE TABLE Transactions (
 );
 
 CREATE TABLE Positions (
-    PositionId INTEGER PRIMARY KEY AUTOINCREMENT,
-    UserId INTEGER NOT NULL,
-    StockId INTEGER NOT NULL,
-    Quantity INTEGER NOT NULL,
-    ReservedQuantity INTEGER NOT NULL DEFAULT 0,
-    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PositionId          INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserId              INTEGER NOT NULL,
+    StockId             INTEGER NOT NULL,
+    Quantity            INTEGER NOT NULL,
+    ReservedQuantity    INTEGER NOT NULL DEFAULT 0,
+    CreatedAt           DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt           DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (UserId)  REFERENCES Users(UserId),
     FOREIGN KEY (StockId) REFERENCES Stocks(StockId),
     UNIQUE(UserId, StockId)
 );
 
 CREATE TABLE Funds (
-    FundId INTEGER PRIMARY KEY AUTOINCREMENT,
-    UserId INTEGER NOT NULL,
-    Currency TEXT NOT NULL,
-    TotalBalance REAL NOT NULL DEFAULT 0.0,
-    ReservedBalance REAL NOT NULL DEFAULT 0.0,
-    CreatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UpdatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FundId              INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserId              INTEGER NOT NULL,
+    Currency            TEXT NOT NULL DEFAULT 'USD',
+    TotalBalance        REAL NOT NULL DEFAULT 0.0,
+    ReservedBalance     REAL NOT NULL DEFAULT 0.0,
+    CreatedAt           DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt           DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (UserId) REFERENCES Users(UserId),
     UNIQUE(UserId, Currency)
 );
 
 CREATE TABLE Candles (
-    CandleId INTEGER PRIMARY KEY AUTOINCREMENT,
-    StockId INTEGER NOT NULL,
-    Currency TEXT NOT NULL,
-    BucketSeconds INTEGER NOT NULL,
-    OpenTime DATETIME NOT NULL, 
-    Open  REAL NOT NULL,
-    High  REAL NOT NULL,
-    Low   REAL NOT NULL,
-    Close REAL NOT NULL,
-    Volume INTEGER NOT NULL DEFAULT 0,
-    TradeCount INTEGER NOT NULL DEFAULT 0,
-    MinTransactionId INTEGER NULL,
-    MaxTransactionId INTEGER NULL,
+    CandleId            INTEGER PRIMARY KEY AUTOINCREMENT,
+    StockId             INTEGER NOT NULL,
+    Currency            TEXT NOT NULL DEFAULT 'USD',
+    BucketSeconds       INTEGER NOT NULL DEFAULT 300,
+    OpenTime            DATETIME NOT NULL, 
+    Open                REAL NOT NULL,
+    High                REAL NOT NULL,
+    Low                 REAL NOT NULL,
+    Close               REAL NOT NULL,
+    Volume              INTEGER NOT NULL DEFAULT 0,
+    TradeCount          INTEGER NOT NULL DEFAULT 0,
+    MinTransactionId    INTEGER NULL,
+    MaxTransactionId    INTEGER NULL,
     UNIQUE(StockId, Currency, BucketSeconds, OpenTime),
     FOREIGN KEY (StockId) REFERENCES Stocks(StockId)
+);
+
+CREATE TABLE Messages (
+  MessageId     INTEGER PRIMARY KEY AUTOINCREMENT,
+  UserId        INTEGER NOT NULL,
+  Kind          TEXT DEFAULT 'Info',
+  Title         TEXT NOT NULL,
+  Content       TEXT NOT NULL,
+  CreatedAt     TEXT NOT NULL,
+  ReadAt        TEXT NULL,
+  FOREIGN KEY (UserId) REFERENCES Users(UserId)
+  CHECK(Kind IN ('Info','Warning','Error','Success','Fill','PasswordReset'))
 );
