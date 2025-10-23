@@ -1,16 +1,59 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="KieshStockExchange.Views.TradePageViews.OrderBookView">
-    <Grid WidthRequest="180" RowDefinitions="Auto,*,*" >
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
+             x:Class="KieshStockExchange.Views.TradePageViews.OrderBookView" >
+    <Grid WidthRequest="180" RowDefinitions="Auto,Auto,*,Auto,*" VerticalOptions="Fill">
         <!-- Title -->
-        <Label Text="Order Book" FontSize="Title" 
-               HorizontalOptions="Center"/>
-        
+        <Label Text="Order Book" Style="{StaticResource OrderBookBigLabel}" />
+
+        <!-- Header -->
+        <Grid Grid.Row="1" ColumnDefinitions="1.5*,*,*" Padding="4,2">
+            <Label Grid.Column="0" Text="{Binding PriceTitle}" 
+                   Style="{StaticResource OrderBookLabel}" HorizontalOptions="Start" />
+            <Label Grid.Column="1" Text="Qty" Style="{StaticResource OrderBookLabel}" />
+            <Label Grid.Column="2" Text="Cum" Style="{StaticResource OrderBookLabel}" />
+        </Grid>
+
         <!-- Sell Orders -->
+        <CollectionView Grid.Row="2" ItemsSource="{Binding VisibleSellLevels}"
+                        SelectionMode="None" ItemSizingStrategy="MeasureAllItems">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="vm:LevelRow">
+                    <Grid ColumnDefinitions="1.5*,*,*" Padding="4,2">
+                        <Label Grid.Column="0" Text="{Binding PriceDisplay}" TextColor="DarkRed"
+                               HorizontalOptions="Start" Style="{StaticResource OrderBookLabel}"/>
+                        <Label Grid.Column="1" Text="{Binding Quantity}" Style="{StaticResource OrderBookLabel}"/>
+                        <Label Grid.Column="2" Text="{Binding CumQuantity}" Style="{StaticResource OrderBookLabel}"/>
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
+        <!-- Current price-->
+        <Grid Grid.Row="3" ColumnDefinitions="Auto, * ">
+            <!-- Up/Down arrow -->
+            <Label Style="{StaticResource OrderBookBigLabel}" Text="{Binding PriceDirectionArrow}" 
+                   TextColor="{Binding PriceTextColour}" />
+            <!-- Current price-->
+            <Label Grid.Column="1" Style="{StaticResource OrderBookBigLabel}"
+                   Text="{Binding Selected.CurrentPriceDisplay}" TextColor="{Binding PriceTextColour}" />
+        </Grid>
         
         <!-- Buy Orders -->
-        
-        
+        <CollectionView Grid.Row="4" ItemsSource="{Binding VisibleBuyLevels}"
+                SelectionMode="None" ItemSizingStrategy="MeasureAllItems">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="vm:LevelRow">
+                    <Grid ColumnDefinitions="1.5*,*,*" Padding="4,2">
+                        <Label Grid.Column="0" Text="{Binding PriceDisplay}" TextColor="DarkGreen"
+                               HorizontalOptions="Start" Style="{StaticResource OrderBookLabel}"/>
+                        <Label Grid.Column="1" Text="{Binding Quantity}" Style="{StaticResource OrderBookLabel}"/>
+                        <Label Grid.Column="2" Text="{Binding CumQuantity}" Style="{StaticResource OrderBookLabel}"/>
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+
     </Grid>
 </ContentView>

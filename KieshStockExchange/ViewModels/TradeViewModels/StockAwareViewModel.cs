@@ -35,14 +35,13 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
     private void OnSelectedChanged(object? sender, PropertyChangedEventArgs e)
     {
         // Update streams if the stock or currency changed
-        if (e.PropertyName  is nameof(ISelectedStockService.StockId)
-                            or nameof(ISelectedStockService.SelectedStock)
+        if (e.PropertyName  is nameof(ISelectedStockService.HasSelectedStock)
                             or nameof(ISelectedStockService.Currency))
             FireStockChanged();
 
         // Notify about price changes
-        if (e.PropertyName  is nameof(ISelectedStockService.CurrentPrice)
-                            or nameof(ISelectedStockService.PriceUpdatedAt))
+        if (e.PropertyName  is nameof(ISelectedStockService.PriceUpdatedAt))
+                            //or nameof(ISelectedStockService.CurrentPrice))
             FirePriceChanged();
     }
 
@@ -67,7 +66,7 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
             var ct = Cts!.Token;
             var stockId = _selected.StockId; var currency = _selected.Currency;
             var price = _selected.CurrentPrice; var updatedAt = _selected.PriceUpdatedAt;
-            await OnPriceChangedAsync(stockId, currency, price, updatedAt, ct);
+            await OnPriceUpdatedsync(stockId, currency, price, updatedAt, ct);
         }
         catch (OperationCanceledException) { } // Ignored on cancellation
     }
@@ -85,7 +84,7 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
     protected abstract Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct);
 
     // Abstract handler for price changes
-    protected abstract Task OnPriceChangedAsync(int? stockId, CurrencyType currency, 
+    protected abstract Task OnPriceUpdatedsync(int? stockId, CurrencyType currency, 
         decimal price, DateTime? updatedAt, CancellationToken ct);
 
     protected virtual void Dispose(bool disposing)

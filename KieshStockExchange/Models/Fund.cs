@@ -1,5 +1,6 @@
 ﻿using SQLite;
 using KieshStockExchange.Helpers;
+using System.Diagnostics;
 
 namespace KieshStockExchange.Models;
 
@@ -7,7 +8,6 @@ namespace KieshStockExchange.Models;
 public class Fund : IValidatable
 {
     #region Properties
-
     private int _fundId = 0;
     [PrimaryKey, AutoIncrement]
     [Column("FundId")] public int FundId 
@@ -65,15 +65,16 @@ public class Fund : IValidatable
     #endregion
 
     #region IValidatable Implementation
-    public bool IsValid() => UserId > 0 && TotalBalance >= 0
-        && ReservedBalance >= 0 && AvailableBalance >= 0 && IsValidCurrency();
+    public bool IsValid() => UserId > 0 && IsValidBalances() && IsValidCurrency();
 
     public bool IsInvalid => !IsValid();
 
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
     private bool IsValidBalances() =>
-        TotalBalance >= 0 && ReservedBalance >= 0 && AvailableBalance >= 0;
+           (TotalBalance >= 0 || CurrencyHelper.IsEffectivelyZero(TotalBalance, CurrencyType)) 
+        && (ReservedBalance >= 0 || CurrencyHelper.IsEffectivelyZero(ReservedBalance, CurrencyType))
+        && (AvailableBalance >= 0 || CurrencyHelper.IsEffectivelyZero(AvailableBalance, CurrencyType));
 
     private bool IsValidTimestamps() => CreatedAt > DateTime.MinValue &&
         CreatedAt <= TimeHelper.NowUtc() && UpdatedAt >= CreatedAt;
@@ -90,50 +91,67 @@ public class Fund : IValidatable
 
     [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
     [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss");
-
     #endregion
 
     #region Helper Methods
     public void AddFunds(decimal amount)
     {
         if (amount <= 0)
-            throw new ArgumentException("Amount must be positive.");
+            throw new ArgumentException($"{ToString()} - Amount must be positive.");
         TotalBalance += amount;
         UpdatedAt = TimeHelper.NowUtc();
     }
     
     public void WithdrawFunds(decimal amount)
     {
-        if (amount <= 0 || amount > AvailableBalance)
-            throw new ArgumentException("Invalid amount to remove.");
+        if (amount <= 0) 
+            throw new ArgumentException($"{ToString()} - Amount must be positive.");
+        if (!CurrencyHelper.GreaterOrEqual(AvailableBalance, amount, CurrencyType))
+            throw new ArgumentException($"{ToString()} - Insufficient available balance. " +
+                $"Available={AvailableBalanceDisplay}. Amount={CurrencyHelper.Format(amount, CurrencyType)}.");
         TotalBalance -= amount;
+        if (CurrencyHelper.IsEffectivelyZero(TotalBalance, CurrencyType))
+            TotalBalance = 0m; // Avoid negative zero
         UpdatedAt = TimeHelper.NowUtc();
     }
-    
+
     public void ConsumeReservedFunds(decimal amount)
     {
-        if (amount < 0) 
-            throw new ArgumentException("Amount must be positive.");
-        if (amount > ReservedBalance)
-            throw new ArgumentException("Invalid reserved amount");
+        if (amount <= 0) 
+            throw new ArgumentException($"{ToString()} - Amount must be positive.");
+        if (!CurrencyHelper.GreaterOrEqual(ReservedBalance, amount, CurrencyType))
+            throw new ArgumentException($"{ToString()} - Insufficient reserved balance. " +
+                $"Reserved={ReservedBalanceDisplay}. Amount={CurrencyHelper.Format(amount, CurrencyType)}.");
         ReservedBalance -= amount;
         TotalBalance -= amount;
+        if (CurrencyHelper.IsEffectivelyZero(TotalBalance, CurrencyType))
+            TotalBalance = 0m; // Avoid negative zero
+        if (CurrencyHelper.IsEffectivelyZero(ReservedBalance, CurrencyType))
+            ReservedBalance = 0m; // Avoid negative zero
         UpdatedAt = TimeHelper.NowUtc();
     }
-    
+
     public void ReserveFunds(decimal amount)
     {
-        if (amount <= 0 || amount > AvailableBalance)
-            throw new ArgumentException("Invalid amount to reserve.");
+        if (amount <= 0) 
+            throw new ArgumentException($"{ToString()} - Amount must be positive.");
+        if (!CurrencyHelper.GreaterOrEqual(AvailableBalance, amount, CurrencyType))
+            throw new ArgumentException($"{ToString()} - Insufficient available balance. " +
+                $"Available={AvailableBalanceDisplay}. Amount={CurrencyHelper.Format(amount, CurrencyType)}.");
         ReservedBalance += amount;
         UpdatedAt = TimeHelper.NowUtc();
     }
     
     public void UnreserveFunds(decimal amount)
     {
-        if (amount <= 0 || amount > ReservedBalance)
-            throw new ArgumentException("Invalid amount to release.");
+        if (amount <= 0) 
+            throw new ArgumentException($"{ToString()} - Amount must be positive.");
+        if (!CurrencyHelper.GreaterOrEqual(ReservedBalance, amount, CurrencyType))
+            throw new ArgumentException($"{ToString()} - Insufficient reserved balance. " +
+                $"Reserved={ReservedBalanceDisplay}. Amount={CurrencyHelper.Format(amount, CurrencyType)}.");
         ReservedBalance -= amount;
+        if (CurrencyHelper.IsEffectivelyZero(ReservedBalance, CurrencyType))
+            ReservedBalance = 0m; // Avoid negative zero
         UpdatedAt = TimeHelper.NowUtc();
     }
     #endregion

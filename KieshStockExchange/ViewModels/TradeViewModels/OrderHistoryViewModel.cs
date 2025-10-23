@@ -22,7 +22,7 @@ public class OrderHistoryViewModel : StockAwareViewModel
         return Task.CompletedTask;
     }
 
-    protected override Task OnPriceChangedAsync(int? stockId, CurrencyType currency,
+    protected override Task OnPriceUpdatedsync(int? stockId, CurrencyType currency,
         decimal price, DateTime? updatedAt, CancellationToken ct)
     {
         return Task.CompletedTask;

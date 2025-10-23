@@ -53,8 +53,8 @@
                ColumnDefinitions="Auto,*" Margin="0,8,0,0">
             <!-- Limit Price entry -->
             <Label Grid.Column="0" Text="Limit price" Style="{StaticResource StockPlacerLabel}" />
-            <Entry  Grid.Column="1" Keyboard="Numeric" Style="{StaticResource StockPlacerEntry}"
-                   Text="{Binding LimitPrice, Mode=TwoWay}" Placeholder="{Binding Selected.PriceDisplay}" />
+            <Entry Grid.Column="1" Style="{StaticResource StockPlacerEntry}"
+                   Text="{Binding LimitPriceString, Mode=TwoWay}" Placeholder="{Binding Selected.CurrentPriceDisplay}" />
         </Grid>
 
         <!-- Quantity, TotalValue and Submit -->

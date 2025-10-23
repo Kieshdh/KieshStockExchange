@@ -22,10 +22,9 @@ public class AuthService : IAuthService
         _logger = logger;
     }
 
-    public async Task<bool> RegisterAsync(
-        string username, string fullname,
-        string email, string password, DateTime birthdate
-    ) {
+    public async Task<bool> RegisterAsync(string username, string fullname,
+        string email, string password, DateTime birthdate) 
+    {
         // Check for existing user
         if (await _db.GetUserByUsername(username) != null)
             return false;
@@ -76,6 +75,8 @@ public class AuthService : IAuthService
             return;
         // Set current user
         CurrentUser = user;
+
+        _logger.LogInformation("User logged in: #{UserId} {Username}", user.UserId, user.Username);
     }
 
     public async Task LogoutAsync()

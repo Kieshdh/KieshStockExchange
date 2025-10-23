@@ -224,5 +224,23 @@
         <Setter Property="FontAttributes" Value="Bold"/>
         <Setter Property="HorizontalTextAlignment" Value="Center"/>
     </Style>
+    <Style x:Key="OrderBookBigLabel" TargetType="Label" >
+        <Setter Property="HorizontalOptions" Value="Start" />
+        <Setter Property="FontSize" Value="17" />
+        <Setter Property="HorizontalTextAlignment" Value="Start" />
+    </Style>
+    <Style x:Key="OrderBookLabel" TargetType="Label" >
+        <Setter Property="HorizontalTextAlignment" Value="End" />
+        <Setter Property="HorizontalOptions" Value="End" />
+        <Setter Property="Margin" Value="0,0,0,0" />
+    </Style>
+    <Style x:Key="OrderBookPriceBuy" BasedOn="{StaticResource OrderBookLabel}" TargetType="Label">
+        <Setter Property="TextColor" Value="{StaticResource BuyPriceBrush}"/>
+        <Setter Property="FontAttributes" Value="Bold"/>
+        <Setter Property="HorizontalOptions" Value="Start" />
+    </Style>
+    <Style x:Key="OrderBookPriceSell" BasedOn="{StaticResource OrderBookPriceBuy}" TargetType="Label">
+        <Setter Property="TextColor" Value="{StaticResource SellPriceBrush}"/>
+    </Style>
 
 </ResourceDictionary>

@@ -17,9 +17,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     [ObservableProperty] private int _selectedSideIndex = 0; // 0 = Buy, 1 = Sell
     [ObservableProperty] private int _selectedTypeIndex = 0; // 0 = Market, 1 = Limit
 
-    //[ObservableProperty]
     [ObservableProperty] private int _quantity = 0;
-    [ObservableProperty] private decimal _limitPrice = 0m;
+    [ObservableProperty] private string _limitPriceString = String.Empty;
     [ObservableProperty] private decimal _slippagePrc = 0.005m; // 0.5% default
     [ObservableProperty] private string _assetText = "Available Funds"; // Buy="Available Funds", Sell="Available Shares"
     [ObservableProperty] private string _availableAssetsText = "-"; // Based on side and portfolio
@@ -27,6 +26,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
 
     [ObservableProperty] private string _submitButtonText = "Buy"; // Buy="Buy {Symbol}", Sell="Sell {Symbol}"
     [ObservableProperty] private Color _submitButtonColor = Colors.ForestGreen; // Buy=ForestGreen, Sell=OrangeRed
+
+    private decimal LimitPrice => ParsingHelper.TryToDecimal(_limitPriceString, out var val) ? val : 0m;
     #endregion
 
     #region PropertyChanged events
@@ -43,7 +44,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         OnPropertyChanged(nameof(IsLimitSelected));
     }
     partial void OnQuantityChanged(int value) { RecomputeUi(); }
-    partial void OnLimitPriceChanged(decimal value) { RecomputeUi(); }
+    partial void OnLimitPriceStringChanged(string value) { RecomputeUi(); }
     partial void OnSlippagePrcChanged(decimal value) { RecomputeUi(); }
     #endregion
 
@@ -90,13 +91,13 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         // Method called when selected stock changes
         // For limit orders, set limit price to current price
         if (IsLimitSelected)
-            LimitPrice = Selected.CurrentPrice > 0 ? Selected.CurrentPrice : 0m;
+            LimitPriceString = Selected.CurrentPriceDisplay;
 
         RecomputeUi();
         return Task.CompletedTask;
     }
 
-    protected override Task OnPriceChangedAsync(int? stockId, CurrencyType currency, 
+    protected override Task OnPriceUpdatedsync(int? stockId, CurrencyType currency, 
         decimal price, DateTime? updatedAt, CancellationToken ct)
     {
         // Price moved -> update order value preview
@@ -190,8 +191,9 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             }
 
             // Show result
-            await _notification.NotifyOrderResultAsync(result);
+            await _notification.NotifyOrderResultAsync(result, ct);
 
+            // Log result
             if (result.PlacedSuccessfully)
                 _logger.LogInformation("Order placed. Id={Id}, Remaining={Rem}, Fills={Fills}, AvgPrice={Avg}",
                 result.NewOrderId, result.RemainingQuantity, result.TotalFilledQuantity, result.AverageFillPrice);

@@ -65,7 +65,7 @@ public partial class ChartViewModel : StockAwareViewModel
         finally { IsBusy = false; }
     }
 
-    protected override Task OnPriceChangedAsync(int? stockId, CurrencyType currency, 
+    protected override Task OnPriceUpdatedsync(int? stockId, CurrencyType currency, 
         decimal price, DateTime? updatedAt, CancellationToken ct)
     {
         // If the live candle exists in ICandleService, copy it into Series (replace or append).

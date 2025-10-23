@@ -28,14 +28,14 @@ public partial class LoginViewModel : BaseViewModel
 
     public async Task AutoLogin() 
     {
-        Username = "kevin47"; // kevin47 kiesh
+        // Login with a random user each time
+        Username = GetRandomUser();
         Password = "hallo123";
 
         await LoadDataFromExcel();
 
         // Add default admin user if not exists
-        await _authService.RegisterAsync("kiesh", "Kishan den Hartog",
-            "kjdenhartog@outlook.com", "hallo123", DateTime.Parse("17-1-1997"));
+        await AddAdminUser();
         // Perform login
         await ExecuteLogin();
     }
@@ -58,5 +58,23 @@ public partial class LoginViewModel : BaseViewModel
         await _excel.AddStocksFromExcelAsync(checkDataLoaded);
         await _excel.AddHoldingsFromExcelAsync(checkDataLoaded);
         await _excel.AddAIUserBehaviourDataFromExcelAsync(checkDataLoaded);
+    }
+
+    private async Task AddAdminUser()
+    {
+        await _authService.RegisterAsync("admin", "Admin User",
+            "admin@gmail.com", "hallo123", DateTime.Parse("17-1-2000"));
+    }
+
+    private string GetRandomUser()
+    {
+        string[] users = { "kevinsparks", "zachary83", "jamesreese", "dbrown", "ujohnson", "vware",
+            "markhall", "bushjack", "tguerra", "deanhector", "shirley13", "timothywolf", "laurie83", 
+            "wilsondennis", "oliverrichard", "amanda12", "joannaboyd", "johnsonnicholas",
+            "millerangela", "vharris", "emcdonald", "jameswood", "lfranco", "guycochran",
+            "ricestephanie", "kevinreyes",  "martinthompson", "nparsons", "dawndeleon", "frobinson",};
+
+        int index = Random.Shared.Next(0, users.Length);
+        return users[index];
     }
 }

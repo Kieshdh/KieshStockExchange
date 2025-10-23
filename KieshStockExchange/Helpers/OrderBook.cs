@@ -6,10 +6,7 @@ namespace KieshStockExchange.Helpers;
 
 public sealed class OrderBook
 {
-    #region Properties and Constructor
-    public readonly int StockId;
-    public readonly CurrencyType Currency;
-
+    #region Private Fields
     // Lock to prevent multiple users from unsynchronized decisions
     private readonly object _gate = new();
 
@@ -27,7 +24,14 @@ public sealed class OrderBook
         public decimal Price;
         public LinkedListNode<Order> Node = null!;
     }
+
     private readonly Dictionary<int, IndexEntry> _index = new();
+    #endregion
+
+    #region Public properties and Constructor
+    public readonly int StockId;
+    public readonly CurrencyType Currency;
+    public event EventHandler<BookSnapshot>? Changed;
 
     public OrderBook(int stockId, CurrencyType currency)
     {
@@ -49,7 +53,7 @@ public sealed class OrderBook
         lock (_gate)
         {
             var book = incoming.IsBuyOrder ? _buyBook : _sellBook;
-         
+
             // If this OrderId already lives in the book, we have an entry to update or remove.
             if (_index.TryGetValue(incoming.OrderId, out var idx))
             {
@@ -58,42 +62,51 @@ public sealed class OrderBook
                 {
                     RemoveIndexEntry(idx);
                     _index.Remove(incoming.OrderId);
-                    return;
                 }
-
-                // Update the existing order in place, moving it if needed.
-                ReinsertOrder(idx, incoming);
-
-                return;
+                else
+                {
+                    // Update the existing order in place, moving it if needed.
+                    ReinsertOrder(idx, incoming);
+                }
             }
-
-            // If it gets here the order in not in the book.
-            // But only add Open Limit orders to the book.
-            if (!incoming.IsOpen || !incoming.IsLimitOrder)
-                return;
-
-            // New order: add to the tail of its (side, price) level
-            var newNode = new LinkedListNode<Order>(incoming);
-            GetOrCreateLevel(book, incoming.Price).AddLast(newNode);
-
-            _index[incoming.OrderId] = new IndexEntry
+            else
             {
-                IsBuy = incoming.IsBuyOrder,
-                Price = incoming.Price,
-                Node = newNode
-            };
+
+                // If it gets here the order in not in the book.
+                // But only add Open Limit orders to the book.
+                if (!incoming.IsOpen || !incoming.IsLimitOrder)
+                    return;
+
+                // New order: add to the tail of its (side, price) level
+                var newNode = new LinkedListNode<Order>(incoming);
+                GetOrCreateLevel(book, incoming.Price).AddLast(newNode);
+
+                _index[incoming.OrderId] = new IndexEntry
+                {
+                    IsBuy = incoming.IsBuyOrder,
+                    Price = incoming.Price,
+                    Node = newNode
+                };
+            }
         }
+        NotifyChanged();
     }
 
     public bool RemoveById(int orderId)
     {
+        var removed = false;
         lock (_gate)
         {
-            if (!_index.TryGetValue(orderId, out var idx)) return false;
-            RemoveIndexEntry(idx);
-            _index.Remove(orderId);
-            return true;
+            if (_index.TryGetValue(orderId, out var idx))
+            {
+                RemoveIndexEntry(idx);
+                _index.Remove(orderId);
+                removed = true;
+            }
         }
+        if (removed)
+            NotifyChanged();
+        return removed;
     }
     #endregion
 
@@ -134,12 +147,13 @@ public sealed class OrderBook
     /// </summary>
     public BookFixReport FixAll()
     {
+        BookFixReport report;
         lock (_gate)
         {
             var buys = FixSide(_buyBook, isBuySide: true);
             var sells = FixSide(_sellBook, isBuySide: false);
 
-            return new BookFixReport(
+            report = new BookFixReport(
                 RemovedEmptyPriceLevelsBuys: buys.removedEmptyLevels,
                 RemovedEmptyPriceLevelsSells: sells.removedEmptyLevels,
                 RemovedOrphanedOrdersBuys: buys.removedOrphans,
@@ -152,6 +166,8 @@ public sealed class OrderBook
                 FixedIndexMismatchesSells: sells.fixedIndexMismatches
             );
         }
+        NotifyChanged();
+        return report;
     }
 
     /// <summary> Lightweight consistency checker that does not modify anything. </summary>
@@ -237,6 +253,7 @@ public sealed class OrderBook
                 }
             }
         }
+        NotifyChanged();
     }
     #endregion
 
@@ -347,13 +364,14 @@ public sealed class OrderBook
     #region Helpers
     private Order? RemoveBest(SortedDictionary<decimal, LinkedList<Order>> side)
     {
+        Order? order;
         lock (_gate)
         {
             if (side.Count == 0) 
                 return null;
             var kv = side.First();
             var node = kv.Value.First;
-            var order = node!.Value;
+            order = node!.Value;
 
             kv.Value.RemoveFirst();
 
@@ -361,8 +379,10 @@ public sealed class OrderBook
                 side.Remove(kv.Key);
 
             _index.Remove(order.OrderId);
-            return order;
         }
+        if (order != null)
+            NotifyChanged();
+        return order;
     }
 
     private Order? PeekBest(SortedDictionary<decimal, LinkedList<Order>> side)
@@ -436,6 +456,11 @@ public sealed class OrderBook
             idx.IsBuy = order.IsBuyOrder;
             idx.Price = order.Price;
         }
+    }
+
+    private void NotifyChanged()
+    {
+        Changed?.Invoke(this, Snapshot());
     }
     #endregion
 }

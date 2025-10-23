@@ -53,6 +53,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IStockService, StockService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         //builder.Services.AddSingleton(_ => Application.Current!.Dispatcher);
+        builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
         // Viewmodels
         // - User
         builder.Services.AddTransient<RegisterViewModel>();

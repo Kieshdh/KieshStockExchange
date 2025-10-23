@@ -25,6 +25,7 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
             var price = await _market.GetLastPriceAsync(stock.StockId, CurrencyType.USD);
             rows.Add(new StockTableObject(stock, CurrencyType.USD, price));
         }
+        rows.Sort((a, b) => a.Stock.StockId.CompareTo(b.Stock.StockId));
         return rows;
     }
 }

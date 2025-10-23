@@ -163,7 +163,17 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
 
         // Fallback to latest StockPrice from DB
         var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
-        return sp?.Price ?? 0m;
+        if (sp is not null && sp.Price > 0m)
+            return sp.Price;
+
+        // Fallback to USD latest price converted
+        if (currency != CurrencyType.USD)
+        {
+            var usdPrice = await GetLastPriceAsync(stockId, CurrencyType.USD, ct);
+            if (usdPrice > 0m)
+                return CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency);
+        }
+        return 0m; // No price found
     }
 
     public async Task<decimal> GetDateTimePriceAsync(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default)
@@ -342,7 +352,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     #endregion
 
     #region Random Display Ticker (for testing/demo)
-    private const decimal Percentage = 0.01m;
+    private const decimal Percentage = 0.002m;
 
     public void StartRandomDisplayTicker(int stockId, CurrencyType currency) =>
         _simTimers.GetOrAdd((stockId, currency), _ =>

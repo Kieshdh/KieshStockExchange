@@ -16,12 +16,11 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     // UI-bound state
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSelectedStock))] 
-    private Stock? _selectedStock = null;
-
-    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasSelectedStock))] 
     private int? _stockId = null;
+    [ObservableProperty] private Stock? _selectedStock = null;
     [ObservableProperty] private string _symbol = string.Empty;
     [ObservableProperty] private string _companyName = string.Empty;
+    [ObservableProperty] private OrderBook? _currentOrderBook = null;
 
     // Convenience property for UI
     public bool HasSelectedStock => SelectedStock is not null && StockId.HasValue && SelectedStock.StockId == StockId;
@@ -46,12 +45,14 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     #region Fields & Constructor
     private readonly IMarketDataService _market;
+    private readonly IMarketOrderService _order;
     private readonly ILogger<SelectedStockService> _logger;
 
-    public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger)
+    public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger, IMarketOrderService order)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _order = order ?? throw new ArgumentException(nameof(order));
 
         // React to live quote pushes from the single source of truth
         _market.QuoteUpdated += OnQuoteUpdated;
@@ -66,7 +67,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         await Set(stk, ct);
     }
 
-    // Set by Stock (parent already has the entity)
+    // Set by Stock object
     public async Task Set(Stock stock, CancellationToken ct = default)
     {
         // Validation
@@ -75,20 +76,26 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
         // Set new state
         await UnsubscribeAsync(); // Stop previous tracking
-        SelectedStock = stock;
-        StockId = stock.StockId;
-        Symbol = stock.Symbol;
-        CompanyName = stock.CompanyName;
+
+        // Get the current order book
+        CurrentOrderBook = await _order.GetOrderBookByStockAsync(stock.StockId, Currency, ct);
 
         // Prime quote from history and start streaming ticks for (stock, currency)
         await _market.SubscribeAsync(stock.StockId, Currency, ct);
         await _market.BuildFromHistoryAsync(stock.StockId, Currency, ct);
-        _market.StartRandomDisplayTicker(stock.StockId, Currency);
+        //_market.StartRandomDisplayTicker(stock.StockId, Currency);
+
+        // Set Stock variables
+        Symbol = stock.Symbol;
+        CompanyName = stock.CompanyName;
+        SelectedStock = stock;
+        StockId = stock.StockId;
 
         // Grab the current LiveQuote snapshot so UI has immediate data
         Quote = TryGetQuote();
         await UpdateFromLiveAsync(Quote);
 
+        // Complete first-selection awaiter if needed
         if (!_firstSelectionTcs.Task.IsCompleted)
             _firstSelectionTcs.SetResult(stock);
 
@@ -101,16 +108,20 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         if (StockId is null || currency == Currency) return;
 
         var stockId = StockId.Value;
-        var prevCurrency = Currency;
-        await UnsubscribeAsync();
+        var prevCurrency = Currency; // For logging
+        await UnsubscribeAsync(); // Stop previous tracking
 
-        Currency = currency;
         await _market.SubscribeAsync(stockId, currency, ct);
         await _market.BuildFromHistoryAsync(stockId, currency, ct);
-        _market.StartRandomDisplayTicker(stockId, currency);
+        //_market.StartRandomDisplayTicker(stockId, currency);
 
         Quote = TryGetQuote();
         await UpdateFromLiveAsync(Quote);
+
+        // Get the current order book
+        CurrentOrderBook = await _order.GetOrderBookByStockAsync(stockId, currency, ct);
+
+        Currency = currency;
 
         _logger.LogInformation("SelectedStockService changed currency for {Symbol} #{StockId} from {PrevCurrency} to {NewCurrency}.",
             Symbol, stockId, prevCurrency, currency);
@@ -129,6 +140,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         CurrentPrice = 0m;
         Quote = null;
         PriceUpdatedAt = null;
+        CurrentOrderBook = null;
         _firstSelectionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 

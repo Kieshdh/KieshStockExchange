@@ -35,7 +35,7 @@
                         <!-- Content -->
                         <Label Text="{Binding Transaction.TransactionId}" Grid.Column="0" 
                                Style="{StaticResource TableRowLabel}"/>
-                        <Label Text="{Binding Transaction.CreatedAtDisplay}" Grid.Column="1" 
+                        <Label Text="{Binding Transaction.TimestampDisplay}" Grid.Column="1" 
                                Style="{StaticResource TableRowLabel}" />
                         <Label Text="{Binding Stock.Symbol}" Grid.Column="2" 
                                Style="{StaticResource TableRowLabel}" />

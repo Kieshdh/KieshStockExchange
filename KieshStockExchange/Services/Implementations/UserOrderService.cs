@@ -230,7 +230,7 @@ public class UserOrderService : IUserOrderService
             UserId = userId,
             StockId = stockId,
             Quantity = quantity,
-            Price = price,
+            Price = CurrencyHelper.RoundMoney(price, currency),
             CurrencyType = currency,
             OrderType = buyOrder ?
                 (limitOrder ? Order.Types.LimitBuy : Order.Types.MarketBuy)

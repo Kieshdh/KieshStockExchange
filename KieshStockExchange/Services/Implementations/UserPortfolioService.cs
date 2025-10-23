@@ -215,7 +215,7 @@ public class UserPortfolioService : IUserPortfolioService
                 break;
 
             case FundMutation.Withdraw:
-                if (fund.AvailableBalance < amount)
+                if (!CurrencyHelper.GreaterOrEqual(fund.AvailableBalance, amount, currency))
                 {
                     _logger.LogWarning("Insufficient funds to withdraw {Amount} for user {UserId}. Available={Avail}",
                         amount, targetUserId, fund.AvailableBalance);
@@ -225,7 +225,7 @@ public class UserPortfolioService : IUserPortfolioService
                 break;
 
             case FundMutation.Reserve:
-                if (fund.AvailableBalance < amount)
+                if (!CurrencyHelper.GreaterOrEqual(fund.AvailableBalance, amount, currency))
                 {
                     _logger.LogWarning("Insufficient funds to reserve {Amount} for user {UserId}. Available={Avail}",
                         amount, targetUserId, fund.AvailableBalance);
@@ -235,7 +235,7 @@ public class UserPortfolioService : IUserPortfolioService
                 break;
 
             case FundMutation.Unreserve:
-                if (fund.ReservedBalance < amount)
+                if (!CurrencyHelper.GreaterOrEqual(fund.ReservedBalance, amount, currency))
                 {
                     _logger.LogWarning("Insufficient reserved to unreserve {Amount} for user {UserId}. Reserved={Res}",
                         amount, targetUserId, fund.ReservedBalance);
@@ -245,7 +245,7 @@ public class UserPortfolioService : IUserPortfolioService
                 break;
 
             case FundMutation.SpendReserved:
-                if (fund.ReservedBalance < amount)
+                if (!CurrencyHelper.GreaterOrEqual(fund.ReservedBalance, amount, currency))
                 {
                     _logger.LogWarning("Insufficient reserved to spend {Amount} for user {UserId}. Reserved={Res}",
                         amount, targetUserId, fund.ReservedBalance);

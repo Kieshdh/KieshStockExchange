@@ -316,15 +316,16 @@ public class MarketOrderService : IMarketOrderService
         var currency = trade.CurrencyType;
         var qty = trade.Quantity;
         var buyerUnit = taker.IsBuyOrder ? taker.Price : maker.Price;
-        var reserved = buyerUnit * qty;
-        var spend = maker.Price * qty;
-        var toRelease = reserved - spend;
+
+        var reserved = CurrencyHelper.RoundMoney(buyerUnit * qty, currency);
+        var spend = CurrencyHelper.RoundMoney(maker.Price * qty, currency);
+        var toRelease = CurrencyHelper.RoundMoney(reserved - spend, currency);
 
         using (_portfolio.BeginSystemScope())
         {
             // If the buyer had a different price than the spend amount,
             // then the difference needs to be returned. 
-            if (toRelease > 0)
+            if (!CurrencyHelper.IsEffectivelyZero(toRelease, currency) && toRelease > 0)
             {
                 var okRelease = await _portfolio.ReleaseReservedFundsAsync(toRelease, currency, trade.BuyerId, ct);
                 if (!okRelease) throw new InvalidOperationException("Buyer release of over-reserved funds failed");

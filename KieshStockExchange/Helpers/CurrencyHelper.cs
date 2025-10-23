@@ -101,9 +101,7 @@ public static class CurrencyHelper
     }
 
     public static CurrencyType FromIsoCodeOrDefault(string? isoCode, CurrencyType fallback = CurrencyType.USD)
-    {
-        return TryFromIsoCode(isoCode, out var c) ? c : fallback;
-    }
+        => TryFromIsoCode(isoCode, out var c) ? c : fallback;
 
     public static bool IsSupported(string? isoCode) => TryFromIsoCode(isoCode, out _);
 
@@ -149,5 +147,30 @@ public static class CurrencyHelper
             return result;
         return null;
     }
+    #endregion
+
+    #region Rounding Helpers
+    /// <summary> Returns the amount of decimal places for the specified currency.  </summary>
+    public static int DecimalPlaces(CurrencyType c) => c == CurrencyType.JPY ? 0 : 2;
+
+    /// <summary> Rounds a monetary amount according to the currency's decimal places. </summary>
+    public static decimal RoundMoney(decimal amount, CurrencyType currency,
+        MidpointRounding mode = MidpointRounding.AwayFromZero)
+        => Math.Round(amount, DecimalPlaces(currency), mode);
+
+    /// <summary>
+    /// Rounding epsilon for comparisons. JPY has no decimals, so use 0.5; others use 0.005.
+    /// </summary>
+    public static decimal Epsilon(CurrencyType c) => c == CurrencyType.JPY ? 0.5m : 0.005m;
+
+    /// <summary> Compares two decimal values for "almost equality" within the currency's epsilon. </summary>
+    /// <param name="a">The greater decimal. </param>
+    /// <param name="b">The lesser decimal. </param>
+    public static bool GreaterOrEqual(decimal a, decimal b, CurrencyType currency)
+        => a >= b || Math.Abs(a - b) < Epsilon(currency);
+
+    /// <summary> Checks if a decimal value is effectively zero within the currency's epsilon. </summary>
+    public static bool IsEffectivelyZero(decimal a, CurrencyType currency)
+        => Math.Abs(a) < Epsilon(currency);
     #endregion
 }
