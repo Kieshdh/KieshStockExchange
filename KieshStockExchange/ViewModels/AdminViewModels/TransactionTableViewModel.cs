@@ -23,9 +23,9 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         try
         {
             // Fetch all data
-            var transactions = await _dbService.GetTransactionsAsync();
-            var users = await _dbService.GetUsersAsync();
-            var stocks = await _dbService.GetStocksAsync();
+            var transactions = await _db.GetTransactionsAsync();
+            var users = await _db.GetUsersAsync();
+            var stocks = await _db.GetStocksAsync();
 
             // Create fast lookup structures in memory.
             var usersById = users.ToDictionary(u => u.UserId);

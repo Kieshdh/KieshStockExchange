@@ -19,12 +19,9 @@ public class HistoryViewModel : BaseViewModel
         ILogger<HistoryViewModel> logger, ISelectedStockService stockService)
     {
         Title = "Order History";
-        _marketService = marketService ?? throw new ArgumentNullException(
-            nameof(marketService), "Market service cannot be null.");
-        _logger = logger ?? throw new ArgumentNullException(
-            nameof(logger), "Logger cannot be null.");
-        _stockService = stockService ?? throw new ArgumentNullException(
-            nameof(stockService), "Stock service cannot be null.");
+        _marketService = marketService ?? throw new ArgumentNullException(nameof(marketService));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _stockService = stockService ?? throw new ArgumentNullException(nameof(stockService));
     }
 
     public async Task InitializeAsync()

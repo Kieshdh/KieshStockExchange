@@ -25,9 +25,9 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
             var rows = new List<OrderTableObject>();
 
             // Fetch all data
-            var users = await _dbService.GetUsersAsync();
-            var stocks = await _dbService.GetStocksAsync();
-            var orders = await _dbService.GetOrdersAsync();
+            var users = await _db.GetUsersAsync();
+            var stocks = await _db.GetStocksAsync();
+            var orders = await _db.GetOrdersAsync();
 
             // Create fast lookup structures in memory.
             var usersById = users.ToDictionary(u => u.UserId);

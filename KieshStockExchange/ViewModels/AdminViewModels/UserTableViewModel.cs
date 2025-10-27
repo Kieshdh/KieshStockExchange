@@ -1,10 +1,10 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services;
-using System.Windows.Input;
 using System.Diagnostics;
-using KieshStockExchange.Helpers;
+using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -23,11 +23,11 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
             var rows = new List<UserTableObject>();
 
             // Fetch all data
-            var users = await _dbService.GetUsersAsync();
+            var users = await _db.GetUsersAsync();
 
             // Convert to table objects
             foreach (var user in users)
-                rows.Add(new UserTableObject(_dbService, user));
+                rows.Add(new UserTableObject(_db, user));
 
             // Sort by most recent first
             rows = rows.OrderByDescending(r => r.User.CreatedAt).ToList();

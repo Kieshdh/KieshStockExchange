@@ -104,6 +104,13 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         RecomputeUi();
         return Task.CompletedTask;
     }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            StopAssetsAutoRefresh();
+        base.Dispose(disposing);
+    }
     #endregion
 
     #region RelayCommands
@@ -211,7 +218,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     }
     #endregion
 
-    #region Assets Auto-Refresh and disposal
+    #region Assets Auto-Refresh
     private async Task UpdateAssetsAsync()
     {
         // Refresh portfolio after order placement
@@ -268,13 +275,6 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             _assetsTimer.Stop();
         }
         finally { _assetsTimer = null; }
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-            StopAssetsAutoRefresh();
-        base.Dispose(disposing);
     }
     #endregion
 
