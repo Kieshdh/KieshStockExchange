@@ -147,9 +147,13 @@ public class Order : IValidatable
         $"Order #{OrderId} - {OrderType} - {Quantity} @ {PriceDisplay} - Status: {Status}";
     [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
     [Ignore] public string TotalAmountDisplay => CurrencyHelper.Format(TotalAmount, CurrencyType);
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
-    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss");
     [Ignore] public string AmountFilledDisplay => $"{AmountFilled}/{Quantity}";
+    [Ignore] public string SideDisplay => IsBuyOrder ? "BUY" : "SELL";
+    [Ignore] public string TypeDisplay => IsLimitOrder ? "LIMIT" : "MARKET";
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string CreatedDateShort => CreatedAt.ToString("dd-MM HH:mm");
+    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string UpdatedDateShort => UpdatedAt.ToString("dd-MM HH:mm");
     #endregion
 
     #region Helper Variables
