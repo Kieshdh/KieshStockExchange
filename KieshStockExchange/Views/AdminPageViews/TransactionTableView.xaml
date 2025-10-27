@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
              x:Class="KieshStockExchange.Views.AdminPageViews.TransactionTableView"  >
 
     <!-- Labels -->
@@ -28,10 +29,9 @@
         <!-- CollectionView for displaying Stock data -->
         <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1">
             <CollectionView.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="vm:TransactionTableObject">
                     <Grid ColumnDefinitions="50, 3*, 2*, *, *, 3*, 2*, 3*, 3" 
                           Style="{StaticResource TableRowGrid}">
-
                         <!-- Content -->
                         <Label Text="{Binding Transaction.TransactionId}" Grid.Column="0" 
                                Style="{StaticResource TableRowLabel}"/>
@@ -49,7 +49,6 @@
                                Style="{StaticResource TableRowLabel}" />
                         <Label Text="{Binding Transaction.TotalAmountDisplay}" Grid.Column="7" 
                            Style="{StaticResource TableRowLabel}" />
-
 
                         <!-- Vertical Lines -->
                         <BoxView Grid.Column="0" Style="{StaticResource TableVerticalSeparator}"/>

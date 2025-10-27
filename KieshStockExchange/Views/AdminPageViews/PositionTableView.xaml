@@ -2,18 +2,17 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.AdminPageViews.PositionTableView" 
-             x:Name="PositionTableRoot">
+             x:Name="PositionTableRoot" x:DataType="vm:PositionTableViewModel"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels">
     <Grid RowDefinitions="Auto,*,Auto">
 
         <!-- Labels -->
         <Grid ColumnDefinitions="60, 95, *, *, 2*, 2*, 2.5*, 60, 3" 
-              Style="{StaticResource TableHeaderGrid}" >
+              Style="{StaticResource TableHeaderGrid}" RowDefinitions="Auto,Auto" >
             <Label Text="UserId" Grid.Column="0" 
                    Style="{StaticResource TableHeaderLabel}"/>
-            <Picker ItemsSource="{Binding PickerStocks}" Grid.Column="1" 
-                    ItemDisplayBinding="{Binding Symbol}"
-                    SelectedItem="{Binding PickerSelection, Mode=TwoWay}" />
-                    <!-- Style="{StaticResource StockSelectorPicker}" -->
+            <Label Text="Stock" Grid.Column="1" 
+                   Style="{StaticResource TableHeaderLabel}"/>
             <Label Text="Quantity" Grid.Column="2" 
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Reserved" Grid.Column="3" 
@@ -26,6 +25,53 @@
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Edit" Grid.Column="7" 
                    Style="{StaticResource TableHeaderLabel}" />
+            
+            <!-- Filters and Sorting -->
+            <Entry Grid.Row="1" Grid.Column="0" Placeholder="Type ID…"
+                   Text="{Binding IdFilter, Mode=TwoWay}" Keyboard="Numeric"/>
+            <Picker ItemsSource="{Binding PickerStocks}" Grid.Column="1" 
+                    ItemDisplayBinding="{Binding Symbol}" Grid.Row="1"
+                    SelectedItem="{Binding PickerSelection, Mode=TwoWay}" />
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="2" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.Quantity}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.Quantity}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="3" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.Reserved}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.Reserved}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="4" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.Price}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.Price}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="5" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.StockValue}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.StockValue}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="6" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.TotalValue}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:PosSortColumn.TotalValue}" />
+            </HorizontalStackLayout>
         </Grid>
 
         <!-- CollectionView for displaying user data -->

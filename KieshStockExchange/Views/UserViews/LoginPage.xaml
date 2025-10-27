@@ -37,28 +37,28 @@
             <VerticalStackLayout Grid.Row="3"  MinimumWidthRequest="300"
                                  HorizontalOptions="CenterAndExpand" >
                 <!-- Username Entry -->
-                <Frame Style="{StaticResource LoginBaseFrame}" Margin="0,0,0,0" >
+                <Border Style="{StaticResource LoginBaseBorder}" Margin="0,0,0,0" >
                     <StackLayout Orientation="Horizontal">
-                        <Frame Style="{StaticResource LoginImageFrame}" >
+                        <Border Style="{StaticResource LoginImageBorder}" >
                             <Image Source="user_icon.png" 
-                                   Style="{StaticResource LoginFrameImage}"/>
-                        </Frame>
+                                   Style="{StaticResource LoginImage}"/>
+                        </Border>
                         <Entry Text="{Binding Username}" Placeholder="Username"
                                Style="{StaticResource LoginEntry}" />
                     </StackLayout>
-                </Frame>
+                </Border>
                 
                 <!-- Password Entry -->
-                <Frame Style="{StaticResource LoginBaseFrame}" Margin="0,15,0,0" >
+                <Border Style="{StaticResource LoginBaseBorder}" Margin="0,15,0,0" >
                     <StackLayout Orientation="Horizontal">
-                        <Frame Style="{StaticResource LoginImageFrame}"  >
+                        <Border Style="{StaticResource LoginImageBorder}"  >
                             <Image Source="password_icon.png" 
-                                   Style="{StaticResource LoginFrameImage}"/>
-                        </Frame>
+                                   Style="{StaticResource LoginImage}"/>
+                        </Border>
                         <Entry Text="{Binding Password}" Placeholder="Password" 
                                Style="{StaticResource LoginEntry}" IsPassword="True" />
                     </StackLayout>
-                </Frame>
+                </Border>
                 <!-- Remember me & Forgot Password -->
                 <StackLayout Orientation="Horizontal" Margin="0,0,0,0" Padding="0" Spacing="-10">
                     <CheckBox IsChecked="False" />

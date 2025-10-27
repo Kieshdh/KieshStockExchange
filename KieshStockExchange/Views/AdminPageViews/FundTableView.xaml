@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
              x:Class="KieshStockExchange.Views.AdminPageViews.FundTableView" 
-             x:Name="FundTableRoot">
-    <Grid RowDefinitions="Auto,* ,Auto">
+             x:Name="FundTableRoot" x:DataType="vm:FundTableViewModel">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
 
         <!-- Labels -->
         <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" 
@@ -24,39 +25,109 @@
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="AUD" Grid.Column="7"
                    Style="{StaticResource TableHeaderLabel}" /> 
-            <Label Text="TotalBalance (USD)" Grid.Column="8" 
+            <Label Text="TotalBalance" Grid.Column="8" 
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Edit" Grid.Column="9" 
                    Style="{StaticResource TableHeaderLabel}" />
         </Grid>
 
+        <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" Grid.Row="1"
+              Style="{StaticResource TableHeaderGrid}" x:DataType="vm:FundTableViewModel">
+            <Entry Grid.Column="0" Text="{Binding IdFilter, Mode=TwoWay}" 
+                   Keyboard="Numeric" Placeholder="Type ID…" />
+            <HorizontalStackLayout Grid.Column="1" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Usd}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Usd}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Column="2" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Reserved}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Reserved}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Column="3" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Eur}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Eur}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Column="4" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Gbp}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Gbp}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Column="5" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Jpy}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Jpy}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Column="6" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Chf}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Chf}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Column="7" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Aud}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.Aud}" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Column="8" Style="{StaticResource SortingStackLayout}">
+                <Button Text="↓" Command="{Binding SetSortDescCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.TotalValue}" />
+                <Button Text="↑" Command="{Binding SetSortAscCommand}"
+                        Style="{StaticResource TableSortingButton}"
+                        CommandParameter="{x:Static vm:FundSortColumn.TotalValue}" />
+            </HorizontalStackLayout>
+        </Grid>
+
         <!-- CollectionView for displaying user data -->
-        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1" >
+        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="2" x:DataType="vm:FundTableObject">
             <CollectionView.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="vm:FundTableObject">
                     <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" 
                           Style="{StaticResource TableRowGrid}">
                         <!-- Viewing Mode Labels -->
                         <Label Text="{Binding UserId}" Grid.Column="0" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Usd.TotalBalanceDisplay}" Grid.Column="1" 
+                        <Label Text="{Binding UsdBalanceDisplay}" Grid.Column="1" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Usd.ReservedBalanceDisplay}" Grid.Column="2" 
+                        <Label Text="{Binding ReservedBalanceDisplay}" Grid.Column="2" 
                                Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Eur.TotalBalanceDisplay}" Grid.Column="3" 
+                        <Label Text="{Binding EurBalanceDisplay}" Grid.Column="3" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Gbp.TotalBalanceDisplay}" Grid.Column="4" 
+                        <Label Text="{Binding GbpBalanceDisplay}" Grid.Column="4" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Jpy.TotalBalanceDisplay}" Grid.Column="5" 
+                        <Label Text="{Binding JpyBalanceDisplay}" Grid.Column="5" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Chf.TotalBalanceDisplay}" Grid.Column="6" 
+                        <Label Text="{Binding ChfBalanceDisplay}" Grid.Column="6" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
-                        <Label Text="{Binding Aud.TotalBalanceDisplay}" Grid.Column="7" 
+                        <Label Text="{Binding AudBalanceDisplay}" Grid.Column="7" 
                                Style="{StaticResource TableRowLabel}" 
                                IsVisible="{Binding IsViewing}" />
                         <Label Text="{Binding TotalFunds}" Grid.Column="8"
@@ -69,22 +140,22 @@
                         </Label>
 
                         <!-- Editing Mode Entries -->
-                        <Entry Text="{Binding UsdBalance, Mode=TwoWay}" Grid.Column="1" 
+                        <Entry Text="{Binding UsdBalanceDisplay, Mode=TwoWay}" Grid.Column="1" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding EurBalance, Mode=TwoWay}" Grid.Column="3" 
+                        <Entry Text="{Binding EurBalanceDisplay, Mode=TwoWay}" Grid.Column="3" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding GbpBalance, Mode=TwoWay}" Grid.Column="4" 
+                        <Entry Text="{Binding GbpBalanceDisplay, Mode=TwoWay}" Grid.Column="4" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding JpyBalance, Mode=TwoWay}" Grid.Column="5" 
+                        <Entry Text="{Binding JpyBalanceDisplay, Mode=TwoWay}" Grid.Column="5" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding ChfBalance, Mode=TwoWay}" Grid.Column="6" 
+                        <Entry Text="{Binding ChfBalanceDisplay, Mode=TwoWay}" Grid.Column="6" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
-                        <Entry Text="{Binding AudBalance, Mode=TwoWay}" Grid.Column="7" 
+                        <Entry Text="{Binding AudBalanceDisplay, Mode=TwoWay}" Grid.Column="7" 
                                Style="{StaticResource TableRowEntry}" 
                                IsVisible="{Binding IsEditing}" />
 
@@ -109,7 +180,7 @@
         </CollectionView>
 
         <!-- Table Page Navigation -->
-        <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}" Grid.Row="2" 
+        <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}" Grid.Row="3" 
                     BindableLayout.ItemsSource="{Binding VisiblePageNumbers}" >
             <BindableLayout.ItemTemplate>
                 <DataTemplate>

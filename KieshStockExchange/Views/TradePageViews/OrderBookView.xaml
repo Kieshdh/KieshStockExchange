@@ -17,7 +17,8 @@
 
         <!-- Sell Orders -->
         <CollectionView Grid.Row="2" ItemsSource="{Binding VisibleSellLevels}"
-                        SelectionMode="None" ItemSizingStrategy="MeasureAllItems">
+                        SelectionMode="None" ItemSizingStrategy="MeasureAllItems"
+                        x:DataType="vm:OrderBookViewModel">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:LevelRow">
                     <Grid ColumnDefinitions="1.5*,*,*" Padding="4,2">
@@ -42,7 +43,8 @@
         
         <!-- Buy Orders -->
         <CollectionView Grid.Row="4" ItemsSource="{Binding VisibleBuyLevels}"
-                SelectionMode="None" ItemSizingStrategy="MeasureAllItems">
+                SelectionMode="None" ItemSizingStrategy="MeasureAllItems"
+                x:DataType="vm:OrderBookViewModel">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:LevelRow">
                     <Grid ColumnDefinitions="1.5*,*,*" Padding="4,2">

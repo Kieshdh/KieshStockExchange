@@ -2,11 +2,13 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.TradePageViews.TradePage"
-             x:Name="TradePageRoot"
+             x:Name="TradePageRoot" 
+             x:DataType="local:TradeViewModel"
              xmlns:local="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:views="clr-namespace:KieshStockExchange.Views.TradePageViews"
-             Title="TradePage">
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             Title="TradePage" >
     <ScrollView>
         <Grid Style="{StaticResource MainGrid}" 
               RowDefinitions="Auto, Auto, *, Auto" 
@@ -17,14 +19,15 @@
                                   Grid.ColumnSpan="3" />
             
             <!-- Stock picker and price display -->
-            <Frame Style="{StaticResource TradeContentOutline}"
-                   Grid.Row="1" Grid.Column="0" >
+            <Border Style="{StaticResource TradeContentOutline}"
+                   Grid.Row="1" Grid.Column="0">
                 <Grid ColumnDefinitions="Auto, Auto, Auto" ColumnSpacing="10">
                     <!-- Stock Picker -->
                     <Picker ItemsSource="{Binding Stocks}" Grid.Column="0" 
                             ItemDisplayBinding="{Binding Symbol}"
                             SelectedItem="{Binding PickerSelection, Mode=TwoWay}"
-                            Style="{StaticResource StockSelectorPicker}" />
+                            Style="{StaticResource StockSelectorPicker}" 
+                            x:DataType="models:Stock" />
                     <!-- Stock Price Display -->
                     <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="1" 
                            Style="{StaticResource SelectedStockDisplayLabel}" />
@@ -32,23 +35,23 @@
                     <Label Text="{Binding Selected.CompanyName}" Grid.Column="2"
                            Style="{StaticResource SelectedStockDisplayLabel}" />
                 </Grid>
-            </Frame>
+            </Border>
 
             <!-- The chart that displays the price-->
-            <Frame Style="{StaticResource TradeContentOutline}"
-                   Grid.Row="2" Grid.Column="0" >
+            <Border Style="{StaticResource TradeContentOutline}"
+                   Grid.Row="2" Grid.Column="0">
                 <views:ChartView BindingContext="{Binding ChartVm}"/>
-            </Frame>
+            </Border>
 
             <!-- The Orderbook that displays current orders-->
-            <Frame Style="{StaticResource TradeContentOutline}"
-                   Grid.Row="1" Grid.Column="1" Grid.RowSpan="2" >
+            <Border Style="{StaticResource TradeContentOutline}"
+                   Grid.Row="1" Grid.Column="1" Grid.RowSpan="2">
                 <views:OrderBookView BindingContext="{Binding OrderBookVm}"/>
-            </Frame>
+            </Border>
 
             <!-- Shows the current orders, order history and current positions -->
-            <Frame Style="{StaticResource TradeContentOutline}"
-                    Grid.Row="3" Grid.ColumnSpan="2" >
+            <Border Style="{StaticResource TradeContentOutline}"
+                    Grid.Row="3" Grid.ColumnSpan="2">
                 <other:SegmentedTabView HeaderContainerHorizontalOptions="Start"
                         SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
                         UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}" >
@@ -78,13 +81,13 @@
                         </other:SegmentedTabItem>
                     </other:SegmentedTabView.Tabs>
                 </other:SegmentedTabView>
-            </Frame>
+            </Border>
 
             <!-- Section for placing orders -->
-            <Frame Style="{StaticResource TradeContentOutline}"
+            <Border Style="{StaticResource TradeContentOutline}"
                    Grid.Column="2" Grid.Row="1" Grid.RowSpan="3" MinimumWidthRequest="300">
                 <views:PlaceOrderView BindingContext="{Binding PlacingVm}"/>
-            </Frame>
+            </Border>
         </Grid>
     </ScrollView>
 </ContentPage>

@@ -7,7 +7,8 @@
              xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
-             Title="Admin">
+             Title="Admin" 
+             x:DataType="local:AdminViewModel">
     <Grid RowDefinitions="Auto,*" Style="{StaticResource MainGrid}">
 
         <!-- Navigation bar at the Top -->
