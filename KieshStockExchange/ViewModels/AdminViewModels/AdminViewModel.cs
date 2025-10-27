@@ -46,20 +46,10 @@ public partial class AdminViewModel : BaseViewModel
         IsBusy = true;
         try
         {
-            
             // Import data from the excel sheet
             bool resetDatabases = false;
             if (resetDatabases)
-            {
-                LoadingText = "Importing users from Excel";
-                await ExcelService.AddUsersFromExcelAsync(false);
-                LoadingText = "Importing Funds from Excel";
-                await ExcelService.AddHoldingsFromExcelAsync(false);
-                LoadingText = "Importing Stocks from Excel";
-                await ExcelService.AddStocksFromExcelAsync(false);
-                LoadingText = "Importing AI User Behaviour from Excel";
-                await ExcelService.AddAIUserBehaviourDataFromExcelAsync(false);
-            }
+                await ResetDatabases();
 
             // Initialize table viewmodels
             LoadingText = "Getting user data";
@@ -83,5 +73,17 @@ public partial class AdminViewModel : BaseViewModel
             LoadingText = string.Empty;
         }
         Debug.WriteLine($"Succesfully loaded tables");
+    }
+
+    private async Task ResetDatabases()
+    {
+        LoadingText = "Importing users from Excel";
+        await ExcelService.AddUsersFromExcelAsync(false);
+        LoadingText = "Importing Funds from Excel";
+        await ExcelService.AddHoldingsFromExcelAsync(false);
+        LoadingText = "Importing Stocks from Excel";
+        await ExcelService.AddStocksFromExcelAsync(false);
+        LoadingText = "Importing AI User Behaviour from Excel";
+        await ExcelService.AddAIUserBehaviourDataFromExcelAsync(false);
     }
 }
