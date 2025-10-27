@@ -1,9 +1,85 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="KieshStockExchange.Views.TradePageViews.OpenOrdersView">
-    <Grid HeightRequest="150">
-        <Label Text="Open Orders Table" 
-           TextColor="White" FontSize="Medium" />
-    </Grid>
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             x:Class="KieshStockExchange.Views.TradePageViews.OpenOrdersView"
+             x:Name="OpenOrdersRoot">
+
+    <VerticalStackLayout Spacing="8" Padding="12,8">
+        <!-- Header + controls -->
+        <Grid ColumnDefinitions="*,Auto,Auto,Auto" RowDefinitions="Auto">
+            <Label Text="Open Orders" FontAttributes="Bold" FontSize="16"/>
+            <Switch Grid.Column="1" IsToggled="{Binding ShowAllOrders}"
+                    VerticalOptions="Center"/>
+            <Label Grid.Column="2" VerticalOptions="Center"
+                   Text="Show all" Opacity="0.75" />
+            <Button Grid.Column="3" Text="Refresh"
+                    Command="{Binding RefreshCommand}"
+                    IsEnabled="{Binding IsNotBusy}"/>
+        </Grid>
+
+        <!-- Table headers -->
+        <Grid ColumnDefinitions="1.5*,*,*,*,*,*,*,*" Padding="8,4" >
+            <!-- BackgroundColor="{StaticResource TableHeaderBackground}"> -->
+            <Label Grid.Column="0" Text="Date" FontAttributes="Bold"/>
+            <Label Grid.Column="1" Text="Side" FontAttributes="Bold"/>
+            <Label Grid.Column="2" Text="Type" FontAttributes="Bold"/>
+            <Label Grid.Column="3" Text="Qty (filled)"  FontAttributes="Bold" HorizontalTextAlignment="End"/>
+            <Label Grid.Column="4" Text="Price" FontAttributes="Bold" HorizontalTextAlignment="End"/>
+            <Label Grid.Column="5" Text="Total" FontAttributes="Bold" HorizontalTextAlignment="End"/>
+            <Label Grid.Column="6" Text="Status" FontAttributes="Bold"/>
+            <Label Grid.Column="7" Text="Action" FontAttributes="Bold"/>
+        </Grid>
+
+        <!-- Rows -->
+        <CollectionView ItemsSource="{Binding CurrentOrdersView}"
+                        SelectionMode="None">
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:Order">
+                    <Grid ColumnDefinitions="1.5*,*,*,*,*,*,*,*" Padding="8,6"
+                          BackgroundColor="{StaticResource TableRowBackground}">
+                        <!-- Date -->
+                        <Label Text="{Binding CreatedDateShort}" Opacity="0.85"/>
+
+                        <!-- Side (BUY green / SELL red) -->
+                        <Label Grid.Column="1"
+                               Text="{Binding SideDisplay}">
+                            <Label.Triggers>
+                                <DataTrigger TargetType="Label"
+                                             Binding="{Binding IsBuyOrder}"
+                                             Value="True">
+                                    <Setter Property="TextColor" Value="{StaticResource BuyGreen}"/>
+                                </DataTrigger>
+                                <DataTrigger TargetType="Label"
+                                             Binding="{Binding IsSellOrder}"
+                                             Value="True">
+                                    <Setter Property="TextColor" Value="{StaticResource SellRed}"/>
+                                </DataTrigger>
+                            </Label.Triggers>
+                        </Label>
+
+                        <!-- Type -->
+                        <Label Grid.Column="2" Text="{Binding TypeDisplay}" />
+
+                        <!-- Qty / Filled / Remaining -->
+                        <Label Grid.Column="3" Text="{Binding AmountFilledDisplay}" HorizontalTextAlignment="End"/>
+
+                        <!-- Price / Total (already formatted) -->
+                        <Label Grid.Column="4" Text="{Binding PriceDisplay}" HorizontalTextAlignment="End"/>
+                        <Label Grid.Column="5" Text="{Binding TotalAmountDisplay}" HorizontalTextAlignment="End"/>
+
+                        <!-- Status -->
+                        <Label Grid.Column="6" Text="{Binding Status}" />
+
+                        <!-- Actions -->
+                        <HorizontalStackLayout Grid.Column="7" Spacing="6">
+                            <Button Text="Cancel" IsVisible="{Binding IsOpen}"
+                                    Command="{Binding Source={RelativeSource AncestorType={x:Type ContentView}}, Path=BindingContext.CancelCommand}"
+                                    CommandParameter="{Binding .}" />
+                        </HorizontalStackLayout>
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </VerticalStackLayout>
 </ContentView>

@@ -3,8 +3,8 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services;
 using Microsoft.Extensions.Logging;
-using System.Collections.ObjectModel;
 using Microsoft.Maui.ApplicationModel;
+using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -152,12 +152,12 @@ public partial class OrderBookViewModel : StockAwareViewModel
 
         // Target view order:
         //  - Sells: high -> low
-        //  - Buys : low  -> high
+        //  - Buys : high -> low
         var orderedSells = snap.Sells.OrderByDescending(l => l.Price).ToList();
-        var orderedBuys = snap.Buys.OrderBy(l => l.Price).ToList();
+        var orderedBuys = snap.Buys.OrderByDescending(l => l.Price).ToList();
 
-        ApplySideSnapshot(SellLevels, orderedSells, currency);
-        ApplySideSnapshot(BuyLevels, orderedBuys, currency);
+        ApplySideSnapshot(SellLevels, orderedSells, currency, false);
+        ApplySideSnapshot(BuyLevels, orderedBuys, currency, true);
 
         // Let the view recompute the “Depth” slices
         OnPropertyChanged(nameof(VisibleSellLevels));
@@ -165,20 +165,40 @@ public partial class OrderBookViewModel : StockAwareViewModel
     }
 
     private void ApplySideSnapshot(ObservableCollection<LevelRow> target,
-        List<PriceLevel> source, CurrencyType currency)
+        List<PriceLevel> source, CurrencyType currency, bool accumulateForward)
     {
+        // Get the cumulative quantities
+        var cumulatives = new int[source.Count];
         int cumulative = 0;
+
+        if (accumulateForward)
+        {
+            for (int i = 0; i < source.Count; i++)
+            {
+                cumulative += source[i].Quantity;
+                cumulatives[i] = cumulative;
+            }
+        }
+        else
+        {
+            for (int i = source.Count - 1; i >= 0; i--)
+            {
+                cumulative += source[i].Quantity;
+                cumulatives[i] = cumulative;
+            }
+        }
+
+        // Update or add rows
         for (int i = 0; i < source.Count; i++)
         {
             var level = source[i];
-            cumulative += level.Quantity;
             // Add or update
             if (i < target.Count)
                 // Update existing
-                target[i].Update(level.Price, level.Quantity, cumulative);
+                target[i].Update(level.Price, level.Quantity, cumulatives[i]);
             else
                 // Add new Row
-                target.Add(new LevelRow(level.Price, level.Quantity, cumulative, currency));
+                target.Add(new LevelRow(level.Price, level.Quantity, cumulatives[i], currency));
         }
 
         // Remove excess
