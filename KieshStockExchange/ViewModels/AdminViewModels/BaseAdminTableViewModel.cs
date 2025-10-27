@@ -9,13 +9,15 @@ namespace KieshStockExchange.ViewModels.AdminViewModels;
 
 public abstract partial class BaseTableViewModel<TItem> : BaseViewModel
 {
-    protected readonly IDataBaseService _dbService;
-
+    #region Page Properties
     // Backing storage for all rows
     protected List<TItem> AllItems = new();
 
-    [ObservableProperty]
-    private ObservableCollection<TItem> _pagedItems = new();
+    private List<TItem> CurrentView = new();
+
+    protected virtual IEnumerable<TItem> GetCurrentView() => AllItems;
+
+    [ObservableProperty] private ObservableCollection<TItem> _pagedItems = new();
 
     [ObservableProperty] private int _pageNumber;
 
@@ -24,7 +26,7 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel
 
     /// <summary>Total number of pages</summary>
     public int TotalPages =>
-        (int)Math.Ceiling((double)(AllItems?.Count ?? 0) / PageSize);
+        (int)Math.Ceiling((double)(CurrentView?.Count ?? 0) / PageSize);
 
     /// <summary>Which page-buttons to show in the pager</summary>
     public List<int> VisiblePageNumbers
@@ -45,20 +47,26 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel
             return pages.OrderBy(x => x).ToList();
         }
     }
+    #endregion
+
+    #region Services, Commands and Constructor
+    protected readonly IDataBaseService _db;
 
     /// <summary>Command to jump to a given page</summary>
     public ICommand GoToPageCommand { get; }
 
     protected BaseTableViewModel(IDataBaseService dbService)
     {
-        _dbService = dbService;
+        _db = dbService;
         GoToPageCommand = new Command<int>(page =>
         {
             PageNumber = page - 1;
             RefreshPagedItems();
         });
     }
+    #endregion
 
+    #region Methods
     /// <summary>Call this once on startup to load data and seed the first page.</summary>
     public async Task InitializeAsync()
     {
@@ -76,17 +84,29 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel
     protected abstract Task<List<TItem>> LoadItemsAsync();
 
     /// <summary>Re-compute which items appear on the current page.</summary>
-    private void RefreshPagedItems()
+    protected void RefreshPagedItems()
     {
         PagedItems.Clear();
         if (AllItems == null) return;
 
+        CurrentView = GetCurrentView().ToList();
+
         int start = PageNumber * PageSize;
-        for (int i = 0; i < PageSize && start + i < AllItems.Count; i++)
-            PagedItems.Add(AllItems[start + i]);
+        for (int i = 0; i < PageSize && start + i < CurrentView.Count; i++)
+            PagedItems.Add(CurrentView[start + i]);
 
         OnPropertyChanged(nameof(TotalPages));
         OnPropertyChanged(nameof(VisiblePageNumbers));
     }
+
+    /// <summary>
+    /// Called when the view changes (e.g. sorting, filtering) to reset to page 1 and re-page.
+    /// </summary>
+    protected void ApplyViewChange()
+    {
+        PageNumber = 0;        // back to first page
+        RefreshPagedItems();   // and re-page
+    }
+    #endregion
 }
 

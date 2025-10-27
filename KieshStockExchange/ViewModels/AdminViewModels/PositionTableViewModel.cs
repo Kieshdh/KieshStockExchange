@@ -12,11 +12,12 @@ using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
+public enum PosSortColumn { None, UserId, Quantity, Reserved, Price, StockValue, TotalValue }
+public enum PosSortDir { Asc, Desc }
+
 public partial class PositionTableViewModel : BaseTableViewModel<PositionTableObject>
 {
-    #region Data properties and Constructor
-    private readonly IMarketDataService _market;
-
+    #region Data properties 
     public Dictionary<int, decimal> LatestPrices = new();  // Id → StockPrice
     public Dictionary<int, Stock> Stocks = new(); // Id → Stock
     public Dictionary<int, string> StockSymbols => Stocks.ToDictionary(kv => kv.Key, kv => kv.Value.Symbol);
@@ -37,6 +38,18 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
             OnPropertyChanged(); // ensures the picker reflects the new selection
         }
     }
+    #endregion
+
+    #region Filtering and Sorting
+    [ObservableProperty] private string _idFilter = string.Empty;
+    [ObservableProperty] private PosSortColumn _sortBy = PosSortColumn.None;
+    [ObservableProperty] private PosSortDir _sortDirection = PosSortDir.Desc;
+
+    partial void OnIdFilterChanged(string value) => ApplyViewChange(); // refresh on change
+    #endregion
+
+    #region Services and Constructor
+    private readonly IMarketDataService _market;
 
     public PositionTableViewModel(IDataBaseService dbService, IMarketDataService market) : base(dbService)
     {
@@ -54,9 +67,9 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
             var rows = new List<PositionTableObject>();
 
             // Fetch all data
-            var users = await _dbService.GetUsersAsync();
-            var allPositions = await _dbService.GetPositionsAsync(); 
-            var stocks = await _dbService.GetStocksAsync();
+            var users = await _db.GetUsersAsync();
+            var allPositions = await _db.GetPositionsAsync(); 
+            var stocks = await _db.GetStocksAsync();
 
             // Ensure at least one stock exists
             if (stocks.Count == 0)
@@ -97,7 +110,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
                 }
 
                 // Create the table object
-                rows.Add(new PositionTableObject(_dbService, user.UserId, BaseCurrency, positionsDict, LatestPrices, StockSymbols));
+                rows.Add(new PositionTableObject(_db, user.UserId, BaseCurrency, positionsDict, LatestPrices, StockSymbols));
             }
 
             // Sort by most recent first
@@ -112,6 +125,45 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
             return new List<PositionTableObject>();
         }
         finally { IsBusy = false; }
+    }
+
+    protected override IEnumerable<PositionTableObject> GetCurrentView()
+    {
+        IEnumerable<PositionTableObject> items = AllItems;
+
+        // ID filter on substring of UserId
+        if (!string.IsNullOrWhiteSpace(IdFilter))
+        {
+            var needle = IdFilter.Trim();
+            items = items.Where(r => r.UserId.ToString().Contains(needle, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Sorting based on selected column and direction
+        items = (SortBy, SortDirection) switch
+        {
+            (PosSortColumn.UserId, PosSortDir.Desc) => items.OrderByDescending(r => r.UserId),
+            (PosSortColumn.UserId, PosSortDir.Asc) => items.OrderBy(r => r.UserId),
+
+            (PosSortColumn.Quantity, PosSortDir.Desc) => items.OrderByDescending(r => r.Quantity),
+            (PosSortColumn.Quantity, PosSortDir.Asc) => items.OrderBy(r => r.Quantity),
+
+            (PosSortColumn.Reserved, PosSortDir.Desc) => items.OrderByDescending(r => r.ReservedQuantity),
+            (PosSortColumn.Reserved, PosSortDir.Asc) => items.OrderBy(r => r.ReservedQuantity),
+
+            // nulls last: use ?? to push nulls to the bottom on Desc, top on Asc
+            (PosSortColumn.Price, PosSortDir.Desc) => items.OrderByDescending(r => r.Price ?? decimal.MinValue),
+            (PosSortColumn.Price, PosSortDir.Asc) => items.OrderBy(r => r.Price ?? decimal.MaxValue),
+
+            (PosSortColumn.StockValue, PosSortDir.Desc) => items.OrderByDescending(r => r.StockValue ?? decimal.MinValue),
+            (PosSortColumn.StockValue, PosSortDir.Asc) => items.OrderBy(r => r.StockValue ?? decimal.MaxValue),
+
+            (PosSortColumn.TotalValue, PosSortDir.Desc) => items.OrderByDescending(r => r.TotalValue),
+            (PosSortColumn.TotalValue, PosSortDir.Asc) => items.OrderBy(r => r.TotalValue),
+
+            _ => items // keep default order if no sort selected
+        };
+
+        return items;
     }
     #endregion
 
@@ -141,6 +193,22 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
                 user.RefreshData(baseCurrency, LatestPrices);
         }
         finally { IsBusy = false; }
+    }
+    #endregion
+
+    #region Commands
+    [RelayCommand] private void SetSortDesc(PosSortColumn column)
+    {
+        SortBy = column;
+        SortDirection = PosSortDir.Desc;
+        ApplyViewChange();
+    }
+
+    [RelayCommand] private void SetSortAsc(PosSortColumn column)
+    {
+        SortBy = column;
+        SortDirection = PosSortDir.Asc;
+        ApplyViewChange();
     }
     #endregion
 }
@@ -180,9 +248,31 @@ public partial class PositionTableObject : ObservableObject
     private Position CurrentPosition => PosDict.TryGetValue(CurrentStockId, out var p) 
         ? p : new Position { UserId = UserId, StockId = CurrentStockId };
 
+    public int Quantity => CurrentPosition.Quantity;
+
+    public int ReservedQuantity => CurrentPosition.ReservedQuantity;
+
+    public decimal? Price => Prices.TryGetValue(CurrentStockId, out var p) ? p : (decimal?)null;
+
+    public decimal? StockValue => Price.HasValue ? Price.Value * Quantity : (decimal?)null;
+
+    public decimal TotalValue
+    {
+        get
+        {
+            decimal total = 0m;
+            foreach (var (id, pos) in PosDict)
+                if (Prices.TryGetValue(id, out var p))
+                    total += pos.Quantity * p;
+            return total;
+        }
+    }
+    #endregion
+
+    #region Display properties
     public string QuantityDisplay
     {
-        get => CurrentPosition.Quantity == 0? "-" : CurrentPosition.Quantity.ToString();
+        get => Quantity == 0? "-" : Quantity.ToString();
         set         
         {
             if (ParsingHelper.TryToInt(value, out var qty) && qty >= 0)
@@ -195,7 +285,7 @@ public partial class PositionTableObject : ObservableObject
 
     public string ReservedQuantityDisplay
     {
-        get => CurrentPosition.ReservedQuantity == 0 ? "-" : CurrentPosition.ReservedQuantity.ToString();
+        get => ReservedQuantity == 0 ? "-" : ReservedQuantity.ToString();
         set
         {
             if (ParsingHelper.TryToInt(value, out var qty) && qty >= 0 && qty <= CurrentPosition.Quantity)
@@ -207,29 +297,14 @@ public partial class PositionTableObject : ObservableObject
     }
 
     public string PriceDisplay
-    {
-        get => (Prices.TryGetValue(CurrentStockId, out var price)) 
-            ? CurrencyHelper.Format(price, BaseCurrency) : "-";
-    }
+        => Price.HasValue ? CurrencyHelper.Format(Price.Value, BaseCurrency) : "-";
 
     public string StockSymbol => Symbols.TryGetValue(CurrentStockId, out var symbol) ? symbol : "-";
 
-    public string StockValueDisplay  => (Prices.TryGetValue(CurrentStockId, out var price)) 
-        ? CurrencyHelper.Format(CurrentPosition.Quantity * price, BaseCurrency) : "-";
+    public string StockValueDisplay 
+        => StockValue.HasValue ? CurrencyHelper.Format(StockValue.Value, BaseCurrency) : "-";
 
-    public string TotalValueDisplay
-    {
-        get
-        {
-            var totalValue = 0m;
-            foreach (var (id, pos) in PosDict)
-            {
-                if (Prices.TryGetValue(id, out var price))
-                    totalValue += pos.Quantity * price;
-            }
-            return totalValue > 0m ? CurrencyHelper.Format(totalValue, BaseCurrency) : "-";
-        }
-    }
+    public string TotalValueDisplay => CurrencyHelper.Format(TotalValue, BaseCurrency);
     #endregion
 
     #region Other properties and Constructor
@@ -339,12 +414,12 @@ public partial class PositionTableObject : ObservableObject
     #region Refresh data
     private void NotifyAllProperties()
     {
-        OnPropertyChanged(nameof(QuantityDisplay));
-        OnPropertyChanged(nameof(ReservedQuantityDisplay));
-        OnPropertyChanged(nameof(PriceDisplay));
+        OnPropertyChanged(nameof(Quantity)); OnPropertyChanged(nameof(QuantityDisplay));
+        OnPropertyChanged(nameof(ReservedQuantity)); OnPropertyChanged(nameof(ReservedQuantityDisplay));
+        OnPropertyChanged(nameof(Price)); OnPropertyChanged(nameof(PriceDisplay));
+        OnPropertyChanged(nameof(StockValue)); OnPropertyChanged(nameof(StockValueDisplay));
+        OnPropertyChanged(nameof(TotalValue)); OnPropertyChanged(nameof(TotalValueDisplay));
         OnPropertyChanged(nameof(StockSymbol));
-        OnPropertyChanged(nameof(StockValueDisplay));
-        OnPropertyChanged(nameof(TotalValueDisplay));
     }
 
     public void RefreshData(CurrencyType baseCurrency, Dictionary<int, decimal> latestPrices)
