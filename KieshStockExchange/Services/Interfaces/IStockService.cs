@@ -38,6 +38,11 @@ public interface IStockService
     /// </summary>
     bool TryGetBySymbol(string symbol, out Stock? stock);
 
+    /// <summary>
+    /// Try to get a stock symbol by its unique identifier from in-memory snapshot.
+    /// </summary>
+    bool TryGetSymbol(int id, out string symbol);
+
     /// <summary>Simple symbol/company search.</summary>
     IReadOnlyList<Stock> Search(string? query, int take = 50);
 

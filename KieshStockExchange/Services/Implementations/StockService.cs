@@ -117,6 +117,18 @@ public sealed class StockService : IStockService
             .Take(take)
             .ToList();
     }
+
+    public bool TryGetSymbol(int id, out string symbol)
+    {
+        if (TryGetById(id, out var stock))
+        {
+            symbol = stock!.Symbol;
+            return true;
+        }
+        symbol = string.Empty;
+        return false;
+    }
+
     #endregion
 
     #region Upsert and Delete stocks

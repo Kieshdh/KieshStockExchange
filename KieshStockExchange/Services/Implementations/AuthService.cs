@@ -82,5 +82,6 @@ public class AuthService : IAuthService
     public async Task LogoutAsync()
     {
         CurrentUser = null;
+        await Task.CompletedTask;
     }
 }
