@@ -15,6 +15,7 @@ public class UserOrderService : IUserOrderService
     #endregion
 
     #region Order Properties
+    // In‐memory cache of user orders
     public List<Order> UserAllOrders { get; private set; } = new();
     public IReadOnlyList<Order> UserOpenOrders =>
         UserAllOrders.Where(o => o.IsOpen).ToList();
@@ -22,6 +23,10 @@ public class UserOrderService : IUserOrderService
         UserAllOrders.Where(o => o.IsCancelled).ToList();
     public IReadOnlyList<Order> UserFilledOrders =>
         UserAllOrders.Where(o => o.IsFilled).ToList();
+
+    // Event for order changes
+    public event EventHandler? OrdersChanged;
+    private void NotifyOrdersChanged() => OrdersChanged?.Invoke(this, EventArgs.Empty);
     #endregion
 
     #region Constructor
@@ -89,6 +94,7 @@ public class UserOrderService : IUserOrderService
         try
         {
             UserAllOrders = (await _db.GetOrdersByUserId(targetUserId, ct)).ToList();
+            NotifyOrdersChanged();
             return true;
         }
         catch (Exception ex)

@@ -13,6 +13,8 @@ namespace KieshStockExchange.Services;
     IReadOnlyList<Order> UserCancelledOrders { get; }
     IReadOnlyList<Order> UserFilledOrders { get; }
 
+    event EventHandler? OrdersChanged;
+
     /// <summary>Reloads the user's orders from the back‐end.</summary>
     Task<bool> RefreshOrdersAsync(int? asUserId = null, CancellationToken ct = default);
 
