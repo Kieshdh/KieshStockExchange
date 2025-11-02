@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
              x:Class="KieshStockExchange.Views.AdminPageViews.FundTableView" 
-             x:Name="FundTableRoot" x:DataType="vm:FundTableViewModel">
+             x:Name="FundTableRoot">
     <Grid RowDefinitions="Auto,Auto,*,Auto">
 
         <!-- Labels -->
@@ -102,7 +102,7 @@
         </Grid>
 
         <!-- CollectionView for displaying user data -->
-        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="2" x:DataType="vm:FundTableObject">
+        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="2">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:FundTableObject">
                     <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" 
