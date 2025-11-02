@@ -260,6 +260,18 @@
         <Setter Property="HorizontalOptions"    Value="End" />
         <Setter Property="VerticalOptions"      Value="Center" />
     </Style>
+    <Style x:Key="TradeTableButton" TargetType="Button" >
+        
+    </Style>
+    <Style x:Key="TradeTableHeaderLabel" TargetType="Label" >
+        <Setter Property="FontAttributes"       Value="Bold"   />
+    </Style>
+    <Style x:Key="TradeTableRowLabel" TargetType="Label" >
+
+    </Style>
+    <Style x:Key="TradeTableHeaderGrid"          TargetType="Grid">
+        <Setter Property="Padding"           Value="8,4"/>
+    </Style>
 
 
 </ResourceDictionary>
