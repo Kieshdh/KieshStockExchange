@@ -6,19 +6,13 @@ namespace KieshStockExchange.Services.Implementations;
 
 public class UserOrderService : IUserOrderService
 {
-    #region Private Fields
-    private readonly IDataBaseService _db;
-    private readonly IAuthService _auth;
-    private readonly IUserPortfolioService _portfolio;
-    private readonly IMarketOrderService _market;
-    private readonly ILogger<UserOrderService> _logger;
-    #endregion
-
     #region Order Properties
     // In‐memory cache of user orders
     public List<Order> UserAllOrders { get; private set; } = new();
     public IReadOnlyList<Order> UserOpenOrders =>
         UserAllOrders.Where(o => o.IsOpen).ToList();
+    public IReadOnlyList<Order> UserClosedOrders =>
+        UserAllOrders.Where(o => o.IsClosed).ToList();
     public IReadOnlyList<Order> UserCancelledOrders =>
         UserAllOrders.Where(o => o.IsCancelled).ToList();
     public IReadOnlyList<Order> UserFilledOrders =>
@@ -29,19 +23,24 @@ public class UserOrderService : IUserOrderService
     private void NotifyOrdersChanged() => OrdersChanged?.Invoke(this, EventArgs.Empty);
     #endregion
 
-    #region Constructor
-    public UserOrderService(
-        IDataBaseService dbService,
-        IAuthService authService,
-        IUserPortfolioService portfolioService,
-        IMarketOrderService marketService,
-        ILogger<UserOrderService> logger)
+    #region Services and Constructor
+    private readonly IDataBaseService _db;
+    private readonly IAuthService _auth;
+    private readonly IUserPortfolioService _portfolio;
+    private readonly IMarketOrderService _market;
+    private readonly ILogger<UserOrderService> _logger;
+    private readonly IStockService _stock;
+
+    public UserOrderService(IDataBaseService db, IStockService stock,
+        IAuthService auth, IUserPortfolioService portfolio,
+        IMarketOrderService market, ILogger<UserOrderService> logger)
     {
-        _db = dbService ?? throw new ArgumentNullException(nameof(dbService));
-        _auth = authService ?? throw new ArgumentNullException(nameof(authService));
-        _portfolio = portfolioService ?? throw new ArgumentNullException(nameof(portfolioService));
-        _market = marketService ?? throw new ArgumentNullException(nameof(marketService)); 
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _auth = auth ?? throw new ArgumentNullException(nameof(auth));
+        _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
+        _market = market ?? throw new ArgumentNullException(nameof(market)); 
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _stock = stock ?? throw new ArgumentNullException(nameof(stock));
     }
     #endregion
 
@@ -115,10 +114,10 @@ public class UserOrderService : IUserOrderService
         }
     }
 
-    public async Task<OrderResult> ChangeOrderAsync(int orderId, int? newQuantity, 
-        decimal? price, int? asUserId = null, CancellationToken ct = default)
+    public async Task<OrderResult> ModifyOrderAsync(int orderId, int? newQuantity = null, 
+        decimal? newPrice = null, int? asUserId = null, CancellationToken ct = default)
     {
-        try { return await _market.ModifyOrderAsync(orderId, newQuantity, price, asUserId, ct); }
+        try { return await _market.ModifyOrderAsync(orderId, newQuantity, newPrice, asUserId, ct); }
         catch { return OperationFailedResult(); }
         finally 
         { 
@@ -129,49 +128,52 @@ public class UserOrderService : IUserOrderService
     #endregion
 
     #region Placing Orders 
-    public Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int qty, decimal limitPrice,
+    public Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int quantity, decimal limitPrice,
             CurrencyType currency, CancellationToken ct = default, int? asUserId = null) =>
-        PlaceOrderAsync(stockId, qty, true, true, limitPrice, currency, asUserId, ct);
+        PlaceOrderAsync(stockId, quantity, true, true, limitPrice, null, currency, asUserId, ct);
 
-    public Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int qty, decimal limitPrice,
+    public Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int quantity, decimal limitPrice,
             CurrencyType currency, CancellationToken ct = default, int? asUserId = null) =>
-        PlaceOrderAsync(stockId, qty, false, true, limitPrice, currency, asUserId, ct);
+        PlaceOrderAsync(stockId, quantity, false, true, limitPrice, null, currency, asUserId, ct);
 
-    public Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int qty, decimal maxPrice,
-            CurrencyType currency, CancellationToken ct = default, int? asUserId = null) =>
-        PlaceOrderAsync(stockId, qty, true, false, maxPrice, currency, asUserId, ct);
+    public Task<OrderResult> PlaceTrueMarketBuyAsync(int stockId, int quantity,
+        CurrencyType currency, int? asUserId = null, CancellationToken ct = default) =>
+        PlaceOrderAsync(stockId, quantity, true, false, 0m, null, currency, asUserId, ct);
 
-    public Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int qty, decimal minPrice,
-             CurrencyType currency, CancellationToken ct = default, int? asUserId = null) =>
-        PlaceOrderAsync(stockId, qty, false, false, minPrice, currency, asUserId, ct);
+    public Task<OrderResult> PlaceTrueMarketSellAsync(int stockId, int quantity,
+            CurrencyType currency, int? asUserId = null, CancellationToken ct = default) =>
+        PlaceOrderAsync(stockId, quantity, false, false, 0m, null, currency, asUserId, ct);
+
+    public Task<OrderResult> PlaceSlippageMarketBuyAsync(int stockId, int quantity, decimal anchorPrice,
+            decimal slippagePercent, CurrencyType currency, int? asUserId = null, CancellationToken ct = default) => 
+        PlaceOrderAsync(stockId, quantity, true, false, anchorPrice, slippagePercent, currency, asUserId, ct);
+
+    public Task<OrderResult> PlaceSlippageMarketSellAsync(int stockId, int quantity, decimal anchorPrice,
+            decimal slippagePercent, CurrencyType currency, int? asUserId = null, CancellationToken ct = default) =>
+        PlaceOrderAsync(stockId, quantity, false, false, anchorPrice, slippagePercent, currency, asUserId, ct);
+
 
     private async Task<OrderResult> PlaceOrderAsync(int stockId, int quantity, bool buyOrder, 
-        bool limitOrder, decimal price, CurrencyType currency, int? asUserId, CancellationToken ct)
+        bool limitOrder, decimal price, decimal? slippage, CurrencyType currency, int? asUserId, CancellationToken ct)
     {
         // Check if able to place order
-        if (stockId <= 0 || quantity <= 0 || price <= 0)
-            return ParamError("Order details must be positive.");
+        var paramError = ValidateParameters(stockId, quantity, limitOrder, price, slippage);
+        if (paramError != null) return paramError;
 
         var actingUserId = GetTargetUserIdOrFail(asUserId, out var authError);
         if (authError != null) return authError;
 
         try
         {
-            // Find the stock
-            var stock = await _db.GetStockById(stockId, ct);
-            if (stock == null) return ParamError("Stock not found.");
-
             //  Load portfolio snapshot for the target user
             await _portfolio.RefreshAsync(actingUserId, ct);
-            var fund = GetFund(actingUserId, currency);
-            var holding = GetHolding(actingUserId, stockId);
 
             // Check if user has enough funds or shares
-            var assetResult = CheckAssets(fund, holding, buyOrder, price, quantity);
+            var assetResult = CheckAssets(actingUserId, currency, stockId, buyOrder, price, quantity);
             if (assetResult != null) return assetResult; 
 
             // Create the order
-            var order = CreateOrder(actingUserId, stockId, quantity, price, currency, buyOrder, limitOrder);
+            var order = CreateOrder(actingUserId, stockId, quantity, price, currency, buyOrder, limitOrder, slippage);
             if (!order.IsValid()) return ParamError("Invalid order parameters.");
 
             // Send to market for placing and matching
@@ -199,30 +201,63 @@ public class UserOrderService : IUserOrderService
     #endregion
 
     #region Private Helpers
-    private Fund GetFund(int targetUserId, CurrencyType currency) =>
-        _portfolio.GetFundByCurrency(currency) ?? new Fund { UserId = targetUserId, CurrencyType = currency };
+    private OrderResult? ValidateParameters(int stockId, int quantity, bool limitOrder, decimal price, decimal? slippage)
+    {
+        // Basic parameter validation
+        if (stockId <= 0 || quantity <= 0)
+            return ParamError("Order details must be positive.");
 
-    private Position GetHolding(int targetUserId, int stockId) =>
-        _portfolio.GetPositionByStockId(stockId) ?? new Position { UserId = targetUserId, StockId = stockId };
+        // Find the stock
+        _stock.TryGetById(stockId, out var stock);
+        if (stock == null) return ParamError("Stock not found.");
 
-    private OrderResult? CheckAssets(Fund fund, Position holding, bool buyOrder, decimal price, int quantity)
+        // Price and slippage validation
+        if (limitOrder)
+        {
+            if (price <= 0m)
+                return ParamError("Limit price must be positive.");
+        }
+        else
+        {
+            if (slippage.HasValue)
+            {
+                if (slippage.Value < 0m || slippage.Value > 100m)
+                    return ParamError("Slippage percent must be between 0 and 100.");
+                if (price <= 0m)
+                    return ParamError("Slippage anchor price must be positive.");
+            }
+            else if (price != 0m)
+                return ParamError("TrueMarket orders must have price = 0.");
+        }
+        return null; // No errors
+    }
+
+    private Fund GetFund(CurrencyType currency) =>
+        _portfolio.GetFundByCurrency(currency) ?? new Fund { };
+
+    private Position GetHolding(int stockId) =>
+        _portfolio.GetPositionByStockId(stockId) ?? new Position { };
+
+    private OrderResult? CheckAssets(int userId, CurrencyType currency, int stockId, bool buyOrder, decimal price, int quantity)
     {
         if (buyOrder) // Check funds
         {
+            var fund = GetFund(currency);
             var required = price * quantity;
             if (fund.AvailableBalance < required)
             {
                 _logger.LogWarning("User {UserId} has insufficient funds: avail {Available} " +
-                    "needed {Required}", fund.UserId, fund.AvailableBalance, price * quantity);
+                    "needed {Required}", userId, fund.AvailableBalance, price * quantity);
                 return ParamError("Insufficient funds.");
             }
         }
         else // Check shares
         {
+            var holding = GetHolding(stockId);
             if (holding.AvailableQuantity < quantity)
             {
                 _logger.LogWarning("User {UserId} has insufficient shares of stock #{StockId}",
-                    fund.UserId, holding.StockId);
+                    userId, holding.StockId);
                 return ParamError("Insufficient shares.");
             }
         }
@@ -230,17 +265,24 @@ public class UserOrderService : IUserOrderService
     }
     
     private Order CreateOrder(int userId, int stockId, int quantity,
-        decimal price, CurrencyType currency, bool buyOrder, bool limitOrder)
+        decimal price, CurrencyType currency, bool buyOrder, bool limitOrder, decimal? slippagePercent)
     {
+        string orderType;
+        if (limitOrder)
+            orderType = buyOrder ? Order.Types.LimitBuy : Order.Types.LimitSell;
+        else if (slippagePercent.HasValue)
+            orderType = buyOrder ? Order.Types.SlippageMarketBuy : Order.Types.SlippageMarketSell;
+        else
+            orderType = buyOrder ? Order.Types.TrueMarketBuy : Order.Types.TrueMarketSell;
+
         return new Order {
             UserId = userId,
             StockId = stockId,
             Quantity = quantity,
             Price = CurrencyHelper.RoundMoney(price, currency),
+            SlippagePercent = slippagePercent,
             CurrencyType = currency,
-            OrderType = buyOrder ?
-                (limitOrder ? Order.Types.LimitBuy : Order.Types.MarketBuy)
-              : (limitOrder ? Order.Types.LimitSell : Order.Types.MarketSell),
+            OrderType = orderType,
         };
     }
     #endregion

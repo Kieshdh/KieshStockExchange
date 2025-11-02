@@ -9,10 +9,12 @@ public class Order : IValidatable
     #region Constants
     public static class Types
     {
-        public const string MarketBuy = "MarketBuy";
-        public const string MarketSell = "MarketSell";
         public const string LimitBuy = "LimitBuy";
         public const string LimitSell = "LimitSell";
+        public const string TrueMarketBuy = "TrueMarketBuy";
+        public const string TrueMarketSell = "TrueMarketSell";
+        public const string SlippageMarketBuy = "SlippageMarketBuy";
+        public const string SlippageMarketSell = "SlippageMarketSell";
     }
 
     public static class Statuses
@@ -64,8 +66,18 @@ public class Order : IValidatable
     [Column("Price")] public decimal Price { 
         get => _price; 
         set {
-            if (value <= 0m) throw new ArgumentException("Price must be positive.");
+            if (value < 0m) throw new ArgumentException("Price cannot be negative.");
             _price = value;
+        }
+    }
+
+    private decimal? _slippagePercent = null;
+    [Column("Slippage")] public decimal? SlippagePercent {
+        get => _slippagePercent;
+        set {
+            if (value.HasValue && (value.Value < 0m || value.Value > 100m))
+                throw new ArgumentException("Slippage percent must be between 0 and 100.");
+            _slippagePercent = value;
         }
     }
 
@@ -81,8 +93,8 @@ public class Order : IValidatable
     [Column("OrderType")] public string OrderType { 
         get => _orderType;
         set {
-            if (value == Types.MarketBuy || value == Types.MarketSell ||
-                value == Types.LimitBuy || value == Types.LimitSell)
+            if (value is Types.TrueMarketBuy or Types.SlippageMarketBuy or Types.LimitBuy  or
+                Types.TrueMarketSell or Types.SlippageMarketSell or Types.LimitSell)
                 _orderType = value;
             else throw new ArgumentException("Invalid OrderType.");
         }
@@ -123,33 +135,60 @@ public class Order : IValidatable
     #endregion
 
     #region IValidatable Implementation
-    public bool IsValid() => UserId > 0 && StockId > 0 && Quantity > 0 && Price > 0 &&
+    public bool IsValid() => UserId > 0 && StockId > 0 && Quantity > 0 && IsValidPrice() &&
         IsValidOrderType() && IsValidStatus() && IsValidCurrency() && IsValidAmount();
 
     public bool IsInvalid => !IsValid();
 
-    private bool IsValidOrderType() =>
-        OrderType == Types.MarketBuy || OrderType == Types.MarketSell ||
-        OrderType == Types.LimitBuy || OrderType == Types.LimitSell;
+    private bool IsValidOrderType() => IsLimitOrder || IsMarketOrder;
     private bool IsValidStatus() =>
         Status == Statuses.Open || Status == Statuses.Filled || Status == Statuses.Cancelled;
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
-    private bool IsValidAmount() =>
-        (IsFilled && AmountFilled == Quantity) || 
-        (IsOpen && RemainingQuantity > 0) || 
-        (IsCancelled && AmountFilled != Quantity);
+    private bool IsValidAmount() => (IsFilled && AmountFilled == Quantity) || 
+        (IsOpen && RemainingQuantity > 0) || (IsCancelled && AmountFilled != Quantity);
+
+    private bool IsValidPrice() => (IsLimitOrder && SlippagePercent is null && Price > 0m) || 
+        (IsTrueMarketOrder && SlippagePercent is null && Price == 0m) || (IsSlippageOrder && SlippagePercent.HasValue && Price > 0m);
 
     #endregion
 
     #region String Representations
     public override string ToString() =>
         $"Order #{OrderId} - {OrderType} - {Quantity} @ {PriceDisplay} - Status: {Status}";
-    [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
-    [Ignore] public string TotalAmountDisplay => CurrencyHelper.Format(TotalAmount, CurrencyType);
+    [Ignore] public string PriceDisplay
+    {
+        get
+        {
+            if (IsLimitOrder) return CurrencyHelper.Format(Price, CurrencyType);
+            if (IsTrueMarketOrder) return "MARKET";
+
+            // Slippage market
+            var dir = IsBuyOrder ? "≤" : "≥";
+            var cap = CurrencyHelper.Format(PriceWithSlippage, CurrencyType);
+            var anchor = CurrencyHelper.Format(Price, CurrencyType);
+            return $"MKT {dir}{cap} • anchor {anchor}";
+        }
+    }
+    [Ignore] public string TotalAmountDisplay
+    {
+        get
+        {
+            if (IsLimitOrder) return CurrencyHelper.Format(TotalAmount, CurrencyType);
+            if (IsTrueMarketOrder) return "-"; // Unknown total amount
+
+            // Slippage market
+            var dir = IsBuyOrder ? "≤" : "≥";
+            var cap = CurrencyHelper.Format(TotalAmount, CurrencyType);
+            return $"MKT {dir}{cap}";
+        }
+    }
     [Ignore] public string AmountFilledDisplay => $"{AmountFilled}/{Quantity}";
     [Ignore] public string SideDisplay => IsBuyOrder ? "BUY" : "SELL";
-    [Ignore] public string TypeDisplay => IsLimitOrder ? "LIMIT" : "MARKET";
+    [Ignore] public string TypeDisplay => IsLimitOrder ? "LIMIT" : (IsTrueMarketOrder ? "MKT" : "MKT±");
+    [Ignore] public string StatusDisplay => Status.ToUpperInvariant();
+    [Ignore]
+    public string SlippageDisplay => SlippagePercent.HasValue ? $"±{SlippagePercent.Value:0.##}%" : "—";
     [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
     [Ignore] public string CreatedDateShort => CreatedAt.ToString("dd-MM HH:mm");
     [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss");
@@ -157,20 +196,39 @@ public class Order : IValidatable
     #endregion
 
     #region Helper Variables
-    [Ignore] public bool IsBuyOrder =>
-        OrderType == Types.MarketBuy || OrderType == Types.LimitBuy;
-    [Ignore] public bool IsSellOrder =>
-        OrderType == Types.MarketSell || OrderType == Types.LimitSell;
+    [Ignore] public bool IsBuyOrder => OrderType is Types.TrueMarketBuy or Types.SlippageMarketBuy or Types.LimitBuy;
+    [Ignore] public bool IsSellOrder => OrderType is Types.TrueMarketSell or Types.SlippageMarketSell or Types.LimitSell;
     [Ignore] public bool IsLimitOrder =>
         OrderType == Types.LimitBuy || OrderType == Types.LimitSell;
-    [Ignore] public bool IsMarketOrder =>
-        OrderType == Types.MarketBuy || OrderType == Types.MarketSell;
+    [Ignore] public bool IsMarketOrder => IsSlippageOrder || IsTrueMarketOrder;
+    [Ignore] public bool IsSlippageOrder =>
+        OrderType == Types.SlippageMarketBuy || OrderType == Types.SlippageMarketSell;
+    [Ignore] public bool IsTrueMarketOrder =>
+        OrderType == Types.TrueMarketBuy || OrderType == Types.TrueMarketSell;
     [Ignore] public bool IsOpen => Status == Statuses.Open;
+    [Ignore] public bool IsClosed => !IsOpen;
     [Ignore] public bool IsFilled => Status == Statuses.Filled;
     [Ignore] public bool IsCancelled => Status == Statuses.Cancelled;
-    [Ignore] public decimal TotalAmount => Price * Quantity;
+    [Ignore] public decimal TotalAmount => IsLimitOrder ? Price * Quantity
+        : (IsSlippageOrder && SlippagePercent.HasValue) ? PriceWithSlippage!.Value * Quantity : 0m;
     [Ignore] public int RemainingQuantity => Quantity - AmountFilled;
-    [Ignore] public decimal RemainingAmount => RemainingQuantity * Price;
+    [Ignore] public decimal RemainingAmount => IsLimitOrder ? Price * RemainingQuantity
+        : (IsSlippageOrder && SlippagePercent.HasValue) ? PriceWithSlippage!.Value * RemainingQuantity : 0m;
+    [Ignore] public decimal FilledAmount => IsLimitOrder ? Price * AmountFilled
+        : (IsSlippageOrder && SlippagePercent.HasValue) ? PriceWithSlippage!.Value * AmountFilled : 0m;
+    [Ignore] public decimal? SlippageAmount => 
+        SlippagePercent.HasValue ? (SlippagePercent.Value / 100m) * Price : null;
+    [Ignore] public decimal? PriceWithSlippage
+    {
+        get
+        {
+            if (!SlippageAmount.HasValue) return null;
+            var raw = IsBuyOrder ? Price + SlippageAmount.Value : Price - SlippageAmount.Value;
+            if (raw <= 0m) return 0m;
+            return CurrencyHelper.RoundMoney(raw, CurrencyType);
+        }
+    }
+    [Ignore] public decimal? EffectiveTakerLimit => IsSlippageOrder ? PriceWithSlippage : (IsLimitOrder ? Price : null);
     #endregion
 
     #region Order Operations
@@ -204,6 +262,7 @@ public class Order : IValidatable
     public void UpdateQuantity(int newQuantity)
     {
         if (!IsOpen) throw new InvalidOperationException("Cannot update quantity of a non-open order.");
+        if (!IsLimitOrder) throw new InvalidOperationException("Only limit orders can have their quantity updated.");
         if (newQuantity < AmountFilled)
             throw new ArgumentException("New quantity cannot be less than amount filled.");
         Quantity = newQuantity;
@@ -218,6 +277,7 @@ public class Order : IValidatable
             StockId = this.StockId,
             Quantity = this.Quantity,
             Price = this.Price,
+            SlippagePercent = this.SlippagePercent,
             CurrencyType = this.CurrencyType,
             OrderType = this.OrderType,
             Status = this.Status,

@@ -10,6 +10,7 @@ namespace KieshStockExchange.Services;
     /// </summary>
     List<Order> UserAllOrders { get; }
     IReadOnlyList<Order> UserOpenOrders { get; }
+    IReadOnlyList<Order> UserClosedOrders { get; }
     IReadOnlyList<Order> UserCancelledOrders { get; }
     IReadOnlyList<Order> UserFilledOrders { get; }
 
@@ -22,6 +23,10 @@ namespace KieshStockExchange.Services;
     Task<OrderResult> CancelOrderAsync(int orderId, 
         int? asUserId = null, CancellationToken ct = default);
 
+    /// <summary> Modifies an existing open order's quantity and/or price. </summary>
+    Task<OrderResult> ModifyOrderAsync(int orderId, int? newQuantity = null,
+        decimal? newPrice = null, int? asUserId = null, CancellationToken ct = default);
+
     /// <summary>Places a limit‐buy order.</summary>
     Task<OrderResult> PlaceLimitBuyOrderAsync(int stockId, int quantity, 
         decimal limitPrice, CurrencyType currency, CancellationToken ct = default, int? asUserId = null);
@@ -30,11 +35,20 @@ namespace KieshStockExchange.Services;
     Task<OrderResult> PlaceLimitSellOrderAsync(int stockId, int quantity, 
         decimal limitPrice, CurrencyType currency, CancellationToken ct = default, int? asUserId = null);
 
-    /// <summary>Places a market‐buy order, capping at maxPrice.</summary>
-    Task<OrderResult> PlaceMarketBuyOrderAsync(int stockId, int quantity, 
-        decimal maxPrice, CurrencyType currency, CancellationToken ct = default, int? asUserId = null);
+    /// <summary>Places a market‐buy order with true market pricing.</summary>
+    Task<OrderResult> PlaceTrueMarketBuyAsync(int stockId, int quantity, 
+        CurrencyType currency, int? asUserId = null, CancellationToken ct = default);
 
-    /// <summary>Places a market‐sell order, floor at minPrice.</summary>
-    Task<OrderResult> PlaceMarketSellOrderAsync(int stockId, int quantity, 
-        decimal minPrice, CurrencyType currency, CancellationToken ct = default, int? asUserId = null);
+    /// <summary>Places a market‐sell order with true market pricing.</summary>
+    Task<OrderResult> PlaceTrueMarketSellAsync(int stockId, int quantity, 
+        CurrencyType currency, int? asUserId = null, CancellationToken ct = default);
+
+    /// <summary>Places a market‐buy order with slippage protection.</summary>
+    Task<OrderResult> PlaceSlippageMarketBuyAsync(int stockId, int quantity, decimal anchorPrice, 
+        decimal slippagePercent, CurrencyType currency, int? asUserId = null, CancellationToken ct = default);
+
+    /// <summary>Places a market‐sell order with slippage protection.</summary>
+    Task<OrderResult> PlaceSlippageMarketSellAsync(int stockId, int quantity, decimal anchorPrice,
+         decimal slippagePercent, CurrencyType currency, int? asUserId = null, CancellationToken ct = default);
+
 }
