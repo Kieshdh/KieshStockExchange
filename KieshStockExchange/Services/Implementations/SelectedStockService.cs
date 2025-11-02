@@ -73,6 +73,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         // Validation
         if (stock is null) throw new ArgumentNullException(nameof(stock));
         if (stock.StockId <= 0) throw new ArgumentException("StockId must be positive.", nameof(stock));
+        if (stock.StockId == StockId) return; // No change
 
         // Set new state
         await UnsubscribeAsync(); // Stop previous tracking

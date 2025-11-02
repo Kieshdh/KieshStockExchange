@@ -58,8 +58,8 @@ public partial class OrderBookViewModel : StockAwareViewModel
     private readonly IMarketOrderService _market;
     private readonly ILogger<OrderBookViewModel> _logger;
 
-    public OrderBookViewModel(IMarketOrderService marketService, ILogger<OrderBookViewModel> logger, 
-        ISelectedStockService selected) : base(selected)
+    public OrderBookViewModel(IMarketOrderService marketService, ILogger<OrderBookViewModel> logger,
+        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
     {
         _market = marketService ?? throw new ArgumentNullException(nameof(marketService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -87,7 +87,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
         return Task.CompletedTask;
     }
 
-    protected override Task OnPriceUpdatedsync(int? stockId, CurrencyType currency,
+    protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency,
         decimal price, DateTime? updatedAt, CancellationToken ct)
     {
         // Update price arrow

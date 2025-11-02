@@ -67,18 +67,16 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     private readonly IUserPortfolioService _portfolio;
     private readonly IUserOrderService _orders;
     private readonly ILogger<PlaceOrderViewModel> _logger;
-    private readonly INotificationService _notification;
     private readonly IDispatcher _dispatcher;
 
-    public PlaceOrderViewModel(IUserOrderService orders, IUserPortfolioService portfolio, 
-        INotificationService notification, ILogger<PlaceOrderViewModel> logger, 
-        ISelectedStockService selected, IDispatcher disp) : base(selected)
+    public PlaceOrderViewModel(ILogger<PlaceOrderViewModel> logger,
+        IUserOrderService orders, IUserPortfolioService portfolio, IDispatcher disp,
+        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dispatcher = disp ?? throw new ArgumentNullException(nameof(disp));
-        _notification = notification ?? throw new ArgumentNullException(nameof(notification));
 
         InitializeSelection();
         StartAssetsAutoRefresh();
@@ -97,7 +95,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         return Task.CompletedTask;
     }
 
-    protected override Task OnPriceUpdatedsync(int? stockId, CurrencyType currency, 
+    protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency, 
         decimal price, DateTime? updatedAt, CancellationToken ct)
     {
         // Price moved -> update order value preview
@@ -184,8 +182,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                     IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, PriceForOrder, cur, SlippagePrc);
                 
                 result = IsBuySelected
-                    ? await _orders.PlaceMarketBuyOrderAsync(id, Quantity, PriceForOrder, cur, ct)
-                    : await _orders.PlaceMarketSellOrderAsync(id, Quantity, PriceForOrder, cur, ct);
+                    ? await _orders.PlaceSlippageMarketBuyAsync(id, Quantity, PriceForOrder, SlippagePrc, cur)
+                    : await _orders.PlaceSlippageMarketSellAsync(id, Quantity, PriceForOrder, SlippagePrc, cur);
             }
             else
             {
@@ -283,7 +281,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     public bool IsLimitSelected => SelectedTypeIndex == 1;
     public bool IsBuySelected => SelectedSideIndex == 0;
     public bool IsSellSelected => SelectedSideIndex == 1;
-    private decimal PriceForOrder => IsMarketSelected ? ComputeMarketGuardPrice() : LimitPrice;
+    private decimal PriceForOrder => IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
     #endregion
 
     #region Private Methods

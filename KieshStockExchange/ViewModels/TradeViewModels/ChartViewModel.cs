@@ -22,8 +22,8 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly ICandleService _candles;
     private readonly ILogger<TradeViewModel> _logger;
 
-    public ChartViewModel( ICandleService candles, ISelectedStockService selected, 
-        ILogger<TradeViewModel> logger) : base(selected)
+    public ChartViewModel(ILogger<TradeViewModel> logger, ICandleService candles,
+        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
@@ -43,7 +43,7 @@ public partial class ChartViewModel : StockAwareViewModel
             // Unsubscribe from previous stream if any
             if (Key is { } prev)
             {
-                ct = Cts?.Token ?? default;
+                ct = CtsStock?.Token ?? default;
                 try { await _candles.UnsubscribeAsync(prev.StockId, prev.Currency, prev.Res, ct); }
                 catch (Exception ex) { _logger.LogWarning(ex, "Unsubscribing previous candle stream failed."); }
             }
@@ -65,7 +65,7 @@ public partial class ChartViewModel : StockAwareViewModel
         finally { IsBusy = false; }
     }
 
-    protected override Task OnPriceUpdatedsync(int? stockId, CurrencyType currency, 
+    protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency, 
         decimal price, DateTime? updatedAt, CancellationToken ct)
     {
         // If the live candle exists in ICandleService, copy it into Series (replace or append).
@@ -101,7 +101,7 @@ public partial class ChartViewModel : StockAwareViewModel
         // Ensure Key has a value before using it
         if (Key is not { } key) return;
 
-        var ct = Cts?.Token ?? CancellationToken.None;
+        var ct = CtsStock?.Token ?? CancellationToken.None;
         _ = Task.Run(async () =>
         {
             try
