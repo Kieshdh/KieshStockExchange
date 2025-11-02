@@ -2,31 +2,30 @@
 using KieshStockExchange.Services;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using System.ComponentModel;
-using System.Reflection.Metadata;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
 public abstract class StockAwareViewModel : BaseViewModel, IDisposable
 {
     #region Fields, Properties and Constructor
-    protected readonly ISelectedStockService _selected;
-    public ISelectedStockService Selected => _selected;
+    // Event handler for selected stock changes
     private readonly PropertyChangedEventHandler Handler;
-    protected CancellationTokenSource? Cts;
+    protected CancellationTokenSource? CtsStock;
+    protected CancellationTokenSource? CtsPrice;
     private bool _disposed;
 
-    protected StockAwareViewModel(ISelectedStockService selected)
+    // Services
+    protected readonly ISelectedStockService _selected;
+    protected readonly INotificationService _notification;
+    public ISelectedStockService Selected => _selected;
+    public INotificationService Notification => _notification;
+
+    protected StockAwareViewModel(ISelectedStockService selected, INotificationService notification)
     {
         _selected = selected ?? throw new ArgumentNullException(nameof(selected));
+        _notification = notification ?? throw new ArgumentNullException(nameof(notification));
         Handler = OnSelectedChanged;
         _selected.PropertyChanged += Handler;
-    }
-
-    protected void InitializeSelection()
-    {
-        // Initialize once with whatever is already selected
-        FireStockChanged();
-        FirePriceChanged();
     }
     #endregion
 
@@ -35,7 +34,7 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
     private void OnSelectedChanged(object? sender, PropertyChangedEventArgs e)
     {
         // Update streams if the stock or currency changed
-        if (e.PropertyName  is nameof(ISelectedStockService.HasSelectedStock)
+        if (e.PropertyName  is nameof(ISelectedStockService.StockId)
                             or nameof(ISelectedStockService.Currency))
             FireStockChanged();
 
@@ -49,8 +48,9 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
     {
         try
         {
-            ResetCts();
-            var ct = Cts!.Token;
+            CtsStock?.Cancel(); CtsStock?.Dispose();
+            CtsStock = new CancellationTokenSource();
+            var ct = CtsStock!.Token;
             var stockId = _selected.StockId;
             var currency = _selected.Currency;
             await OnStockChangedAsync(stockId, currency, ct);
@@ -62,29 +62,31 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
     {
         try
         {
-            ResetCts();
-            var ct = Cts!.Token;
+            CtsPrice?.Cancel(); CtsPrice?.Dispose();
+            CtsPrice = new CancellationTokenSource();
+            var ct = CtsPrice!.Token;
             var stockId = _selected.StockId; var currency = _selected.Currency;
             var price = _selected.CurrentPrice; var updatedAt = _selected.PriceUpdatedAt;
-            await OnPriceUpdatedsync(stockId, currency, price, updatedAt, ct);
+            await OnPriceUpdatedAsync(stockId, currency, price, updatedAt, ct);
         }
         catch (OperationCanceledException) { } // Ignored on cancellation
-    }
-
-    private void ResetCts()
-    {
-        Cts?.Cancel();
-        Cts?.Dispose();
-        Cts = new CancellationTokenSource();
     }
     #endregion
 
     #region Abstract Handlers and disposal
+    // Initializer to be called by derived classes
+    protected void InitializeSelection()
+    {
+        // Initialize once with whatever is already selected
+        FireStockChanged();
+        FirePriceChanged();
+    }
+
     // Abstract handlers for derived classes to implement
     protected abstract Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct);
 
     // Abstract handler for price changes
-    protected abstract Task OnPriceUpdatedsync(int? stockId, CurrencyType currency, 
+    protected abstract Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency, 
         decimal price, DateTime? updatedAt, CancellationToken ct);
 
     protected virtual void Dispose(bool disposing)
@@ -93,8 +95,8 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
         if (disposing)
         {
             _selected.PropertyChanged -= Handler;
-            Cts?.Cancel();
-            Cts?.Dispose();
+            CtsStock?.Cancel(); CtsStock?.Dispose();
+            CtsPrice?.Cancel(); CtsPrice?.Dispose();
         }
         _disposed = true;
     }
