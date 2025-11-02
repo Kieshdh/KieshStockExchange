@@ -16,9 +16,6 @@ public class UserPortfolioService : IUserPortfolioService
     private readonly IAuthService _auth;
     private readonly AsyncLocal<int> _systemScopeDepth = new();
 
-    public PortfolioSnapshot? Snapshot { get; private set; }
-    public event EventHandler<PortfolioSnapshot>? SnapshotChanged;
-
     public UserPortfolioService(IAuthService auth, IDataBaseService db, ILogger<UserPortfolioService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -107,7 +104,9 @@ public class UserPortfolioService : IUserPortfolioService
     public CurrencyType GetBaseCurrency() => BaseCurrency;
     #endregion
 
-    #region Snapshot Accessors & Refresh
+    #region Snapshot Accessors
+    public PortfolioSnapshot? Snapshot { get; private set; }
+
     public IReadOnlyList<Fund> GetFunds() =>
         Snapshot?.Funds ?? Array.Empty<Fund>();
 
@@ -121,6 +120,12 @@ public class UserPortfolioService : IUserPortfolioService
 
     public Position? GetPositionByStockId(int stockId) =>
         Snapshot?.Positions?.FirstOrDefault(p => p.StockId == stockId);
+    #endregion
+
+    #region Refresh and Events
+    public event EventHandler? SnapshotChanged;
+
+    private void NotifyChanged() => SnapshotChanged?.Invoke(this, EventArgs.Empty);
 
     public async Task<bool> RefreshAsync(int? asUserId, CancellationToken ct = default)
     {
@@ -137,7 +142,7 @@ public class UserPortfolioService : IUserPortfolioService
                 positions.ToImmutableList(),
                 BaseCurrency);
 
-            SnapshotChanged?.Invoke(this, Snapshot);
+            NotifyChanged();
             return true;
         }
         catch (Exception ex)

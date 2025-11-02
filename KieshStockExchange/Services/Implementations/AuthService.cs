@@ -15,6 +15,7 @@ public class AuthService : IAuthService
     public User? CurrentUser { get; private set; } = null;
     public bool IsLoggedIn => CurrentUser != null;
     public bool IsAdmin => IsLoggedIn && CurrentUser!.IsAdmin;
+    public int CurrentUserId => IsLoggedIn ? CurrentUser!.UserId : 0;
 
     public AuthService(IDataBaseService db, ILogger<AuthService> logger)
     {

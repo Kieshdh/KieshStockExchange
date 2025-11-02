@@ -885,7 +885,6 @@ public class LocalDBService: IDataBaseService, IDisposable
     }
     #endregion
 
-
     #region Helper Methods
     private async Task InitializeAsync(CancellationToken ct = default)
     {

@@ -122,9 +122,11 @@ public class Transaction : IValidatable
         $"Transaction #{TransactionId} - {Quantity} @ {PriceDisplay} at {TimestampDisplay}";
 
     [Ignore] public string TimestampDisplay => Timestamp.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string TimestampShort => Timestamp.ToString("dd-MM HH:mm");
 
     [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
 
     [Ignore] public string TotalAmountDisplay => CurrencyHelper.Format(TotalAmount, CurrencyType);
+
     #endregion
 }

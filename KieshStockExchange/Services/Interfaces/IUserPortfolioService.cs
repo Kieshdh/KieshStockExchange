@@ -23,7 +23,7 @@ public interface IUserPortfolioService
     /// <summary>
     /// Raised whenever Snapshot is updated (after refresh or mutation).
     /// </summary>
-    event EventHandler<PortfolioSnapshot>? SnapshotChanged;
+    event EventHandler? SnapshotChanged;
 
     /// <summary>
     /// Reloads Funds + Positions from storage into memory.

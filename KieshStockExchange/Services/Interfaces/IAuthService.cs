@@ -13,4 +13,5 @@ public interface IAuthService
     bool IsLoggedIn { get; }
     bool IsAdmin { get; }
     User? CurrentUser { get; }
+    int CurrentUserId { get; }
 }

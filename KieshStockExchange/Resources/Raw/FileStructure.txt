@@ -35,6 +35,7 @@ KieshStockExchange
 --- Candle.cs
 --- Fund.cs
 --- IValidatable.cs
+--- Message.cs
 --- Order.cs
 --- Position.cs
 --- Stock.cs
@@ -54,10 +55,10 @@ KieshStockExchange
 --- Fonts
 --- Images
 --- Raw
------ FileStructure.txt (This file)
------ SQL.txt (SQL schema and seed data)
 ----- AiUserData.xlsx (Sample data for AI users)
 ----- AiUserDataGenerator.py (Python script to generate sample data)
+----- FileStructure.txt (This file)
+----- SQL.txt (SQL schema and seed data)
 --- Splash
 --- Styles
 ----- Colors.xaml
@@ -81,7 +82,7 @@ KieshStockExchange
 ----- SelectedStockService.cs
 ----- StockService.cs
 ----- TrendingService.cs
------ TransactionService.cs (TODO)
+----- TransactionService.cs
 ----- UserOrderService.cs
 ----- UserPortfolioService.cs
 ----- UserSessionService.cs (TODO)
@@ -124,13 +125,13 @@ KieshStockExchange
 ----- PortfolioViewModel.cs
 --- TradeViewModels (TODO)
 ----- ChartViewModel.cs
------ StockHistoryViewModel.cs
 ----- OpenOrderViewModel.cs 
 ----- OrderBookViewModel.cs
 ----- OrderHistoryViewModel.cs
 ----- PlaceOrderViewModel.cs
 ----- StockAwareViewModel.cs (Holds a SelectedStock property for binding)
 ----- TradeViewModel.cs (Main ViewModel for TradePage)
+----- TransactionHistoryViewModel.cs
 ----- UserPositionsViewModel.cs 
 --- UserViewModels
 ----- LoginViewModel.cs
@@ -156,13 +157,13 @@ KieshStockExchange
 ----- PortfolioPage.xaml 
 --- TradePageViews 
 ----- ChartView.xaml (TODO)
------ OpenOrdersView.xaml (TODO)
+----- OpenOrdersView.xaml
 ----- OrderBookView.xaml (TODO)
------ OrderHistoryView.xaml (TODO)
+----- OrderHistoryView.xaml
 ----- PlaceOrderView.xaml (TODO)
------ StockHistoryView.xaml (TODO)
 ----- TradePage.xaml 
------ UserPositionsView.xaml (TODO)
+----- TransactionHistoryView.xaml
+----- UserPositionsView.xaml
 --- UserViews
 ----- LoginPage.xaml
 ----- RegisterPage.xaml
