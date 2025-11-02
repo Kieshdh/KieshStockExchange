@@ -3,7 +3,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.TradePageViews.TradePage"
              x:Name="TradePageRoot" 
-             x:DataType="local:TradeViewModel"
              xmlns:local="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:views="clr-namespace:KieshStockExchange.Views.TradePageViews"
@@ -23,11 +22,10 @@
                    Grid.Row="1" Grid.Column="0">
                 <Grid ColumnDefinitions="Auto, Auto, Auto" ColumnSpacing="10">
                     <!-- Stock Picker -->
-                    <Picker ItemsSource="{Binding Stocks}" Grid.Column="0" 
-                            ItemDisplayBinding="{Binding Symbol}"
+                    <Picker ItemsSource="{Binding Stocks}" Grid.Column="0"
                             SelectedItem="{Binding PickerSelection, Mode=TwoWay}"
-                            Style="{StaticResource StockSelectorPicker}" 
-                            x:DataType="models:Stock" />
+                            ItemDisplayBinding="{Binding Symbol}"
+                            Style="{StaticResource StockSelectorPicker}" />
                     <!-- Stock Price Display -->
                     <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="1" 
                            Style="{StaticResource SelectedStockDisplayLabel}" />
@@ -55,15 +53,21 @@
                 <other:SegmentedTabView HeaderContainerHorizontalOptions="Start"
                         SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
                         UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}" >
-                    <other:SegmentedTabView.Tabs>
-                        <!-- Current Positions Table -->
-                        <other:SegmentedTabItem Header="Positions">
-                            <other:SegmentedTabItem.Content>
-                                <views:UserPositionsView BindingContext="{Binding Source=
-                                    {x:Reference TradePageRoot}, Path=BindingContext.PositionsVm}" />
-                            </other:SegmentedTabItem.Content>
-                        </other:SegmentedTabItem>
+                    <!-- Header right side -->
+                    <other:SegmentedTabView.HeaderRightContent>
+                        <HorizontalStackLayout Spacing="8" Padding="8,0"
+                                   VerticalOptions="Center" >
+                            <Label Text="Show all" VerticalTextAlignment="Center"
+                                   Style="{StaticResource SelectedStockDisplayLabel}" />
+                            <!-- Bind to a bool on the TradePage ViewModel -->
+                            <CheckBox IsChecked="{Binding Source={x:Reference TradePageRoot},
+                                      Path=BindingContext.ShowAll, Mode=TwoWay}"
+                                      VerticalOptions="Center" />
+                        </HorizontalStackLayout>
+                    </other:SegmentedTabView.HeaderRightContent>
 
+                    <!-- Content -->
+                    <other:SegmentedTabView.Tabs>
                         <!-- Open Orders Table-->
                         <other:SegmentedTabItem Header="Open Orders">
                             <other:SegmentedTabItem.Content>
@@ -73,10 +77,26 @@
                         </other:SegmentedTabItem>
 
                         <!-- Order History Table-->
-                        <other:SegmentedTabItem Header="History">
+                        <other:SegmentedTabItem Header="Order History">
                             <other:SegmentedTabItem.Content>
                                 <views:OrderHistoryView BindingContext="{Binding Source=
-                                    {x:Reference TradePageRoot}, Path=BindingContext.HistoryVm}" />
+                                    {x:Reference TradePageRoot}, Path=BindingContext.OrderHistoryVm}" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
+
+                        <!-- Transaction History Table-->
+                        <other:SegmentedTabItem Header="Transaction History">
+                            <other:SegmentedTabItem.Content>
+                                <views:TransactionHistoryView BindingContext="{Binding Source=
+                                    {x:Reference TradePageRoot}, Path=BindingContext.TransactionVm}" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
+                        
+                        <!-- Current Positions Table -->
+                        <other:SegmentedTabItem Header="Positions">
+                            <other:SegmentedTabItem.Content>
+                                <views:UserPositionsView BindingContext="{Binding Source=
+                                    {x:Reference TradePageRoot}, Path=BindingContext.PositionsVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
                     </other:SegmentedTabView.Tabs>

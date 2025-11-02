@@ -3,29 +3,25 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.OtherViews.SegmentedTabView"
              x:Name="Root">
-    <Grid RowDefinitions="Auto,*" ColumnDefinitions="*">
+    <Grid RowDefinitions="Auto,*" ColumnDefinitions="*,Auto">
         <!-- Header strip -->
         <Border x:Name="HeaderPill"
-                Grid.Row="0"
                 Style="{StaticResource SegmentedPillContainerStyle}"
                 HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContainerHorizontalOptions}"
                 VerticalOptions="Start">
 
             <!-- The header buttons are injected here from code-behind -->
-            <HorizontalStackLayout
-                x:Name="HeaderStrip"
-                Spacing="6"
-                Padding="0"
-                HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContentHorizontalOptions}"
-                VerticalOptions="Center" />
+            <HorizontalStackLayout x:Name="HeaderStrip"
+                Spacing="6" Padding="0" VerticalOptions="Center"
+                HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContentHorizontalOptions}" />
         </Border>
 
+        <!-- Right of the Header pill -->
+        <ContentPresenter x:Name="RightSlot" Grid.Row="0" Grid.Column="1"
+                VerticalOptions="Center" HorizontalOptions="End" />
+
         <!-- Content area -->
-        <ContentPresenter
-            x:Name="ContentHost"
-            Grid.Row="1"
-            Padding="0"
-            HorizontalOptions="Fill"
-            VerticalOptions="Fill" />
+        <ContentPresenter x:Name="ContentHost" Grid.Row="1" Grid.ColumnSpan="2" 
+                Padding="0" HorizontalOptions="Fill" VerticalOptions="Fill" />
     </Grid>
 </ContentView>

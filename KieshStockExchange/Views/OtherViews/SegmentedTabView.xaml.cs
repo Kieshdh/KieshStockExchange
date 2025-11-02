@@ -100,6 +100,23 @@ public partial class SegmentedTabView : ContentView
 
     #endregion
 
+    #region Right slot content
+    public static readonly BindableProperty HeaderRightContentProperty =
+    BindableProperty.Create(nameof(HeaderRightContent), typeof(View), typeof(SegmentedTabView),
+        default(View), propertyChanged: (b, o, n) =>
+        {
+            var v = (SegmentedTabView)b;
+            if (v.RightSlot is not null)
+                v.RightSlot.Content = (View?)n;
+        });
+
+    public View? HeaderRightContent
+    {
+        get => (View?)GetValue(HeaderRightContentProperty);
+        set => SetValue(HeaderRightContentProperty, value);
+    }
+    #endregion
+
     public SegmentedTabView()
     {
         InitializeComponent();
@@ -162,7 +179,6 @@ public partial class SegmentedTabView : ContentView
         view.UpdateContent();
     }
     #endregion
-
 
     #region Header and Content management
     void BuildHeaders()
@@ -262,6 +278,10 @@ public partial class SegmentedTabView : ContentView
 
             // Release content to avoid retaining subviews
             ContentHost.Content = null;
+
+            // Clear right slot
+            if (RightSlot is not null) 
+                RightSlot.Content = null;
         }
     }
 
