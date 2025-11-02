@@ -51,6 +51,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IPriceSnapshotService, PriceSnapshotService>();
         builder.Services.AddSingleton<ICandleService, CandleService>();
         builder.Services.AddSingleton<IStockService, StockService>();
+        builder.Services.AddSingleton<ITransactionService, TransactionService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         //builder.Services.AddSingleton(_ => Application.Current!.Dispatcher);
         builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
@@ -69,14 +70,15 @@ public static class MauiProgram
         // - Trade
         builder.Services.AddTransient<TradeViewModel>();
         builder.Services.AddTransient<PlaceOrderViewModel>();
-        builder.Services.AddTransient<HistoryViewModel>();
+        builder.Services.AddTransient<TransactionHistoryViewModel>();
         builder.Services.AddTransient<OpenOrdersViewModel>();
         builder.Services.AddTransient<UserPositionsViewModel>();
         builder.Services.AddTransient<ChartViewModel>();
         builder.Services.AddTransient<OrderBookViewModel>();
+        builder.Services.AddTransient<OrderHistoryViewModel>();
 
 #if DEBUG
-		builder.Logging.AddDebug();
+        builder.Logging.AddDebug();
 #endif
 
         return builder.Build();

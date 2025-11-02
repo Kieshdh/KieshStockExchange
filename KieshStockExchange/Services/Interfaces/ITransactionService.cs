@@ -8,18 +8,18 @@ namespace KieshStockExchange.Services;
 public interface ITransactionService
 {
     /// <summary>All user transactions, newest first.</summary>
-    IReadOnlyList<Transaction> All { get; }
+    IReadOnlyList<Transaction> AllTransactions { get; }
 
     /// <summary>Only buy transactions.</summary>
-    IReadOnlyList<Transaction> Buys { get; }
+    IReadOnlyList<Transaction> BuyTransactions { get; }
 
     /// <summary>Only sell transactions.</summary>
-    IReadOnlyList<Transaction> Sells { get; }
+    IReadOnlyList<Transaction> SellTransactions { get; }
 
     /// <summary>Reloads the cached transaction list from the data source.</summary>
-    Task<IReadOnlyList<Transaction>> RefreshAsync(CancellationToken cancellationToken = default);
+    Task RefreshAsync(int? asUserId, CancellationToken ct = default);
 
-    /// <summary>Returns the current (cached) transaction list.</summary>
-    Task<IReadOnlyList<Transaction>> GetCurrentAsync(CancellationToken cancellationToken = default);
+    /// <summary>  Occurs when the transaction lists are updated </summary>
+    event EventHandler? TransactionsChanged;
 }
 

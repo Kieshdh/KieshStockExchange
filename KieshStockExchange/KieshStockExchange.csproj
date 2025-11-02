@@ -79,8 +79,8 @@
 	  <Compile Update="Views\TradePageViews\OrderHistoryView.xaml.cs">
 	    <DependentUpon>OrderHistoryView.xaml</DependentUpon>
 	  </Compile>
-	  <Compile Update="Views\TradePageViews\StockHistoryView.xaml.cs">
-	    <DependentUpon>StockHistoryView.xaml</DependentUpon>
+	  <Compile Update="Views\TradePageViews\TransactionHistoryView.xaml.cs">
+	    <DependentUpon>TransactionHistoryView.xaml</DependentUpon>
 	  </Compile>
 	  <Compile Update="Views\TradePageViews\OpenOrdersView.xaml.cs">
 	    <DependentUpon>OpenOrdersView.xaml</DependentUpon>
@@ -139,7 +139,7 @@
 	  <MauiXaml Update="Views\TradePageViews\OrderHistoryView.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>
-	  <MauiXaml Update="Views\TradePageViews\StockHistoryView.xaml">
+	  <MauiXaml Update="Views\TradePageViews\TransactionHistoryView.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>
 	  <MauiXaml Update="Views\TradePageViews\OpenOrdersView.xaml">
