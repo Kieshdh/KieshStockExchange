@@ -4,6 +4,7 @@ using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using System.Net.NetworkInformation;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 
@@ -161,6 +162,8 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         if (tx is not null && tx.Price > 0m)
             return tx.Price;
 
+        _logger.LogDebug("No live price found for stock {StockId} in {Currency}", stockId, currency);
+
         // Fallback to latest StockPrice from DB
         var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
         if (sp is not null && sp.Price > 0m)
@@ -286,21 +289,15 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         var history = await GetHistoricalTicksAsync(stockId, currency, ct);
         if (history.Count == 0)
         {
-            var latest = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
-            if (latest is null)
-            {
-                _logger.LogWarning("No fallback price found for stock {StockId} in {Currency}", stockId, currency);
-                return;
-            }
+            // Get a fallback price if no history
+            (decimal price, DateTime time) = await FallbackNoHistoricalTicks(stockId, currency, quote, ring, ct);
 
-            var time = TimeHelper.EnsureUtc(latest.Timestamp);
+            // Add to ring and update quote
             lock (GetRingGate(key))
-                ring.Add(latest.Price, time);
-
+                ring.Add(price, time);
             _dispatcher.Dispatch(() =>
             {
-                // Snapshot a flat OHLC at latest price, zero volume
-                quote.ApplySnapshot(latest.Price, 0, latest.Price, latest.Price, latest.Price, time);
+                quote.ApplySnapshot(price, 0, price, price, price, time);
                 ScheduleQuoteUpdated(stockId, currency);
             });
             return;
@@ -460,6 +457,33 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
                 timer.Stop();
             timer.Start();
         });
+    }
+
+    private async Task<(decimal, DateTime)> FallbackNoHistoricalTicks(int stockId, CurrencyType currency, LiveQuote quote, RingBuffer ring, CancellationToken ct)
+    { 
+        // Fallback to latest transaction price
+        var tx = await _db.GetLatestTransactionByStockId(stockId, currency, ct);
+        if (tx is not null)
+            return (tx.Price, TimeHelper.EnsureUtc(tx.Timestamp));
+        
+        // Fallback to latest stock price
+        var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
+        if (sp is not null)
+            return (sp.Price, TimeHelper.EnsureUtc(sp.Timestamp));
+
+        _logger.LogWarning("No transactions or stock prices found for stock {StockId} in {Currency}", stockId, currency);
+
+        // Fallback to USD latest price converted
+        if (currency != CurrencyType.USD)
+        {
+            var usdPrice = await GetLastPriceAsync(stockId, CurrencyType.USD, ct);
+            if (usdPrice > 0m)
+                return (CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency), TimeHelper.NowUtc());
+        }
+
+        // Final fallback to default seed price
+        _logger.LogWarning("No price data found for stock {StockId} in {Currency}, using default seed price.", stockId, currency);
+        return (100m, TimeHelper.NowUtc());
     }
     #endregion
 
