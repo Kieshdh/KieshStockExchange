@@ -1,9 +1,54 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="KieshStockExchange.Views.TradePageViews.UserPositionsView">
-    <Grid HeightRequest="150">
-        <Label Text="Current Positions Table" 
-           TextColor="White" FontSize="Medium" />
-    </Grid>
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
+             x:Class="KieshStockExchange.Views.TradePageViews.UserPositionsView"
+             x:Name="PositionRoot">
+    <VerticalStackLayout Spacing="8" Padding="12,8">
+
+        <!-- Table headers -->
+        <Grid ColumnDefinitions="*,*,*,*,*,*,*" Style="{StaticResource TradeTableHeaderGrid}" >
+            <Label Grid.Column="0" Text="Symbol"    Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="1" Text="Price"     Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="2" Text="Amount"    Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="3" Text="Reserved"  Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="4" Text="Available" Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="5" Text="Total"     Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="6" Text="Action"    Style="{StaticResource TradeTableHeaderLabel}" />
+        </Grid>
+
+        <!-- Rows -->
+        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}" >
+            <CollectionView ItemsSource="{Binding CurrentView}"
+                            SelectionMode="None" Margin="0,4,0,0">
+                <!-- Empty view -->
+                <CollectionView.EmptyView>
+                    <StackLayout Padding="12" Spacing="4">
+                        <Label Text="No open positions" Opacity="0.7" />
+                    </StackLayout>
+                </CollectionView.EmptyView>
+
+                <!-- Items -->
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PositionRow">
+                        <Grid ColumnDefinitions="*,*,*,*,*,*,*" Padding="8,6"
+                              BackgroundColor="{StaticResource TableRowBackground}">
+                            <Label Grid.Column="0" Text="{Binding Symbol}" FontAttributes="Bold"/>
+                            <Label Grid.Column="1" Text="{Binding Price}" />
+                            <Label Grid.Column="2" Text="{Binding Qty}" />
+                            <Label Grid.Column="3" Text="{Binding Reserved}" />
+                            <Label Grid.Column="4" Text="{Binding Available}" />
+                            <Label Grid.Column="5" Text="{Binding Total}"/>
+
+                            <Button Grid.Column="6" Text="Trade"
+                                    Command="{Binding Source={x:Reference PositionRoot}, Path=BindingContext.TradeCommand}"
+                                    CommandParameter="{Binding .}"
+                                    Style="{StaticResource TableActionButton}" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </VerticalStackLayout>
 </ContentView>

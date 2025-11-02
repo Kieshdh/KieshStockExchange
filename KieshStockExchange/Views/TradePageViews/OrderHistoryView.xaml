@@ -1,11 +1,68 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="KieshStockExchange.Views.TradePageViews.OrderHistoryView">
-    <VerticalStackLayout>
-        <Label 
-            Text="Welcome to .NET MAUI!"
-            VerticalOptions="Center" 
-            HorizontalOptions="Center" />
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
+             x:Class="KieshStockExchange.Views.TradePageViews.OrderHistoryView"
+             x:Name="OrderHistoryRoot">
+    <VerticalStackLayout Spacing="8" Padding="12,8">
+
+        <!-- Table headers -->
+        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*" Style="{StaticResource TradeTableHeaderGrid}" >
+            <Label Grid.Column="0" Text="Symbol"    Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="1" Text="Created"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="2" Text="Closed"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="3" Text="Side"      Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="4" Text="Type"      Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="5" Text="Qty"       Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="6" Text="Price"     Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="7" Text="Total"     Style="{StaticResource TradeTableHeaderLabel}" />
+        </Grid>
+
+        <!-- Rows -->
+        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}" >
+            <CollectionView ItemsSource="{Binding CurrentView}"
+                        SelectionMode="None" Margin="0,4,0,0">
+                <!-- Empty view -->
+                <CollectionView.EmptyView>
+                    <StackLayout Padding="12" Spacing="4">
+                        <Label Text="No order history" Opacity="0.7" />
+                    </StackLayout>
+                </CollectionView.EmptyView>
+
+                <!-- Items -->
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ClosedOrderRow">
+                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*" Padding="8,6"
+                          BackgroundColor="{StaticResource TableRowBackground}">
+                            <Label Grid.Column="0" Text="{Binding Symbol}" FontAttributes="Bold"/>
+                            <Label Grid.Column="1" Text="{Binding Opened}"/>
+                            <Label Grid.Column="2" Text="{Binding Closed}"/>
+
+                            <!-- Side (BUY green / SELL red) -->
+                            <Label Grid.Column="3" Text="{Binding Side}">
+                                <Label.Triggers>
+                                    <DataTrigger TargetType="Label"
+                                         Binding="{Binding Order.IsBuyOrder}"
+                                         Value="True">
+                                        <Setter Property="TextColor" Value="{StaticResource BuyGreen}"/>
+                                    </DataTrigger>
+                                    <DataTrigger TargetType="Label"
+                                         Binding="{Binding Order.IsSellOrder}"
+                                         Value="True">
+                                        <Setter Property="TextColor" Value="{StaticResource SellRed}"/>
+                                    </DataTrigger>
+                                </Label.Triggers>
+                            </Label>
+
+                            <Label Grid.Column="4" Text="{Binding Type}" />
+                            <Label Grid.Column="5" Text="{Binding Qty}"/>
+                            <Label Grid.Column="6" Text="{Binding Price}"/>
+                            <Label Grid.Column="7" Text="{Binding Total}"/>
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
     </VerticalStackLayout>
 </ContentView>

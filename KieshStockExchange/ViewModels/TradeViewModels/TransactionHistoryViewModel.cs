@@ -3,19 +3,19 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services;
+using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Controls;
 using System.Collections.ObjectModel;
-
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
-public partial class OrderHistoryViewModel : StockAwareViewModel
+public partial class TransactionHistoryViewModel : StockAwareViewModel
 {
     #region Properties
-    [ObservableProperty] private ObservableCollection<ClosedOrderRow> _currentView = new();
+    [ObservableProperty] private ObservableCollection<TransactionRow> _currentView = new();
 
     private bool ShowAll = false;
-
     public void SetShowAll(bool show)
     {
         if (ShowAll == show) return;
@@ -25,22 +25,22 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
     #endregion
 
     #region Services and Constructor
-    private readonly ILogger<OrderHistoryViewModel> _logger;
-    private readonly IUserOrderService _orders;
     private readonly IStockService _stocks;
+    private readonly ILogger<TransactionHistoryViewModel> _logger;
+    private readonly ITransactionService _tx;
     private readonly IAuthService _auth;
 
-    public OrderHistoryViewModel(ILogger<OrderHistoryViewModel> logger, 
-        IUserOrderService orders, IStockService stocks, IAuthService auth,
+    public TransactionHistoryViewModel(ILogger<TransactionHistoryViewModel> logger, 
+        IStockService stocks, ITransactionService tx, IAuthService auth,
         ISelectedStockService selected, INotificationService notification) : base(selected, notification)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _tx     = tx     ?? throw new ArgumentNullException(nameof(tx));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _auth   = auth   ?? throw new ArgumentNullException(nameof(auth));
 
         // Subscribe to order changes
-        _orders.OrdersChanged += OnOrdersChanged;
+        _tx.TransactionsChanged += OnTransactionsChanged;
 
         // Initial load
         InitializeSelection();
@@ -61,7 +61,7 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-            _orders.OrdersChanged -= OnOrdersChanged;
+            _tx.TransactionsChanged -= OnTransactionsChanged;
         base.Dispose(disposing);
     }
     #endregion
@@ -74,22 +74,22 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
         IsBusy = true;
         try
         {
-            await _orders.RefreshOrdersAsync(_auth.CurrentUserId);
+            await _tx.RefreshAsync(_auth.CurrentUserId);
             UpdateFromCache();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error refreshing order history.");
+            _logger.LogError(ex, "Error refreshing transaction history.");
         }
         finally { IsBusy = false; }
     }
     #endregion
 
-    #region Private methods
-    private void OnOrdersChanged(object? s, EventArgs e)
+    #region Private Methods
+    private void OnTransactionsChanged(object? s, EventArgs e)
     {
         try { MainThread.BeginInvokeOnMainThread(() => UpdateFromCache()); }
-        catch (Exception ex) { _logger.LogError(ex, "Error updating order history."); }
+        catch (Exception ex) { _logger.LogError(ex, "Error updating transaction history"); }
     }
 
     private void UpdateFromCache(int? stockId = null, CurrencyType? currency = null)
@@ -108,54 +108,57 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
 
     private void UpdateFromCache(int stockId, CurrencyType currency)
     {
-        var snapshot = _orders.UserOpenOrders.ToList();
-        var rows = new List<ClosedOrderRow>(capacity: snapshot.Count);
+        var snapshot = _tx.AllTransactions.ToList();
+        var rows = new List<TransactionRow>(capacity: snapshot.Count);
 
         if (stockId > 0)
         {
             // Get all orders for the current stock and currency
-            var current = snapshot.Where(o => o.StockId == stockId && o.CurrencyType == currency);
+            var current = snapshot.Where(t => t.StockId == stockId && t.CurrencyType == currency);
 
-            // Create OpenOrderRow objects and add to list
-            foreach (var order in current.OrderByDescending(o => o.UpdatedAt))
-                if (order.StockId > 0) rows.Add(CreateClosedOrderRow(order));
+            // Create TransactionRow objects and add to list
+            foreach (var tx in current.OrderByDescending(t => t.Timestamp))
+                if (tx.StockId > 0) rows.Add(CreateTransactionRow(tx));
         }
 
-        // If showing all, add other orders
+        // If showing all, add other transactions
         if (ShowAll)
-            foreach (var o in snapshot.OrderByDescending(o => o.UpdatedAt))
+            foreach (var tx in snapshot.OrderByDescending(t => t.Timestamp))
             {
-                if (o.StockId <= 0) continue;
-                if (o.StockId == stockId && o.CurrencyType == currency) continue;
-                rows.Add(CreateClosedOrderRow(o));
+                if (tx.StockId <= 0) continue;
+                if (tx.StockId == stockId && tx.CurrencyType == currency) continue;
+                rows.Add(CreateTransactionRow(tx));
             }
 
         // Update the observable collection
-        CurrentView = new ObservableCollection<ClosedOrderRow>(rows);
+        CurrentView = new ObservableCollection<TransactionRow>(rows);
     }
 
-    private ClosedOrderRow CreateClosedOrderRow(Order order)
+    private TransactionRow CreateTransactionRow(Transaction tx)
     {
-        if (!_stocks.TryGetSymbol(order.StockId, out string symbol))
+        if (!_stocks.TryGetSymbol(tx.StockId, out string symbol))
             symbol = "-";
-        return new ClosedOrderRow
+        return new TransactionRow
         {
-            Order = order,
-            Symbol = symbol
+            Tx = tx,
+            Symbol = symbol,
+            UserId = _auth.CurrentUserId,
         };
     }
     #endregion
 }
 
-public sealed class ClosedOrderRow
+    public sealed class TransactionRow
 {
-    public required Order Order { get; init; }
+    public required Transaction Tx { get; init; }
     public required string Symbol { get; init; }
-    public string Opened => Order.CreatedDateShort;
-    public string Closed => Order.UpdatedDateShort;
-    public string Side => Order.SideDisplay;
-    public string Type => Order.TypeDisplay;
-    public string Qty => Order.AmountFilledDisplay;
-    public string Price => Order.PriceDisplay;
-    public string Total => Order.TotalAmountDisplay;
+    public required int UserId { get; init; }
+    public bool IsBuy => Tx.BuyerId == UserId;
+    public bool IsSell => Tx.SellerId == UserId;
+    public string When => Tx.TimestampShort;
+    public string Side => IsBuy ? "BUY" : "SELL";
+    public string Type => "MARKET"; // Will implement order types later
+    public string Qty => Tx.Quantity.ToString();
+    public string Price => Tx.PriceDisplay;
+    public string Total => Tx.TotalAmountDisplay;
 }
