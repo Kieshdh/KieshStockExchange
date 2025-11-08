@@ -8,7 +8,7 @@
 
         <!-- Labels -->
         <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" 
-              Style="{StaticResource TableHeaderGrid}" >
+              Style="{StaticResource TableHeaderGrid}"  RowDefinitions="Auto,Auto" >
             <Label Text="ID" Grid.Column="0" 
                    Style="{StaticResource TableHeaderLabel}"/>
             <Label Text="USD" Grid.Column="1" 
@@ -29,13 +29,12 @@
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Edit" Grid.Column="9" 
                    Style="{StaticResource TableHeaderLabel}" />
-        </Grid>
 
-        <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" Grid.Row="1"
-              Style="{StaticResource TableHeaderGrid}" x:DataType="vm:FundTableViewModel">
-            <Entry Grid.Column="0" Text="{Binding IdFilter, Mode=TwoWay}" 
+
+            <!-- Filters and Sorting -->
+            <Entry Grid.Row="1" Grid.Column="0" Text="{Binding IdFilter, Mode=TwoWay}" 
                    Keyboard="Numeric" Placeholder="Type ID…" />
-            <HorizontalStackLayout Grid.Column="1" Style="{StaticResource SortingStackLayout}">
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="1" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Usd}" />
@@ -43,7 +42,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Usd}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Column="2" Style="{StaticResource SortingStackLayout}">
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="2" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Reserved}" />
@@ -51,7 +50,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Reserved}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Column="3" Style="{StaticResource SortingStackLayout}">
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="3" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Eur}" />
@@ -59,7 +58,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Eur}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Column="4" Style="{StaticResource SortingStackLayout}">
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="4" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Gbp}" />
@@ -67,7 +66,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Gbp}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Column="5" Style="{StaticResource SortingStackLayout}">
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="5" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Jpy}" />
@@ -75,7 +74,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Jpy}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Column="6" Style="{StaticResource SortingStackLayout}">
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="6" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Chf}" />
@@ -83,7 +82,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Chf}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Column="7" Style="{StaticResource SortingStackLayout}">
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="7" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Aud}" />
@@ -91,7 +90,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Aud}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Column="8" Style="{StaticResource SortingStackLayout}">
+            <HorizontalStackLayout Grid.Row="1" Grid.Column="8" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.TotalValue}" />

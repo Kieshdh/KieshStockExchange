@@ -19,7 +19,7 @@
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Birthdate" Grid.Column="4" 
                    Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Registration Date" Grid.Column="5" 
+            <Label Text="Registration" Grid.Column="5" 
                    Style="{StaticResource TableHeaderLabel}" />
             <Label Text="Admin" Grid.Column="6" 
                    Style="{StaticResource TableHeaderLabel}" />
