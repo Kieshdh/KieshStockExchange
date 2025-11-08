@@ -116,7 +116,7 @@ public class User : IValidatable
     #region String Representations
     public override string ToString() => $"User #{UserId}: {Username} ({FullName})";
 
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy");
-    [Ignore] public string BirthDateDisplay =>  BirthDate?.ToString("dd/MM/yyyy") ?? "N/A";
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy");
+    [Ignore] public string BirthDateDisplay =>  BirthDate?.ToLocalTime().ToString("dd/MM/yyyy") ?? "N/A";
     #endregion
 }

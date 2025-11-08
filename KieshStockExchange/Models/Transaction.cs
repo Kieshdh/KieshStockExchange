@@ -121,8 +121,8 @@ public class Transaction : IValidatable
     public override string ToString() =>
         $"Transaction #{TransactionId} - {Quantity} @ {PriceDisplay} at {TimestampDisplay}";
 
-    [Ignore] public string TimestampDisplay => Timestamp.ToString("dd/MM/yyyy HH:mm:ss");
-    [Ignore] public string TimestampShort => Timestamp.ToString("dd-MM HH:mm");
+    [Ignore] public string TimestampDisplay => Timestamp.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string TimestampShort => Timestamp.ToLocalTime().ToString("dd-MM HH:mm");
 
     [Ignore] public string PriceDisplay => CurrencyHelper.Format(Price, CurrencyType);
 

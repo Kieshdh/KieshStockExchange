@@ -89,8 +89,8 @@ public class Fund : IValidatable
     [Ignore] public string ReservedBalanceDisplay => PriceString(ReservedBalance);
     [Ignore] public string AvailableBalanceDisplay => PriceString(AvailableBalance);
 
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
-    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss");
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("MM-dd HH:mm");
+    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm");
     #endregion
 
     #region Helper Methods

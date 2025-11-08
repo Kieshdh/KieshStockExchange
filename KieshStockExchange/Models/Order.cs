@@ -189,10 +189,10 @@ public class Order : IValidatable
     [Ignore] public string StatusDisplay => Status.ToUpperInvariant();
     [Ignore]
     public string SlippageDisplay => SlippagePercent.HasValue ? $"±{SlippagePercent.Value:0.##}%" : "—";
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
-    [Ignore] public string CreatedDateShort => CreatedAt.ToString("dd-MM HH:mm");
-    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss");
-    [Ignore] public string UpdatedDateShort => UpdatedAt.ToString("dd-MM HH:mm");
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string CreatedDateShort => CreatedAt.ToLocalTime().ToString("dd-MM HH:mm");
+    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string UpdatedDateShort => UpdatedAt.ToLocalTime().ToString("dd-MM HH:mm");
     #endregion
 
     #region Helper Variables

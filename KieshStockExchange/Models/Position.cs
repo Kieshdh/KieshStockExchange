@@ -75,8 +75,8 @@ public class Position : IValidatable
     public override string ToString() =>
         $"Position #{PositionId}: User #{UserId} - Stock {StockId} - Qty {Quantity} (Reserved {ReservedQuantity})";
 
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
-    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
+    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
     #endregion
 
     #region Helper Methods

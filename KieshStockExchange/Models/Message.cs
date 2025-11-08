@@ -101,8 +101,8 @@ public class Message : IValidatable
     #region String Representations
     public override string ToString() => $"Message #{MessageId} {Title}: {Content}";
 
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToString("dd/MM/yyyy HH:mm:ss");
-    [Ignore] public string ReadAtDisplay => ReadAt.HasValue ? ReadAt.Value.ToString("dd/MM/yyyy HH:mm:ss") : "Unread";
+    [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("MM-dd HH:mm");
+    [Ignore] public string ReadAtDisplay => ReadAt.HasValue ? ReadAt.Value.ToLocalTime().ToString("MM-dd HH:mm") : "Unread";
     #endregion
 
     #region Helpers

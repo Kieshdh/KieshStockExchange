@@ -197,7 +197,8 @@ public class Candle : IValidatable
     [Ignore] public string Summary =>
         $"{ToString()} O:{OpenDisplay} H:{HighDisplay} L:{LowDisplay} C:{CloseDisplay} V:{Volume} T:{TradeCount}";
 
-    [Ignore] public string OpenTimeDisplay => OpenTime.ToString("yyyy-MM-dd HH:mm");
+    [Ignore] public string OpenTimeDisplay => OpenTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    [Ignore] public string CloseTimeDisplay => CloseTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
     [Ignore] public string OpenDisplay => CurrencyHelper.Format(Open, CurrencyType);
     [Ignore] public string HighDisplay => CurrencyHelper.Format(High, CurrencyType);
