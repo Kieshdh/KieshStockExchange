@@ -43,7 +43,7 @@ public interface ICandleService
 
     /// <summary> Get historical candles from the database for the given stock, currency, resolution and time range. </summary>
     Task<IReadOnlyList<Candle>> GetHistoricalCandlesAsync(int stockId, CurrencyType currency, 
-        CandleResolution resolution, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default);
+        CandleResolution resolution, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default, bool fillGaps = false);
     #endregion
 
     #region Candle Maintenance

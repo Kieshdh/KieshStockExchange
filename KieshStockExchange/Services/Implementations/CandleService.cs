@@ -2,6 +2,7 @@
 using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
@@ -156,7 +157,7 @@ public sealed class CandleService : ICandleService, IDisposable
 
     public async Task<IReadOnlyList<Candle>> GetHistoricalCandlesAsync(
         int stockId, CurrencyType currency, CandleResolution resolution,
-        DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+        DateTime fromUtc, DateTime toUtc, CancellationToken ct = default, bool fillGaps = false)
     {
         CheckKey(stockId, currency, resolution);
 
@@ -165,14 +166,52 @@ public sealed class CandleService : ICandleService, IDisposable
         var fromAligned = TimeHelper.FloorToBucketUtc(fromUtc, span);
         var toAligned = TimeHelper.NextBucketBoundaryUtc(toUtc, span);
 
+        // Load from DB and sort by time
         var list = await _db.GetCandlesByStockIdAndTimeRange(
             stockId, currency, span, fromAligned, toAligned, ct);
+        list.Sort(static (a, b) => a.OpenTime.CompareTo(b.OpenTime));
 
-        return list.OrderBy(c => c.OpenTime).ToList();
+        if (!fillGaps) return list;
+
+        // Fill gaps with flat candles
+        var result = new List<Candle>();
+        var i = 0; var t = fromAligned;
+
+        // Get the latest price at or before 'fromAligned' to use as fallback
+        decimal lastPrice = await GetPriceAtOrBeforeAsync(stockId, currency, fromAligned, ct);
+
+        while (t < toAligned)
+        {
+            if (i < list.Count && list[i].OpenTime == t)
+            {
+                // Use the stored candle
+                var c = list[i++]; // Advance index
+                result.Add(c);
+                lastPrice = c.Close; // Update last known price
+            }
+            else // Gap detected
+            {
+                // Create a flat candle at the last known price
+                var candle = NewCandle(stockId, currency, t, span, lastPrice);
+
+                // Add random percentage to the last price to simulate some movement
+                lastPrice *= 1m + (decimal)(Random.Shared.NextDouble() * 2 - 1) * 0.002m;
+                candle.Close = lastPrice;
+                candle.Low = Math.Min(candle.Open, candle.Close) * (1m - (decimal)(Random.Shared.NextDouble()) * 0.001m);
+                candle.High = Math.Max(candle.Open, candle.Close) * (1m + (decimal)(Random.Shared.NextDouble()) * 0.001m);
+
+                result.Add(candle);
+            }
+
+            // Advance to next bucket
+            t = t.Add(span);
+        }
+
+        return result;
     }
     #endregion
 
-    #region Fix historical candles
+        #region Fix historical candles
     public async Task<CandleFixReport> FixCandlesAsync(
         int stockId, CurrencyType currency, CandleResolution resolution,
         DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
@@ -344,6 +383,29 @@ public sealed class CandleService : ICandleService, IDisposable
             catch (Exception ex) { _logger.LogError(ex, "Error in candle flush loop."); }
         }
             
+    }
+
+    private async Task<decimal> GetPriceAtOrBeforeAsync(int stockId, CurrencyType currency, 
+        DateTime time, CancellationToken ct)
+    {
+        // Try latest price from transactions
+        var tx = await _db.GetLatestTransactionBeforeTime(stockId, currency, time, ct);
+        if (tx is not null && tx.Price > 0m) return tx.Price;
+
+        // Fall back to latest stock price
+        var sp = await _db.GetLatestStockPriceBeforeTime(stockId, currency, time, ct);
+        if (sp is not null && sp.Price > 0m) return sp.Price;
+
+
+        // Fall back to the USD latest price converted
+        if (currency != CurrencyType.USD)
+        {
+            var usdPrice = await GetPriceAtOrBeforeAsync(stockId, CurrencyType.USD, time, ct);
+            if (usdPrice > 0m) return CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency);
+        }
+
+        // Final fallback to default seed price
+        return 100m; // Default seed price
     }
     #endregion
 
