@@ -4,7 +4,7 @@
              xmlns:views="clr-namespace:KieshStockExchange.Views.OtherViews"
              x:Class="KieshStockExchange.Views.TradePageViews.PlaceOrderView">
 
-    <VerticalStackLayout Spacing="15" Padding="15">
+    <VerticalStackLayout Spacing="15" Padding="15" WidthRequest="300">
 
         <!-- BUY | SELL Segmented -->
         <views:SegmentedTabView
@@ -36,21 +36,23 @@
 
         <!-- MARKET pane -->
         <Grid x:Name="MarketPane" IsVisible="{Binding IsMarketSelected}"
-              RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,*" Margin="0,8,0,0">
+              RowDefinitions="Auto,Auto" Margin="0,15,0,0">
             <!-- Slippage -->
-            <Label Grid.Row="0" Grid.ColumnSpan="2" Text="Slippage guard" Style="{StaticResource StockPlacerLabel}" />
-            <Grid Grid.Row="1" Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,8">
-                <Label Grid.Column="0" Text="±" VerticalOptions="Center" />
-                <Slider Grid.Column="1" Minimum="0" Maximum="0.05"
+            <Label Grid.Row="0" Text="Slippage guard" Style="{StaticResource StockPlacerLabel}" />
+            <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+                <Label Grid.Column="0" Text="None" VerticalOptions="Center" />
+                <CheckBox Grid.Column="1" IsChecked="{Binding NoSlippageGuard}" />
+                <Label Grid.Column="2" Text="±" VerticalOptions="Center" />
+                <Slider Grid.Column="3" Minimum="0" Maximum="0.05"
                         Value="{Binding SlippagePrc, Mode=TwoWay}" VerticalOptions="Center" />
-                <Label Grid.Column="2" VerticalOptions="Center"
+                <Label Grid.Column="4" VerticalOptions="Center"
                        Text="{Binding SlippagePrc, StringFormat='{}{0:P2}'}" />
             </Grid>
         </Grid>
 
         <!-- LIMIT pane -->
         <Grid x:Name="LimitPane" IsVisible="{Binding IsLimitSelected}"
-               ColumnDefinitions="Auto,*" Margin="0,8,0,0">
+               ColumnDefinitions="Auto,*" Margin="0,15,0,0" ColumnSpacing="8">
             <!-- Limit Price entry -->
             <Label Grid.Column="0" Text="Limit price" Style="{StaticResource StockPlacerLabel}" />
             <Entry Grid.Column="1" Style="{StaticResource StockPlacerEntry}"
@@ -58,10 +60,10 @@
         </Grid>
 
         <!-- Quantity, TotalValue and Submit -->
-        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*" Margin="0,12,0,0">
+        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*" Margin="0,15,0,0" RowSpacing="12" ColumnSpacing="8">
             <!-- Quantity label-->
             <Label Grid.Row="0" Grid.Column="0" Text="Quantity" Style="{StaticResource StockPlacerLabel}" />
-            <Entry Grid.Row="0" Grid.Column="1" Keyboard="Numeric" Text="{Binding Quantity, Mode=TwoWay}" />
+            <Entry Grid.Row="0" Grid.Column="1" Keyboard="Numeric" Text="{Binding QuantityString, Mode=TwoWay}" />
             
             <!-- Total ordervalue label-->
             <Label Grid.Row="1" Grid.Column="0" Text="Total" Style="{StaticResource StockPlacerLabel}" />

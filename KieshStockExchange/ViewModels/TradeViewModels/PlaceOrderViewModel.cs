@@ -17,8 +17,9 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     [ObservableProperty] private int _selectedSideIndex = 0; // 0 = Buy, 1 = Sell
     [ObservableProperty] private int _selectedTypeIndex = 0; // 0 = Market, 1 = Limit
 
-    [ObservableProperty] private int _quantity = 0;
+    [ObservableProperty] private string _quantityString = "0";
     [ObservableProperty] private string _limitPriceString = String.Empty;
+    [ObservableProperty] private bool _noSlippageGuard = false; // If true, market orders have no slippage protection
     [ObservableProperty] private decimal _slippagePrc = 0.005m; // 0.5% default
     [ObservableProperty] private string _assetText = "Available Funds"; // Buy="Available Funds", Sell="Available Shares"
     [ObservableProperty] private string _availableAssetsText = "-"; // Based on side and portfolio
@@ -26,11 +27,29 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
 
     [ObservableProperty] private string _submitButtonText = "Buy"; // Buy="Buy {Symbol}", Sell="Sell {Symbol}"
     [ObservableProperty] private Color _submitButtonColor = Colors.ForestGreen; // Buy=ForestGreen, Sell=OrangeRed
-
-    private decimal LimitPrice => ParsingHelper.TryToDecimal(_limitPriceString, out var val) ? val : 0m;
     #endregion
 
-    #region PropertyChanged events
+    #region Helpers properties
+    public bool IsMarketSelected => SelectedTypeIndex == 0;
+    public bool IsLimitSelected => SelectedTypeIndex == 1;
+    public bool IsBuySelected => SelectedSideIndex == 0;
+    public bool IsSellSelected => SelectedSideIndex == 1;
+    private decimal PriceForOrder => IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
+    private decimal LimitPrice => ParsingHelper.TryToDecimal(LimitPriceString, out var val) ? val : 0m;
+    private int Quantity
+    {
+        get
+        {
+            if (ParsingHelper.TryToInt(QuantityString, out var val) && val > 0)
+                return val;
+            return 0;
+        }
+        set => QuantityString = value.ToString();
+    }
+
+    #endregion
+
+            #region PropertyChanged events
     partial void OnSelectedSideIndexChanged(int value) 
     { 
         RecomputeUi(); 
@@ -43,9 +62,10 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         OnPropertyChanged(nameof(IsMarketSelected));
         OnPropertyChanged(nameof(IsLimitSelected));
     }
-    partial void OnQuantityChanged(int value) { RecomputeUi(); }
+    partial void OnQuantityStringChanged(string value) { RecomputeUi(); }
     partial void OnLimitPriceStringChanged(string value) { RecomputeUi(); }
-    partial void OnSlippagePrcChanged(decimal value) { RecomputeUi(); }
+    partial void OnNoSlippageGuardChanged(bool value) { RecomputeUi(); if (value) SlippagePrc = 0m; }
+    partial void OnSlippagePrcChanged(decimal value) { if (value > 0m) NoSlippageGuard = false; }
     #endregion
 
     #region Assets display properties
@@ -160,8 +180,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     [RelayCommand] private async Task PlaceOrderAsync()
     {
         if (IsBusy) return;
-
         IsBusy = true;
+
         try
         {
             if (!ValidateInputs())
@@ -177,17 +197,30 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             OrderResult result;
             if (IsMarketSelected)
             {
-                _logger.LogInformation("Placing {Side} MARKET order for {Quantity} shares of {Symbol} " +
-                    "at computed price {Price} {Currency} (slippage {Slippage:P2})",
-                    IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, PriceForOrder, cur, SlippagePrc);
-                
-                result = IsBuySelected
-                    ? await _orders.PlaceSlippageMarketBuyAsync(id, Quantity, PriceForOrder, SlippagePrc, cur)
-                    : await _orders.PlaceSlippageMarketSellAsync(id, Quantity, PriceForOrder, SlippagePrc, cur);
+                if (NoSlippageGuard)
+                {
+                    // True Market order with no slippage protection
+                    _logger.LogInformation("Placing {Side} TRUE MARKET (no guard) order for {Quantity} of {Symbol}.",
+                    IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol);
+
+                    result = IsBuySelected
+                        ? await _orders.PlaceTrueMarketBuyAsync(id, Quantity, cur, ct: ct)
+                        : await _orders.PlaceTrueMarketSellAsync(id, Quantity, cur, ct: ct);
+                }
+                else
+                {
+                    // Slippage Market order with slippage protection and anchor price
+                    _logger.LogInformation("Placing {Side} MARKET± order for {Quantity} of {Symbol} anchor {Price} {Currency} (slippage {Slippage:P2}).",
+                        IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, PriceForOrder, cur, SlippagePrc);
+
+                    result = IsBuySelected
+                        ? await _orders.PlaceSlippageMarketBuyAsync(id, Quantity, PriceForOrder, SlippagePrc, cur, ct: ct)
+                        : await _orders.PlaceSlippageMarketSellAsync(id, Quantity, PriceForOrder, SlippagePrc, cur, ct: ct);
+                }
             }
             else
             {
-                _logger.LogInformation("Placing {Side} LIMIT order for {Quantity} shares of {Symbol} at limit price {Price} {Currency}",
+                _logger.LogInformation("Placing {Side} LIMIT order for {Quantity} shares of {Symbol} at limit price {Price} {Currency}.",
                     IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, LimitPrice, cur);
                 
                 result = IsBuySelected
@@ -204,15 +237,17 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                 result.NewOrderId, result.RemainingQuantity, result.TotalFilledQuantity, result.AverageFillPrice);
             else
                 _logger.LogWarning("Order failed: {Message}", result.ErrorMessage);
-
-            // Refresh assets
-            await UpdateAssetsAsync();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error placing order for {Symbol}", Selected.Symbol);
         }
-        finally { IsBusy = false; }
+        finally 
+        { 
+            IsBusy = false;
+            await UpdateAssetsAsync(); // Refresh assets
+            RecomputeUi();
+        }
     }
     #endregion
 
@@ -276,14 +311,6 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     }
     #endregion
 
-    #region Helpers variables
-    public bool IsMarketSelected => SelectedTypeIndex == 0;
-    public bool IsLimitSelected => SelectedTypeIndex == 1;
-    public bool IsBuySelected => SelectedSideIndex == 0;
-    public bool IsSellSelected => SelectedSideIndex == 1;
-    private decimal PriceForOrder => IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
-    #endregion
-
     #region Private Methods
     private void RecomputeUi()
     {
@@ -298,8 +325,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             : ($"{UserPosition.AvailableQuantity} {Selected.Symbol}");
 
         // Order value preview
-        decimal price = IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
-        var total = (price > 0 && Quantity > 0) ? price * Quantity : 0m;
+        var total = (PriceForOrder > 0 && Quantity > 0) ? PriceForOrder * Quantity : 0m;
         OrderValue = total > 0 ? CurrencyHelper.Format(total, Selected.Currency) : "-";
     }
 
@@ -327,13 +353,6 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             return false;
         }
         return true;
-    }
-
-    private decimal ComputeMarketGuardPrice()
-    {
-        // For market: cap (buy) or floor (sell) to protect from bad ticks
-        var prc = Math.Max(0m, SlippagePrc);
-        return IsBuySelected ? Selected.CurrentPrice * (1m + prc) : Selected.CurrentPrice * (1m - prc);
     }
     #endregion
 }
