@@ -149,46 +149,50 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     {
         // Try LiveQuote first
         var quote = await GetOrAddQuote(stockId, currency, ct);
-        if (quote.LastPrice > 0m)
-            return quote.LastPrice;
+        if (quote.LastPrice > 0m) return quote.LastPrice;
 
         // Try latest price from candles
         var candle = _candle.TryGetLiveSnapshot(stockId, currency, CandleResolution.Default);
-        if (candle is not null && candle.Close > 0m)
-            return candle.Close;
+        if (candle is not null && candle.Close > 0m) return candle.Close;
 
         // Fallback to latest Transaction from DB
         var tx = await _db.GetLatestTransactionByStockId(stockId, currency, ct);
-        if (tx is not null && tx.Price > 0m)
-            return tx.Price;
+        if (tx is not null && tx.Price > 0m) return tx.Price;
 
         _logger.LogDebug("No live price found for stock {StockId} in {Currency}", stockId, currency);
 
         // Fallback to latest StockPrice from DB
         var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
-        if (sp is not null && sp.Price > 0m)
-            return sp.Price;
+        if (sp is not null && sp.Price > 0m) return sp.Price;
 
         // Fallback to USD latest price converted
         if (currency != CurrencyType.USD)
         {
             var usdPrice = await GetLastPriceAsync(stockId, CurrencyType.USD, ct);
-            if (usdPrice > 0m)
-                return CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency);
+            if (usdPrice > 0m) return CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency);
         }
-        return 0m; // No price found
+
+        // Final fallback to default seed price
+        return 100m; // Default seed price
     }
 
     public async Task<decimal> GetDateTimePriceAsync(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default)
     {
         // Try to get the price at or before the specified time
         var tx = await _db.GetLatestTransactionBeforeTime(stockId, currency, time, ct);
-        if (tx is not null && tx.Price > 0m)
-            return tx.Price;
+        if (tx is not null && tx.Price > 0m) return tx.Price;
 
         // Fallback to latest StockPrice from DB
         var sp = await _db.GetLatestStockPriceBeforeTime(stockId, currency, time, ct);
-        return sp?.Price ?? 0m;
+        if (sp is not null && sp.Price > 0m) return sp.Price;
+
+        // Fallback to USD latest price converted
+        if (currency != CurrencyType.USD)
+        {
+            var usdPrice = await GetDateTimePriceAsync(stockId, CurrencyType.USD, time, ct);
+            if (usdPrice > 0m) return CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency);
+        }
+        return 100m; // Default seed price
     }
     #endregion
 
@@ -381,7 +385,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         if (last <= 0m)
             last = q.Open > 0m ? q.Open : 100m; // simple seed
 
-        // ±1% random move
+        // Random move
         var factor = 1m + (decimal)(Random.Shared.NextDouble() * 2 - 1) * Percentage;
         var next = Math.Max(0.01m, last * factor);
         var shares = Random.Shared.Next(1, 100);
