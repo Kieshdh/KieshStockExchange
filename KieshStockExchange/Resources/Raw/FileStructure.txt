@@ -20,6 +20,7 @@ KieshStockExchange
 
 - Helpers
 --- CandleAggregator.cs (Helps aggregate candle data)
+--- CandleChartDrawable.cs (For drawing candle charts)
 --- CandleComparer.cs (For comparing candles)
 --- CurrencyHelper.cs (Formats currency values)
 --- LiveQuote.cs (For ViewModel binding of a stock)

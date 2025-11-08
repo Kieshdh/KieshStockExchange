@@ -2,23 +2,28 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartView">
-    <Grid Padding="12" RowDefinitions="Auto, *" >
-        <!-- Header -->
-        <Label Text="Candle feed" FontAttributes="Bold" />
 
-        <!-- A very quick visual check: newest at the end, live candle keeps changing -->
-        <CollectionView Grid.Row="1" ItemsSource="{Binding Series}"
-                        ItemsLayout="HorizontalList" HeightRequest="140">
-            <CollectionView.ItemTemplate>
-                <DataTemplate>
-                    <VerticalStackLayout Padding="6" Spacing="4">
-                        <Label Text="{Binding OpenTimeDisplay}" FontSize="10" />
-                        <Label Text="{Binding CloseDisplay}" FontSize="14" />
-                        <Label Text="{Binding PriceChangePercentDisplay}" FontSize="10" />
-                    </VerticalStackLayout>
-                </DataTemplate>
-            </CollectionView.ItemTemplate>
-        </CollectionView>
+    <Grid RowDefinitions="auto,*" RowSpacing="8" Padding="8" MinimumHeightRequest="320" >
+        <!-- Controls row -->
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12" Padding="0,0,0,4">
+            <Label Text="Candles:" VerticalOptions="Center" />
+            <HorizontalStackLayout Grid.Column="1" Spacing="8">
+                <Stepper x:Name="CandlesStepper" VerticalOptions="Center" 
+                         Minimum="20" Maximum="360" Increment="10" />
+                <Label VerticalOptions="Center"
+                       Text="{Binding Source={x:Reference CandlesStepper}, Path=Value, StringFormat='{}{0:0}'}"/>
+            </HorizontalStackLayout>
+
+            <!-- Delete later -->
+            <Label Grid.Column="2" Text="Y pad:" VerticalOptions="Center"/>
+            <StackLayout Grid.Column="3" Orientation="Horizontal" Spacing="6">
+                <Slider x:Name="YPadSlider" Minimum="0" Maximum="0.2" Value="0.06" WidthRequest="120" />
+                <Label VerticalOptions="Center"
+                       Text="{Binding Source={x:Reference YPadSlider}, Path=Value, StringFormat='{}{0:P0}'}"/>
+            </StackLayout>
+        </Grid>
         
+        <!-- Chart -->
+        <GraphicsView x:Name="Chart" Grid.Row="1" HorizontalOptions="Fill" VerticalOptions="Fill" />
     </Grid>
 </ContentView>
