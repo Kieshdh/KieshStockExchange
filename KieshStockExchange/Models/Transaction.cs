@@ -129,4 +129,8 @@ public class Transaction : IValidatable
     [Ignore] public string TotalAmountDisplay => CurrencyHelper.Format(TotalAmount, CurrencyType);
 
     #endregion
+
+    #region Helper Methods
+    public bool InvolvesUser(int userId) => BuyerId == userId || SellerId == userId;
+    #endregion
 }

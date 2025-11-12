@@ -88,7 +88,6 @@ public class Order : IValidatable
         set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
-    // "MarketBuy", "MarketSell", "LimitBuy", "LimitSell"
     private string _orderType = String.Empty;
     [Column("OrderType")] public string OrderType { 
         get => _orderType;
