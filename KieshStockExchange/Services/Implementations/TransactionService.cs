@@ -73,6 +73,7 @@ public sealed class TransactionService : ITransactionService
                 _logger.LogInformation("Transaction refresh skipped: Not able to see history");
                 _all.Clear();
                 NotifyChanged();
+                return;
             }
 
             // Pull from DB and order newest first
