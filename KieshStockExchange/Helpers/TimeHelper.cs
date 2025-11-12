@@ -7,6 +7,9 @@ public static class TimeHelper
     /// <summary> Returns the current UTC time. Centralize access so you can </summary>
     public static Func<DateTime> NowUtc { get; set; } = () => DateTime.UtcNow;
 
+    /// <summary> Returns today's date in UTC. </summary>
+    public static DateOnly Today() => DateOnly.FromDateTime(NowUtc());
+
     /// <summary>
     /// If dt.Kind == Utc, returns dt.
     /// If Local, returns dt converted to UTC.
