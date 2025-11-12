@@ -396,14 +396,15 @@ public class MarketOrderService : IMarketOrderService
     {
         if (!IsAuthenticated) return;
 
-        // If the current app belongs to the buyer or seller, notify portfolio change
         try
         {
-            if (trade.BuyerId != CurrentUserId && trade.SellerId != CurrentUserId)
-                return;
-
-            await _portfolio.RefreshAsync(CurrentUserId, ct);
-            await _transaction.RefreshAsync(CurrentUserId, ct);
+            using (_portfolio.BeginSystemScope())
+            {
+                await _portfolio.RefreshAsync(trade.BuyerId, ct);
+                await _portfolio.RefreshAsync(trade.SellerId, ct);
+                await _transaction.RefreshAsync(trade.BuyerId, ct);
+                await _transaction.RefreshAsync(trade.SellerId, ct);
+            }
         }
         catch (Exception ex)
         {
