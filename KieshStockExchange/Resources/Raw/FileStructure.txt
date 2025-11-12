@@ -69,6 +69,7 @@ KieshStockExchange
 
 - Services
 --- Implementations
+----- AiTradeService.cs (TODO)
 ----- AuthService.cs
 ----- CandleService.cs
 ----- ExcelImportService.cs
@@ -88,6 +89,7 @@ KieshStockExchange
 ----- UserPortfolioService.cs
 ----- UserSessionService.cs (TODO)
 --- Interfaces
+----- IAITradeService.cs (Makes trades using the AI users for price fluctuations)
 ----- IAuthService.cs (Login, registration)
 ----- ICandleService.cs (Candle data for charts)
 ----- IDataBaseService.cs (Local and online DB operations)
