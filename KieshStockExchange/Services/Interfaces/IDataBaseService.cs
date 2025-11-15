@@ -60,6 +60,7 @@ public interface IDataBaseService
     Task<Transaction?> GetTransactionById(int transactionId, CancellationToken cancellationToken = default);
     Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken cancellationToken = default);
     Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken cancellationToken = default);
+    Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, CancellationToken cancellationToken = default);
     Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default);
     Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken cancellationToken = default);
     Task CreateTransaction(Transaction transaction, CancellationToken cancellationToken = default);
@@ -107,6 +108,16 @@ public interface IDataBaseService
     Task DeleteMessage(Message message, CancellationToken cancellationToken = default);
     Task<bool> MarkMessageRead(int messageId, DateTime? readAtUtc = null, CancellationToken ct = default);
     Task<int> MarkAllMessagesRead(int userId, DateTime? readAtUtc = null, CancellationToken ct = default);
+
+    // AIUser operations
+    Task<List<AIUser>> GetAIUsersAsync(CancellationToken cancellationToken = default);
+    Task<AIUser?> GetAIUserById(int aiUserId, CancellationToken cancellationToken = default);
+    Task<List<AIUser>> GetAIUsersByUserId(int userId, CancellationToken cancellationToken = default);
+    Task CreateAIUser(AIUser aiUser, CancellationToken cancellationToken = default);
+    Task UpdateAIUser(AIUser aiUser, CancellationToken cancellationToken = default);
+    Task UpsertAIUser(AIUser aiUser, CancellationToken cancellationToken = default);
+    Task DeleteAIUser(AIUser aiUser, CancellationToken cancellationToken = default);
+
 }
 
 public interface ITransaction : IAsyncDisposable

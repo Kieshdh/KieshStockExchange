@@ -506,6 +506,16 @@ public class LocalDBService: IDataBaseService, IDisposable
             cancellationToken);
     }
 
+    public async Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken);
+        return await RunDbAsync(() =>
+            _db.Table<Transaction>()
+               .Where(t => t.Timestamp >= since && t.Timestamp <= TimeHelper.NowUtc())
+               .ToListAsync(),
+            cancellationToken);
+    }
+
     public async Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken);
@@ -885,6 +895,67 @@ public class LocalDBService: IDataBaseService, IDisposable
     }
     #endregion
 
+    #region AIUser operations
+    public async Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() => _db.Table<AIUser>().ToListAsync(), ct);
+    }
+
+    public async Task<AIUser?> GetAIUserById(int aiUserId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<AIUser>().Where(a => a.AiUserId == aiUserId).FirstOrDefaultAsync(), ct);
+    }
+
+    public async Task<List<AIUser>> GetAIUsersByUserId(int userId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<AIUser>().Where(a => a.UserId == userId).ToListAsync(), ct);
+    }
+
+    public async Task CreateAIUser(AIUser aiUser, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!aiUser.IsValid())
+            throw new ArgumentException("AIUser entity is not valid", nameof(aiUser));
+        await RunDbAsync(() => _db.InsertAsync(aiUser), ct);
+    }
+
+    public async Task UpdateAIUser(AIUser aiUser, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!aiUser.IsValid())
+            throw new ArgumentException("AIUser entity is not valid", nameof(aiUser));
+        await RunDbAsync(() => _db.UpdateAsync(aiUser), ct);
+    }
+
+    public async Task DeleteAIUser(AIUser aiUser, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (aiUser.AiUserId == 0)
+            throw new ArgumentException("AIUser entity must have a valid AiUserId", nameof(aiUser));
+        await RunDbAsync(() => _db.DeleteAsync(aiUser), ct);
+    }
+
+    public async Task UpsertAIUser(AIUser aiUser, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!aiUser.IsValid())
+            throw new ArgumentException("AIUser entity is not valid", nameof(aiUser));
+
+        var existing = await GetAIUserById(aiUser.AiUserId, ct);
+        if (existing is not null)
+        {
+            aiUser.AiUserId = existing.AiUserId;
+            await RunDbAsync(() => _db.UpdateAsync(aiUser), ct);
+        }
+        else await RunDbAsync(() => _db.InsertAsync(aiUser), ct);
+    }
+    #endregion
+
     #region Helper Methods
     private async Task InitializeAsync(CancellationToken ct = default)
     {
@@ -907,6 +978,8 @@ public class LocalDBService: IDataBaseService, IDisposable
             await _db.CreateTableAsync<Position>();
             await _db.CreateTableAsync<Fund>();
             await _db.CreateTableAsync<Candle>();
+            await _db.CreateTableAsync<Message>();
+            await _db.CreateTableAsync<AIUser>();
 
             _initialized = true;
         }
