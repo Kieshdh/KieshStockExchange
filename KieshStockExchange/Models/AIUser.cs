@@ -111,6 +111,14 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         set => _onlineProb = RequiredPrc(value, nameof(OnlineProb));
     }
 
+    // Buy bias percentage (0 to 1)
+    private decimal _buyBiasPrc = 0.5m;
+    [Column("BuyBiasPrc")] public decimal BuyBiasPrc
+    {
+        get => _buyBiasPrc;
+        set => _buyBiasPrc = RequiredPrc(value, nameof(BuyBiasPrc));
+    }
+
     // Minimum trade amount as a percentage of total portfolio (0 to 1)
     private decimal _minTradeAmountPrc = 0.01m;
     [Column("MinTradeAmountPrc")] public decimal MinTradeAmountPrc
@@ -221,7 +229,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     // Maximum number of trades the AI can make in a day
     // When it exceeds then stop trading for the day while keeping orders open
     private int _maxDailyTrades = 50;
-    [Column("MaxDailyPositions")] public int MaxDailyTrades
+    [Column("MaxDailyTrades")] public int MaxDailyTrades
     {
         get => _maxDailyTrades;
         set => _maxDailyTrades = value < 0 ? 0 : value;
@@ -256,11 +264,10 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     [Ignore] public bool IsEnabled { get; set; } = false; // If the current AI is enabled to place active trades
     [Ignore] public DateOnly TradesDayUtc { get; private set; } = TimeHelper.Today();
     [Ignore] public int TradesToday { get; private set; } = 0; // Number of trades made today
-    [Ignore] public int OpenOrdersToday { get; private set; } = 0; // Number of open orders placed today
     [Ignore] public int ErrorsToday { get; private set; } = 0; // Number of errors encountered today
-    [Ignore] public DateTime? LastDecisionAtUtc { get; private set; }
-    [Ignore] public DateTime? LastTradeAtUtc { get; private set; }
-    [Ignore] public HashSet<int> StocksTouchedToday { get; } = new();
+    [Ignore] public DateTime LastDecisionTime { get; private set; } = DateTime.MinValue; // Timestamp of last decision
+    [Ignore] public DateTime LastTradeTime { get; private set; } = DateTime.MinValue; // Timestamp of last trade
+    [Ignore] public HashSet<int> StocksTouchedToday { get; } = new(); // Set of stock IDs traded today
     #endregion
 
     #region IValidatable Implementation
@@ -271,10 +278,10 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     private static bool IsValidPrc(decimal val) => val >= 0 && val <= 1;
     private bool IsValidPercentages() => IsValidPrc(TradeProb) && IsValidPrc(UseMarketProb) && IsValidPrc(OnlineProb) &&
-        IsValidPrc(MinTradeAmountPrc) && IsValidPrc(MaxTradeAmountPrc) && IsValidPrc(PerPositionMaxPrc) &&
-        IsValidPrc(CashReserveTargetPrc) && IsValidPrc(SlippageTolerancePrc) && IsValidPrc(AggressivenessPrc);
+        IsValidPrc(MinTradeAmountPrc) && IsValidPrc(MaxTradeAmountPrc) && IsValidPrc(PerPositionMaxPrc) && IsValidPrc(BuyBiasPrc) &&
+        IsValidPrc(MinCashReservePrc) && IsValidPrc(MaxCashReservePrc) && IsValidPrc(SlippageTolerancePrc) && IsValidPrc(AggressivenessPrc);
 
-    private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc;
+    private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc;
 
     private bool ValidatePositions() => MinOpenPositions >= 0 && MaxOpenPositions >= MinOpenPositions;
 
@@ -334,7 +341,6 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         // Reset daily counters
         TradesDayUtc = today;
         TradesToday = 0;
-        OpenOrdersToday = 0;
         ErrorsToday = 0;
         StocksTouchedToday.Clear();
 
@@ -356,20 +362,25 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         return removed;
     }
 
+    public void RecordDecision(DateTime whenUtc)
+    {
+        LastDecisionTime = TimeHelper.EnsureUtc(whenUtc);
+        Touched();
+    }
+
     public void RecordError()
     {
         ErrorsToday++;
         Touched();
     }
 
-    public void RecordTrade(Transaction transaction)
+    public void RecordTrade(Transaction tx)
     {
-        if (transaction == null) return;
-        if (transaction.IsInvalid || !transaction.InvolvesUser(UserId)) return;
+        if (tx == null || tx.IsInvalid || !tx.InvolvesUser(UserId)) return;
 
         TradesToday++;
-        StocksTouchedToday.Add(transaction.StockId);
-        LastTradeAtUtc = transaction.Timestamp;
+        StocksTouchedToday.Add(tx.StockId);
+        LastTradeTime = tx.Timestamp;
         Touched();
     }
     #endregion

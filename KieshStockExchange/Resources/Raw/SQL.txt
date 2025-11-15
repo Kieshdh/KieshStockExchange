@@ -122,3 +122,34 @@ CREATE TABLE Messages (
   FOREIGN KEY (UserId) REFERENCES Users(UserId)
   CHECK(Kind IN ('Info','Warning','Error','Success','Fill','PasswordReset'))
 );
+
+CREATE TABLE AIUsers (
+    AiUserId                INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserId                  INTEGER NOT NULL,
+    Seed                    INTEGER NOT NULL,
+    DecisionIntervalSeconds INTEGER NOT NULL DEFAULT 1,
+    CreatedAt               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    TradeProb               REAL NOT NULL,
+    UseMarketProb           REAL NOT NULL,
+    UseSlippageMarketProb   REAL NOT NULL,
+    OnlineProb              REAL NOT NULL,
+    BuyBiasPrc              REAL NOT NULL,
+    MinTradeAmountPrc       REAL NOT NULL,
+    MaxTradeAmountPrc       REAL NOT NULL,
+    PerPositionMaxPrc       REAL NOT NULL,
+    MinCashReservePrc       REAL NOT NULL,
+    MaxCashReservePrc       REAL NOT NULL,
+    SlippageTolerancePrc    REAL NOT NULL,
+    MinLimitOffsetPrc       REAL NOT NULL,
+    MaxLimitOffsetPrc       REAL NOT NULL,
+    AggressivenessPrc       REAL NOT NULL,
+    MinOpenPositions        INTEGER NOT NULL,
+    MaxOpenPositions        INTEGER NOT NULL,
+    MaxDailyTrades          INTEGER NOT NULL,
+    MaxOpenOrders           INTEGER NOT NULL,
+    Strategy                INTEGER NOT NULL DEFAULT 3,
+    WatchlistCsv            TEXT,
+    FOREIGN KEY (UserId) REFERENCES Users(UserId),
+    CHECK(Strategy IN (1,2,3,4))
+);

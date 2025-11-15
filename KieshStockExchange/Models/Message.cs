@@ -40,7 +40,7 @@ public class Message : IValidatable
         }
     }
 
-    public MessageType Kind { get; set; } = MessageType.Info;
+    [Ignore] public MessageType Kind { get; set; } = MessageType.Info;
     [Column("Kind")] public string KindString
     {
         get => Kind.ToString();
