@@ -15,6 +15,7 @@ public interface IMarketDataService
     Task SubscribeAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
     Task Unsubscribe(int stockId, CurrencyType currency, CancellationToken ct = default);
     Task SubscribeAllAsync(CurrencyType currency, CancellationToken ct = default);
+    Task UnsubscribeAllAsync(CurrencyType currency, CancellationToken ct = default);
 
     // History bootstrap + candle stream --------------------------------------
     /// <summary> When a new transaction (tick) arrives, update the corresponding LiveQuote </summary>

@@ -241,6 +241,12 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         var stocks = await GetAllStocksAsync(ct);
         await Task.WhenAll(stocks.Select(s => SubscribeAsync(s.StockId, currency, ct)));
     }
+
+    public async Task UnsubscribeAllAsync(CurrencyType currency, CancellationToken ct = default)
+    {
+        var stocks = await GetAllStocksAsync(ct);
+        await Task.WhenAll(stocks.Select(s => Unsubscribe(s.StockId, currency, ct)));
+    }
     #endregion
 
     #region Build LiveQuote from ticks
