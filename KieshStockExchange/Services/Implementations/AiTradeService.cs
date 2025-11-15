@@ -1,54 +1,353 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
-using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace KieshStockExchange.Services.Implementations;
 
-public class AiTradeService : IAiTradeService, IDisposable
+public class AiTradeService : IAiTradeService, IAsyncDisposable
 {
-    #region Properties
-    // In-memory state of AI users by AiUserId
-    private Dictionary<int, AIUser> AiUsers { get; set; } = new();
-    private Dictionary<int, Random> AiUserRngs { get; set; } = new();
+    #region Public Properties
+    // Intervals
+    public TimeSpan TradeInterval { get; private set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan OnlineCheckInterval { get; private set; } = TimeSpan.FromHours(1);
+    public TimeSpan DailyCheckInterval { get; private set; } = TimeSpan.FromMinutes(1);
+    public TimeSpan ReloadAssetsInterval { get; private set; } = TimeSpan.FromMinutes(1);
+    public TimeSpan TransactionLoadInterval { get; private set; } = TimeSpan.FromSeconds(30);
 
-    // In-memory state of positions, funds and open orders for AI users identified by AiUserId
-    private Dictionary<int, Dictionary<int, Position>> Positions { get; set; } = new();
-    private Dictionary<int, Dictionary<CurrencyType, Fund>> Funds { get; set; } = new();
-    private Dictionary<int, List<Order>> OpenOrders { get; set; } = new();
+    // Trade these currencies (default USD only)
+    public IReadOnlyList<CurrencyType> CurrenciesToTrade { get; private set; } =
+        new[] { CurrencyType.USD };
+    #endregion
+
+    #region Private Fields
+    // Next check times
+    private DateTime NextOnlineCheck = DateTime.MinValue;
+    private DateTime NextDailyCheck = DateTime.MinValue;
+    private DateTime NextAssetReload = DateTime.MinValue;
+    private DateTime NextTxsLoad = DateTime.MinValue;
+
+    // Last daily refresh date
+    private DateOnly LastRefreshDate = DateOnly.MinValue;
+
+    // Hashset to store all transaction IDs processed to avoid double counting
+    private readonly HashSet<int> ProcessedTxIds = new(); // Resets per day
+
+    // Internal loop state
+    private CancellationTokenSource? _cts;
+    private Task? _runner;
+    private long _tickCount = 0;
+    #endregion
+
+    #region Dictionaries
+    // In-memory state of AI users by AiUserId
+    private readonly Dictionary<int, AIUser> AiUsersByAiUserId = new();
+    private readonly Dictionary<int, AIUser> AiUsersByUserId = new();
+    private readonly Dictionary<int, Random> AiUserRngs = new();
+
+    // In-memory state of positions, funds and open orders for AI users identified by UserId
+    private readonly Dictionary<int, Dictionary<int, Position>> Positions = new();
+    private readonly Dictionary<int, Dictionary<CurrencyType, Fund>> Funds = new();
+    private readonly Dictionary<int, Dictionary<int, Order>> OpenOrders = new();
 
     // In-memory cache of stock prices at last refresh to avoid repeated market data calls
-    private Dictionary<(int, CurrencyType), decimal> StockPrices { get; set; } = new();
+    private readonly ConcurrentDictionary<(int, CurrencyType), decimal> StockPrices = new();
     #endregion
 
     #region Services and Constructor
+    private readonly IDataBaseService _db;
     private readonly IUserPortfolioService _portfolio;
-    private readonly IUserOrderService _orders;
+    private readonly IUserOrderService _userOrders;
+    private readonly IMarketOrderService _marketOrders;
     private readonly IMarketDataService _market;
     private readonly IStockService _stocks;
     private readonly ILogger<AiTradeService> _logger;
 
-    public AiTradeService(IUserPortfolioService portfolio, IUserOrderService orders,
-        IMarketDataService market, IStockService stocks, ILogger<AiTradeService> logger)
+    public AiTradeService(IUserPortfolioService portfolio, IUserOrderService userOrders, IMarketOrderService marketOrders,
+        IMarketDataService market, IStockService stocks, ILogger<AiTradeService> logger, IDataBaseService db)
     {
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
-        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _userOrders = userOrders ?? throw new ArgumentNullException(nameof(userOrders));
+        _marketOrders = marketOrders ?? throw new ArgumentNullException(nameof(marketOrders));
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+
+        // Subscribe to market quote updates
+        _market.QuoteUpdated += OnQuoteUpdated;
     }
     #endregion
 
-    #region AIUser state
+    #region Loading AIUsers and runtime caches
+    private async Task LoadAiUsers(CancellationToken ct = default)
+    {
+        // Clear existing users
+        AiUsersByAiUserId.Clear();
+        AiUsersByUserId.Clear();
+        AiUserRngs.Clear();
 
+        // Load AI users from database
+        foreach (var user in await _db.GetAIUsersAsync(ct))
+        {
+            AiUsersByAiUserId[user.AiUserId] = user;
+            AiUsersByUserId[user.UserId] = user;
+            AiUserRngs[user.AiUserId] = GetRandom(user.AiUserId);
+        }
+
+        // Preload portfolios and orders for loaded users
+        foreach (var userId in AiUsersByUserId.Keys)
+            await SyncUserStateAsync(userId, ct);
+    }
+
+    private async Task RefreshAssetsAsync(CancellationToken ct = default)
+    {
+        // Clear existing caches
+        Positions.Clear();
+        Funds.Clear();
+        OpenOrders.Clear();
+
+        // Refresh portfolios and orders for each user
+        foreach (var userId in AiUsersByUserId.Keys)
+            await SyncUserStateAsync(userId, ct);
+    }
+
+    private async Task SyncUserStateAsync(int userId, CancellationToken ct)
+    {
+        // Using system scope to avoid auth checks
+        using (_portfolio.BeginSystemScope())
+        {
+            // Refresh user portfolio
+            await _portfolio.RefreshAsync(asUserId: userId, ct);
+            Funds[userId] = _portfolio.GetFunds().ToDictionary(f => f.CurrencyType, f => f);
+            Positions[userId] = _portfolio.GetPositions().ToDictionary(p => p.StockId, p => p);
+        }
+        using (_userOrders.BeginSystemScope())
+        {
+            // Refresh user orders
+            await _userOrders.RefreshOrdersAsync(asUserId: userId, ct);
+            OpenOrders[userId] = _userOrders.UserOpenOrders.ToDictionary(o => o.OrderId, o => o);
+        }
+    }
+
+    private async Task LoadRecentTransactionsAsync(DateTime now, CancellationToken ct = default)
+    {
+        // Load recent transactions
+        var since = now - TransactionLoadInterval * 2; // Load double the interval to avoid missing any
+        foreach (var tx in await _db.GetTransactionsSinceTime(since, ct)
+                                    .ConfigureAwait(false))
+            RecordTx(tx);
+    }
     #endregion
 
-    #region AIUser order computation
-    public async Task<Order?> ComputeOrderAsync(AIUser user, CurrencyType currency, CancellationToken ct = default)
+    #region AIUser state management
+    private void CheckDailyRefresh()
     {
-        // Check if able to place more orders
-        if (!CanPlaceMoreOrder(user)) return null;
+        if (LastRefreshDate == TimeHelper.Today()) return; // Already refreshed today
 
+        LastRefreshDate = TimeHelper.Today(); // Update last refresh date
+
+        // Clear RNGs to force reseeding next time
+        AiUserRngs.Clear();
+        ProcessedTxIds.Clear();
+
+        // Reset daily state for each AI user
+        foreach (var user in AiUsersByAiUserId.Values)
+            user.ResetDay();
+
+        _logger.LogInformation("Performed daily refresh for AI users on {date}", 
+            TimeHelper.Today().ToString("yyyy-MM-dd"));
+    }
+
+    private void RecalculateOnlineUsers(DateTime time)
+    {
+        foreach (var user in AiUsersByAiUserId.Values)
+            user.IsEnabled = Decimal01(user.AiUserId) < user.OnlineProb;
+
+        _logger.LogInformation("Recalculated online AI users at {time}", 
+            time.ToLocalTime().ToString("dd-MM HH:mm:ss"));
+    }
+
+    private async Task CheckTimers(DateTime now, CancellationToken ct)
+    {
+        // Online check
+        if (now >= NextOnlineCheck)
+        {
+            RecalculateOnlineUsers(now);
+            NextOnlineCheck = now + OnlineCheckInterval;
+        }
+        // Daily check
+        if (now >= NextDailyCheck)
+        {
+            CheckDailyRefresh();
+            NextDailyCheck = now + DailyCheckInterval;
+        }
+        // Asset and prices reload
+        if (now >= NextAssetReload)
+        {
+            await RefreshAssetsAsync(ct).ConfigureAwait(false);
+            NextAssetReload = now + ReloadAssetsInterval;
+        }
+        // Transaction load
+        if (now >= NextTxsLoad)
+        {
+            await LoadRecentTransactionsAsync(now, ct).ConfigureAwait(false);
+            NextTxsLoad = now +  TransactionLoadInterval;
+        }
+    }
+
+    private void RecordTx(Transaction tx)
+    {
+        if (tx == null || tx.IsInvalid) return; // Skip invalid transactions
+        if (tx.Timestamp < TimeHelper.UtcStartOfToday()) return; // Too old
+        if (!ProcessedTxIds.Add(tx.TransactionId)) return; // Already processed
+
+        // Buyer side
+        if (AiUsersByUserId.TryGetValue(tx.BuyerId, out var buyer))
+        {
+            buyer.RecordTrade(tx); // Let the ai user know
+            //await SyncUserStateAsync(buyer.UserId, ct); // Update assets
+        }
+
+        // Skip if self-trade
+        if (tx.SellerId == tx.BuyerId) return;
+
+        // Seller side
+        if (AiUsersByUserId.TryGetValue(tx.SellerId, out var seller))
+        {
+            seller.RecordTrade(tx); // Let the ai user know
+            //await SyncUserStateAsync(seller.UserId, ct); // Update assets
+        }
+    }
+    #endregion
+
+    #region Umbrella trading loop
+    public void Configure(TimeSpan? tradeInterval = null, TimeSpan? onlineCheckInterval = null,
+        TimeSpan? dailyCheckInterval = null, TimeSpan? reloadAssetsInterval = null, 
+        IEnumerable<CurrencyType>? currencies = null)
+    {
+        if (tradeInterval is { } ti) TradeInterval = ti;
+        if (onlineCheckInterval is { } oi) OnlineCheckInterval = oi;
+        if (dailyCheckInterval is { } di) DailyCheckInterval = di;
+        if (reloadAssetsInterval is { } rai) ReloadAssetsInterval = rai;
+        if (currencies != null) CurrenciesToTrade = currencies.ToList();
+    }
+
+    public async Task StartAsync(CancellationToken ct = default)
+    {
+        // If already running, no-op
+        if (_runner != null && !_runner.IsCompleted) return;
+
+        // Make sure the stock list is loaded
+        await _stocks.EnsureLoadedAsync(ct).ConfigureAwait(false);
+
+        // Subscribe to all stocks in each currency we trade
+        foreach (var currency in CurrenciesToTrade)
+            await _market.SubscribeAllAsync(currency, ct).ConfigureAwait(false);
+
+        // Get cancellation token
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var token = _cts.Token;
+
+        // Start the main loop
+        _runner = Task.Run(() => RunLoopAsync(token));
+    }
+
+    public async Task StopAsync()
+    {
+        if (_runner == null) return;
+        try
+        {
+            _cts?.Cancel();
+            await _runner.ConfigureAwait(false);
+
+            foreach (var currency in CurrenciesToTrade)
+                await _market.UnsubscribeAllAsync(currency).ConfigureAwait(false);
+        }
+        finally
+        {
+            _runner = null;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    private async Task RunLoopAsync(CancellationToken ct)
+    {
+        // First-time load AI users
+        await LoadAiUsers(ct).ConfigureAwait(false);
+
+        // Main loop
+        while (!ct.IsCancellationRequested)
+        {
+            // Current time
+            var now = TimeHelper.NowUtc();
+
+            // Check timers
+            await CheckTimers(now, ct).ConfigureAwait(false);
+
+            // Per-AI decisions
+            foreach (var user in AiUsersByAiUserId.Values)
+                await AIUserNextDecision(user, now, ct).ConfigureAwait(false);
+
+            // Wait for next tick
+            _tickCount++;
+            try { await Task.Delay(TradeInterval, ct).ConfigureAwait(false); }
+            catch (TaskCanceledException) { /* breaking loop */ }
+        }
+    }
+    #endregion
+
+    #region AIUser Next Decision
+    private async Task AIUserNextDecision(AIUser user, DateTime now, CancellationToken ct = default)
+    {
+        // Skip if not enabled or not due
+        if (!user.IsEnabled || !CanPlaceMoreOrder(user)) return;
+
+        // Check if decision is due
+        var elapsed = now - user.LastDecisionTime;
+        if (elapsed < user.DecisionInterval) return;
+
+        // Record decision time
+        user.RecordDecision(now);
+        // Roll the dice to see if we trade this tick
+        if (Decimal01(user.AiUserId) > user.TradeProb) return;
+
+        // Make trade for each currency
+        foreach (var currency in CurrenciesToTrade)
+        {
+            // Generate order
+            var order = await ComputeOrderAsync(user, currency, ct);
+            if (order is null) continue; // No order to place
+
+            // Execute the order
+            var result = await ExecuteOrderAsync(user, order, ct);
+
+            // If not placed successfully, skip
+            if (result is null || !result.PlacedSuccessfully) continue;
+
+            // Keep caches consistent after any placement/fill
+            await SyncUserStateAsync(user.UserId, ct).ConfigureAwait(false);
+        }
+    }
+
+    private bool CanPlaceMoreOrder(AIUser user)
+    {
+        // Check max open orders
+        if (OpenOrders.TryGetValue(user.UserId, out Dictionary<int, Order>? value))
+            if (value.Count >= user.MaxOpenOrders)
+                return false;
+
+        // Check if within daily trade limit
+        if (user.TradesToday >= user.MaxDailyTrades) return false;
+
+        return true; // Can place more orders
+    }
+
+    private async Task<Order?> ComputeOrderAsync(AIUser user, CurrencyType currency, CancellationToken ct = default)
+    {
         // Get the type of order
         var type = ChooseOrderType(user, currency);
 
@@ -72,39 +371,51 @@ public class AiTradeService : IAiTradeService, IDisposable
         };
     }
 
-    private bool CanPlaceMoreOrder(AIUser user)
+    private async Task<OrderResult?> ExecuteOrderAsync(AIUser user, Order order, CancellationToken ct = default)
     {
-        // Check if enabled
-        if (!user.IsEnabled) return false;
+        if (user is null || order is null || order.UserId != user.UserId) return null;
+        if (order.IsInvalid) throw new ArgumentException("Order is invalid", nameof(order)); // Sanity check
 
-        // Make sure we have the open orders list
-        if (!OpenOrders.ContainsKey(user.AiUserId))
-            OpenOrders[user.AiUserId] = new List<Order>();
-        // Check max open orders
-        if (OpenOrders[user.AiUserId].Count >= user.MaxOpenOrders) return false;
+        try
+        {
+            // Sent to the MarketOrderService for placement and matching
+            var result = await _marketOrders.PlaceAndMatchAsync(order, user.UserId, ct);
 
-        // Check if within daily trade limit
-        if (user.TradesToday >= user.MaxDailyTrades) return false;
+            _logger.LogInformation("ExecuteOrderAsync for AIUser {AiUserId} on stock {StockId} resulted in {Status}",
+                user.AiUserId, order.StockId, result.Status);
 
-        return true; // Can place more orders
+            // Record fills
+            foreach (var fill in result.FillTransactions)
+                RecordTx(fill);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ExecuteOrderAsync failed for AIUser {AiUserId} on stock {StockId}", user.AiUserId, order.StockId);
+            user.RecordError();
+            return new OrderResult { Status = OrderStatus.OperationFailed, ErrorMessage = ex.Message };
+        }
     }
+    #endregion
 
+    #region Order computation helpers
     private OrderType ChooseOrderType(AIUser user, CurrencyType currency)
     {
         // Determine BUY or SELL
         bool isBuy; 
         // Check if something exceeds limits and forced to go one side
-        var cashPrc = FundsPercentagePortfolio(user, currency);
+        var cashPrc = FundsPercentagePortfolio(user.UserId, currency);
         if (cashPrc < user.MinCashReservePrc) // Not enough cash
             isBuy = false; // Force SELL
         else if (cashPrc > user.MaxCashReservePrc) // Too much cash
             isBuy = true; // Force BUY
         else
-            isBuy = Decimal01(user) < 0.5m; // Choose randomly
+            isBuy = Decimal01(user.AiUserId) < user.BuyBiasPrc; // Choose randomly
 
         // Choose market or limit
-        var isMarket = Decimal01(user) < user.UseMarketProb;
-        var isSlippage = Decimal01(user) < user.UseSlippageMarketProb;
+        var isMarket = Decimal01(user.AiUserId) < user.UseMarketProb;
+        var isSlippage = Decimal01(user.AiUserId) < user.UseSlippageMarketProb;
 
         // Return appropriate order type
         return isBuy 
@@ -114,19 +425,18 @@ public class AiTradeService : IAiTradeService, IDisposable
 
     private int ChooseStockId(AIUser user, OrderType type)
     {
-        var rng = GetRandom(user);
+        var rng = GetRandom(user.AiUserId);
 
         // Get the user's watchlist
         var watch = user.Watchlist?.ToList();
         if (watch == null || watch.Count == 0) return 0;
 
-        // For sell orders, prefer stocks already held
         if (IsSellOrder(type))
         {
             var candidates = new List<int>();
             foreach (var id in watch)
             {
-                var pos = GetPosition(user, id);
+                var pos = GetPosition(user.UserId, id);
                 if (pos.AvailableQuantity > 0) candidates.Add(id);
             }
             if (candidates.Count > 0)
@@ -150,10 +460,10 @@ public class AiTradeService : IAiTradeService, IDisposable
         if (IsSlippageOrder(type)) return RoundToCurrency(marketPrice, currency);
 
         // Compute offset based on min/max limit offset
-        var offset = Lerp(user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, Decimal01(user));
+        var offset = Clamp01(Lerp(user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, Decimal01(user.AiUserId)));
 
         // Add some jitter based on aggressiveness
-        var jitter = Decimal01(user) * user.AggressivenessPrc; // [0, AggressivenessPrc)
+        var jitter = Decimal01(user.AiUserId) * user.AggressivenessPrc; // [0, AggressivenessPrc)
         offset *= (1m + jitter); // Increase offset by up to AggressivenessPrc
         offset = Math.Min(offset, user.MaxLimitOffsetPrc); // Clamp to max limit offset
 
@@ -165,14 +475,14 @@ public class AiTradeService : IAiTradeService, IDisposable
     private async Task<int> ComputeOrderQuantityAsync(AIUser user, OrderType type, int stockId, CurrencyType currency, CancellationToken ct = default)
     {
         // Portfolio numbers
-        var portfolio = PortfolioValueByCurrency(user, currency);
+        var portfolio = PortfolioValueByCurrency(user.UserId, currency);
         if (portfolio <= 0m) return 0;
         
         // Get trade amount as percentage of portfolio
-        var tradePrc = Lerp(user.MinTradeAmountPrc, user.MaxTradeAmountPrc, Decimal01(user));
+        var tradePrc = Lerp(user.MinTradeAmountPrc, user.MaxTradeAmountPrc, Decimal01(user.AiUserId));
 
         // Add some jitter based on aggressiveness
-        var jitter = Decimal01(user) * user.AggressivenessPrc; // [0, AggressivenessPrc)
+        var jitter = Decimal01(user.AiUserId) * user.AggressivenessPrc; // [0, AggressivenessPrc)
         tradePrc *= (1m + jitter); // Increase trade percentage by up to AggressivenessPrc
         tradePrc = Math.Min(tradePrc, user.MaxTradeAmountPrc); // Clamp to max trade amount percentage
         if (tradePrc <= 0m) return 0; // No trade
@@ -191,18 +501,17 @@ public class AiTradeService : IAiTradeService, IDisposable
         };
         if (estimatePrice <= 0m) return 0;
 
-        // Position & cash context
-        var fund = GetFund(user, currency);
-        var pos = GetPosition(user, stockId);
+        // Fetch the user's fund and position
+        var fund = GetFund(user.UserId, currency);
+        var pos = GetPosition(user.UserId, stockId);
 
-        // Per-position cap: current value + new should be ≤ cap * portfolio
+        // Get necessary values
         var capValue = user.PerPositionMaxPrc * portfolio;
         var currentVal = pos.Quantity > 0 ? pos.Quantity * marketPrice : 0m;
         var roomValue = Math.Max(0m, capValue - currentVal);
-
-        // Target trade value (raw)
         var rawTradeValue = tradePrc * portfolio;
 
+        // Get the quantity based on buy or sell order
         if (IsBuyOrder(type))
         {
             // Buy: don’t exceed available funds and roomValue
@@ -221,25 +530,11 @@ public class AiTradeService : IAiTradeService, IDisposable
     }
     #endregion
 
-    #region AIUser order execution
-    public async Task<OrderResult?> ExecuteOrderAsync(AIUser aiUser, Order order, CancellationToken ct = default)
-    {
-        return null;
-    }
-    #endregion
-
-    #region IDisposable implementation
-    public void Dispose()
-    {
-
-    }
-    #endregion
-
     #region Static Helpers
     private static decimal RoundToCurrency(decimal price, CurrencyType currency) =>
         CurrencyHelper.RoundMoney(price, currency);
 
-    private static decimal Lerp(decimal left, decimal right, decimal t) => Clamp01(left + (right - left) * t);
+    private static decimal Lerp(decimal left, decimal right, decimal t) => left + (right - left) * t;
 
     private static decimal Clamp01(decimal x) => x < 0m ? 0m : (x > 1m ? 1m : x);
 
@@ -258,7 +553,7 @@ public class AiTradeService : IAiTradeService, IDisposable
     }
     #endregion
 
-    #region OrderType
+    #region OrderType helpers
     private enum OrderType { TrueMarketBuy, TrueMarketSell, SlippageMarketBuy, SlippageMarketSell, LimitBuy, LimitSell }
 
     private bool IsBuyOrder(OrderType t) => t is OrderType.TrueMarketBuy or OrderType.SlippageMarketBuy or OrderType.LimitBuy;
@@ -280,45 +575,49 @@ public class AiTradeService : IAiTradeService, IDisposable
     };
     #endregion
 
-    #region AiUser fetching 
-    private Fund GetFund(AIUser user, CurrencyType currency)
+    #region Data fetching and caching helpers
+    private Fund GetFund(int userId, CurrencyType currency)
     {
-        // Create user funds  dictionary if not available
-        if (!Funds.ContainsKey(user.UserId))
-            Funds[user.UserId] = new Dictionary<CurrencyType, Fund>();
+        // If no fund dictionary is available create a new one
+        if (!Funds.ContainsKey(userId))
+            Funds[userId] = new Dictionary<CurrencyType, Fund>();
 
-        // Create fund if not available
-        if (!Funds[user.UserId].ContainsKey(currency))
-            Funds[user.UserId][currency] = new Fund { UserId = user.UserId };
+        // If the fund of the currency is unavailable create a new one
+        if (!Funds[userId].ContainsKey(currency))
+            Funds[userId][currency] = new Fund { UserId = userId, CurrencyType = currency };
 
-        return Funds[user.UserId][currency];
-
+        return Funds[userId][currency];
     }
 
-    private Position GetPosition(AIUser user, int stockId)
+    private Position GetPosition(int userId, int stockId)
     {
-        // Create user postions dictionary if not available
-        if (!Positions.ContainsKey(user.UserId))
-            Positions[user.UserId] = new Dictionary<int, Position>();
+        // If no position dictionary is  available create a new one
+        if (!Positions.ContainsKey(userId))
+            Positions[userId] = new Dictionary<int, Position>();
 
-        // Create position if not available
-        if (!Positions[user.UserId].ContainsKey(stockId))
-            Positions[user.UserId][stockId] = new Position { UserId = user.UserId };
+        // If no position for that stock is available create a new one
+        if (!Positions[userId].ContainsKey(stockId))
+            Positions[userId][stockId] = new Position { UserId = userId, StockId = stockId };
 
-        return Positions[user.UserId][stockId];
+        return Positions[userId][stockId];
     }
 
-    private Random GetRandom(AIUser user)
+    private Random GetRandom(int aiUserId)
     {
-        // Create Random object using the daily seed if does not exist
-        if (!AiUserRngs.ContainsKey(user.UserId))
-            AiUserRngs[user.UserId] = new Random(DailySeed(user.Seed, user.UserId, TimeHelper.Today()));
-
-        return AiUserRngs[user.UserId];
+        // If no user
+        if (!AiUserRngs.ContainsKey(aiUserId))
+        {
+            if (!AiUsersByAiUserId.TryGetValue(aiUserId, out var ai))
+                throw new KeyNotFoundException($"AIUser not found for userId {aiUserId}");
+            AiUserRngs[aiUserId] = new Random(DailySeed(ai.Seed, ai.AiUserId, TimeHelper.Today()));
+        }
+        return AiUserRngs[aiUserId];
     }
 
-    private decimal Decimal01(AIUser user) => (decimal)GetRandom(user).NextDouble();
+    private decimal Decimal01(int aiUserId) => (decimal)GetRandom(aiUserId).NextDouble();
+    #endregion
 
+    #region Financial methods
     private async Task<decimal> GetStockPrice(int stockId, CurrencyType currency, CancellationToken ct)
     {
         if (!StockPrices.TryGetValue((stockId, currency), out var marketPrice) || marketPrice <= 0m)
@@ -328,19 +627,25 @@ public class AiTradeService : IAiTradeService, IDisposable
         }
         return marketPrice;
     }
-    #endregion
 
-    #region Financial computations
-    private decimal PortfolioValueByCurrency(AIUser user, CurrencyType currency)
+    private void OnQuoteUpdated(object? sender, LiveQuote quote)
+    {
+        if (quote == null) return;
+        if (quote.LastPrice <= 0m) return;
+
+        // Adjust property names if your LiveQuote uses e.g. CurrencyType instead of Currency
+        var key = (quote.StockId, quote.Currency);
+        StockPrices[key] = quote.LastPrice;
+    }
+
+    private decimal PortfolioValueByCurrency(int userId, CurrencyType currency)
     {
         decimal total = 0m;
-        // Add fund balance
-        var fund = GetFund(user, currency);
+        var fund = GetFund(userId, currency);
         total += fund.TotalBalance;
 
-        // Sum positions
-        if (!Positions.ContainsKey(user.UserId)) return total;
-        foreach (var position in Positions[user.UserId].Values)
+        if (!Positions.ContainsKey(userId)) return total;
+        foreach (var position in Positions[userId].Values)
         {
             if (position.Quantity <= 0) continue;
             if (StockPrices.TryGetValue((position.StockId, currency), out var price))
@@ -349,11 +654,19 @@ public class AiTradeService : IAiTradeService, IDisposable
         return total;
     }
 
-    private decimal FundsPercentagePortfolio(AIUser user, CurrencyType currency)
+    private decimal FundsPercentagePortfolio(int userId, CurrencyType currency)
     {
-        var cash = GetFund(user, currency).TotalBalance;
-        decimal total = PortfolioValueByCurrency(user, currency);
+        var cash = GetFund(userId, currency).TotalBalance;
+        var total = PortfolioValueByCurrency(userId, currency);
         return total > 0m ? cash / total : 0m;
+    }
+    #endregion
+
+    #region IDisposable implementation
+    public async ValueTask DisposeAsync()
+    {
+        _market.QuoteUpdated -= OnQuoteUpdated;
+        await StopAsync().ConfigureAwait(false);
     }
     #endregion
 }
