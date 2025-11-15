@@ -31,6 +31,9 @@ public class UserOrderService : IUserOrderService
     private readonly ILogger<UserOrderService> _logger;
     private readonly IStockService _stock;
 
+    // Tracks the depth of "system" scopes for this async flow.
+    private readonly AsyncLocal<int> _systemScopeDepth = new();
+
     public UserOrderService(IDataBaseService db, IStockService stock,
         IAuthService auth, IUserPortfolioService portfolio,
         IMarketOrderService market, ILogger<UserOrderService> logger)
@@ -48,11 +51,15 @@ public class UserOrderService : IUserOrderService
     private User? CurrentUser => _auth.CurrentUser;
     private int CurrentUserId => CurrentUser?.UserId ?? 0;
     private bool IsAuthenticated => CurrentUserId > 0 && _auth.IsLoggedIn;
+    private bool IsAdmin => _auth.CurrentUser?.IsAdmin == true;
 
     private bool CanModifyOrder(Order order, int targetUserId)
     {
-        // Admin can modify any; otherwise order must belong to the target user (which for non-admin == current)
-        if (_auth.CurrentUser?.IsAdmin == true) return true;
+        // System scope or admin can touch any order.
+        if (IsSystemScope) return true;
+        if (IsAdmin) return true;
+
+        // Regular user can only touch their own orders.
         return order.UserId == targetUserId && targetUserId == CurrentUserId;
     }
 
@@ -60,6 +67,20 @@ public class UserOrderService : IUserOrderService
     {
         authError = null;
 
+        // System scope: must specify a valid target user
+        if (IsSystemScope)
+        {
+            if (asUserId.HasValue && asUserId.Value > 0)
+                return asUserId.Value;
+
+            if (CurrentUserId > 0 && (!asUserId.HasValue || asUserId.Value == CurrentUserId))
+                return CurrentUserId;
+
+            authError = AuthError("System scope requires a valid target user.");
+            return 0;
+        }
+
+        // Regular scope: must be authenticated
         if (!IsAuthenticated)
         {
             authError = NotAuthResult();
@@ -71,11 +92,40 @@ public class UserOrderService : IUserOrderService
             return CurrentUserId;
 
         // Impersonation requested: require admin
-        if (_auth.CurrentUser?.IsAdmin == true)
+        if (IsAdmin)
             return asUserId.Value;
 
         authError = AuthError("Only admins may act on behalf of other users.");
         return 0;
+    }
+    #endregion
+
+    #region System Scope
+    public IDisposable BeginSystemScope() => new SystemScope(this);
+
+    private bool IsSystemScope => _systemScopeDepth.Value > 0;
+
+    private void EnterSystemScope() => _systemScopeDepth.Value = _systemScopeDepth.Value + 1;
+
+    private void ExitSystemScope() => _systemScopeDepth.Value = Math.Max(0, _systemScopeDepth.Value - 1);
+
+    private sealed class SystemScope : IDisposable
+    {
+        private readonly UserOrderService _owner;
+        private bool _disposed;
+
+        public SystemScope(UserOrderService owner)
+        {
+            _owner = owner;
+            _owner.EnterSystemScope();
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _owner.ExitSystemScope();
+        }
     }
     #endregion
 
