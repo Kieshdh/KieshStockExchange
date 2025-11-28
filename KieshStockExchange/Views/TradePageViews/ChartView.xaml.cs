@@ -55,8 +55,11 @@ public partial class ChartView : ContentView
 
     private void OnRedrawRequested()
     {
-        UpdateDrawable();
-        MainThread.BeginInvokeOnMainThread(Chart.Invalidate);
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            UpdateDrawable();
+            Chart.Invalidate();
+        });
     }
 
     private void UpdateDrawable()
