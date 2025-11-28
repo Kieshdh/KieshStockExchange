@@ -11,10 +11,9 @@ public class ExcelImportService : IExcelImportService
 {
     #region Fields, properties, and constructor
     private const string EXCEL_FILE_NAME = "AiUserData.xlsx";
+    private DataTable? StockDataTable = null;
     private DataTable? IdentityDataTable = null;
     private DataTable? ProfileDataTable = null;
-    private DataTable? StockDataTable = null;
-    private DataTable? PreferenceDataTable = null;
     private DataTable? HoldingDataTable = null;
 
     private bool _dataLoaded = false;
@@ -30,88 +29,33 @@ public class ExcelImportService : IExcelImportService
     #endregion
 
     #region Importing data from Excel
-    public async Task ResetDatabase() => await _db.DropAndRecreateAsync(true);
+    public async Task ResetAndAddDatabases()
+    {
+        await _db.ResetTableAsync<Message>().ConfigureAwait(false);
+        await _db.ResetTableAsync<Transaction>().ConfigureAwait(false);
+        await _db.ResetTableAsync<Order>().ConfigureAwait(false);
+        await AddStocksFromExcelAsync(false).ConfigureAwait(false);
+        await AddUsersFromExcelAsync(false).ConfigureAwait(false);
+        await AddAIProfileFromExcelAsync(false).ConfigureAwait(false);
+        await AddHoldingsFromExcelAsync(false).ConfigureAwait(false);
+    }
 
-    public async Task AddUsersFromExcelAsync(bool checkDataLoaded = true)
+    public async Task CheckAndAddDatabases()
+    {
+
+        await AddStocksFromExcelAsync(true).ConfigureAwait(false);
+        await AddUsersFromExcelAsync(true).ConfigureAwait(false);
+        await AddAIProfileFromExcelAsync(true).ConfigureAwait(false);
+        await AddHoldingsFromExcelAsync(true).ConfigureAwait(false);
+    }
+
+    private async Task AddStocksFromExcelAsync(bool checkDataLoaded = true)
     {
         LoadDataTables();
         // Check if the data is already imported
         if (checkDataLoaded)
         {
-            int count = (await _db.GetUsersAsync()).Count;
-            int tableCount = IdentityDataTable!.Rows.Count;
-            if (count >= tableCount)
-            {
-                _logger.LogInformation("Users data already imported. Skipping import.");
-                return;
-            }
-            _logger.LogInformation("Users data not fully imported. Total {UserCount} user. " +
-                "Expected at least {TableCount} users. Importing data...", count, tableCount);
-        }
-
-        // Get the new users
-        List<User> users = new List<User>();
-        foreach (DataRow row in IdentityDataTable!.Rows)
-        {
-            // Get the user ID and validate it
-            if (!ParsingHelper.TryToInt(row["ID"].ToString(), out var userId))
-            {
-                _logger.LogWarning("Invalid User ID: '{UserIdString}'.", row["ID"]);
-                continue;
-            }
-
-            // Get other fields
-            var username = row["Username"]?.ToString() ?? string.Empty;
-            var email = row["Email"]?.ToString() ?? string.Empty;
-            var password = "hallo123";
-            var fullName = row["Full Name"]?.ToString() ?? string.Empty;
-            DateTime? birthdate = row["Birthdate"] is DateTime d ? d
-                : (DateTime.TryParse(row["Birthdate"]?.ToString(), out var bd) ? bd : null);
-
-            // Validate required fields
-            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(email)
-                 || string.IsNullOrWhiteSpace(fullName) || !birthdate.HasValue)
-            {
-                _logger.LogWarning("Skipping user #{UserId} with missing required fields", userId);
-                continue;
-            }
-
-            // Create new user
-            User user = new User
-            {
-                UserId = userId, Username = username, Email = email,
-                PasswordHash = SecurityHelper.HashPassword(password),
-                FullName = fullName, BirthDate = birthdate
-            };
-            if (!user.IsValid())
-            {
-                _logger.LogWarning("Failed to register user #{UserId}: {Username}.", userId, username);
-                continue;
-            }
-            users.Add(user);
-        }
-
-        // Reset the existing users table and insert the new users
-        await _db.RunInTransactionAsync(async ct =>
-        {
-            await _db.ResetTableAsync<User>();
-            await _db.InsertAllAsync(users);
-        });
-        _logger.LogInformation("Loaded in total {userCount} users", users.Count);
-    }
-
-    public async Task AddAIUserBehaviourDataFromExcelAsync(bool checkDataLoaded = true)
-    {
-        LoadDataTables();
-    }
-
-    public async Task AddStocksFromExcelAsync(bool checkDataLoaded = true)
-    {
-        LoadDataTables();
-        // Check if the data is already imported
-        if (checkDataLoaded)
-        {
-            int count = (await _db.GetStocksAsync()).Count;
+            int count = (await _db.GetStocksAsync().ConfigureAwait(false)).Count;
             if (count >= StockDataTable!.Rows.Count)
             {
                 _logger.LogInformation("Stocks data already imported. Skipping import.");
@@ -125,14 +69,14 @@ public class ExcelImportService : IExcelImportService
         foreach (DataRow row in StockDataTable!.Rows)
         {
             // Get the stock ID and validate it
-            if (!ParsingHelper.TryToInt(row["ID"].ToString(), out var stockId))
+            if (!ParsingHelper.TryToInt(row["StockId"].ToString(), out var stockId))
             {
-                _logger.LogWarning("Invalid Stock ID: '{StockIdString}'.", row["ID"]);
+                _logger.LogWarning("Invalid Stock ID: '{StockIdString}'.", row["StockId"]);
                 continue;
             }
 
             // Get other fields
-            var symbol = row["Symbol"]?.ToString() ?? string.Empty;
+            var symbol = row["Ticker"]?.ToString() ?? string.Empty;
             var companyName = row["CompanyName"]?.ToString() ?? string.Empty;
 
             if (string.IsNullOrEmpty(symbol) || string.IsNullOrWhiteSpace(companyName))
@@ -183,12 +127,185 @@ public class ExcelImportService : IExcelImportService
             await _db.ResetTableAsync<StockPrice>(ct);
             await _db.InsertAllAsync(stocks, ct);
             await _db.InsertAllAsync(stockPrices, ct);
-        });
+        }).ConfigureAwait(false);
         
         _logger.LogInformation("Loaded in total {StockCount} stocks with initial stockprice.", stocks.Count);
     }
 
-    public async Task AddHoldingsFromExcelAsync(bool checkDataLoaded = true)
+    private async Task AddUsersFromExcelAsync(bool checkDataLoaded = true)
+    {
+        LoadDataTables();
+        // Check if the data is already imported
+        if (checkDataLoaded)
+        {
+            int count = (await _db.GetUsersAsync().ConfigureAwait(false)).Count;
+            int tableCount = IdentityDataTable!.Rows.Count;
+            if (count >= tableCount)
+            {
+                _logger.LogInformation("Users data already imported. Skipping import.");
+                return;
+            }
+            _logger.LogInformation("Users data not fully imported. Total {UserCount} user. " +
+                "Expected at least {TableCount} users. Importing data...", count, tableCount);
+        }
+
+        // Get the new users
+        List<User> users = new List<User>();
+        foreach (DataRow row in IdentityDataTable!.Rows)
+        {
+            // Get the user ID and validate it
+            if (!ParsingHelper.TryToInt(row["UserId"].ToString(), out var userId))
+            {
+                _logger.LogWarning("Invalid User ID: '{UserIdString}'.", row["UserId"]);
+                continue;
+            }
+
+            // Get other fields
+            var username = row["Username"]?.ToString() ?? string.Empty;
+            var email = row["Email"]?.ToString() ?? string.Empty;
+            var password = "hallo123";
+            var fullName = row["FullName"]?.ToString() ?? string.Empty;
+            DateTime? birthdate = row["Birthdate"] is DateTime d ? d
+                : (DateTime.TryParse(row["Birthdate"]?.ToString(), out var bd) ? bd : null);
+
+            // Validate required fields
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(email)
+                 || string.IsNullOrWhiteSpace(fullName) || !birthdate.HasValue)
+            {
+                _logger.LogWarning("Skipping user #{UserId} with missing required fields", userId);
+                continue;
+            }
+
+            // Create new user
+            User user = new User
+            {
+                UserId = userId, Username = username, Email = email,
+                PasswordHash = SecurityHelper.HashPassword(password),
+                FullName = fullName, BirthDate = birthdate
+            };
+            if (!user.IsValid())
+            {
+                _logger.LogWarning("Failed to register user #{UserId}: {Username}.", userId, username);
+                continue;
+            }
+            users.Add(user);
+        }
+
+        // Reset the existing users table and insert the new users
+        await _db.RunInTransactionAsync(async ct =>
+        {
+            await _db.ResetTableAsync<User>();
+            await _db.InsertAllAsync(users);
+        }).ConfigureAwait(false);
+        _logger.LogInformation("Loaded in total {userCount} users", users.Count);
+    }
+
+    private async Task AddAIProfileFromExcelAsync(bool checkDataLoaded = true)
+    {
+        LoadDataTables();
+        // Check if the data is already imported
+        if (checkDataLoaded)
+        {
+            int count = (await _db.GetAIUsersAsync().ConfigureAwait(false)).Count;
+            int tableCount = ProfileDataTable!.Rows.Count;
+
+            if (count >= tableCount)
+            {
+                _logger.LogInformation("AI profile data already imported. Skipping import.");
+                return;
+            }
+
+            _logger.LogInformation("AI profile data not fully imported. Total {ExistingCount} " +
+                "AIUsers. Expected at least {TableCount}. Importing data...", count, tableCount);
+        }
+
+        // Get the new AI users
+        List<AIUser> aiUsers = new List<AIUser>();
+        foreach (DataRow row in ProfileDataTable!.Rows)
+        {
+            // Get the user ID and validate it
+            if (!ParsingHelper.TryToInt(row["UserId"].ToString(), out var userId))
+            {
+                _logger.LogWarning("Invalid User ID: '{UserIdString}'.", row["ID"]);
+                continue;
+            }
+
+            // Integer values
+            if (!ParsingHelper.TryToInt(row["Seed"].ToString(), out var seed) ||
+                !ParsingHelper.TryToInt(row["DecisionIntervalSeconds"].ToString(), out var intervalSeconds) ||
+                !ParsingHelper.TryToInt(row["MinOpenPositions"].ToString(), out var minOpenPositions) ||
+                !ParsingHelper.TryToInt(row["MaxOpenPositions"].ToString(), out var maxOpenPositions) ||
+                !ParsingHelper.TryToInt(row["MaxDailyTrades"].ToString(), out var maxDailyTrades) ||
+                !ParsingHelper.TryToInt(row["MaxOpenOrders"].ToString(), out var maxOpenOrders) ||
+                !ParsingHelper.TryToInt(row["Strategy"].ToString(), out var strategyCode))
+            {
+                _logger.LogWarning("Invalid integer field for AI user #{UserId}.", userId);
+                continue;
+            }
+
+            // Decimal values
+            if (!ParsingHelper.TryToDecimal(row["TradeProb"].ToString(), out var tradeProb) ||
+                !ParsingHelper.TryToDecimal(row["UseMarketProb"].ToString(), out var useMarketProb) ||
+                !ParsingHelper.TryToDecimal(row["UseSlippageMarketProb"].ToString(), out var useSlippageMarketProb) ||
+                !ParsingHelper.TryToDecimal(row["OnlineProb"].ToString(), out var onlineProb) ||
+                !ParsingHelper.TryToDecimal(row["BuyBiasPrc"].ToString(), out var buyBiasPrc) ||
+                !ParsingHelper.TryToDecimal(row["MinTradeAmountPrc"].ToString(), out var minTradeAmountPrc) ||
+                !ParsingHelper.TryToDecimal(row["MaxTradeAmountPrc"].ToString(), out var maxTradeAmountPrc) ||
+                !ParsingHelper.TryToDecimal(row["PerPositionMaxPrc"].ToString(), out var perPositionMaxPrc) ||
+                !ParsingHelper.TryToDecimal(row["MinCashReservePrc"].ToString(), out var minCashReservePrc) ||
+                !ParsingHelper.TryToDecimal(row["MaxCashReservePrc"].ToString(), out var maxCashReservePrc) ||
+                !ParsingHelper.TryToDecimal(row["SlippageTolerancePrc"].ToString(), out var slippageTolerancePrc) ||
+                !ParsingHelper.TryToDecimal(row["MinLimitOffsetPrc"].ToString(), out var minLimitOffsetPrc) ||
+                !ParsingHelper.TryToDecimal(row["MaxLimitOffsetPrc"].ToString(), out var maxLimitOffsetPrc) ||
+                !ParsingHelper.TryToDecimal(row["AggressivenessPrc"].ToString(), out var aggressivenessPrc))
+            {
+                _logger.LogWarning("Invalid percentage value(s) for User #{UserId}. Skipping.", userId);
+                continue;
+            }
+
+            var watchlistCsv = row["WatchlistCsv"]?.ToString() ?? string.Empty;
+
+            // Create new AI user profile
+            try
+            {
+                var aiUser = new AIUser
+                {
+                    UserId = userId, Seed = seed, DecisionIntervalSeconds = intervalSeconds,
+                    TradeProb = tradeProb, UseMarketProb = useMarketProb, BuyBiasPrc = buyBiasPrc,
+                    UseSlippageMarketProb = useSlippageMarketProb, OnlineProb = onlineProb, 
+                    MinTradeAmountPrc = minTradeAmountPrc, MaxTradeAmountPrc = maxTradeAmountPrc,
+                    PerPositionMaxPrc = perPositionMaxPrc, MinCashReservePrc = minCashReservePrc,
+                    MaxCashReservePrc = maxCashReservePrc, SlippageTolerancePrc = slippageTolerancePrc,
+                    MinLimitOffsetPrc = minLimitOffsetPrc, MaxLimitOffsetPrc = maxLimitOffsetPrc,
+                    AggressivenessPrc = aggressivenessPrc, MinOpenPositions = minOpenPositions,
+                    MaxOpenPositions = maxOpenPositions, MaxDailyTrades = maxDailyTrades,
+                    MaxOpenOrders = maxOpenOrders, WatchlistCsv = watchlistCsv, StrategyCode = strategyCode
+                };
+                if (!aiUser.IsValid())
+                {
+                    _logger.LogWarning("Failed to register AI profile for user #{UserId}.", userId);
+                    continue;
+                }
+                aiUsers.Add(aiUser);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Exception while creating AI profile for user #{UserId}.", userId);
+                continue;
+            }
+        }
+
+        // Reset the existing AI users table and insert the new AI user profiles
+        await _db.RunInTransactionAsync(async ct =>
+        {
+            await _db.ResetTableAsync<AIUser>(ct);
+            await _db.InsertAllAsync(aiUsers, ct);
+        }).ConfigureAwait(false);
+
+        _logger.LogInformation("Loaded in total {AiUserCount} AI user profiles.", aiUsers.Count);
+    }
+
+    private async Task AddHoldingsFromExcelAsync(bool checkDataLoaded = true)
     {
         LoadDataTables();
         int stockCount = StockDataTable!.Rows.Count;
@@ -196,8 +313,8 @@ public class ExcelImportService : IExcelImportService
         // Check if the data is already imported
         if (checkDataLoaded)
         {
-            int countFunds = (await _db.GetFundsAsync()).Count;
-            int countPositions = (await _db.GetPositionsAsync()).Count;
+            int countFunds = (await _db.GetFundsAsync().ConfigureAwait(false)).Count;
+            int countPositions = (await _db.GetPositionsAsync().ConfigureAwait(false)).Count;
             if (countFunds >= HoldingDataTable!.Rows.Count && countPositions >= HoldingDataTable.Rows.Count * 21)
             {
                 _logger.LogInformation("Holdings data already imported. Skipping import.");
@@ -210,9 +327,9 @@ public class ExcelImportService : IExcelImportService
         foreach (DataRow row in HoldingDataTable!.Rows)
         {
             // Validate required fields
-            if (!ParsingHelper.TryToInt(row["ID"].ToString(), out var userId))
+            if (!ParsingHelper.TryToInt(row["UserId"].ToString(), out var userId))
             {
-                _logger.LogWarning("Invalid User ID: '{UserIdString}'.", row["ID"]);
+                _logger.LogWarning("Invalid User ID: '{UserIdString}'.", row["UserId"]);
                 continue;
             }
             if (!ParsingHelper.TryToDecimal(row["Balance"].ToString(), out var balance))
@@ -222,12 +339,12 @@ public class ExcelImportService : IExcelImportService
             }
 
             int[] stocks = new int[stockCount];
-            for (int i = 1; i <= stockCount; i++)
+            for (int i = 0; i < stockCount; i++)
             {
-                if (!ParsingHelper.TryToInt(row[i+1].ToString(), out stocks[i - 1]))
+                if (!ParsingHelper.TryToInt(row[i+2].ToString(), out stocks[i]))
                 {
-                    _logger.LogWarning("Invalid Stock{i} for User ID {UserId}: '{StockString}'.", i, userId, row[$"Stock{i}"]);
-                    stocks[i - 1] = 0;
+                    _logger.LogWarning("Invalid Stock{i} for User ID {UserId}: '{StockString}'.", i, userId, row[$"Stock{i+1}"]);
+                    stocks[i] = 0;
                 }
             }
 
@@ -236,6 +353,7 @@ public class ExcelImportService : IExcelImportService
             {
                 UserId = userId,
                 TotalBalance = balance,
+                CurrencyType = CurrencyType.USD,
             };
             if (!fund.IsValid())
             {
@@ -273,7 +391,7 @@ public class ExcelImportService : IExcelImportService
             await _db.ResetTableAsync<Fund>();
             await _db.InsertAllAsync(funds);
             await _db.InsertAllAsync(positions);
-        });
+        }).ConfigureAwait(false);
         _logger.LogInformation("Loaded in total {FundCount} funds with {PositionCount} positions.", funds.Count, positions.Count);
 
     }
@@ -287,8 +405,7 @@ public class ExcelImportService : IExcelImportService
         StockDataTable = ReadExcelFile(EXCEL_FILE_NAME, 0);
         IdentityDataTable = ReadExcelFile(EXCEL_FILE_NAME, 1);
         ProfileDataTable = ReadExcelFile(EXCEL_FILE_NAME, 2);
-        PreferenceDataTable = ReadExcelFile(EXCEL_FILE_NAME, 3);
-        HoldingDataTable = ReadExcelFile(EXCEL_FILE_NAME, 4);
+        HoldingDataTable = ReadExcelFile(EXCEL_FILE_NAME, 3);
 
         _dataLoaded = true;
     }
