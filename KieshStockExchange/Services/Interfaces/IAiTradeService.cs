@@ -9,7 +9,6 @@ namespace KieshStockExchange.Services;
 /// </summary>
 public interface IAiTradeService
 {
-    #region Timer and Currency Configuration 
     /// <summary>Interval between trading ticks for the AI loop.</summary>
     TimeSpan TradeInterval { get; }
 
@@ -32,19 +31,16 @@ public interface IAiTradeService
     void Configure(TimeSpan? tradeInterval = null, TimeSpan? onlineCheckInterval = null,
         TimeSpan? dailyCheckInterval = null, TimeSpan? reloadAssetsInterval = null,
         IEnumerable<CurrencyType>? currencies = null);
-    #endregion
 
-    #region Lifecycle Management
     /// <summary>
     /// Starts the background trading loop if it is not already running.
     /// Safe to call multiple times.
     /// </summary>
-    Task StartAsync(CancellationToken ct = default);
+    Task StartBotAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Requests the background trading loop to stop and waits for it to finish.
     /// </summary>
-    Task StopAsync();
-    #endregion
+    Task StopBotAsync();
 }
 

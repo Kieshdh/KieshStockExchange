@@ -6,9 +6,9 @@
 /// 
 public interface IExcelImportService
 {
-    Task ResetDatabase();
-    Task AddUsersFromExcelAsync(bool checkDataLoaded = true);
-    Task AddAIUserBehaviourDataFromExcelAsync(bool checkDataLoaded = true);
-    Task AddStocksFromExcelAsync(bool checkDataLoaded = true);
-    Task AddHoldingsFromExcelAsync(bool checkDataLoaded = true);
+    /// <summary> Resets existing database entries and adds new databases from the Excel file. </summary>
+    Task ResetAndAddDatabases();
+
+    /// <summary> Checks for missing databases and adds them from the Excel file. </summary>
+    Task CheckAndAddDatabases();
 }
