@@ -294,9 +294,23 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     #region String Representations
     public override string ToString() => $"AIUser #{AiUserId} (User #{UserId})";
 
-    [Ignore] public string Summary => $"AIUser #{AiUserId} • Active {OnlineProb:P0} • " +
-        $"Trade {TradeProb:P0} • Size {MinTradeAmountPrc:P0}-{MaxTradeAmountPrc:P0} • " +
-        $"Pos {MinOpenPositions}-{MaxOpenPositions} • Δ {IntervalString()}";
+    [Ignore] public string SummaryIdentity =>
+        $"{ToString()} • Strategy={Strategy} • Seed={Seed}";
+
+    [Ignore] public string SummaryActivity =>
+        $"Online {OnlineProbDisplay} • Interval {IntervalString()} • " +
+        $"Trades {TradesToday}/{MaxDailyTrades} • Errors {ErrorsToday}";
+
+    [Ignore] public string SummarySizing =>
+        $"TradeProb {TradeProbDisplay} • Size {TradeAmountDisplay} • " +
+        $"PerPosMax {PerPositionMaxDisplay} • Pos {OpenPositionsDisplay}";
+
+    [Ignore] public string SummaryRisk =>
+        $"Cash {CashReserveTargetPrc} • Slippage {SlippageToleranceDisplay} • " +
+        $"LimitOffset {LimitOffsetDisplay} • Aggro {AggressivenessDisplay}";
+
+    [Ignore] public string Summary =>
+        $"{SummaryIdentity} | {SummaryActivity} | {SummarySizing} | {SummaryRisk}";
 
     public string IntervalString()
     {
@@ -311,6 +325,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     [Ignore] public string UseMarketProbDisplay => $"{UseMarketProb:P0}";
     [Ignore] public string OnlineProbDisplay => $"{OnlineProb:P0}";
     [Ignore] public string TradeAmountDisplay => $"{MinTradeAmountPrc:P0} - {MaxTradeAmountPrc:P0}";
+    [Ignore] public string OpenPositionsDisplay => $"{MinOpenPositions} - {MaxOpenPositions}";
     [Ignore] public string PerPositionMaxDisplay => $"{PerPositionMaxPrc:P0}";
     [Ignore] public string CashReserveTargetPrc => $"{MinCashReservePrc:P0} - {MaxCashReservePrc:P0}";
     [Ignore] public string SlippageToleranceDisplay => $"{SlippageTolerancePrc:P0}";
