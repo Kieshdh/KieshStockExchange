@@ -6,7 +6,7 @@ public enum SeparatorPlacement { Before, After, Both }
 
 public sealed class SeparatorLoggerOptions
 {
-    public string Separator { get; set; } = new('-', 60);
+    public string Separator { get; set; } = "";
     public SeparatorPlacement Placement { get; set; } = SeparatorPlacement.Before;
     public bool ExtraBlankLine { get; set; } = true; // add an empty line after the entry
 }
