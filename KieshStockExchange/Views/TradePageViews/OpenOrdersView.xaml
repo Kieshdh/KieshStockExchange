@@ -60,7 +60,7 @@
                             <HorizontalStackLayout Grid.Column="7" Spacing="6">
                                 <Button Text="✕" IsVisible="{Binding Order.IsOpen}"
                                         Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, 
-                                                  Path=BindingContext.OpenOrdersVm.CancelAsyncCommand}"
+                                                  Path=BindingContext.OpenOrdersVm.CancelCommand}"
                                         CommandParameter="{Binding Order}" Style="{StaticResource TradeTableButton}" />
                             </HorizontalStackLayout>
                         </Grid>
