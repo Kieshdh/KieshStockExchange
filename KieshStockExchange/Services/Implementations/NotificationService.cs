@@ -23,36 +23,36 @@ public sealed class NotificationService : INotificationService
     {
         if (result is null)
         {
-            await PushNotificationAsync("Order", "Unknown result.", ct);
+            await PushNotificationAsync("Order", "Unknown result.", ct).ConfigureAwait(false);
             return;
         }
 
         // Build notification
-        var (title, message) = await BuildFromOrderResultAsync(result, ct);
+        var (title, message) = await BuildFromOrderResultAsync(result, ct).ConfigureAwait(false);
 
         // Show notification
-        await PushNotificationAsync(title, message, ct);
+        await PushNotificationAsync(title, message, ct).ConfigureAwait(false);
     }
 
     public async Task NotifyFillAsync(Order orderAfterFill, Transaction fill, CancellationToken ct = default)
     {
         if (orderAfterFill is null || fill is null)
         {
-            await PushNotificationAsync("Order Update", "Invalid fill data.", ct);
+            await PushNotificationAsync("Order Update", "Invalid fill data.", ct).ConfigureAwait(false);
             return;
         }
 
         // Build notification
-        var (title, message) = await BuildFromFillAsync(orderAfterFill, fill, ct);
+        var (title, message) = await BuildFromFillAsync(orderAfterFill, fill, ct).ConfigureAwait(false);
 
         // Show notification
-        await PushNotificationAsync(title, message, ct);
+        await PushNotificationAsync(title, message, ct).ConfigureAwait(false);
     }
 
     public async Task PushNotificationAsync(string title, string message, CancellationToken ct = default)
     {
         // Acquire the gate unless canceled
-        try { await _notifyGate.WaitAsync(ct); }
+        try { await _notifyGate.WaitAsync(ct).ConfigureAwait(false); }
         catch (OperationCanceledException)
         {
             _logger.LogDebug("Notification canceled before showing: {Title}", title);
@@ -89,7 +89,7 @@ public sealed class NotificationService : INotificationService
     private async Task<(string title, string message)> BuildFromOrderResultAsync(OrderResult r, CancellationToken ct)
     {
         var o = r.PlacedOrder;
-        var symbol = o is null ? "Order" : await TryGetSymbolAsync(o.StockId, ct);
+        var symbol = o is null ? "Order" : await TryGetSymbolAsync(o.StockId, ct).ConfigureAwait(false);
 
         // Failure path
         if (!r.PlacedSuccessfully)
@@ -133,7 +133,7 @@ public sealed class NotificationService : INotificationService
     private async Task<(string title, string message)> BuildFromFillAsync(Order o, Transaction tx, CancellationToken ct)
     {
         // tx.Price is the maker’s price; show exact fill and the new remaining.
-        var symbol = await TryGetSymbolAsync(o.StockId, ct);
+        var symbol = await TryGetSymbolAsync(o.StockId, ct).ConfigureAwait(false);
         var side = o.IsBuyOrder ? "Buy" : "Sell";
 
         return o.IsOpen
@@ -152,12 +152,12 @@ public sealed class NotificationService : INotificationService
             if (stockId <= 0) return "Stock";
 
             // First try from in-memory snapshot
-            await _stock.EnsureLoadedAsync(ct);
+            await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
             if (_stock.TryGetById(stockId, out var stock))
                  return stock!.Symbol;
 
             // Try reloading once more, since it might be a new stock
-            await _stock.RefreshAsync(ct);
+            await _stock.RefreshAsync(ct).ConfigureAwait(false);
             if (_stock.TryGetById(stockId, out stock))
                  return stock!.Symbol;
 

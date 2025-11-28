@@ -26,11 +26,13 @@ public class AuthService : IAuthService
     public async Task<bool> RegisterAsync(string username, string fullname,
         string email, string password, DateTime birthdate) 
     {
-        // Check for existing user
-        if (await _db.GetUserByUsername(username) != null)
+        // Check for existing user by username
+        if (await _db.GetUserByUsername(username).ConfigureAwait(false) != null)
             return false;
-        if (await _db.GetUsersAsync().ContinueWith(t =>
-             t.Result.Any(u => u.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))) 
+
+        // Check for existing user by email
+        var allUsers = await _db.GetUsersAsync().ConfigureAwait(false);
+        if (allUsers.Any(u => u.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
             return false;
 
         // Check valid password
@@ -47,13 +49,10 @@ public class AuthService : IAuthService
             BirthDate = birthdate,
             IsAdmin = true, // Humans always admin
         };
-
-        // Check validity
-        if (!user.IsValid()) 
-            return false;
+        if (!user.IsValid()) return false;
 
         // Save user
-        await _db.CreateUser(user);
+        await _db.CreateUser(user).ConfigureAwait(false);
 
         _logger.LogInformation("New user registered: #{UserId} {Username}", user.UserId, user.Username);
 
@@ -68,7 +67,7 @@ public class AuthService : IAuthService
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password)) 
             return;
         // Get the user
-        var user = await _db.GetUserByUsername(username);
+        var user = await _db.GetUserByUsername(username).ConfigureAwait(false);
         if (user == null) 
             return;
         // Verify password

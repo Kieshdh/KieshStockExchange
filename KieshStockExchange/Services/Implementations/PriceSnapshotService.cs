@@ -32,6 +32,9 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
     #region IPriceSnapshotService Implementation
     public async Task Start(TimeSpan? interval = null)
     {
+        if (interval == null || interval.Value == Interval)
+            return; // No change needed
+
         // Stop any existing timer
         Stop();
 
@@ -48,9 +51,9 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
         try
         {
             if (delay > TimeSpan.Zero)
-                await Task.Delay(delay, _cts.Token);
+                await Task.Delay(delay, _cts.Token).ConfigureAwait(false);
 
-            await CreateSnapShot();
+            await CreateSnapShot().ConfigureAwait(false);
 
             // Create a repeating UI timer
             _timer ??= _dispatcher.CreateTimer();
@@ -85,7 +88,7 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
     #region Timer Tick Handler
     private async void TickMethod(object? sender, EventArgs e)
     {
-        await CreateSnapShot();
+        await CreateSnapShot().ConfigureAwait(false);
     }
 
     private async Task CreateSnapShot()
@@ -95,7 +98,7 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
             CancellationToken ct = _cts?.Token ?? CancellationToken.None;
 
             // Get the list of subscribed stocks (or all if none subscribed)
-            var subs = await GetSubs();
+            var subs = await GetSubs().ConfigureAwait(false);
 
             // Determine the current time bucket
             var bucketStart = TimeHelper.FloorToBucketUtc(TimeHelper.NowUtc(), Interval);
@@ -105,18 +108,18 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
             {
                 ct.ThrowIfCancellationRequested();
 
-                var price = await _market.GetLastPriceAsync(stockId, currency, ct);
+                var price = await _market.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
                 if (price <= 0m) continue; // nothing to snapshot
 
                 // Only write if we don’t already have a snapshot in this hour
                 var existing = await _db.GetStockPricesByStockIdAndTimeRange(
-                    stockId, currency, bucketStart, bucketEnd, ct);
+                    stockId, currency, bucketStart, bucketEnd, ct).ConfigureAwait(false);
 
                 // Create a new snapshot
                 if (existing.Count == 0)
-                    await CreateStockPrice(stockId, currency, price, ct); // Create new snapshot
-                else _logger.LogInformation("Snapshot already exists for StockId {StockId} in {Currency} between {Start} and {End}",
-                        stockId, currency, bucketStart, bucketEnd);
+                    await CreateStockPrice(stockId, currency, price, ct).ConfigureAwait(false); // Create new snapshot
+                else _logger.LogInformation("Snapshot already exists for StockId {StockId} in {Currency} " +
+                    "between {Start} and {End}", stockId, currency, bucketStart, bucketEnd);
             }
         }
         catch (Exception ex) { _logger.LogError(ex, "Price snapshot failed with interval {Interval}", Interval); }
@@ -128,7 +131,7 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
         if (subs.Count == 0)
         {
             // Option B: fallback to all stocks if nothing is subscribed
-            var stocks = await _market.GetAllStocksAsync();
+            var stocks = await _market.GetAllStocksAsync().ConfigureAwait(false);
             subs = stocks.Select(s => (s.StockId, CurrencyType.USD)).ToList();
         }
         return subs;
@@ -138,13 +141,12 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
     {
         try
         {
-            await _db.CreateStockPrice(new StockPrice
+            var sp = new StockPrice
             {
-                StockId = stockId,
-                CurrencyType = currency,
-                Price = price,
+                StockId = stockId, CurrencyType = currency, Price = price,
                 Timestamp = TimeHelper.FloorNowToBucketUtc(Interval)
-            }, ct);
+            };
+            await _db.CreateStockPrice(sp, ct).ConfigureAwait(false);
         }
         catch (Exception ex) {
             _logger.LogError(ex, "Failed to create stock price snapshot for StockId {StockId} in {Currency}", stockId, currency);

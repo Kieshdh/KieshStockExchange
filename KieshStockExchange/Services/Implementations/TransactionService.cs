@@ -77,7 +77,7 @@ public sealed class TransactionService : ITransactionService
             }
 
             // Pull from DB and order newest first
-            var rows = await _db.GetTransactionsByUserId(CurrentUserId, ct);
+            var rows = await _db.GetTransactionsByUserId(CurrentUserId, ct).ConfigureAwait(false);
             _all = rows.OrderByDescending(t => t.Timestamp).ToList();
 
             NotifyChanged();

@@ -41,7 +41,8 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
     public CurrencyType Currency { get; set; } = CurrencyType.USD;
 
-    public TrendingService(IDispatcher dispatcher, ILogger<TrendingService> logger, IDataBaseService db, IMarketDataService market)
+    public TrendingService(IDispatcher dispatcher, ILogger<TrendingService> logger, 
+        IDataBaseService db, IMarketDataService market)
     {
         // Dependencies
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));

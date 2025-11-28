@@ -148,7 +148,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     public async Task<decimal> GetLastPriceAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
         // Try LiveQuote first
-        var quote = await GetOrAddQuote(stockId, currency, ct);
+        var quote = await GetOrAddQuote(stockId, currency, ct).ConfigureAwait(false);
         if (quote.LastPrice > 0m) return quote.LastPrice;
 
         // Try latest price from candles
@@ -156,19 +156,19 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         if (candle is not null && candle.Close > 0m) return candle.Close;
 
         // Fallback to latest Transaction from DB
-        var tx = await _db.GetLatestTransactionByStockId(stockId, currency, ct);
+        var tx = await _db.GetLatestTransactionByStockId(stockId, currency, ct).ConfigureAwait(false);
         if (tx is not null && tx.Price > 0m) return tx.Price;
 
         _logger.LogDebug("No live price found for stock {StockId} in {Currency}", stockId, currency);
 
         // Fallback to latest StockPrice from DB
-        var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
+        var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct).ConfigureAwait(false);
         if (sp is not null && sp.Price > 0m) return sp.Price;
 
         // Fallback to USD latest price converted
         if (currency != CurrencyType.USD)
         {
-            var usdPrice = await GetLastPriceAsync(stockId, CurrencyType.USD, ct);
+            var usdPrice = await GetLastPriceAsync(stockId, CurrencyType.USD, ct).ConfigureAwait(false);
             if (usdPrice > 0m) return CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency);
         }
 
@@ -179,17 +179,17 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     public async Task<decimal> GetDateTimePriceAsync(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default)
     {
         // Try to get the price at or before the specified time
-        var tx = await _db.GetLatestTransactionBeforeTime(stockId, currency, time, ct);
+        var tx = await _db.GetLatestTransactionBeforeTime(stockId, currency, time, ct).ConfigureAwait(false);
         if (tx is not null && tx.Price > 0m) return tx.Price;
 
         // Fallback to latest StockPrice from DB
-        var sp = await _db.GetLatestStockPriceBeforeTime(stockId, currency, time, ct);
+        var sp = await _db.GetLatestStockPriceBeforeTime(stockId, currency, time, ct).ConfigureAwait(false);
         if (sp is not null && sp.Price > 0m) return sp.Price;
 
         // Fallback to USD latest price converted
         if (currency != CurrencyType.USD)
         {
-            var usdPrice = await GetDateTimePriceAsync(stockId, CurrencyType.USD, time, ct);
+            var usdPrice = await GetDateTimePriceAsync(stockId, CurrencyType.USD, time, ct).ConfigureAwait(false);
             if (usdPrice > 0m) return CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency);
         }
         return 100m; // Default seed price
@@ -199,7 +199,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     #region Subscribe/Unsubscribe
     public async Task SubscribeAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
-        await GetOrAddQuote(stockId, currency, ct);
+        await GetOrAddQuote(stockId, currency, ct).ConfigureAwait(false);
         _subRefCount.AddOrUpdate((stockId, currency), 1, (_, c) => c + 1);
 
         // Subscribe to candles
@@ -232,20 +232,20 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
                 _dispatcher.Dispatch(() => sim.Stop());
 
             // Unsubscribe from candles
-            await _candle.UnsubscribeAsync(stockId, currency, CandleResolution.Default, ct);
+            await _candle.UnsubscribeAsync(stockId, currency, CandleResolution.Default, ct).ConfigureAwait(false);
         }
     }
 
     public async Task SubscribeAllAsync(CurrencyType currency, CancellationToken ct = default)
     {
-        var stocks = await GetAllStocksAsync(ct);
-        await Task.WhenAll(stocks.Select(s => SubscribeAsync(s.StockId, currency, ct)));
+        var stocks = await GetAllStocksAsync(ct).ConfigureAwait(false);
+        await Task.WhenAll(stocks.Select(s => SubscribeAsync(s.StockId, currency, ct))).ConfigureAwait(false);
     }
 
     public async Task UnsubscribeAllAsync(CurrencyType currency, CancellationToken ct = default)
     {
-        var stocks = await GetAllStocksAsync(ct);
-        await Task.WhenAll(stocks.Select(s => Unsubscribe(s.StockId, currency, ct)));
+        var stocks = await GetAllStocksAsync(ct).ConfigureAwait(false);
+        await Task.WhenAll(stocks.Select(s => Unsubscribe(s.StockId, currency, ct))).ConfigureAwait(false);
     }
     #endregion
 
@@ -262,19 +262,19 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         var currency = tick.CurrencyType;
         var key = (stockId, currency);
 
+        // Update candles
+        await _candle.OnTransactionTickAsync(tick, ct).ConfigureAwait(false);
+
         // Ignore if not subscribed
         if (!_subRefCount.TryGetValue((stockId, currency), out var c) || c <= 0)
             return; // Nobody subscribed
 
         // Update live quote
-        var quote = await GetOrAddQuote(stockId, currency, ct);
+        var quote = await GetOrAddQuote(stockId, currency, ct).ConfigureAwait(false);
         var utc = TimeHelper.EnsureUtc(tick.Timestamp);
 
         // Keep ring for rolling stats
         AddToRing(key, tick.Price, utc);
-
-        // Update candles
-        await _candle.OnTransactionTickAsync(tick, ct);
 
         // Dispatch the update
         _dispatcher.Dispatch(() =>
@@ -288,7 +288,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     {
         var key = (stockId, currency);
         // Get the quote and ring
-        var quote = await GetOrAddQuote(stockId, currency, ct);
+        var quote = await GetOrAddQuote(stockId, currency, ct).ConfigureAwait(false);
         var ring = GetRing(key);
 
         // If we already have data, skip
@@ -296,11 +296,12 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
             return;
 
         // Load the current day of historical prices
-        var history = await GetHistoricalTicksAsync(stockId, currency, ct);
+        var history = await GetHistoricalTicksAsync(stockId, currency, ct).ConfigureAwait(false);
         if (history.Count == 0)
         {
             // Get a fallback price if no history
-            (decimal price, DateTime time) = await FallbackNoHistoricalTicks(stockId, currency, quote, ring, ct);
+            (decimal price, DateTime time) = await FallbackNoHistoricalTicks(
+                stockId, currency, quote, ring, ct).ConfigureAwait(false);
 
             // Add to ring and update quote
             lock (GetRingGate(key))
@@ -349,7 +350,8 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         // Load last day of historical transactions
         var (start, end) = TimeHelper.TodayUtcRange();
 
-        var history = await _db.GetTransactionsByStockIdAndTimeRange(stockId, currency, start, end, ct);
+        var history = await _db.GetTransactionsByStockIdAndTimeRange(
+            stockId, currency, start, end, ct).ConfigureAwait(false);
         if (history.Count == 0)
             _logger.LogWarning("No transactions found for stock {StockId} in {Currency}", stockId, currency);
         // Sort by time ascending
@@ -472,12 +474,12 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
     private async Task<(decimal, DateTime)> FallbackNoHistoricalTicks(int stockId, CurrencyType currency, LiveQuote quote, RingBuffer ring, CancellationToken ct)
     { 
         // Fallback to latest transaction price
-        var tx = await _db.GetLatestTransactionByStockId(stockId, currency, ct);
+        var tx = await _db.GetLatestTransactionByStockId(stockId, currency, ct).ConfigureAwait(false);
         if (tx is not null)
             return (tx.Price, TimeHelper.EnsureUtc(tx.Timestamp));
         
         // Fallback to latest stock price
-        var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct);
+        var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct).ConfigureAwait(false);
         if (sp is not null)
             return (sp.Price, TimeHelper.EnsureUtc(sp.Timestamp));
 
@@ -486,7 +488,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         // Fallback to USD latest price converted
         if (currency != CurrencyType.USD)
         {
-            var usdPrice = await GetLastPriceAsync(stockId, CurrencyType.USD, ct);
+            var usdPrice = await GetLastPriceAsync(stockId, CurrencyType.USD, ct).ConfigureAwait(false);
             if (usdPrice > 0m)
                 return (CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency), TimeHelper.NowUtc());
         }
@@ -517,7 +519,8 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
             // Ensure underlying candle stream is also torn down
             foreach (var (stockId, currency) in _subRefCount.Keys.ToArray())
             {
-                try { await _candle.UnsubscribeAsync(stockId, currency, CandleResolution.Default); }
+                try { await _candle.UnsubscribeAsync(stockId, currency, 
+                    CandleResolution.Default).ConfigureAwait(false); }
                 catch { } // Ignore
             }
 

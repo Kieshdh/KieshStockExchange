@@ -88,9 +88,9 @@ public class MarketOrderService : IMarketOrderService
         if (vr != null) return vr;
 
         // Get the order book and wait for lock.
-        await EnsureBookLoadedAsync(incoming.StockId, incoming.CurrencyType, ct);
+        await EnsureBookLoadedAsync(incoming.StockId, incoming.CurrencyType, ct).ConfigureAwait(false);
         var gate = GetBookLock(incoming.StockId, incoming.CurrencyType);
-        await gate.WaitAsync(ct);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
 
         // Keep track if we already persisted the order, so we can cancel it on error
         Order? persisted = null;
@@ -99,22 +99,22 @@ public class MarketOrderService : IMarketOrderService
         {
             // Resererve assets and persist the order in a transaction
             OrderResult? reserveFail = null;
-            await using (var tx = await _db.BeginTransactionAsync(ct))
+            await using (var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false))
             {
                 // Try to reserve funds or shares for the incoming order
-                var err = await ReserveAssets(incoming, ct);
+                var err = await ReserveAssets(incoming, ct).ConfigureAwait(false);
                 if (err != null)
                 {
                     // Reservation failed, rollback and return error
                     reserveFail = err;
-                    await tx.RollbackAsync(ct);
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
                 }
                 else
                 {
                     // Persist the incoming order
-                    await _db.CreateOrder(incoming, ct);
+                    await _db.CreateOrder(incoming, ct).ConfigureAwait(false);
                     persisted = incoming;
-                    await tx.CommitAsync(ct);
+                    await tx.CommitAsync(ct).ConfigureAwait(false);
                 }
             }
             // If reservation failed, return the error 
@@ -127,7 +127,7 @@ public class MarketOrderService : IMarketOrderService
             var book = GetOrCreateBook(incoming.StockId, incoming.CurrencyType);
 
             // Try to fill the order and create transactions
-            fills = await FillTransactionsAsync(incoming, book, ct);
+            fills = await FillTransactionsAsync(incoming, book, ct).ConfigureAwait(false);
 
             // if it still has remainder, place it on the book
             if (incoming.IsOpen && incoming.IsLimitOrder && incoming.RemainingQuantity > 0)
@@ -136,7 +136,7 @@ public class MarketOrderService : IMarketOrderService
             // If it a market order and it still has remainder, cancel the remainder
             if (incoming.IsOpen && incoming.IsMarketOrder && incoming.RemainingQuantity > 0)
             {
-                await CancelRemainderAsync(incoming, ct);
+                await CancelRemainderAsync(incoming, ct).ConfigureAwait(false);
                 if (fills.Count == 0) return NoLiquidityResult(incoming, fills);
             }
         }
@@ -146,14 +146,14 @@ public class MarketOrderService : IMarketOrderService
 
             // If we already wrote the order, Make sure it is not left open.
             if (persisted is not null && persisted.IsOpen)
-                await CancelRemainderAsync(persisted, ct);
+                await CancelRemainderAsync(persisted, ct).ConfigureAwait(false);
             return OperationFailedResult();
         }
         finally { gate.Release(); }
 
         // Notify market of each fill (for updating last price, etc)
         foreach (var tick in fills)
-            await _market.OnTick(tick, ct);
+            await _market.OnTick(tick, ct).ConfigureAwait(false);
 
         // Return the a successful result
         return SuccessResult(incoming, fills);
@@ -183,7 +183,8 @@ public class MarketOrderService : IMarketOrderService
         // Sell orders should reserve 
         if (order.IsSellOrder)
         {
-            var ok = await _portfolio.ReservePositionAsync(order.StockId, order.Quantity, order.UserId, ct);
+            var ok = await _portfolio.ReservePositionAsync(
+                order.StockId, order.Quantity, order.UserId, ct).ConfigureAwait(false);
             return ok ? null : ParamError("Insufficient shares to reserve for sell order.");
         }
 
@@ -193,7 +194,8 @@ public class MarketOrderService : IMarketOrderService
         // Buy orders reserve funds based on total amount
         var cap = order.TotalAmount; // estimated total amount including slippage
         if (cap <= 0) return ParamError("Invalid total amount for buy order.");
-        var okFunds = await _portfolio.ReserveFundsAsync(cap, order.CurrencyType, order.UserId, ct);
+        var okFunds = await _portfolio.ReserveFundsAsync(
+            cap, order.CurrencyType, order.UserId, ct).ConfigureAwait(false);
         return okFunds ? null : ParamError("Insufficient funds to reserve for buy order.");
     }
     #endregion
@@ -224,7 +226,7 @@ public class MarketOrderService : IMarketOrderService
             if (!IsPriceCrossed(incoming, bestOpposite)) break;
 
             // Execute fill and create transaction record
-            var tx = await ExecuteFillAsync(incoming, bestOpposite, ct);
+            var tx = await ExecuteFillAsync(incoming, bestOpposite, ct).ConfigureAwait(false);
             fills.Add(tx);
 
             // Delete opposite if fully filled
@@ -295,7 +297,7 @@ public class MarketOrderService : IMarketOrderService
         var makerClone = maker.CloneFull();
 
         // Persist changes using a cloned copy of the orders
-        await PersistTransactionAsync(tx, takerClone, makerClone, ct);
+        await PersistTransactionAsync(tx, takerClone, makerClone, ct).ConfigureAwait(false);
 
         // Log the fill for in memory orders
         taker.Fill(qty);
@@ -305,7 +307,7 @@ public class MarketOrderService : IMarketOrderService
             taker.OrderId, maker.OrderId, qty, maker.Price);
 
         // Update portfolio snapshots if needed
-        await UpdatePortfolio(tx, ct);
+        await UpdatePortfolio(tx, ct).ConfigureAwait(false);
 
         return tx;
     }
@@ -330,7 +332,7 @@ public class MarketOrderService : IMarketOrderService
     private async Task PersistTransactionAsync(Transaction trade, Order taker, Order maker, CancellationToken ct)
     {
         // Start a transaction which does all in one go
-        await using var tx = await _db.BeginTransactionAsync(ct);
+        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         // Get the different values 
         var currency = trade.CurrencyType; 
@@ -342,7 +344,8 @@ public class MarketOrderService : IMarketOrderService
             if (taker.IsTrueMarketOrder)
             {
                 // For true market orders, spend straight from available funds
-                var okPay = await _portfolio.WithdrawFundsAsync(spend, currency, trade.BuyerId, ct);
+                var okPay = await _portfolio.WithdrawFundsAsync(
+                    spend, currency, trade.BuyerId, ct).ConfigureAwait(false);
                 if (!okPay) throw new InvalidOperationException("Buyer funds withdrawal failed.");
             }
             else
@@ -355,25 +358,30 @@ public class MarketOrderService : IMarketOrderService
                 var release = CurrencyHelper.RoundMoney(reservedUnit * qty - spend, currency);
                 if (release > 0m)
                 {
-                    var okRefund = await _portfolio.ReleaseReservedFundsAsync(release, currency, trade.BuyerId, ct);
+                    var okRefund = await _portfolio.ReleaseReservedFundsAsync(
+                        release, currency, trade.BuyerId, ct).ConfigureAwait(false);
                     if (!okRefund) throw new InvalidOperationException("Buyer release of over-reserved funds failed");
                 }
 
                 // Spend from reserved
-                var okSpend = await _portfolio.ReleaseFromReservedFundsAsync(spend, currency, trade.BuyerId, ct);
+                var okSpend = await _portfolio.ReleaseFromReservedFundsAsync(
+                    spend, currency, trade.BuyerId, ct).ConfigureAwait(false);
                 if (!okSpend) throw new InvalidOperationException("Buyer reserved funds spend failed.");
             }
 
             // Buyer gets shares
-            var okAddPos = await _portfolio.AddPositionAsync(trade.StockId, qty, trade.BuyerId, ct);
+            var okAddPos = await _portfolio.AddPositionAsync(
+                trade.StockId, qty, trade.BuyerId, ct).ConfigureAwait(false);
             if (!okAddPos) throw new InvalidOperationException("Buyer position add failed.");
 
             // Seller delivers shares
-            var okPosition = await _portfolio.ReleaseFromReservedPositionAsync(trade.StockId, qty, trade.SellerId, ct);
+            var okPosition = await _portfolio.ReleaseFromReservedPositionAsync(
+                trade.StockId, qty, trade.SellerId, ct).ConfigureAwait(false);
             if (!okPosition) throw new InvalidOperationException("Seller reserved position spend failed.");
 
             // Seller gets funds
-            var okAddFunds = await _portfolio.AddFundsAsync(spend, currency, trade.SellerId, ct);
+            var okAddFunds = await _portfolio.AddFundsAsync(
+                spend, currency, trade.SellerId, ct).ConfigureAwait(false);
             if (!okAddFunds) throw new InvalidOperationException("Seller funds add failed.");
 
             // Fill both orders
@@ -383,12 +391,12 @@ public class MarketOrderService : IMarketOrderService
                 throw new InvalidOperationException("Order became invalid after fill.");
 
             // Persist transaction and updated orders
-            await _db.CreateTransaction(trade, ct);
-            await _db.UpdateOrder(taker, ct);
-            await _db.UpdateOrder(maker, ct);
+            await _db.CreateTransaction(trade, ct).ConfigureAwait(false);
+            await _db.UpdateOrder(taker, ct).ConfigureAwait(false);
+            await _db.UpdateOrder(maker, ct).ConfigureAwait(false);
 
             // Commit to the database
-            await tx.CommitAsync(ct);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
         }
     }
 
@@ -400,10 +408,10 @@ public class MarketOrderService : IMarketOrderService
         {
             using (_portfolio.BeginSystemScope())
             {
-                await _portfolio.RefreshAsync(trade.BuyerId, ct);
-                await _portfolio.RefreshAsync(trade.SellerId, ct);
-                await _transaction.RefreshAsync(trade.BuyerId, ct);
-                await _transaction.RefreshAsync(trade.SellerId, ct);
+                await _portfolio.RefreshAsync(trade.BuyerId, ct).ConfigureAwait(false);
+                await _portfolio.RefreshAsync(trade.SellerId, ct).ConfigureAwait(false);
+                await _transaction.RefreshAsync(trade.BuyerId, ct).ConfigureAwait(false);
+                await _transaction.RefreshAsync(trade.SellerId, ct).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -419,7 +427,7 @@ public class MarketOrderService : IMarketOrderService
         ct.ThrowIfCancellationRequested();
 
         // Get the order
-        var order = await _db.GetOrderById(orderId, ct);
+        var order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
         if (order is null || !order.IsOpen)
             return AlreadyClosedResult();
 
@@ -431,9 +439,9 @@ public class MarketOrderService : IMarketOrderService
             return NotAuthorizedResult("Not allowed to cancel orders for the requested user.");
 
         // Get the order book and wait for lock
-        await EnsureBookLoadedAsync(order.StockId, order.CurrencyType, ct);
+        await EnsureBookLoadedAsync(order.StockId, order.CurrencyType, ct).ConfigureAwait(false);
         var gate = GetBookLock(order.StockId, order.CurrencyType);
-        await gate.WaitAsync(ct);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
 
         try
         {
@@ -441,7 +449,7 @@ public class MarketOrderService : IMarketOrderService
             var book = GetOrCreateBook(order.StockId, order.CurrencyType); ;
 
             // Cancel the remainder and release reserved assets
-            await CancelRemainderAsync(order, ct);
+            await CancelRemainderAsync(order, ct).ConfigureAwait(false);
 
             // Remove from book if present
             if (!book.RemoveById(orderId))
@@ -469,8 +477,8 @@ public class MarketOrderService : IMarketOrderService
                     if (!order.IsTrueMarketOrder && order.RemainingAmount > 0m)
                     {
                         // Release reserved funds
-                        var okRelease = await _portfolio.ReleaseReservedFundsAsync(
-                            order.RemainingAmount, order.CurrencyType, order.UserId, txct);
+                        var okRelease = await _portfolio.ReleaseReservedFundsAsync(order.RemainingAmount, 
+                            order.CurrencyType, order.UserId, txct).ConfigureAwait(false);
                         if (!okRelease) throw new InvalidOperationException(
                             "Failed to release reserved funds for cancelled buy order.");
                     }
@@ -478,17 +486,18 @@ public class MarketOrderService : IMarketOrderService
                 else 
                 {
                     // Release reserved shares
-                    var okUnreserve = await _portfolio.UnreservePositionAsync(
-                        order.StockId, order.RemainingQuantity, order.UserId, txct);
+                    var okUnreserve = await _portfolio.UnreservePositionAsync(order.StockId,
+                        order.RemainingQuantity, order.UserId, txct).ConfigureAwait(false);
                     if (!okUnreserve) throw new InvalidOperationException(
                         "Failed to unreserve shares for cancelled sell order.");
                 }
 
                 // Cancel the order
                 order.Cancel();
-                if (!order.IsValid()) throw new InvalidOperationException("Order became invalid on cancellation.");
-                await _db.UpdateOrder(order, txct);
-            }, ct);
+                if (!order.IsValid()) throw new InvalidOperationException(
+                    "Order became invalid on cancellation.");
+                await _db.UpdateOrder(order, txct).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
         }
 
         
@@ -502,7 +511,7 @@ public class MarketOrderService : IMarketOrderService
         ct.ThrowIfCancellationRequested();
 
         // Get the order
-        var order = await _db.GetOrderById(orderId, ct);
+        var order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
         if (order is null || !order.IsOpen)
             return AlreadyClosedResult();
 
@@ -518,21 +527,22 @@ public class MarketOrderService : IMarketOrderService
         if (vr != null) return vr;
 
         // Get the order book and wait for lock
-        await EnsureBookLoadedAsync(order.StockId, order.CurrencyType, ct);
+        await EnsureBookLoadedAsync(order.StockId, order.CurrencyType, ct).ConfigureAwait(false);
         var gate = GetBookLock(order.StockId, order.CurrencyType);
-        await gate.WaitAsync(ct);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
 
         List<Transaction> fills = new();
         try
         {
             // Get the order book
-            var book = await GetOrderBookByStockAsync(order.StockId, order.CurrencyType, ct);
+            var book = await GetOrderBookByStockAsync(
+                order.StockId, order.CurrencyType, ct).ConfigureAwait(false);
 
             // Modify the order
-            await ChangeOrderAsync(order, newQuantity, newPrice, ct);
+            await ChangeOrderAsync(order, newQuantity, newPrice, ct).ConfigureAwait(false);
 
             // Check for any fills after modification
-            fills = await FillTransactionsAsync(order, book, ct);
+            fills = await FillTransactionsAsync(order, book, ct).ConfigureAwait(false);
 
             // if it still has remainder, place it on the book
             if (order.IsOpen && order.IsLimitOrder && order.RemainingQuantity > 0)
@@ -548,7 +558,7 @@ public class MarketOrderService : IMarketOrderService
 
         // Notify market of each fill (for updating last price, etc)
         foreach (var tick in fills)
-            await _market.OnTick(tick, ct);
+            await _market.OnTick(tick, ct).ConfigureAwait(false);
 
         // Return the a successful result
         return SuccessfullyModifiedResult(order, fills);
@@ -592,15 +602,15 @@ public class MarketOrderService : IMarketOrderService
                 {
                     if (reserveDelta > 0)
                     {
-                        var okReserve = await _portfolio.ReserveFundsAsync(
-                            reserveDelta, order.CurrencyType, order.UserId, txct);
+                        var okReserve = await _portfolio.ReserveFundsAsync(reserveDelta, 
+                            order.CurrencyType, order.UserId, txct).ConfigureAwait(false);
                         if (!okReserve) throw new InvalidOperationException(
                             "Failed to reserve additional funds for modified buy order.");
                     }
                     else if (reserveDelta < 0)
                     {
-                        var okRelease = await _portfolio.ReleaseReservedFundsAsync(
-                            -reserveDelta, order.CurrencyType, order.UserId, txct);
+                        var okRelease = await _portfolio.ReleaseReservedFundsAsync(-reserveDelta, 
+                            order.CurrencyType, order.UserId, txct).ConfigureAwait(false);
                         if (!okRelease) throw new InvalidOperationException(
                             "Failed to release excess reserved funds for modified buy order.");
                     }
@@ -610,14 +620,14 @@ public class MarketOrderService : IMarketOrderService
                     if (qtyDelta > 0)
                     {
                         var okReserve = await _portfolio.ReservePositionAsync(
-                            order.StockId, qtyDelta, order.UserId, txct);
+                            order.StockId, qtyDelta, order.UserId, txct).ConfigureAwait(false);
                         if (!okReserve) throw new InvalidOperationException(
                             "Failed to reserve additional shares for modified sell order.");
                     }
                     else if (qtyDelta < 0)
                     {
                         var okUnreserve = await _portfolio.UnreservePositionAsync(
-                            order.StockId, -qtyDelta, order.UserId, txct);
+                            order.StockId, -qtyDelta, order.UserId, txct).ConfigureAwait(false);
                         if (!okUnreserve) throw new InvalidOperationException(
                             "Failed to unreserve excess shares for modified sell order.");
                     }
@@ -626,8 +636,8 @@ public class MarketOrderService : IMarketOrderService
                 order.UpdateQuantity(newTotalQty);
                 order.UpdatePrice(newUnitPrice);
                 if (!order.IsValid()) throw new InvalidOperationException("Order became invalid on modification.");
-                await _db.UpdateOrder(order, txct);
-            }, ct);
+                await _db.UpdateOrder(order, txct).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
         }
     }
     #endregion
@@ -636,7 +646,7 @@ public class MarketOrderService : IMarketOrderService
     public async Task<OrderBook> GetOrderBookByStockAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        await EnsureBookLoadedAsync(stockId, currency, ct);
+        await EnsureBookLoadedAsync(stockId, currency, ct).ConfigureAwait(false);
         return GetOrCreateBook(stockId, currency);
     }
 
@@ -651,11 +661,11 @@ public class MarketOrderService : IMarketOrderService
         if (_bookLoaded.ContainsKey(key)) return;
 
         // Load existing open limit orders from the database
-        var openLimits = await _db.GetOpenLimitOrders(stockId, currency, ct);
+        var openLimits = await _db.GetOpenLimitOrders(stockId, currency, ct).ConfigureAwait(false);
 
         // Wait for the lock
         var gate = GetBookLock(stockId, currency);
-        await gate.WaitAsync(ct);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             if (_bookLoaded.ContainsKey(key)) return;
@@ -683,9 +693,9 @@ public class MarketOrderService : IMarketOrderService
         if (!IsAdmin)
             return (false, "Only admins may validate order books.");
 
-        await EnsureBookLoadedAsync(stockId, currency, ct);
+        await EnsureBookLoadedAsync(stockId, currency, ct).ConfigureAwait(false);
         var gate = GetBookLock(stockId, currency);
-        await gate.WaitAsync(ct);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var book = GetOrCreateBook(stockId, currency);
@@ -700,9 +710,9 @@ public class MarketOrderService : IMarketOrderService
         if (!IsAdmin)
             throw new UnauthorizedAccessException("Only admins may fix order books.");
 
-        await EnsureBookLoadedAsync(stockId, currency, ct);
+        await EnsureBookLoadedAsync(stockId, currency, ct).ConfigureAwait(false);
         var gate = GetBookLock(stockId, currency);
-        await gate.WaitAsync(ct);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var book = GetOrCreateBook(stockId, currency);
@@ -716,9 +726,9 @@ public class MarketOrderService : IMarketOrderService
         if (!IsAdmin)
             throw new UnauthorizedAccessException("Only admins may rebuild order book indexes.");
 
-        await EnsureBookLoadedAsync(stockId, currency, ct);
+        await EnsureBookLoadedAsync(stockId, currency, ct).ConfigureAwait(false);
         var gate = GetBookLock(stockId, currency);
-        await gate.WaitAsync(ct);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var book = GetOrCreateBook(stockId, currency);

@@ -142,7 +142,7 @@ public class UserOrderService : IUserOrderService
 
         try
         {
-            UserAllOrders = (await _db.GetOrdersByUserId(targetUserId, ct)).ToList();
+            UserAllOrders = (await _db.GetOrdersByUserId(targetUserId, ct).ConfigureAwait(false)).ToList();
             NotifyOrdersChanged();
             return true;
         }
@@ -155,24 +155,24 @@ public class UserOrderService : IUserOrderService
 
     public async Task<OrderResult> CancelOrderAsync(int orderId, int? asUserId = null, CancellationToken ct = default)
     {
-        try { return await _market.CancelOrderAsync(orderId, asUserId, ct); }
+        try { return await _market.CancelOrderAsync(orderId, asUserId, ct).ConfigureAwait(false); }
         catch { return OperationFailedResult(); }
         finally 
         { 
-            await RefreshOrdersAsync(asUserId, ct); 
-            await _portfolio.RefreshAsync(asUserId, ct);
+            await RefreshOrdersAsync(asUserId, ct).ConfigureAwait(false); 
+            await _portfolio.RefreshAsync(asUserId, ct).ConfigureAwait(false);
         }
     }
 
     public async Task<OrderResult> ModifyOrderAsync(int orderId, int? newQuantity = null, 
         decimal? newPrice = null, int? asUserId = null, CancellationToken ct = default)
     {
-        try { return await _market.ModifyOrderAsync(orderId, newQuantity, newPrice, asUserId, ct); }
+        try { return await _market.ModifyOrderAsync(orderId, newQuantity, newPrice, asUserId, ct).ConfigureAwait(false); }
         catch { return OperationFailedResult(); }
         finally 
         { 
-            await RefreshOrdersAsync(asUserId, ct); 
-            await _portfolio.RefreshAsync(asUserId, ct);
+            await RefreshOrdersAsync(asUserId, ct).ConfigureAwait(false); 
+            await _portfolio.RefreshAsync(asUserId, ct).ConfigureAwait(false);
         }
     }
     #endregion
@@ -216,7 +216,7 @@ public class UserOrderService : IUserOrderService
         try
         {
             //  Load portfolio snapshot for the target user
-            await _portfolio.RefreshAsync(actingUserId, ct);
+            await _portfolio.RefreshAsync(actingUserId, ct).ConfigureAwait(false);
 
             // Check if user has enough funds or shares
             var assetResult = CheckAssets(actingUserId, currency, stockId, buyOrder, price, quantity);
@@ -227,7 +227,7 @@ public class UserOrderService : IUserOrderService
             if (!order.IsValid()) return ParamError("Invalid order parameters.");
 
             // Send to market for placing and matching
-            var result = await _market.PlaceAndMatchAsync(order, actingUserId, ct);
+            var result = await _market.PlaceAndMatchAsync(order, actingUserId, ct).ConfigureAwait(false);
 
             if (result.PlacedOrder == null)
                 _logger.LogWarning("Order placement failed for user #{UserId}", actingUserId);
@@ -244,8 +244,8 @@ public class UserOrderService : IUserOrderService
         finally
         {
             // Refresh orders and portfolio after placing
-            await RefreshOrdersAsync(asUserId, ct);
-            await _portfolio.RefreshAsync(asUserId, ct);
+            await RefreshOrdersAsync(asUserId, ct).ConfigureAwait(false);
+            await _portfolio.RefreshAsync(asUserId, ct).ConfigureAwait(false);
         }
     }
     #endregion

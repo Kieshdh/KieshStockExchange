@@ -134,8 +134,8 @@ public class UserPortfolioService : IUserPortfolioService
 
         try
         {
-            var funds = await _db.GetFundsByUserId(activeUserId, ct);
-            var positions = await _db.GetPositionsByUserId(activeUserId, ct);
+            var funds = await _db.GetFundsByUserId(activeUserId, ct).ConfigureAwait(false);
+            var positions = await _db.GetPositionsByUserId(activeUserId, ct).ConfigureAwait(false);
 
             Snapshot = new PortfolioSnapshot(
                 funds.ToImmutableList(),
@@ -210,7 +210,7 @@ public class UserPortfolioService : IUserPortfolioService
         if (amount <= 0) { _logger.LogWarning("Amount must be positive. Given: {Amount}", amount); return false; }
         if (!CurrencyHelper.IsSupported(currency)) { _logger.LogWarning("Unsupported currency {Currency}", currency); return false; }
 
-        var fund = await _db.GetFundByUserIdAndCurrency(targetUserId, currency, ct)
+        var fund = await _db.GetFundByUserIdAndCurrency(targetUserId, currency, ct).ConfigureAwait(false)
             ?? new Fund { UserId = targetUserId, CurrencyType = currency, TotalBalance = 0 };
 
         switch (mutation)
@@ -260,7 +260,7 @@ public class UserPortfolioService : IUserPortfolioService
                 break;
         }
 
-        await _db.UpsertFund(fund, ct);
+        await _db.UpsertFund(fund, ct).ConfigureAwait(false);
 
         return true;
     }
@@ -273,13 +273,13 @@ public class UserPortfolioService : IUserPortfolioService
         if (!CanModifyPortfolio(targetUserId)) { _logger.LogWarning("No permission to modify positions for user {UserId}", targetUserId); return false; }
         if (quantity <= 0) { _logger.LogWarning("Quantity must be positive. Given: {Qty}", quantity); return false; }
 
-        if (!await _db.StockExists(stockId, ct))
+        if (!await _db.StockExists(stockId, ct).ConfigureAwait(false))
         {
             _logger.LogWarning("Stock #{StockId} does not exist.", stockId);
             return false;
         }
 
-        var position = await _db.GetPositionByUserIdAndStockId(targetUserId, stockId, ct)
+        var position = await _db.GetPositionByUserIdAndStockId(targetUserId, stockId, ct).ConfigureAwait(false)
             ?? new Position { UserId = targetUserId, StockId = stockId, Quantity = 0 };
 
         switch (mutation)
@@ -329,7 +329,7 @@ public class UserPortfolioService : IUserPortfolioService
                 break;
         }
 
-        await _db.UpsertPosition(position, ct);
+        await _db.UpsertPosition(position, ct).ConfigureAwait(false);
 
         return true;
     }
@@ -342,15 +342,15 @@ public class UserPortfolioService : IUserPortfolioService
         if (err != null) { _logger.LogWarning(err); return; }
         if (!CanModifyPortfolio(targetUserId)) { _logger.LogWarning("Not allowed to normalize funds for user {UserId}", targetUserId); return; }
 
-        await NormalizeFundsAsync(targetUserId, ct);
-        await NormalizePositionsAsync(targetUserId, ct);
+        await NormalizeFundsAsync(targetUserId, ct).ConfigureAwait(false);
+        await NormalizePositionsAsync(targetUserId, ct).ConfigureAwait(false);
     }
 
     private async Task NormalizeFundsAsync(int userId, CancellationToken ct = default)
     {
         await _db.RunInTransactionAsync(async tx =>
         {
-            var funds = await _db.GetFundsByUserId(userId, tx);
+            var funds = await _db.GetFundsByUserId(userId, tx).ConfigureAwait(false);
             var groups = funds
                 .GroupBy(f => f.CurrencyType)
                 .Where(g => g.Count() > 1 || g.Any(f =>
@@ -381,10 +381,10 @@ public class UserPortfolioService : IUserPortfolioService
                 primary.ReservedBalance = reserved;
                 primary.UpdatedAt = DateTime.UtcNow;
 
-                await _db.UpsertFund(primary, tx);
+                await _db.UpsertFund(primary, tx).ConfigureAwait(false);
 
                 foreach (var dup in duplicates)
-                    await _db.DeleteFund(dup, tx);
+                    await _db.DeleteFund(dup, tx).ConfigureAwait(false);
             }
         }, ct);
     }
@@ -393,7 +393,7 @@ public class UserPortfolioService : IUserPortfolioService
     {
         await _db.RunInTransactionAsync(async tx =>
         {
-            var positions = await _db.GetPositionsByUserId(userId, tx);
+            var positions = await _db.GetPositionsByUserId(userId, tx).ConfigureAwait(false);
             var groups = positions
                 .GroupBy(p => p.StockId)
                 .Where(g => g.Count() > 1 || g.Any(p =>
@@ -424,9 +424,9 @@ public class UserPortfolioService : IUserPortfolioService
                 primary.ReservedQuantity = reserved;
                 primary.UpdatedAt = DateTime.UtcNow;
 
-                await _db.UpsertPosition(primary, tx);
+                await _db.UpsertPosition(primary, tx).ConfigureAwait(false);
                 foreach (var dup in duplicates)
-                    await _db.DeletePosition(dup, tx);
+                    await _db.DeletePosition(dup, tx).ConfigureAwait(false);
             }
         }, ct);
     }
