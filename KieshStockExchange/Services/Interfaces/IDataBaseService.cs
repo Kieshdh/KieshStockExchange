@@ -51,6 +51,7 @@ public interface IDataBaseService
     Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default);
     Task<List<Order>> GetOrdersByStockId(int stockId, CancellationToken ct = default);
     Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken ct = default);
+    Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default);
     Task CreateOrder(Order order, CancellationToken ct = default);
     Task UpdateOrder(Order order, CancellationToken ct = default);
     Task DeleteOrder(Order order, CancellationToken ct = default);
@@ -72,6 +73,7 @@ public interface IDataBaseService
     Task<Position?> GetPositionById(int positionId, CancellationToken ct = default);
     Task<List<Position>> GetPositionsByUserId(int userId, CancellationToken ct = default);
     Task<Position?> GetPositionByUserIdAndStockId(int userId, int stockId, CancellationToken ct = default);
+    Task<List<Position>> GetPositionsForUsersAsync(List<int> userIds, CancellationToken ct = default);
     Task CreatePosition(Position position, CancellationToken ct = default);
     Task UpdatePosition(Position position, CancellationToken ct = default);
     Task DeletePosition(Position position, CancellationToken ct = default);
@@ -82,6 +84,7 @@ public interface IDataBaseService
     Task<Fund?> GetFundById(int fundId, CancellationToken ct = default);
     Task<List<Fund>> GetFundsByUserId(int userId, CancellationToken ct = default);
     Task<Fund?> GetFundByUserIdAndCurrency(int userId, CurrencyType currency, CancellationToken ct = default);
+    Task<List<Fund>> GetFundsForUsersAsync(List<int> userIds, CancellationToken ct = default);
     Task CreateFund(Fund fund, CancellationToken ct = default);
     Task UpdateFund(Fund fund, CancellationToken ct = default);
     Task DeleteFund(Fund fund, CancellationToken ct = default);
