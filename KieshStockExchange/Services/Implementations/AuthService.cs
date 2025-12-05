@@ -8,21 +8,36 @@ namespace KieshStockExchange.Services.Implementations;
 
 public class AuthService : IAuthService
 {
-    
-    private readonly IDataBaseService _db;
-    private readonly ILogger<AuthService> _logger;
-
+    #region Properties
     public User? CurrentUser { get; private set; } = null;
     public bool IsLoggedIn => CurrentUser != null;
     public bool IsAdmin => IsLoggedIn && CurrentUser!.IsAdmin;
     public int CurrentUserId => IsLoggedIn ? CurrentUser!.UserId : 0;
 
-    public AuthService(IDataBaseService db, ILogger<AuthService> logger)
-    {
-        _db = db;
-        _logger = logger;
-    }
+    public bool RememberMe { get; set; } = true;
+    #endregion
 
+    #region Fields & Constructor
+    private readonly IDataBaseService _db;
+    private readonly ILogger<AuthService> _logger;
+    private readonly IUserSessionService _session;
+
+    public AuthService(IDataBaseService db, ILogger<AuthService> logger, IUserSessionService session)
+    {
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+
+        // Initialize long-running services once for the whole app via the session.
+        _ = Task.Run(async () =>
+        {
+            try { await _session.InitializeBackgroundServicesAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogError(ex, "Failed to initialize background services."); }
+        });
+    }
+    #endregion
+
+    #region Methods
     public async Task<bool> RegisterAsync(string username, string fullname,
         string email, string password, DateTime birthdate) 
     {
@@ -77,11 +92,24 @@ public class AuthService : IAuthService
         CurrentUser = user;
 
         _logger.LogInformation("User logged in: #{UserId} {Username}", user.UserId, user.Username);
+
+        // Communicate the user to the session
+        _session.SetAuthenticatedUser(user, RememberMe, CurrencyType.USD,
+            CandleResolution.Default, RingBufferDuration.FiveMinutes);
+
+        // Start bot trading
+        await _session.StartBotsAsync().ConfigureAwait(false);
     }
 
-    public async Task LogoutAsync()
+    public async Task LogoutAsync(CancellationToken ct = default)
     {
+        // Stop bot trading and clear session
+        await _session.StopBotsAsync(ct);
+        _session.ClearSession();
+
+        // Clear current user
         CurrentUser = null;
-        await Task.CompletedTask;
+        _logger.LogInformation("User logged out.");
     }
+    #endregion
 }
