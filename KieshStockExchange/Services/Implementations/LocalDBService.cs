@@ -442,6 +442,18 @@ public class LocalDBService: IDataBaseService, IDisposable
             ct);
     }
 
+    public async Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default)
+    {
+        if (userIds is null || userIds.Count == 0) return new List<Order>();
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<Order>()
+               .Where(o => userIds.Contains(o.UserId) && o.Status == Order.Statuses.Open &&
+                     (o.OrderType == Order.Types.LimitBuy || o.OrderType == Order.Types.LimitSell))
+               .ToListAsync(),
+            ct);
+    }
+
     public async Task CreateOrder(Order order, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
@@ -603,6 +615,17 @@ public class LocalDBService: IDataBaseService, IDisposable
             ct);
     }
 
+    public async Task<List<Position>> GetPositionsForUsersAsync(List<int> userIds, CancellationToken ct = default)
+    {
+        if (userIds is null || userIds.Count == 0) return new List<Position>();
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<Position>()
+               .Where(p => userIds.Contains(p.UserId))
+               .ToListAsync(),
+            ct);
+    }
+
     public async Task CreatePosition(Position position, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
@@ -678,6 +701,17 @@ public class LocalDBService: IDataBaseService, IDisposable
             _db.Table<Fund>()
                .Where(f => f.UserId == userId && f.Currency == currencyCode)
                .FirstOrDefaultAsync(),
+            ct);
+    }
+
+    public async Task<List<Fund>> GetFundsForUsersAsync(List<int> userIds, CancellationToken ct = default)
+    {
+        if (userIds is null || userIds.Count == 0) return new List<Fund>();
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<Fund>()
+               .Where(f => userIds.Contains(f.UserId))
+               .ToListAsync(),
             ct);
     }
 
