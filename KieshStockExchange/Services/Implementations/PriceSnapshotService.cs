@@ -32,8 +32,11 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
     #region IPriceSnapshotService Implementation
     public async Task Start(TimeSpan? interval = null)
     {
-        if (interval == null || interval.Value == Interval)
-            return; // No change needed
+        if (_timer != null)
+        {
+            if (!interval.HasValue || interval.Value == Interval)
+                return; // already running with same interval
+        }
 
         // Stop any existing timer
         Stop();
@@ -46,8 +49,8 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
 
         // Wait until the start of the next hour to align snapshots
         var now = TimeHelper.NowUtc();
-        var nextHour = TimeHelper.NextBucketBoundaryUtc(now, Interval);
-        var delay = nextHour - now;
+        var nextTick = TimeHelper.NextBucketBoundaryUtc(now, Interval);
+        var delay = nextTick - now;
         try
         {
             if (delay > TimeSpan.Zero)
@@ -88,7 +91,10 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
     #region Timer Tick Handler
     private async void TickMethod(object? sender, EventArgs e)
     {
-        await CreateSnapShot().ConfigureAwait(false);
+        try { await CreateSnapShot().ConfigureAwait(false); }
+        catch (Exception ex) {
+            _logger.LogError(ex, "Unhandled error in PriceSnapshotService.TickMethod.");
+        }
     }
 
     private async Task CreateSnapShot()
