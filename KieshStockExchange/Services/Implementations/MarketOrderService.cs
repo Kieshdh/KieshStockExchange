@@ -120,9 +120,6 @@ public class MarketOrderService : IMarketOrderService
             // If reservation failed, return the error 
             if (reserveFail != null) { gate.Release(); return reserveFail; }
 
-            _logger.LogInformation("Placing order: #{Order} for stock #{Stock} for {Quantity} @ {Price}", 
-                incoming.OrderId, incoming.StockId, incoming.Quantity, incoming.Price);
-
             // Get the order book
             var book = GetOrCreateBook(incoming.StockId, incoming.CurrencyType);
 
