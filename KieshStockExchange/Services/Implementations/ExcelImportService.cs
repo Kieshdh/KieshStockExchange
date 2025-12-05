@@ -31,9 +31,9 @@ public class ExcelImportService : IExcelImportService
     #region Importing data from Excel
     public async Task ResetAndAddDatabases()
     {
-        await _db.ResetTableAsync<Message>().ConfigureAwait(false);
-        await _db.ResetTableAsync<Transaction>().ConfigureAwait(false);
         await _db.ResetTableAsync<Order>().ConfigureAwait(false);
+        await _db.ResetTableAsync<Transaction>().ConfigureAwait(false);
+        await _db.ResetTableAsync<Message>().ConfigureAwait(false);
         await AddStocksFromExcelAsync(false).ConfigureAwait(false);
         await AddUsersFromExcelAsync(false).ConfigureAwait(false);
         await AddAIProfileFromExcelAsync(false).ConfigureAwait(false);
