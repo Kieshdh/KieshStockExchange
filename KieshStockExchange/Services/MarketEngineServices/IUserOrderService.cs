@@ -1,7 +1,7 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services;
+namespace KieshStockExchange.Services.MarketEngineServices;
 
  public interface IUserOrderService
 {

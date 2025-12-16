@@ -1,8 +1,11 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.UserServices;
 using Microsoft.Extensions.Logging;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.MarketEngineServices;
 
 public class UserOrderService : IUserOrderService
 {
@@ -48,8 +51,7 @@ public class UserOrderService : IUserOrderService
     #endregion
 
     #region Auth Helpers
-    private User? CurrentUser => _auth.CurrentUser;
-    private int CurrentUserId => CurrentUser?.UserId ?? 0;
+    private int CurrentUserId => _auth.CurrentUser?.UserId ?? 0;
     private bool IsAuthenticated => CurrentUserId > 0 && _auth.IsLoggedIn;
     private bool IsAdmin => _auth.CurrentUser?.IsAdmin == true;
 

@@ -1,12 +1,17 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.UserServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Controls;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.MarketServices;
 
 public class MarketOrderService : IMarketOrderService
 {
@@ -588,7 +593,7 @@ public class MarketOrderService : IMarketOrderService
         var oldUnitPrice = order.Price;
         var newUnitPrice = newPrice ?? order.Price;
 
-        var reserveDelta = (newRemaining * newUnitPrice) - (oldRemaining * oldUnitPrice);
+        var reserveDelta = newRemaining * newUnitPrice - oldRemaining * oldUnitPrice;
         var qtyDelta = newRemaining - oldRemaining;
 
         using (_portfolio.BeginSystemScope())
@@ -765,23 +770,23 @@ public class MarketOrderService : IMarketOrderService
         new() {
             PlacedOrder = order,
             Status = order.IsOpen
-                ? (transactions.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook)
-                : (order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled),
+                ? transactions.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook
+                : order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled,
             FillTransactions = transactions,
             SuccessMessage = order.IsOpen
-                ? (transactions.Count > 0 ? "Order partially filled." : "Order placed on book.")
-                : (order.RemainingQuantity > 0 ? "Order partially filled." : "Order fully filled.")
+                ? transactions.Count > 0 ? "Order partially filled." : "Order placed on book."
+                : order.RemainingQuantity > 0 ? "Order partially filled." : "Order fully filled."
         };
     private OrderResult SuccessfullyModifiedResult(Order order, List<Transaction> fills) =>
         new() {
             PlacedOrder = order,
             Status = order.IsOpen
-                ? (fills.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook)
-                : (order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled),
+                ? fills.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook
+                : order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled,
             FillTransactions = fills,
             SuccessMessage = order.IsOpen
-                ? (fills.Count > 0 ? "Order partially filled after modification." : "Order modified and placed on book.")
-                : (order.RemainingQuantity > 0 ? "Order partially filled after modification." : "Order fully filled after modification.")
+                ? fills.Count > 0 ? "Order partially filled after modification." : "Order modified and placed on book."
+                : order.RemainingQuantity > 0 ? "Order partially filled after modification." : "Order fully filled after modification."
 
         };
     #endregion
