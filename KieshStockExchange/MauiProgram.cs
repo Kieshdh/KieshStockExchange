@@ -1,5 +1,12 @@
-﻿using KieshStockExchange.Services;
+﻿using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.Implementations;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.MarketServices;
+using KieshStockExchange.Services.OtherServices;
+using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.UserServices;
 using KieshStockExchange.ViewModels.AdminViewModels;
 using KieshStockExchange.ViewModels.TradeViewModels;
 using KieshStockExchange.ViewModels.UserViewModels;
@@ -54,8 +61,11 @@ public static class MauiProgram
         builder.Services.AddSingleton<ITransactionService, TransactionService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
-        //builder.Services.AddSingleton(_ => Application.Current!.Dispatcher);
+        builder.Services.AddSingleton<IPortfolioMutationService, PortfolioMutationService>();
+        // Service helpers
         builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
+        builder.Services.AddSingleton<IOrderBookCache, OrderBookCache>();
+        builder.Services.AddSingleton<IMatchingEngine, MatchingEngine>();
         // Viewmodels
         // - User
         builder.Services.AddTransient<RegisterViewModel>();
