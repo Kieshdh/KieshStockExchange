@@ -31,7 +31,7 @@ public class Order : IValidatable
     [Column("OrderId")] public int OrderId {
         get => _orderId;
         set {
-            if (_orderId != 0) throw new InvalidOperationException("OrderId is immutable once set.");
+            if (_orderId != 0 && value != _orderId) throw new InvalidOperationException("OrderId is immutable once set.");
             _orderId = value < 0 ? 0 : value;
         }
     }
@@ -41,7 +41,7 @@ public class Order : IValidatable
     [Column("UserId")] public int UserId { 
         get => _userId; 
         set {
-            if (_userId != 0) throw new InvalidOperationException("UserId is immutable once set.");
+            if (_userId != 0 && value != _userId) throw new InvalidOperationException("UserId is immutable once set.");
             _userId = value;
         }
     }
@@ -51,7 +51,7 @@ public class Order : IValidatable
     [Column("StockId")] public int StockId { 
         get => _stockId; 
         set {
-            if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
+            if (_stockId != 0 && value != _stockId) throw new InvalidOperationException("StockId is immutable once set.");
             _stockId = value;
         }
     }
@@ -72,7 +72,7 @@ public class Order : IValidatable
     }
 
     private decimal? _slippagePercent = null;
-    [Column("Slippage")] public decimal? SlippagePercent {
+    [Column("SlippagePercent")] public decimal? SlippagePercent {
         get => _slippagePercent;
         set {
             if (value.HasValue && (value.Value < 0m || value.Value > 100m))
@@ -208,6 +208,7 @@ public class Order : IValidatable
     [Ignore] public bool IsClosed => !IsOpen;
     [Ignore] public bool IsFilled => Status == Statuses.Filled;
     [Ignore] public bool IsCancelled => Status == Statuses.Cancelled;
+    [Ignore] public bool IsOpenLimitOrder => IsOpen && IsLimitOrder;
     [Ignore] public decimal TotalAmount => IsLimitOrder ? Price * Quantity
         : (IsSlippageOrder && SlippagePercent.HasValue) ? PriceWithSlippage!.Value * Quantity : 0m;
     [Ignore] public int RemainingQuantity => Quantity - AmountFilled;
