@@ -1,11 +1,25 @@
 ﻿using ExcelDataReader;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
 using Microsoft.Extensions.Logging;
 using System.Data;
 using System.Globalization;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.BackgroundServices;
+
+/// <summary>
+/// Defines methods to import data from Excel into the local database.
+/// </summary>
+/// 
+public interface IExcelImportService
+{
+    /// <summary> Resets existing database entries and adds new databases from the Excel file. </summary>
+    Task ResetAndAddDatabases();
+
+    /// <summary> Checks for missing databases and adds them from the Excel file. </summary>
+    Task CheckAndAddDatabases();
+}
 
 public class ExcelImportService : IExcelImportService
 {
@@ -166,7 +180,7 @@ public class ExcelImportService : IExcelImportService
             var password = "hallo123";
             var fullName = row["FullName"]?.ToString() ?? string.Empty;
             DateTime? birthdate = row["Birthdate"] is DateTime d ? d
-                : (DateTime.TryParse(row["Birthdate"]?.ToString(), out var bd) ? bd : null);
+                : DateTime.TryParse(row["Birthdate"]?.ToString(), out var bd) ? bd : null;
 
             // Validate required fields
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(email)

@@ -1,33 +1,33 @@
 ﻿using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
 
-namespace KieshStockExchange.Services;
+namespace KieshStockExchange.Services.MarketDataServices;
 
 public interface IMarketDataService
 {
-    // Live quotes -------------------------------------------------------------
+    #region Live Quotes Snapshot
     IReadOnlyDictionary<(int stockId, CurrencyType currency), LiveQuote> Quotes { get; }
 
     event EventHandler<LiveQuote>? QuoteUpdated;
+    #endregion
 
-    // Subscribe / Unsubscribe (keeps quotes in memory; ref-counted)
+    #region Subscribtions
     IReadOnlyCollection<(int, CurrencyType)> Subscribed { get; }
     Task SubscribeAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
     Task Unsubscribe(int stockId, CurrencyType currency, CancellationToken ct = default);
     Task SubscribeAllAsync(CurrencyType currency, CancellationToken ct = default);
     Task UnsubscribeAllAsync(CurrencyType currency, CancellationToken ct = default);
+    #endregion
 
-    // History bootstrap + candle stream --------------------------------------
+    #region Tick Handling and rebuilding from history
     /// <summary> When a new transaction (tick) arrives, update the corresponding LiveQuote </summary>
     Task OnTick(Transaction tick, CancellationToken ct = default);
 
     /// <summary> Build the LiveQuote state from historical ticks stored in the database. </summary>
     Task BuildFromHistoryAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
+    #endregion
 
-    /// <summary> Change the duration for which ticks are stored in the ring buffer. </summary>
-    void ChangeStoreDuration(RingBufferDuration duration);
-
-    // Convenience lookups -----------------------------------------------------
+    #region Convenience lookups
     /// <summary> Get the last traded price for the specified stock and currency. </summary>
     Task<decimal> GetLastPriceAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
 
@@ -36,11 +36,13 @@ public interface IMarketDataService
 
     /// <summary> Get a list of every stock. </summary>
     Task<IReadOnlyList<Stock>> GetAllStocksAsync(CancellationToken ct = default);
+    #endregion
 
-    // For testing purposes
+    #region Random price ticker for demo purposes
     void StartRandomDisplayTicker(int stockId, CurrencyType currency);
 
     void StopRandomDisplayTicker(int stockId, CurrencyType currency);
+    #endregion
 }
 
 /// <summary> Type-safe enum for ring buffer duration settings. </summary>

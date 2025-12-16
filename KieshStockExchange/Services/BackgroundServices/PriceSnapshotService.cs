@@ -1,10 +1,23 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.MarketDataServices;
 using Microsoft.Extensions.Logging;
-using System.Threading;
-using System.Threading.Tasks;
 
+namespace KieshStockExchange.Services.BackgroundServices;
+
+public interface IPriceSnapshotService
+{
+    /// <summary>
+    /// Start taking price snapshots at the given cadence. 
+    /// Default is hourly if null.
+    /// </summary>
+    /// <param name="interval">Time between snapshots</param>
+    Task Start(TimeSpan? interval = null);
+
+    /// <summary> Stop taking price snapshots. </summary>
+    void Stop();
+}
 public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
 {
     #region Fields, Properties and Constructor 

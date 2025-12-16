@@ -3,8 +3,8 @@ using KieshStockExchange.Models;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Windows.Input;
-using KieshStockExchange.Services;
 using KieshStockExchange.ViewModels.OtherViewModels;
+using KieshStockExchange.Services.BackgroundServices;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 

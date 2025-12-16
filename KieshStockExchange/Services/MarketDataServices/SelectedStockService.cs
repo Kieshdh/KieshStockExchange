@@ -1,10 +1,11 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketEngineServices;
 using Microsoft.Extensions.Logging;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.MarketDataServices;
 
 public partial class SelectedStockService : ObservableObject, ISelectedStockService, IAsyncDisposable
 {

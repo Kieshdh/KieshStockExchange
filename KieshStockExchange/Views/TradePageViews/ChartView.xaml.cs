@@ -1,9 +1,5 @@
-// Views/TradePageViews/ChartView.xaml.cs
-using System.Collections.Specialized;
-using Microsoft.Maui.Controls;
-using Microsoft.Maui.Graphics;
 using KieshStockExchange.ViewModels.TradeViewModels;
-using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.MarketDataServices;
 
 namespace KieshStockExchange.Views.TradePageViews;
 

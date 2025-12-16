@@ -1,12 +1,14 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.OtherServices;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.MarketDataServices;
 
 public sealed class CandleService : ICandleService, IDisposable
 {
@@ -25,7 +27,10 @@ public sealed class CandleService : ICandleService, IDisposable
     private CancellationTokenSource _flushCts = new();
     private Task? _flushLoop;
 
+    // Flush interval and Default Candle Resolution
     public TimeSpan FlushInterval { get; } = TimeSpan.FromSeconds(1);
+
+    public CandleResolution DefaultCandleResolution { get; private set; } = CandleResolution.Default;
     #endregion
 
     #region Fields and Constructor
@@ -91,7 +96,7 @@ public sealed class CandleService : ICandleService, IDisposable
     }
 
     public async Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default)
-        => await SubscribeAllAsync(currency, CandleResolution.Default, ct).ConfigureAwait(false);
+        => await SubscribeAllAsync(currency, DefaultCandleResolution, ct).ConfigureAwait(false);
 
     public void Dispose()
     {
@@ -277,7 +282,7 @@ public sealed class CandleService : ICandleService, IDisposable
         // Return report
         return new CandleFixReport(stockId, currency, resolution, fromUtc, toUtc,
             MissingCandleCount: missedCount, FixedCandleCount: fixedCount,
-            MissedTxCount: (missedTxCount + missedTxCount2), TotalTxCount: ticks.Count, 
+            MissedTxCount: missedTxCount + missedTxCount2, TotalTxCount: ticks.Count, 
             FirstMissing: firstMissing, LastMissing: lastMissing
         );
     }
@@ -532,7 +537,7 @@ public sealed class CandleService : ICandleService, IDisposable
         for (int i = 0; i < grouped.Count; i++)
         {
             var group = grouped[i];
-            var isEdge = i == 0 || i == (grouped.Count - 1);
+            var isEdge = i == 0 || i == grouped.Count - 1;
             var requireFull = requireFullCoverage && (!allowPartialEdges || !isEdge);
             try { result.Add(AggregateCandles(group.Items, targetResolution, requireFull)); }
             catch (ArgumentException ex)
@@ -552,7 +557,7 @@ public sealed class CandleService : ICandleService, IDisposable
         DateTime fromUtc, DateTime toUtc, bool allowPartialEdges = true, CancellationToken ct = default)
     {
         // Validate target resolution is a strict multiple of source resolution
-        if ((int)targetRes <= (int)sourceRes || ((int)targetRes % (int)sourceRes) != 0)
+        if ((int)targetRes <= (int)sourceRes || (int)targetRes % (int)sourceRes != 0)
             throw new ArgumentOutOfRangeException(nameof(targetRes),
                 "Target resolution must be a strict multiple of source resolution.");
 
@@ -602,7 +607,7 @@ public sealed class CandleService : ICandleService, IDisposable
         // Validate target resolution
         if (!Candle.TryFromSeconds(targetRes, out _))
             throw new ArgumentException($"Unsupported target resolution: {targetRes}s.");
-        if (targetRes <= baseRes || (targetRes % baseRes) != 0)
+        if (targetRes <= baseRes || targetRes % baseRes != 0)
             throw new ArgumentException(
                 $"Target resolution ({targetRes}s) must be a strict multiple of base ({baseRes}s).");
     }

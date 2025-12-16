@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using KieshStockExchange.Helpers;
 
-namespace KieshStockExchange.Helpers;
+namespace KieshStockExchange.Services.MarketDataServices;
 
 // Ring Buffer per stock for simple rolling metrics (prices + timestamps)
 public sealed class RingBuffer

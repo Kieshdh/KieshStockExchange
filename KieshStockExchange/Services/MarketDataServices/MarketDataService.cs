@@ -1,17 +1,50 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.OtherServices;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
-using System.Net.NetworkInformation;
-using System.Runtime.CompilerServices;
-using System.Threading.Tasks;
+using KieshStockExchange.Services.BackgroundServices;
 
 namespace KieshStockExchange.Services.Implementations;
 
 public partial class MarketDataService : ObservableObject, IMarketDataService, IAsyncDisposable
 {
+    #region Live Quotes Dictionaries and Subscriptions
+    // The single source of truth for all live quotes. Key: (stockId, currency)
+    private readonly ConcurrentDictionary<(int, CurrencyType), LiveQuote> _quotes = new();
+    private readonly ReadOnlyDictionary<(int, CurrencyType), LiveQuote> _quotesView;
+    public IReadOnlyDictionary<(int, CurrencyType), LiveQuote> Quotes => _quotesView;
+
+    // Event fired when a quote is updated, debounced to avoid flooding
+    public event EventHandler<LiveQuote>? QuoteUpdated;
+
+    // Track subscriptions and their reference counts. Key: (stockId, currency)
+    private readonly ConcurrentDictionary<(int, CurrencyType), int> _subRefCount = new();
+    public IReadOnlyCollection<(int, CurrencyType)> Subscribed =>
+        _subRefCount.Where(kv => kv.Value > 0).Select(kv => kv.Key).ToList().AsReadOnly();
+
+    // Track current candle resolution for subscriptions
+    private CandleResolution _currentResolution;
+    #endregion
+
+    #region Timers for debouncing QuoteUpdated event
+    // One timer per (stockId, currency) pair, created on demand
+    private readonly ConcurrentDictionary<(int, CurrencyType), IDispatcherTimer> _timers = new();
+
+    // Keep track of event handlers to allow removal
+    private readonly ConcurrentDictionary<(int, CurrencyType), EventHandler> _timerHandlers = new();
+
+    // One timer per (stockId, currency) pair for simulating random ticks
+    private readonly ConcurrentDictionary<(int, CurrencyType), IDispatcherTimer> _simTimers = new();
+
+    // Debounce interval
+    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(250);
+    #endregion
+
     #region Fields and Constructor
     private readonly IDispatcher _dispatcher; // to marshal changes to UI thread
     private readonly ILogger<MarketDataService> _logger;
@@ -30,35 +63,6 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
 
         _quotesView = new ReadOnlyDictionary<(int, CurrencyType), LiveQuote>(_quotes);
     }
-    #endregion
-
-    #region Live Quotes Dictionaries and Subscriptions
-    // The single source of truth for all live quotes. Key: (stockId, currency)
-    private readonly ConcurrentDictionary<(int, CurrencyType), LiveQuote> _quotes = new();
-    private readonly ReadOnlyDictionary<(int, CurrencyType), LiveQuote> _quotesView;
-    public IReadOnlyDictionary<(int, CurrencyType), LiveQuote> Quotes => _quotesView;
-
-    // Event fired when a quote is updated, debounced to avoid flooding
-    public event EventHandler<LiveQuote>? QuoteUpdated;
-
-    // Track subscriptions and their reference counts. Key: (stockId, currency)
-    private readonly ConcurrentDictionary<(int, CurrencyType), int> _subRefCount = new();
-    public IReadOnlyCollection<(int, CurrencyType)> Subscribed =>
-        _subRefCount.Where(kv => kv.Value > 0).Select(kv => kv.Key).ToList().AsReadOnly();
-    #endregion
-
-    #region Timers for debouncing QuoteUpdated event
-    // One timer per (stockId, currency) pair, created on demand
-    private readonly ConcurrentDictionary<(int, CurrencyType), IDispatcherTimer> _timers = new();
-
-    // Keep track of event handlers to allow removal
-    private readonly ConcurrentDictionary<(int, CurrencyType), EventHandler> _timerHandlers = new();
-
-    // One timer per (stockId, currency) pair for simulating random ticks
-    private readonly ConcurrentDictionary<(int, CurrencyType), IDispatcherTimer> _simTimers = new();
-
-    // Debounce interval
-    private static readonly TimeSpan TickerInterval = TimeSpan.FromMilliseconds(250);
     #endregion
 
     #region Ring buffer
@@ -81,8 +85,10 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         (int)(DurationMap[CurrentDuration].TotalMilliseconds / TickerInterval.TotalMilliseconds);
 
     /// <summary> Change the duration for which ticks are stored in the ring buffer. </summary>
-    public void ChangeStoreDuration(RingBufferDuration duration)
+    private void ChangeStoreDuration(RingBufferDuration duration)
     {
+        if (duration == CurrentDuration) return; // No change needed
+
         // Set the new duration and adjust existing rings
         CurrentDuration = duration;
 
@@ -152,7 +158,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         if (quote.LastPrice > 0m) return quote.LastPrice;
 
         // Try latest price from candles
-        var candle = _candle.TryGetLiveSnapshot(stockId, currency, CandleResolution.Default);
+        var candle = _candle.TryGetLiveSnapshot(stockId, currency, _currentResolution);
         if (candle is not null && candle.Close > 0m) return candle.Close;
 
         // Fallback to latest Transaction from DB
@@ -203,7 +209,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         _subRefCount.AddOrUpdate((stockId, currency), 1, (_, c) => c + 1);
 
         // Subscribe to candles
-        _candle.Subscribe(stockId, currency, CandleResolution.Default);
+        _candle.Subscribe(stockId, currency, _currentResolution);
     }
 
     public async Task Unsubscribe(int stockId, CurrencyType currency, CancellationToken ct = default)
@@ -232,7 +238,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
                 _dispatcher.Dispatch(() => sim.Stop());
 
             // Unsubscribe from candles
-            await _candle.UnsubscribeAsync(stockId, currency, CandleResolution.Default, ct).ConfigureAwait(false);
+            await _candle.UnsubscribeAsync(stockId, currency, _currentResolution, ct).ConfigureAwait(false);
         }
     }
 
@@ -497,6 +503,58 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         _logger.LogWarning("No price data found for stock {StockId} in {Currency}, using default seed price.", stockId, currency);
         return (100m, TimeHelper.NowUtc());
     }
+
+    public async Task ApplySessionSnapshotAsync(SessionSnapshot snap)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Update ring-buffer duration to the new session default
+                ChangeStoreDuration(snap.DefaultRingDuration);
+
+                // If candle resolution changed, resubscribe all current stocks
+                var newRes = snap.DefaultCandleResolution;
+                var oldRes = _currentResolution;
+                if (newRes == oldRes) return;
+
+                _currentResolution = newRes;
+
+                var keys = _subRefCount.Keys.ToArray();
+                foreach (var (stockId, currency) in keys)
+                {
+                    // Unsubscribe old resolution
+                    try
+                    {
+                        await _candle.UnsubscribeAsync(stockId, currency, oldRes).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Error unsubscribing candles for {StockId} {Currency} at {Resolution}",
+                            stockId, currency, oldRes);
+                    }
+
+                    // Only resubscribe if we still have listeners
+                    if (_subRefCount.TryGetValue((stockId, currency), out var count) && count > 0)
+                    {
+                        try { _candle.Subscribe(stockId, currency, newRes); }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex,
+                                "Error subscribing candles for {StockId} {Currency} at {Resolution}",
+                                stockId, currency, newRes);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error applying session snapshot changes.");
+            }
+        });
+    }
+
     #endregion
 
     #region IDisposable 
@@ -519,8 +577,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
             // Ensure underlying candle stream is also torn down
             foreach (var (stockId, currency) in _subRefCount.Keys.ToArray())
             {
-                try { await _candle.UnsubscribeAsync(stockId, currency, 
-                    CandleResolution.Default).ConfigureAwait(false); }
+                try { await _candle.UnsubscribeAsync(stockId, currency, _currentResolution).ConfigureAwait(false); }
                 catch { } // Ignore
             }
 

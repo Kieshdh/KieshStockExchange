@@ -1,7 +1,9 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.OtherServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.ApplicationModel;
 using System.Collections.ObjectModel;

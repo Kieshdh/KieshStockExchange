@@ -4,7 +4,7 @@ using KieshStockExchange.Models;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.UserServices;
 
 namespace KieshStockExchange.ViewModels.UserViewModels;
 

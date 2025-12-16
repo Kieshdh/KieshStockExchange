@@ -1,7 +1,7 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using System.Diagnostics;
 using System.Globalization;

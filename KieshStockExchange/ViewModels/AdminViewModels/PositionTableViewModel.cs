@@ -2,7 +2,8 @@
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using System;
 using System.Collections.ObjectModel;

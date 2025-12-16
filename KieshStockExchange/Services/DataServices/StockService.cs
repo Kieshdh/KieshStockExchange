@@ -1,7 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services;
+namespace KieshStockExchange.Services.DataServices;
 
 public sealed class StockService : IStockService
 {

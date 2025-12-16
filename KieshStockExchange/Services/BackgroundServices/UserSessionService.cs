@@ -1,9 +1,10 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.MarketDataServices;
 using Microsoft.Extensions.Logging;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.BackgroundServices;
 
 public class UserSessionService : IUserSessionService
 {
@@ -47,14 +48,18 @@ public class UserSessionService : IUserSessionService
     private readonly IPriceSnapshotService _price;
     private readonly IExcelImportService _excel;
     private readonly ILogger<UserSessionService> _logger;
+    private readonly IMarketDataService _marketData;
+    private readonly ICandleService _candle;
 
     public UserSessionService(IAiTradeService trade, IPriceSnapshotService priceSnapshots,
-        IExcelImportService excel, ILogger<UserSessionService> logger)
+        IExcelImportService excel, ILogger<UserSessionService> logger, IMarketDataService marketData, ICandleService candle)
     {
         _trade = trade ?? throw new ArgumentNullException(nameof(trade));
         _price = priceSnapshots ?? throw new ArgumentNullException(nameof(priceSnapshots));
         _excel = excel ?? throw new ArgumentNullException(nameof(excel));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _marketData = marketData ?? throw new ArgumentNullException(nameof(marketData));
+        _candle = candle ?? throw new ArgumentNullException(nameof(candle));
     }
     #endregion
 
@@ -185,7 +190,8 @@ public class UserSessionService : IUserSessionService
         _snapshot = newSnapshot;
 
         // Notify listeners with the new snapshot.
-        SnapshotChanged?.Invoke(this, newSnapshot);
+        //_marketData.ApplySessionSnapshotAsync(newSnapshot);
+        //_candle.ApplySessionSnapshotAsync(newSnapshot);
     }
     #endregion
 }

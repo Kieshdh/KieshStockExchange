@@ -1,9 +1,9 @@
 ﻿using KieshStockExchange.Models;
-using KieshStockExchange.Services;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using KieshStockExchange.Helpers;
 
-namespace KieshStockExchange.Helpers;
+namespace KieshStockExchange.Services.MarketDataServices;
 
 public sealed class CandleAggregator 
 {

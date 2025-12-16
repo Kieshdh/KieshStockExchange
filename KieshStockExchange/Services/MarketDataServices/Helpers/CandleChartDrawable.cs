@@ -1,7 +1,8 @@
 ﻿using System.Globalization;
 using KieshStockExchange.Models;
+using KieshStockExchange.Helpers;
 
-namespace KieshStockExchange.Helpers;
+namespace KieshStockExchange.Services.MarketDataServices;
 
 public sealed class CandleChartDrawable : IDrawable
 {

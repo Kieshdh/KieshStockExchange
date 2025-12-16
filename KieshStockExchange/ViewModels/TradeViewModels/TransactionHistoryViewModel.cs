@@ -2,7 +2,11 @@
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.OtherServices;
+using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.UserServices;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Controls;

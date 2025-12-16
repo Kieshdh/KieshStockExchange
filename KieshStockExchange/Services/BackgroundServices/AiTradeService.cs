@@ -1,11 +1,56 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.PortfolioServices;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading.Tasks;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.BackgroundServices;
+
+/// <summary>
+/// Background service that uses configured <see cref="AIUser"/> bots
+/// to place orders in the market at a fixed cadence.
+/// </summary>
+public interface IAiTradeService
+{
+    /// <summary>Interval between trading ticks for the AI loop.</summary>
+    TimeSpan TradeInterval { get; }
+
+    /// <summary>How often to recompute which AI users are online.</summary>
+    TimeSpan OnlineCheckInterval { get; }
+
+    /// <summary>How often to run daily housekeeping checks.</summary>
+    TimeSpan DailyCheckInterval { get; }
+
+    /// <summary>How often to reload AI users' portfolios and cached prices.</summary>
+    TimeSpan ReloadAssetsInterval { get; }
+
+    /// <summary>Currencies that the AI users are allowed to trade.</summary>
+    IReadOnlyList<CurrencyType> CurrenciesToTrade { get; }
+
+    /// <summary>
+    /// Adjusts the cadence and trading universe of the AI loop at runtime.
+    /// Any null argument keeps the current value.
+    /// </summary>
+    void Configure(TimeSpan? tradeInterval = null, TimeSpan? onlineCheckInterval = null,
+        TimeSpan? dailyCheckInterval = null, TimeSpan? reloadAssetsInterval = null,
+        IEnumerable<CurrencyType>? currencies = null);
+
+    /// <summary>
+    /// Starts the background trading loop if it is not already running.
+    /// Safe to call multiple times.
+    /// </summary>
+    Task StartBotAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Requests the background trading loop to stop and waits for it to finish.
+    /// </summary>
+    Task StopBotAsync();
+}
 
 public class AiTradeService : IAiTradeService, IAsyncDisposable
 {
@@ -98,8 +143,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
 
         // Preload portfolios and orders for loaded users
-        foreach (var userId in AiUsersByUserId.Keys)
-            await SyncUserStateAsync(userId, ct).ConfigureAwait(false);
+        await RefreshAssetsAsync(ct).ConfigureAwait(false);
     }
 
     private async Task RefreshAssetsAsync(CancellationToken ct = default)
@@ -109,27 +153,25 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         Funds.Clear();
         OpenOrders.Clear();
 
-        // Refresh portfolios and orders for each user
-        foreach (var userId in AiUsersByUserId.Keys)
-            await SyncUserStateAsync(userId, ct).ConfigureAwait(false);
-    }
+        // Get all enabled user IDs
+        var userIds = AiUsersByAiUserId.Values.Where(u => u.IsEnabled).Select(u => u.UserId).ToList();
 
-    private async Task SyncUserStateAsync(int userId, CancellationToken ct)
-    {
-        // Using system scope to avoid auth checks
-        using (_portfolio.BeginSystemScope())
-        {
-            // Refresh user portfolio
-            await _portfolio.RefreshAsync(asUserId: userId, ct).ConfigureAwait(false);
-            Funds[userId] = _portfolio.GetFunds().ToDictionary(f => f.CurrencyType, f => f);
-            Positions[userId] = _portfolio.GetPositions().ToDictionary(p => p.StockId, p => p);
-        }
-        using (_userOrders.BeginSystemScope())
-        {
-            // Refresh user orders
-            await _userOrders.RefreshOrdersAsync(asUserId: userId, ct).ConfigureAwait(false);
-            OpenOrders[userId] = _userOrders.UserOpenOrders.ToDictionary(o => o.OrderId, o => o);
-        }
+        if (userIds.Count == 0) return; // No enabled users
+
+        // Load funds, positions and open orders for all enabled users
+        var allFunds = await _db.GetFundsForUsersAsync(userIds, ct).ConfigureAwait(false);
+        var allPositions = await _db.GetPositionsForUsersAsync(userIds, ct).ConfigureAwait(false);
+        var allOrders = await _db.GetOpenOrdersForUsersAsync(userIds, ct).ConfigureAwait(false);
+
+        // Populate dictionaries
+        foreach (var group in allFunds.GroupBy(f => f.UserId))
+            Funds[group.Key] = group.ToDictionary(f => f.CurrencyType, f => f);
+
+        foreach (var group in allPositions.GroupBy(p => p.UserId))
+            Positions[group.Key] = group.ToDictionary(p => p.StockId, p => p);
+
+        foreach (var group in allOrders.GroupBy(o => o.UserId))
+            OpenOrders[group.Key] = group.ToDictionary(o => o.OrderId, o => o);
     }
 
     private async Task LoadRecentTransactionsAsync(DateTime now, CancellationToken ct = default)
@@ -327,9 +369,6 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
             // If not placed successfully, skip
             if (result is null || !result.PlacedSuccessfully) continue;
-
-            // Keep caches consistent after any placement/fill
-            await SyncUserStateAsync(user.UserId, ct).ConfigureAwait(false);
         }
     }
 
@@ -342,8 +381,6 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         // Check if within daily trade limit
         if (user.TradesToday >= user.MaxDailyTrades) return false;
-
-        if (!user.Watchlist.Contains(1)) return false;
 
         return true; // Can place more orders
     }
@@ -423,7 +460,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         {
             // Above max cash → we want to BUY more often.
             // distance = how far above max in [0,1]
-            var distance = (1m - user.MaxCashReservePrc) <= 0m ? 1m
+            var distance = 1m - user.MaxCashReservePrc <= 0m ? 1m
                 : (cashPrc - user.MaxCashReservePrc) / (1m - user.MaxCashReservePrc);
             // Increase buy probability accordingly
             buyProb += maxShift * Clamp01(distance); 
@@ -438,18 +475,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         // Return appropriate order type
         return isBuy
-            ? (isMarket
-                ? (isSlippage ? OrderType.SlippageMarketBuy : OrderType.TrueMarketBuy)
-                : OrderType.LimitBuy)
-            : (isMarket
-                ? (isSlippage ? OrderType.SlippageMarketSell : OrderType.TrueMarketSell)
-                : OrderType.LimitSell);
+            ? isMarket
+                ? isSlippage ? OrderType.SlippageMarketBuy : OrderType.TrueMarketBuy
+                : OrderType.LimitBuy
+            : isMarket
+                ? isSlippage ? OrderType.SlippageMarketSell : OrderType.TrueMarketSell
+                : OrderType.LimitSell;
     }
 
     private int ChooseStockId(AIUser user, OrderType type)
-    {
-        return 1;
-        
+    {        
         var rng = GetRandom(user.AiUserId);
 
         // Get the user's watchlist
@@ -487,7 +522,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // Compute offset based on min/max limit offset and add jitter based on aggressiveness
         var offset = Clamp01(Lerp(user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, Decimal01(user.AiUserId)));
         var jitter = Decimal01(user.AiUserId) * user.AggressivenessPrc; // [0, AggressivenessPrc)
-        offset *= (1m + jitter); // Increase offset by up to AggressivenessPrc
+        offset *= 1m + jitter; // Increase offset by up to AggressivenessPrc
         offset = Math.Min(offset, user.MaxLimitOffsetPrc); // Clamp to max limit offset
 
         // Compute limit price based on offset
@@ -506,7 +541,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         // Add some jitter based on aggressiveness
         var jitter = Decimal01(user.AiUserId) * user.AggressivenessPrc; // [0, AggressivenessPrc)
-        tradePrc *= (1m + jitter); // Increase trade percentage by up to AggressivenessPrc
+        tradePrc *= 1m + jitter; // Increase trade percentage by up to AggressivenessPrc
         tradePrc = Math.Min(tradePrc, user.MaxTradeAmountPrc); // Clamp to max trade amount percentage
         if (tradePrc <= 0m) return 0; // No trade
 
@@ -559,7 +594,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
     private static decimal Lerp(decimal left, decimal right, decimal t) => left + (right - left) * t;
 
-    private static decimal Clamp01(decimal x) => x < 0m ? 0m : (x > 1m ? 1m : x);
+    private static decimal Clamp01(decimal x) => x < 0m ? 0m : x > 1m ? 1m : x;
 
     private static int DailySeed(int baseSeed, int userId, DateOnly date)
     {

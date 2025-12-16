@@ -1,8 +1,9 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.MarketDataServices;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 

@@ -3,8 +3,8 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
-using KieshStockExchange.Services;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.UserServices;
 
 namespace KieshStockExchange.ViewModels.UserViewModels;
 

@@ -1,12 +1,28 @@
 ﻿using ExcelDataReader.Log;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.BackgroundServices;
 using Microsoft.Extensions.Logging;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.UserServices;
 
-public class AuthService : IAuthService
+public interface IAuthService
+{
+    Task<bool> RegisterAsync(
+        string username, string fullname,
+        string email, string password, DateTime birthdate
+    );
+    Task LoginAsync(string username, string password);
+    Task LogoutAsync(CancellationToken ct = default);
+    bool IsLoggedIn { get; }
+    bool IsAdmin { get; }
+    User? CurrentUser { get; }
+    int CurrentUserId { get; }
+}
+
+public sealed class AuthService : IAuthService
 {
     #region Properties
     public User? CurrentUser { get; private set; } = null;

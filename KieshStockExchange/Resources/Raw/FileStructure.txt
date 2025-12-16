@@ -19,15 +19,8 @@ KieshStockExchange
 --- launchSettings.json
 
 - Helpers
---- CandleAggregator.cs (Helps aggregate candle data)
---- CandleChartDrawable.cs (For drawing candle charts)
---- CandleComparer.cs (For comparing candles)
 --- CurrencyHelper.cs (Formats currency values)
---- LiveQuote.cs (For ViewModel binding of a stock)
---- OrderBook.cs (For order matching)
---- OrderResult.cs (Shows result of order operations)
 --- ParsingHelper.cs (For parsing data)
---- RingBuffer.cs (A buffer for rolling metrics)
 --- SecurityHelper.cs (For hashing passwords)
 --- TimeHelper.cs (For handling UTC times)
 
@@ -68,45 +61,53 @@ KieshStockExchange
 ----- SegmentedTabStyles.xaml
 
 - Services
---- Implementations
------ AiTradeService.cs (TODO)
------ AuthService.cs
------ CandleService.cs
------ ExcelImportService.cs
------ LocalDBService.cs 
------ OnlineDBService.cs (TODO)
------ MarketDataService.cs
------ MarketOrderService.cs 
------ NotificationService.cs (TODO)
------ PriceSnapshotService.cs
------ PortfolioService.cs (TODO)
------ ProfileService.cs (TODO)
------ SelectedStockService.cs
------ StockService.cs
------ TrendingService.cs
------ TransactionService.cs
------ UserOrderService.cs
------ UserPortfolioService.cs
------ UserSessionService.cs (TODO)
---- Interfaces
------ IAITradeService.cs (Makes trades using the AI users for price fluctuations)
------ IAuthService.cs (Login, registration)
------ ICandleService.cs (Candle data for charts)
------ IDataBaseService.cs (Local and online DB operations)
------ IExcelImportService.cs (Imports Data from Excel files)
------ IMarketDataService.cs (Source of truth for market data)
------ IMarketOrderService.cs (Market operations and order matching)
------ INotificationService.cs (Displaying notifications to the user)
------ IPortfolioService.cs (Portfolio Overview and history)
------ IPriceSnapshotService.cs (Hourly price snapshots as fallback price data)
------ IProfileService.cs (User profile management)
------ ISelectedStockService.cs (Holds the currently selected stock)
------ IStockService.cs (Stock data in-memory)
------ ITransactionService.cs (Tansaction history and details)
------ ITrendingService.cs (Trending stocks)
------ IUserOrderService.cs (User-specific order management)
------ IUserPortfolioService.cs (User-specific portfolio management)
------ IUserSessionService.cs (User session management and authentication)
+--- BackgroundServices
+----- AiTradeService.cs (Makes trades using the AI users for price fluctuations)
+----- ExcelImportService.cs (Imports Data from Excel files)
+----- IUserSessionService.cs
+----- PriceSnapshotService.cs (Price snapshots as fallback price data)
+----- UserSessionService.cs (Holds session constants and manages background services)
+--- DataServices
+----- IDataBaseService.cs
+----- IStockService.cs
+----- LocalDBService.cs (Local DB operations) 
+----- StockService.cs (Stock data in-memory)
+--- MarketDataServices
+----- Helpers
+------- CandleAggregator.cs (Helps aggregate candle data)
+------- CandleChartDrawable.cs (For drawing candle charts)
+------- CandleComparer.cs (For comparing candles)
+------- LiveQuote.cs (For ViewModel binding of a stock)
+------- RingBuffer.cs (A buffer for rolling metrics)
+----- CandleService.cs (Candle data for charts)
+----- ICandleService.cs
+----- IMarketDataService.cs
+----- ISelectedStockService.cs 
+----- MarketDataService.cs (Source of truth for market data)
+----- SelectedStockService.cs (Holds the currently selected stock)
+----- TrendingService.cs (Trending stocks)
+--- MarketEngineServices
+----- Helpers
+------- MatchingEngine.cs (Order matching logic)
+------- OrderBook.cs (Order book data structure)  
+------- OrderBookCache.cs (Caches order book data)
+------- OrderResult.cs (Shows result of order operations)
+------- OrderResultFactory.cs (Creates OrderResult instances)
+------- OrderValidator.cs (Validates orders)
+----- IMarketOrderService.cs
+----- IUserOrderService.cs
+----- MarketOrderService.cs (Market operations and order matching)
+----- UserOrderService.cs (User-specific order management)
+--- OtherServices
+----- NotificationService.cs (Displaying notifications to the user)
+----- SeparatorLogger.cs (Logs with separators for clarity)
+--- PortfolioServices
+----- PortfolioOverviewService.cs (User-specific portfolio overview)
+----- PortfolioMutationService.cs (Applies portfolio changes after trades)
+----- PortfolioHistoryService.cs (Tansaction history and details)
+--- UserServices
+----- AuthService.cs (Login, registration)
+----- ProfileService.cs (User profile management)
 
 - ViewModels
 --- AccountViewModels (TODO)

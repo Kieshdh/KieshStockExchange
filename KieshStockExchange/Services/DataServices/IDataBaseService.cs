@@ -3,29 +3,32 @@ using System.Threading.Tasks;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services;
+namespace KieshStockExchange.Services.DataServices;
 
 public interface IDataBaseService
 {
-    // Generic operations
+    #region Generic operations
     Task ResetTableAsync<T>(CancellationToken ct = default) where T : new();
     Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default);
     Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default);
     Task<ITransaction> BeginTransactionAsync(CancellationToken ct = default);
     Task RunInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken ct = default);
     Task DropAndRecreateAsync(bool keepBackup = false, CancellationToken ct = default);
+    #endregion
 
-    // User operations
+    #region User operations
     Task<List<User>> GetUsersAsync(CancellationToken ct = default);
     Task<User?> GetUserById(int userId, CancellationToken ct = default);
     Task<User?> GetUserByUsername(string username, CancellationToken ct = default);
+    Task<bool> UserExists(int userId, CancellationToken ct = default);
     Task CreateUser(User user, CancellationToken ct = default);
     Task UpdateUser(User user, CancellationToken ct = default);
     Task UpsertUser(User user, CancellationToken ct = default);
     Task DeleteUser(User user, CancellationToken ct = default);
     Task DeleteUserById(int userId, CancellationToken ct = default);
+    #endregion
 
-    // Stock operations
+    #region Stock operations
     Task<List<Stock>> GetStocksAsync(CancellationToken ct = default);
     Task<Stock?> GetStockById(int stockId, CancellationToken ct = default);
     Task<bool> StockExists(int stockId, CancellationToken ct = default);
@@ -33,8 +36,9 @@ public interface IDataBaseService
     Task UpdateStock(Stock stock, CancellationToken ct = default);
     Task UpsertStock(Stock stock, CancellationToken ct = default);
     Task DeleteStock(Stock stock, CancellationToken ct = default);
+    #endregion
 
-    // StockPrice operations
+    #region StockPrice operations
     Task<List<StockPrice>> GetStockPricesAsync(CancellationToken ct = default);
     Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken ct = default);
     Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken ct = default);
@@ -44,8 +48,9 @@ public interface IDataBaseService
     Task CreateStockPrice(StockPrice stockPrice, CancellationToken ct = default);
     Task UpdateStockPrice(StockPrice stockPrice, CancellationToken ct = default);
     Task DeleteStockPrice(StockPrice stockPrice, CancellationToken ct = default);
+    #endregion
 
-    // Order operations
+    #region Order operations
     Task<List<Order>> GetOrdersAsync(CancellationToken ct = default);
     Task<Order?> GetOrderById(int orderId, CancellationToken ct = default);
     Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default);
@@ -55,8 +60,9 @@ public interface IDataBaseService
     Task CreateOrder(Order order, CancellationToken ct = default);
     Task UpdateOrder(Order order, CancellationToken ct = default);
     Task DeleteOrder(Order order, CancellationToken ct = default);
+    #endregion
 
-    // Transaction operations
+    #region Transaction operations
     Task<List<Transaction>> GetTransactionsAsync(CancellationToken ct = default);
     Task<Transaction?> GetTransactionById(int transactionId, CancellationToken ct = default);
     Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default);
@@ -67,8 +73,9 @@ public interface IDataBaseService
     Task CreateTransaction(Transaction transaction, CancellationToken ct = default);
     Task UpdateTransaction(Transaction transaction, CancellationToken ct = default);
     Task DeleteTransaction(Transaction transaction, CancellationToken ct = default);
+    #endregion
 
-    // Position operations
+    #region Position operations
     Task<List<Position>> GetPositionsAsync(CancellationToken ct = default);
     Task<Position?> GetPositionById(int positionId, CancellationToken ct = default);
     Task<List<Position>> GetPositionsByUserId(int userId, CancellationToken ct = default);
@@ -78,8 +85,9 @@ public interface IDataBaseService
     Task UpdatePosition(Position position, CancellationToken ct = default);
     Task DeletePosition(Position position, CancellationToken ct = default);
     Task UpsertPosition(Position position, CancellationToken ct = default);
+    #endregion
 
-    // Fund operations
+    #region Fund operations
     Task<List<Fund>> GetFundsAsync(CancellationToken ct = default);
     Task<Fund?> GetFundById(int fundId, CancellationToken ct = default);
     Task<List<Fund>> GetFundsByUserId(int userId, CancellationToken ct = default);
@@ -89,8 +97,9 @@ public interface IDataBaseService
     Task UpdateFund(Fund fund, CancellationToken ct = default);
     Task DeleteFund(Fund fund, CancellationToken ct = default);
     Task UpsertFund(Fund fund, CancellationToken ct = default);
+    #endregion
 
-    // Candle operations
+    #region Candle operations
     Task<List<Candle>> GetCandlesAsync(CancellationToken ct = default);
     Task<Candle?> GetCandleById(int candleId, CancellationToken ct = default);
     Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken ct = default);
@@ -100,8 +109,9 @@ public interface IDataBaseService
     Task UpdateCandle(Candle candle, CancellationToken ct = default);
     Task DeleteCandle(Candle candle, CancellationToken ct = default);
     Task UpsertCandle(Candle candle, CancellationToken ct = default);
+    #endregion
 
-    // Message operations
+    #region Message operations
     Task<List<Message>> GetMessagesAsync(CancellationToken ct = default);
     Task<Message?> GetMessageById(int messageId, CancellationToken ct = default);
     Task<List<Message>> GetMessagesByUserId(int userId, bool onlyUnread = false, CancellationToken ct = default);
@@ -111,8 +121,9 @@ public interface IDataBaseService
     Task DeleteMessage(Message message, CancellationToken ct = default);
     Task<bool> MarkMessageRead(int messageId, DateTime? readAtUtc = null, CancellationToken ct = default);
     Task<int> MarkAllMessagesRead(int userId, DateTime? readAtUtc = null, CancellationToken ct = default);
+    #endregion
 
-    // AIUser operations
+    #region AIUser operations
     Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default);
     Task<AIUser?> GetAIUserById(int aiUserId, CancellationToken ct = default);
     Task<List<AIUser>> GetAIUsersByUserId(int userId, CancellationToken ct = default);
@@ -120,6 +131,7 @@ public interface IDataBaseService
     Task UpdateAIUser(AIUser aiUser, CancellationToken ct = default);
     Task UpsertAIUser(AIUser aiUser, CancellationToken ct = default);
     Task DeleteAIUser(AIUser aiUser, CancellationToken ct = default);
+    #endregion
 }
 
 public interface ITransaction : IAsyncDisposable

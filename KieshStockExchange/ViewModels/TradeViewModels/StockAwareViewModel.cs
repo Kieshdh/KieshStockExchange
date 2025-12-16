@@ -1,5 +1,6 @@
 ﻿using KieshStockExchange.Helpers;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using System.ComponentModel;
 

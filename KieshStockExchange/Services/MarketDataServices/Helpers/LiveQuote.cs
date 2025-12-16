@@ -1,6 +1,7 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
+using KieshStockExchange.Helpers;
 
-namespace KieshStockExchange.Helpers;
+namespace KieshStockExchange.Services.MarketDataServices;
 
 public sealed partial class LiveQuote : ObservableObject
 {

@@ -2,7 +2,7 @@
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.DataServices;
 using System.Diagnostics;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;

@@ -1,11 +1,10 @@
 ﻿using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services;
 using SQLite;
 using System;
 using System.Threading;
 
-namespace KieshStockExchange.Services.Implementations;
+namespace KieshStockExchange.Services.DataServices;
 
 public class LocalDBService: IDataBaseService, IDisposable
 {
@@ -204,6 +203,15 @@ public class LocalDBService: IDataBaseService, IDisposable
         return await RunDbAsync(() =>
             _db.Table<User>().Where(u => u.Username == username).FirstOrDefaultAsync(),
             ct);
+    }
+
+    public async Task<bool> UserExists(int userId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        var count = await RunDbAsync(() =>
+            _db.Table<User>().Where(u => u.UserId == userId).CountAsync(),
+            ct);
+        return count > 0;
     }
 
     public async Task CreateUser(User user, CancellationToken ct = default)

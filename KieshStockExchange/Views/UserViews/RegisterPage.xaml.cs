@@ -1,5 +1,5 @@
 using System;
-using KieshStockExchange.Services;
+using KieshStockExchange.Services.UserServices;
 
 namespace KieshStockExchange.Views.UserViews;
 
