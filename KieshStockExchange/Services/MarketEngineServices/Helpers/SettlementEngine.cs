@@ -7,17 +7,16 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 
 public interface ISettlementEngine
 {
-    // Reservation when placing a new order
-    Task<OrderResult?> ReserveAssetsAndPersistOrderAsync(
-        Order order, CancellationToken ct, Action<Order> onPersisted);
+    /// <summary> Persist an order and reserve assets </summary>
+    Task<OrderResult?> SettleOrderAsync(Order incoming, CancellationToken ct = default);
 
-    // Called for each matched trade
+    /// <summary> Persist trade and transfers assets </summary>
     Task<Transaction> SettleTradeAsync(Transaction trade, CancellationToken ct);
 
-    // Used when cancelling an order remainder
+    /// <summary> Used when cancelling an order remainder </summary>
     Task CancelRemainderAsync(Order order, CancellationToken ct);
 
-    // Used when modifying an existing open order
+    /// <summary> Used when modifying an existing open order </summary>
     Task ApplyOrderChangeAsync(Order order, int? newQuantity, decimal? newPrice, CancellationToken ct);
 }
 
@@ -43,12 +42,61 @@ public sealed class SettlementEngine : ISettlementEngine
     #endregion
 
     #region Reservation and Order Persistence
-    public async Task<OrderResult?> ReserveAssetsAndPersistOrderAsync(
-        Order order, CancellationToken ct, Action<Order> onPersisted)
+    public async Task<OrderResult?> SettleOrderAsync(Order incoming, CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
+        // Start a transaction which does all in one go
+        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
 
-        throw new NotImplementedException();
+        try
+        {
+            // Reserve assets
+            if (incoming.IsTrueMarketBuyOrder)
+            {
+                // True Market Buy: reserve by budget
+                var reserved = await _portfolio.ReserveFundsAsync(incoming.UserId,
+                    incoming.BuyBudget!.Value, incoming.CurrencyType, ct).ConfigureAwait(false);
+                if (!reserved) return OrderResultFactory.InsufficientFunds(
+                    $"Insufficient funds to place true market buy order for user {incoming.UserId}.");
+            }
+            else if (incoming.IsBuyOrder)
+            {
+                // Other Buy order: reserve by total amount (Price * Quantity)
+                var reserved = await _portfolio.ReserveFundsAsync(incoming.UserId,
+                    incoming.TotalAmount, incoming.CurrencyType, ct).ConfigureAwait(false);
+                if (!reserved) return OrderResultFactory.InsufficientFunds(
+                    $"Insufficient funds to place order for user {incoming.UserId}.");
+            }
+            else
+            {
+                // Sell order: reserve by quantity of stocks
+                var reserved = await _portfolio.ReservePositionAsync(incoming.UserId,
+                    incoming.StockId, incoming.Quantity, ct).ConfigureAwait(false);
+                if (!reserved) return OrderResultFactory.InsufficientStocks(
+                    $"Insufficient stocks to place order for user {incoming.UserId}.");
+            }
+
+            // Persist order
+            await _db.CreateOrder(incoming, ct).ConfigureAwait(false);
+
+            // Commit transaction
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+
+            // Log
+            if (DebugMode) _logger.LogInformation("Order settled and persisted: {@Order}", incoming);
+
+            return null; // Success
+
+        }
+        catch (OperationCanceledException)
+        {
+            // No commit => rollback via DisposeAsync
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // No commit => rollback via DisposeAsync
+            return OrderResultFactory.OperationFailed($"SettleOrder failed: {ex.Message}");
+        }
     }
     #endregion
 
@@ -56,6 +104,10 @@ public sealed class SettlementEngine : ISettlementEngine
     #endregion
 
     #region Order Cancellation and Modification
+
+    #endregion
+
+    #region Private Helpers
 
     #endregion
 }
