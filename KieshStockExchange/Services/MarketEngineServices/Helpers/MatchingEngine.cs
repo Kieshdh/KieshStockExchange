@@ -24,24 +24,36 @@ public sealed class MatchingEngine : IMatchingEngine
         // Collect transactions here; settlement will apply them later
         var fills = new List<Transaction>();
 
+        var remainingBudget = taker.IsTrueMarketBuyOrder ? taker.BuyBudget : 0m;
+
         while (taker.IsOpen && taker.RemainingQuantity > 0)
         {
             ct.ThrowIfCancellationRequested();
 
             // Get the top of book for the *opposite* side
-            var bestOpposite = taker.IsBuyOrder ? book.PeekBestSell() : book.PeekBestBuy();
-            if (bestOpposite is null) break;
-
-            // Guard: stale or self order
-            if (!CheckBestOpposite(taker, book, bestOpposite, out var selfOpp))
-                continue; // Skip invalid or self-trade orders and try again
-            if (selfOpp is not null) break; // self-match is not allowed; stop trying
+            var (tryAgain, bestOpposite) = GetBestOpposite(taker, book);
+            if (tryAgain) continue; // Cleaned up invalid maker, try again
+            if (bestOpposite is null) break; // No more makers
 
             // If The price is not crossed, stop matching
             if (!IsPriceCrossed(taker, bestOpposite)) break;
 
             // Determine fill quantity
             var qty = Math.Min(taker.RemainingQuantity, bestOpposite.RemainingQuantity);
+
+            // For TrueMarketOrders don't exceed budget
+            if (taker.IsTrueMarketBuyOrder)
+            {
+                var costAtMakerPrice = qty * bestOpposite.Price;
+                if (costAtMakerPrice > remainingBudget)
+                {
+                    // Reduce qty to fit budget and recalculate
+                    var affordable = (int)(remainingBudget / bestOpposite.Price);
+                    if (affordable <= 0) break; // Cannot afford any more
+                    qty = Math.Min(qty, affordable);
+                    remainingBudget -= qty * bestOpposite.Price;
+                }
+            }
 
             // Build an in-memory transaction (not persisted yet)
             fills.Add(CreateTransaction(taker, bestOpposite, qty));
@@ -57,7 +69,7 @@ public sealed class MatchingEngine : IMatchingEngine
             // If maker is fully filled, pop from book
             if (bestOpposite.IsClosed)
             {
-                _ = taker.IsBuyOrder ? book.RemoveBestSell() : book.RemoveBestBuy();
+                book.RemoveById(bestOpposite.OrderId);
                 if (DebugMode) _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);
             }
         }
@@ -65,34 +77,29 @@ public sealed class MatchingEngine : IMatchingEngine
         return await Task.FromResult(fills);
     }
 
-    private bool CheckBestOpposite(Order incoming, OrderBook book, Order bestOpposite, out Order? selfOrder)
+    private (bool, Order?) GetBestOpposite(Order taker, OrderBook book)
     {
-        selfOrder = null;
+        // Get the top of book for the *opposite* side
+        var bestOpposite = taker.IsBuyOrder ? book.PeekBestSell(taker.UserId) : book.PeekBestBuy(taker.UserId);
+        if (bestOpposite is null) return (false, null);
 
         // Clean closed/empty makers that linger
         if (!bestOpposite.IsOpen || bestOpposite.RemainingQuantity <= 0)
         {
-            _ = incoming.IsBuyOrder ? book.RemoveBestSell() : book.RemoveBestBuy();
-            _logger.LogWarning("Removed stale opposite order #{OrderId} from book.", bestOpposite.OrderId);
-            return false;
+            book.RemoveById(bestOpposite.OrderId);
+            return (true, null); // Try again
         }
 
         // Security sanity check (should never differ)
-        if (bestOpposite.StockId != incoming.StockId || bestOpposite.CurrencyType != incoming.CurrencyType)
+        if (bestOpposite.StockId != taker.StockId || bestOpposite.CurrencyType != taker.CurrencyType)
         {
             _logger.LogError("Book contains mismatched stock/currency order #{OrderId}. Removing.", bestOpposite.OrderId);
-            _ = incoming.IsBuyOrder ? book.RemoveBestSell() : book.RemoveBestBuy();
-            return false;
+            book.RemoveById(bestOpposite.OrderId);
+            return (true, null); // Try again
         }
 
-        // No self-trading
-        if (bestOpposite.UserId == incoming.UserId)
-        {
-            selfOrder = bestOpposite;
-            return true;
-        }
-
-        return true;
+        // Return the valid best opposite order
+        return (false, bestOpposite);
     }
 
     private static bool IsPriceCrossed(Order taker, Order maker)
