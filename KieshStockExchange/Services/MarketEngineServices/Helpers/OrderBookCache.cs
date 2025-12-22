@@ -100,5 +100,29 @@ public sealed class OrderBookCache : IOrderBookCache
         }
         finally { gate.Release(); }
     }
+
+    public async Task<(bool ok, string reason)> ValidateAsync(int stockId, CurrencyType currency, CancellationToken ct)
+    {
+        bool ok = false;
+        string reason = string.Empty;
+
+        await WithBookLockAsync(stockId, currency, ct, book =>
+        {
+            ok = book.ValidateIndex(out reason);
+            return Task.CompletedTask;
+        }).ConfigureAwait(false);
+
+        return (ok, ok ? "OK" : reason);
+    }
+
+    public async Task RebuildIndexAsync(int stockId, CurrencyType currency, CancellationToken ct)
+    {
+        await WithBookLockAsync(stockId, currency, ct, book =>
+        {
+            book.RebuildIndex();
+            return Task.CompletedTask;
+        }).ConfigureAwait(false);
+    }
+
     #endregion
 }
