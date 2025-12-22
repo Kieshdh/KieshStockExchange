@@ -22,6 +22,18 @@ public static class OrderResultFactory
         ErrorMessage = msg
     };
 
+    public static OrderResult InsufficientFunds(string msg) => new()
+    {
+        Status = OrderStatus.InsufficientFunds,
+        ErrorMessage = msg
+    };
+    
+    public static OrderResult InsufficientStocks(string msg) => new()
+    {
+        Status = OrderStatus.InsufficientStocks,
+        ErrorMessage = msg
+    };
+
     public static OrderResult OperationFailed(string? msg = null) => new()
     {
         Status = OrderStatus.OperationFailed,
