@@ -81,6 +81,16 @@ public class Order : IValidatable
         }
     }
 
+    private decimal? _buyBudget = null;
+    [Column("BuyBudget")] public decimal? BuyBudget {
+        get => _buyBudget;
+        set {
+            if (value.HasValue && value.Value < 0m)
+                throw new ArgumentException("Buy budget cannot be negative.");
+            _buyBudget = value;
+        }
+    }
+
     [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
     [Column("Currency")] public string Currency
     {
@@ -135,7 +145,7 @@ public class Order : IValidatable
 
     #region IValidatable Implementation
     public bool IsValid() => UserId > 0 && StockId > 0 && Quantity > 0 && IsValidPrice() &&
-        IsValidOrderType() && IsValidStatus() && IsValidCurrency() && IsValidAmount();
+        IsValidOrderType() && IsValidStatus() && IsValidCurrency() && IsValidAmount() && IsValidBuyBudget();
 
     public bool IsInvalid => !IsValid();
 
@@ -150,11 +160,21 @@ public class Order : IValidatable
     private bool IsValidPrice() => (IsLimitOrder && SlippagePercent is null && Price > 0m) || 
         (IsTrueMarketOrder && SlippagePercent is null && Price == 0m) || (IsSlippageOrder && SlippagePercent.HasValue && Price > 0m);
 
+    private bool IsValidBuyBudget()
+    {
+        // TrueMarket BUY requires BuyBudget
+        if (IsTrueMarketOrder && IsBuyOrder)
+            return BuyBudget.HasValue && BuyBudget.Value > 0m;
+
+        // Everything else must NOT have budget
+        return BuyBudget is null;
+    }
     #endregion
 
     #region String Representations
     public override string ToString() =>
         $"Order #{OrderId} - {OrderType} - {Quantity} @ {PriceDisplay} - Status: {Status}";
+
     [Ignore] public string PriceDisplay
     {
         get
@@ -183,11 +203,14 @@ public class Order : IValidatable
         }
     }
     [Ignore] public string AmountFilledDisplay => $"{AmountFilled}/{Quantity}";
+    [Ignore] public string BuyBudgetDisplay =>
+        BuyBudget.HasValue ? CurrencyHelper.Format(BuyBudget.Value, CurrencyType) : "—";
+    [Ignore] public string SlippageDisplay => SlippagePercent.HasValue ? $"±{SlippagePercent.Value:0.##}%" : "—";
+
     [Ignore] public string SideDisplay => IsBuyOrder ? "BUY" : "SELL";
     [Ignore] public string TypeDisplay => IsLimitOrder ? "LIMIT" : (IsTrueMarketOrder ? "MKT" : "MKT±");
     [Ignore] public string StatusDisplay => Status.ToUpperInvariant();
-    [Ignore]
-    public string SlippageDisplay => SlippagePercent.HasValue ? $"±{SlippagePercent.Value:0.##}%" : "—";
+
     [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
     [Ignore] public string CreatedDateShort => CreatedAt.ToLocalTime().ToString("dd-MM HH:mm");
     [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
@@ -202,8 +225,8 @@ public class Order : IValidatable
     [Ignore] public bool IsMarketOrder => IsSlippageOrder || IsTrueMarketOrder;
     [Ignore] public bool IsSlippageOrder =>
         OrderType == Types.SlippageMarketBuy || OrderType == Types.SlippageMarketSell;
-    [Ignore] public bool IsTrueMarketOrder =>
-        OrderType == Types.TrueMarketBuy || OrderType == Types.TrueMarketSell;
+    [Ignore] public bool IsTrueMarketOrder => IsTrueMarketBuyOrder || OrderType == Types.TrueMarketSell;
+    [Ignore] public bool IsTrueMarketBuyOrder => OrderType == Types.TrueMarketBuy;
     [Ignore] public bool IsOpen => Status == Statuses.Open;
     [Ignore] public bool IsClosed => !IsOpen;
     [Ignore] public bool IsFilled => Status == Statuses.Filled;
@@ -278,6 +301,7 @@ public class Order : IValidatable
             Quantity = this.Quantity,
             Price = this.Price,
             SlippagePercent = this.SlippagePercent,
+            BuyBudget = this.BuyBudget,
             CurrencyType = this.CurrencyType,
             OrderType = this.OrderType,
             Status = this.Status,
