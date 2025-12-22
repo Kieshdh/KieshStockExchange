@@ -4,19 +4,8 @@ using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.PortfolioServices;
 using Microsoft.Extensions.Logging;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
-
-public interface IOrderExecutionService
-{
-    Task<OrderResult> PlaceAndMatchAsync(Order incoming, CancellationToken ct = default);
-    Task<OrderResult> CancelOrderAsync(int orderId, CancellationToken ct = default);
-    Task<OrderResult> ModifyOrderAsync(int orderId, int? newQuantity = null,
-        decimal? newPrice = null, CancellationToken ct = default);
-}
 
 public sealed class OrderExecutionService : IOrderExecutionService
 {
@@ -55,9 +44,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (validationError != null) return validationError;
 
         // Reserve assets and persist order
-        Order? persisted = null;
-        var reserveError = await _settlement.ReserveAssetsAndPersistOrderAsync(
-            incoming, ct, o => persisted = o).ConfigureAwait(false);
+        var reserveError = await _settlement.SettleOrderAsync(incoming, ct).ConfigureAwait(false);
         if (reserveError != null) return reserveError;
 
         // Matching & settlement under book lock
@@ -95,10 +82,15 @@ public sealed class OrderExecutionService : IOrderExecutionService
     {
         ct.ThrowIfCancellationRequested();
 
-        Order? order = await _db.GetOrderById(orderId, ct); // adjust name to your DB service
+        // Fetch existing order
+        Order? order = await _db.GetOrderById(orderId, ct);
+        if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+
+        // Validate cancellation
         var validation = _validator.ValidateCancel(order);
         if (validation != null) return validation;
 
+        // Cancellation under book lock
         await _books.WithBookLockAsync(order!.StockId, order.CurrencyType, ct, async book =>
         {
             // Remove from book if it exists there
@@ -115,10 +107,15 @@ public sealed class OrderExecutionService : IOrderExecutionService
     {
         ct.ThrowIfCancellationRequested();
 
+        // Fetch existing order
         Order? order = await _db.GetOrderById(orderId, ct);
+        if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+
+        // Validate modification
         var validation = _validator.ValidateModify(order, newQuantity, newPrice);
         if (validation != null) return validation;
 
+        // Modification and re-matching under book lock
         List<Transaction> txs = new();
 
         await _books.WithBookLockAsync(order.StockId, order.CurrencyType, ct, async book =>
@@ -138,6 +135,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 await _settlement.CancelRemainderAsync(order, ct);
         });
 
+        // Publish ticks to market data (outside lock)
         foreach (var t in txs)
             await _marketData.OnTick(t, ct);
 
