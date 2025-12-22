@@ -7,8 +7,8 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 public interface IOrderValidator
 {
     /// <summary> Returns null when valid; otherwise an OrderResult explaining the failure. </summary>
-    OrderResult? ValidateInput(int userId, int stockId, int quantity, decimal price,
-        CurrencyType currency, bool buyOrder, bool limitOrder, decimal? slippagePercent);
+    OrderResult? ValidateInput(int userId, int stockId, int quantity, decimal price, CurrencyType currency, 
+        bool buyOrder, bool limitOrder, decimal? slippagePercent = null, decimal? buyBudget = null);
 
     /// <summary> Returns null when valid; otherwise an OrderResult explaining the failure. </summary>
     OrderResult? ValidateNew(Order order);
@@ -30,8 +30,8 @@ public sealed class OrderValidator : IOrderValidator
     #endregion
 
     #region Validatation Methods
-    public OrderResult? ValidateInput(int userId, int stockId, int quantity, decimal price,
-        CurrencyType currency, bool buyOrder, bool limitOrder, decimal? slippagePercent)
+    public OrderResult? ValidateInput(int userId, int stockId, int quantity, decimal price, CurrencyType currency, 
+        bool buyOrder, bool limitOrder, decimal? slippagePercent = null, decimal? buyBudget = null)
     {
         if (userId <= 0)
             return OrderResultFactory.InvalidParams("Invalid user ID.");
@@ -57,6 +57,12 @@ public sealed class OrderValidator : IOrderValidator
             {
                 if (price != 0m)
                     return OrderResultFactory.InvalidParams("TrueMarket must have Price = 0.");
+                if (buyOrder)
+                {
+                    // For TrueMarket buy orders with a budget, ensure budget is positive
+                    if (!buyBudget.HasValue || buyBudget.Value <= 0m)
+                        return OrderResultFactory.InvalidParams("BuyBudget is required for TrueMarket BUY orders and must be > 0.");
+                }
             }
             else // SlippageMarket: needs anchor price and slippage %
             {
@@ -83,6 +89,8 @@ public sealed class OrderValidator : IOrderValidator
                 return OrderResultFactory.InvalidParams("Limit price must be positive.");
             if (order.SlippagePercent.HasValue)
                 return OrderResultFactory.InvalidParams("Limit order cannot have slippage.");
+            if (order.BuyBudget.HasValue)
+                return OrderResultFactory.InvalidParams("Limit buy order cannot have BuyBudget.");
         }
 
         // True market: Price must be 0 and no slippage.
@@ -92,6 +100,10 @@ public sealed class OrderValidator : IOrderValidator
                 return OrderResultFactory.InvalidParams("TrueMarket must have Price = 0.");
             if (order.SlippagePercent.HasValue)
                 return OrderResultFactory.InvalidParams("TrueMarket cannot have slippage.");
+            if (order.IsBuyOrder && (!order.BuyBudget.HasValue || order.BuyBudget.Value <= 0m))
+                return OrderResultFactory.InvalidParams("BuyBudget is required for TrueMarket BUY orders and must be > 0.");
+            if (order.IsSellOrder && order.BuyBudget.HasValue)
+                return OrderResultFactory.InvalidParams("Sell TrueMarket orders cannot have BuyBudget.");
         }
 
         // Slippage market: needs anchor price and slippage %
@@ -105,6 +117,8 @@ public sealed class OrderValidator : IOrderValidator
                 return OrderResultFactory.InvalidParams("Slippage percent cannot exceed 100%.");
             if (order.Price <= 0m)
                 return OrderResultFactory.InvalidParams("Slippage anchor price must be positive.");
+            if (order.BuyBudget.HasValue)
+                return OrderResultFactory.InvalidParams("Slippage market order cannot have BuyBudget.");
         }
 
         if (order.IsInvalid) return OrderResultFactory.InvalidParams("Order is invalid.");
