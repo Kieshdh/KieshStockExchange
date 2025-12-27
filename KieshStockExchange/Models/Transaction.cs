@@ -85,8 +85,6 @@ public class Transaction : IValidatable
         }
     }
 
-    [Ignore] public decimal TotalAmount => Price * Quantity;
-
     [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
     [Indexed(Name = "IX_Tx_Stock_Curr_Time", Order = 2)]
     [Column("Currency")] public string Currency
@@ -128,6 +126,10 @@ public class Transaction : IValidatable
 
     [Ignore] public string TotalAmountDisplay => CurrencyHelper.Format(TotalAmount, CurrencyType);
 
+    #endregion
+
+    #region Helper variables
+    [Ignore] public decimal TotalAmount => CurrencyHelper.RoundMoney(Price * Quantity, CurrencyType);
     #endregion
 
     #region Helper Methods
