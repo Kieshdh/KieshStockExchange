@@ -94,10 +94,12 @@ KieshStockExchange
 ------- OrderResult.cs (Shows result of order operations)
 ------- OrderResultFactory.cs (Creates OrderResult instances)
 ------- OrderValidator.cs (Validates orders)
------ IMarketOrderService.cs
------ IUserOrderService.cs
------ MarketOrderService.cs (Market operations and order matching)
------ UserOrderService.cs (User-specific order management)
+----- EngineAdminService.cs 
+----- IEngineAdminService.cs (Admin operations on the market engine)
+----- IOrderEntryService.cs (Order entry operations)
+----- IOrderExecutionService.cs (Handles order executions and market operations)
+----- OrderEntryService.cs
+----- OrderExecutionService.cs
 --- OtherServices
 ----- NotificationService.cs (Displaying notifications to the user)
 ----- SeparatorLogger.cs (Logs with separators for clarity)
