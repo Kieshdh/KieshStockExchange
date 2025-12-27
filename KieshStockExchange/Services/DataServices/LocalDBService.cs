@@ -418,6 +418,17 @@ public class LocalDBService: IDataBaseService, IDisposable
             ct);
     }
 
+    public async Task<List<Order>> GetOrdersByIds(List<int> orderIds, CancellationToken ct = default)
+    {
+        if (orderIds is null || orderIds.Count == 0) return new List<Order>();
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<Order>()
+               .Where(o => orderIds.Contains(o.OrderId))
+               .ToListAsync(),
+            ct);
+    }
+
     public async Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default)
     {
         await InitializeAsync(ct);

@@ -53,6 +53,7 @@ public interface IDataBaseService
     #region Order operations
     Task<List<Order>> GetOrdersAsync(CancellationToken ct = default);
     Task<Order?> GetOrderById(int orderId, CancellationToken ct = default);
+    Task<List<Order>> GetOrdersByIds(List<int> orderIds, CancellationToken ct = default);
     Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default);
     Task<List<Order>> GetOrdersByStockId(int stockId, CancellationToken ct = default);
     Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken ct = default);
