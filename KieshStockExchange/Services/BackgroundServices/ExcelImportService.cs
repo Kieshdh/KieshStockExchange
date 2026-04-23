@@ -208,8 +208,8 @@ public class ExcelImportService : IExcelImportService
         // Reset the existing users table and insert the new users
         await _db.RunInTransactionAsync(async ct =>
         {
-            await _db.ResetTableAsync<User>();
-            await _db.InsertAllAsync(users);
+            await _db.ResetTableAsync<User>(ct);
+            await _db.InsertAllAsync(users, ct);
         }).ConfigureAwait(false);
         _logger.LogInformation("Loaded in total {userCount} users", users.Count);
     }
@@ -401,10 +401,10 @@ public class ExcelImportService : IExcelImportService
         // Drop the existing funds table from the database
         await _db.RunInTransactionAsync(async ct =>
         {
-            await _db.ResetTableAsync<Position>();
-            await _db.ResetTableAsync<Fund>();
-            await _db.InsertAllAsync(funds);
-            await _db.InsertAllAsync(positions);
+            await _db.ResetTableAsync<Position>(ct);
+            await _db.ResetTableAsync<Fund>(ct);
+            await _db.InsertAllAsync(funds, ct);
+            await _db.InsertAllAsync(positions, ct);
         }).ConfigureAwait(false);
         _logger.LogInformation("Loaded in total {FundCount} funds with {PositionCount} positions.", funds.Count, positions.Count);
 
