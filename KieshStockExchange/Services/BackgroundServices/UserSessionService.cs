@@ -140,17 +140,15 @@ public class UserSessionService : IUserSessionService
     public async Task StartBotsAsync(CancellationToken ct = default)
     {
         await _backgroundLock.WaitAsync(ct).ConfigureAwait(false);
-
-        if (_aiBotsRunning)
-        {
-            _logger.LogInformation("AI bots already running.");
-            return;
-        }
-
-        _logger.LogInformation("Starting AI trading bots...");
-
         try
         {
+            if (_aiBotsRunning)
+            {
+                _logger.LogInformation("AI bots already running.");
+                return;
+            }
+
+            _logger.LogInformation("Starting AI trading bots...");
             await _trade.StartBotAsync(ct).ConfigureAwait(false);
             _aiBotsRunning = true;
             _logger.LogInformation("AI trading bots started.");
@@ -158,8 +156,8 @@ public class UserSessionService : IUserSessionService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to start AI bots.");
-            _aiBotsRunning = false; 
-            throw; 
+            _aiBotsRunning = false;
+            throw;
         }
         finally { _backgroundLock.Release(); }
     }
