@@ -14,7 +14,7 @@ public partial class ChartViewModel : StockAwareViewModel
 {
     #region Properties
 
-    private CandleResolution Resolution = CandleResolution.FiveSeconds;
+    private CandleResolution Resolution = CandleResolution.FiveMinutes;
 
     private (int StockId, CurrencyType Currency, CandleResolution Res)? Key; // Current subscription key for unsubscription
 
@@ -25,7 +25,7 @@ public partial class ChartViewModel : StockAwareViewModel
     public event Action? RedrawRequested;
 
     // Chart display settings
-    [ObservableProperty] private int _amountOfCandlesToShow = 120;
+    [ObservableProperty] private int _amountOfCandlesToShow = 50;
     [ObservableProperty] private double _yPaddingPercent = 0.06;
     [ObservableProperty] private double _xPaddingPercent = 0.02;
     const int MaxFactor = 5;
