@@ -286,7 +286,7 @@ public class Candle : IValidatable
 
     public static bool TryFromSeconds(int seconds, out CandleResolution resolution)
     {
-        if (Enum.IsDefined(typeof(CandleResolution), seconds))
+        if (seconds > 0 && Enum.IsDefined(typeof(CandleResolution), seconds))
         {
             resolution = (CandleResolution)seconds;
             return true;
