@@ -245,14 +245,13 @@ public class Candle : IValidatable
         NoteTransactionId(tick.TransactionId);
 
         // OHLC update
-        var price = tick.Price;
-        if (IsNew) Open = price;
+        var price = tick.Price;        
         if (price > High || IsNew) High = price;
         if (price < Low || IsNew) Low = price;
         Close = price;
 
         // Update volume and trade count
-        Volume += tick.Quantity; ;
+        Volume += tick.Quantity;
         TradeCount += 1;
 
         if (!IsValid())
