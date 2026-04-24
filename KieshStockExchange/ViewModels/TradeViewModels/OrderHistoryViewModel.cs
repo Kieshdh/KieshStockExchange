@@ -30,21 +30,21 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
 
     #region Services and Constructor
     private readonly ILogger<OrderHistoryViewModel> _logger;
-    private readonly IUserOrderService _orders;
+    private readonly IOrderCacheService _cache;
     private readonly IStockService _stocks;
     private readonly IAuthService _auth;
 
-    public OrderHistoryViewModel(ILogger<OrderHistoryViewModel> logger, 
-        IUserOrderService orders, IStockService stocks, IAuthService auth,
+    public OrderHistoryViewModel(ILogger<OrderHistoryViewModel> logger,
+        IOrderCacheService cache, IStockService stocks, IAuthService auth,
         ISelectedStockService selected, INotificationService notification) : base(selected, notification)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _cache  = cache  ?? throw new ArgumentNullException(nameof(cache));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _auth   = auth   ?? throw new ArgumentNullException(nameof(auth));
 
         // Subscribe to order changes
-        _orders.OrdersChanged += OnOrdersChanged;
+        _cache.OrdersChanged += OnOrdersChanged;
 
         // Initial load
         InitializeSelection();
@@ -65,7 +65,7 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-            _orders.OrdersChanged -= OnOrdersChanged;
+            _cache.OrdersChanged -= OnOrdersChanged;
         base.Dispose(disposing);
     }
     #endregion
@@ -78,7 +78,7 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
         IsBusy = true;
         try
         {
-            await _orders.RefreshOrdersAsync(_auth.CurrentUserId);
+            await _cache.RefreshAsync(_auth.CurrentUserId);
             UpdateFromCache();
         }
         catch (Exception ex)
@@ -112,7 +112,7 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
 
     private void UpdateFromCache(int stockId, CurrencyType currency)
     {
-        var snapshot = _orders.UserOpenOrders.ToList();
+        var snapshot = _cache.ClosedOrders.ToList();
         var rows = new List<ClosedOrderRow>(capacity: snapshot.Count);
 
         if (stockId > 0)

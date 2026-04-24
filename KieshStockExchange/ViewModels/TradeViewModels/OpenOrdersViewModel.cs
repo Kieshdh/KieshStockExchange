@@ -30,22 +30,24 @@ public partial class OpenOrdersViewModel : StockAwareViewModel
     #endregion
 
     #region Services and Constructors
-    private readonly IUserOrderService _orders;
+    private readonly IOrderCacheService _cache;
+    private readonly IOrderEntryService _orders;
     private readonly IStockService _stocks;
     private readonly ILogger<OpenOrdersViewModel> _logger;
     private readonly IAuthService _auth;
 
-    public OpenOrdersViewModel(ILogger<OpenOrdersViewModel> logger, 
-        IUserOrderService orders, IStockService stocks, IAuthService auth,
+    public OpenOrdersViewModel(ILogger<OpenOrdersViewModel> logger,
+        IOrderCacheService cache, IOrderEntryService orders, IStockService stocks, IAuthService auth,
         ISelectedStockService selected, INotificationService notification) : base(selected, notification)
     {
+        _cache  = cache  ?? throw new ArgumentNullException(nameof(cache));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _auth   = auth   ?? throw new ArgumentNullException(nameof(auth));
 
         // Subscribe to order changes
-        _orders.OrdersChanged += OnOrdersChanged;
+        _cache.OrdersChanged += OnOrdersChanged;
 
         // Initial load
         InitializeSelection();
@@ -66,7 +68,7 @@ public partial class OpenOrdersViewModel : StockAwareViewModel
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-            _orders.OrdersChanged -= OnOrdersChanged;
+            _cache.OrdersChanged -= OnOrdersChanged;
         base.Dispose(disposing);
     }
     #endregion
@@ -79,7 +81,7 @@ public partial class OpenOrdersViewModel : StockAwareViewModel
         IsBusy = true;
         try
         {
-            await _orders.RefreshOrdersAsync(_auth.CurrentUserId);
+            await _cache.RefreshAsync(_auth.CurrentUserId);
             UpdateFromCache();
         }
         catch (Exception ex)
@@ -95,9 +97,10 @@ public partial class OpenOrdersViewModel : StockAwareViewModel
         IsBusy = true;
         try
         {
-            var result = await _orders.CancelOrderAsync(order.OrderId);
+            var result = await _orders.CancelOrderAsync(_auth.CurrentUserId, order.OrderId);
             _logger.LogInformation("Cancel order #{OrderId}: {Status}", order.OrderId, result.Status);
-            await RefreshAsync(); // re-pull + re-filter into CurrentOrdersView
+            await _cache.RefreshAsync(_auth.CurrentUserId);
+            UpdateFromCache();
         }
         catch (Exception ex)
         {
@@ -113,7 +116,7 @@ public partial class OpenOrdersViewModel : StockAwareViewModel
         IsBusy = true;
         try
         {
-            // Strategy: let users change price, quantity, or both with quick prompts.
+            // let users change price, quantity, or both with quick prompts.
             var choice = await Shell.Current.DisplayActionSheet(
                 "Modify order", "Cancel", null, "Price", "Quantity", "Price & Quantity");
             if (choice is null || choice == "Cancel") return;
@@ -144,7 +147,6 @@ public partial class OpenOrdersViewModel : StockAwareViewModel
                 newPrice = parsed.Value;
             }
 
-            // Change quantity
             if (choice.Contains("Quantity"))
             {
                 var qtyStr = await Shell.Current.DisplayPromptAsync(
@@ -153,15 +155,15 @@ public partial class OpenOrdersViewModel : StockAwareViewModel
                     keyboard: Keyboard.Numeric);
                 if (!int.TryParse(qtyStr, out var q) || q < order.AmountFilled)
                     throw new ArgumentException("Quantity must be ≥ filled amount.");
-                if (q == order.Quantity && newPrice is null) return; // nothing changed
+                if (q == order.Quantity && newPrice is null) return;
                 newQty = q;
             }
 
             // Update the order in the service
-            var result = await _orders.ModifyOrderAsync(order.OrderId, newQty, newPrice);
-
+            var result = await _orders.ModifyOrderAsync(_auth.CurrentUserId, order.OrderId, newQty, newPrice);
             _logger.LogInformation("Modify order #{OrderId}: {Status}", order.OrderId, result.Status);
-            await RefreshAsync(); // re-pull + re-filter into CurrentOrdersView
+            await _cache.RefreshAsync(_auth.CurrentUserId);
+            UpdateFromCache();
         }
         catch (Exception ex)
         {
@@ -195,7 +197,7 @@ public partial class OpenOrdersViewModel : StockAwareViewModel
 
     private void UpdateFromCache(int stockId, CurrencyType currency)
     {
-        var snapshot = _orders.UserOpenOrders.ToList();
+        var snapshot = _cache.OpenOrders.ToList();
         var rows = new List<OpenOrderRow>(capacity: snapshot.Count);
 
         if (stockId > 0)

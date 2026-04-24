@@ -3,7 +3,6 @@ using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.Implementations;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketEngineServices;
-using KieshStockExchange.Services.MarketServices;
 using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.UserServices;
@@ -48,9 +47,8 @@ public static class MauiProgram
         builder.Services.AddSingleton<IDataBaseService, LocalDBService>();
         builder.Services.AddSingleton<IExcelImportService, ExcelImportService>();
         builder.Services.AddSingleton<IAuthService, AuthService>();
-        builder.Services.AddSingleton<IMarketOrderService, MarketOrderService>();
         builder.Services.AddSingleton<IMarketDataService, MarketDataService>();
-        builder.Services.AddSingleton<IUserOrderService, UserOrderService>();
+        builder.Services.AddSingleton<IOrderCacheService, OrderCacheService>();
         builder.Services.AddSingleton<ISelectedStockService, SelectedStockService>();
         builder.Services.AddSingleton<IUserPortfolioService, UserPortfolioService>();
         builder.Services.AddSingleton<IUserSessionService, UserSessionService>();
@@ -61,7 +59,12 @@ public static class MauiProgram
         builder.Services.AddSingleton<ITransactionService, TransactionService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
-        builder.Services.AddSingleton<IPortfolioMutationService, PortfolioMutationService>();
+        // Market engine
+        builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
+        builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();
+        builder.Services.AddSingleton<IOrderExecutionService, OrderExecutionService>();
+        builder.Services.AddSingleton<IOrderEntryService, OrderEntryService>();
+        builder.Services.AddSingleton<IEngineAdminService, EngineAdminService>();
         // Service helpers
         builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
         builder.Services.AddSingleton<IOrderBookCache, OrderBookCache>();

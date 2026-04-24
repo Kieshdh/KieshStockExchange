@@ -46,14 +46,14 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     #region Fields & Constructor
     private readonly IMarketDataService _market;
-    private readonly IMarketOrderService _order;
+    private readonly IOrderBookCache _books;
     private readonly ILogger<SelectedStockService> _logger;
 
-    public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger, IMarketOrderService order)
+    public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger, IOrderBookCache books)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _order = order ?? throw new ArgumentException(nameof(order));
+        _books = books ?? throw new ArgumentNullException(nameof(books));
 
         // React to live quote pushes from the single source of truth
         _market.QuoteUpdated += OnQuoteUpdated;
@@ -80,7 +80,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         await UnsubscribeAsync(); // Stop previous tracking
 
         // Get the current order book
-        CurrentOrderBook = await _order.GetOrderBookByStockAsync(stock.StockId, Currency, ct);
+        CurrentOrderBook = await _books.GetAsync(stock.StockId, Currency, ct);
 
         // Prime quote from history and start streaming ticks for (stock, currency)
         await _market.SubscribeAsync(stock.StockId, Currency, ct);
@@ -121,7 +121,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         await UpdateFromLiveAsync(Quote);
 
         // Get the current order book
-        CurrentOrderBook = await _order.GetOrderBookByStockAsync(stockId, currency, ct);
+        CurrentOrderBook = await _books.GetAsync(stockId, currency, ct);
 
         Currency = currency;
 
