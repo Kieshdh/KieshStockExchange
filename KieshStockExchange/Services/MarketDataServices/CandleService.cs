@@ -202,9 +202,22 @@ public sealed class CandleService : ICandleService, IDisposable
         var toAligned = TimeHelper.NextBucketBoundaryUtc(toUtc, span);
 
         // Load from DB and sort by time
-        var list = await _db.GetCandlesByStockIdAndTimeRange(stockId, currency, 
+        var list = await _db.GetCandlesByStockIdAndTimeRange(stockId, currency,
             span, fromAligned, toAligned, ct).ConfigureAwait(false);
         list.Sort(static (a, b) => a.OpenTime.CompareTo(b.OpenTime));
+
+        // No persisted candles for this resolution: rebuild from transactions and persist them.
+        if (list.Count == 0)
+        {
+            var ticks = await _db.GetTransactionsByStockIdAndTimeRange(
+                stockId, currency, fromAligned, toAligned, ct).ConfigureAwait(false);
+            if (ticks.Count > 0)
+            {
+                list = ReplayTicksBuildClosed(stockId, currency, resolution, ticks, toAligned, ct);
+                list.Sort(static (a, b) => a.OpenTime.CompareTo(b.OpenTime));
+                await PersistAndPublishAsync((stockId, currency, resolution), list, ct).ConfigureAwait(false);
+            }
+        }
 
         if (!fillGaps) return list;
 

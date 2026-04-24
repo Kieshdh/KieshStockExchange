@@ -28,7 +28,7 @@ public partial class MarketDataService : ObservableObject, IMarketDataService, I
         _subRefCount.Where(kv => kv.Value > 0).Select(kv => kv.Key).ToList().AsReadOnly();
 
     // Track current candle resolution for subscriptions
-    private CandleResolution _currentResolution;
+    private CandleResolution _currentResolution = CandleResolution.Default;
     #endregion
 
     #region Timers for debouncing QuoteUpdated event

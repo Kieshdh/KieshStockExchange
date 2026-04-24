@@ -52,10 +52,12 @@ public sealed class CandleAggregator
         if (!CurrencyHelper.IsSupported(currency)) 
             throw new ArgumentOutOfRangeException(nameof(currency), "Unsupported currency.");
         // Key properties
-        StockId = stockId; 
-        Currency = currency; 
+        StockId = stockId;
+        Currency = currency;
         Resolution = resolution;
-        BucketSec = (int)resolution;  
+        BucketSec = (int)resolution;
+        if (BucketSec <= 0)
+            throw new ArgumentOutOfRangeException(nameof(resolution), "Resolution must be a positive candle resolution.");
         Bucket = TimeSpan.FromSeconds(BucketSec);
         FillGapsEnabled = fillGapsEnabled;
         // Dependencies
