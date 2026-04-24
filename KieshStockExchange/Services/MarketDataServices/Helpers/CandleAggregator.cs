@@ -72,7 +72,6 @@ public sealed class CandleAggregator
         if (!tick.IsValid() || tick.TransactionId <= 0) 
             throw new ArgumentException("Invalid tick.");
 
-
         // Align tick time to bucket start
         var start = TimeHelper.FloorToBucketUtc(tick.Timestamp, Bucket);
 
@@ -111,7 +110,7 @@ public sealed class CandleAggregator
                 LastCloseTime = LiveCandle!.CloseTime;
 
                 // Start new candle and clear transaction ids
-                LiveCandle = NewCandle(start, tick.Price);
+                LiveCandle = NewCandle(start, LastClosedPrice ?? tick.Price);
                 SeenTxIds.Clear();
             }
             // Drop duplicate
