@@ -57,13 +57,11 @@ public partial class OrderBookViewModel : StockAwareViewModel
     #endregion
 
     #region Services and Constructor
-    private readonly IMarketOrderService _market;
     private readonly ILogger<OrderBookViewModel> _logger;
 
-    public OrderBookViewModel(IMarketOrderService marketService, ILogger<OrderBookViewModel> logger,
+    public OrderBookViewModel(ILogger<OrderBookViewModel> logger,
         ISelectedStockService selected, INotificationService notification) : base(selected, notification)
     {
-        _market = marketService ?? throw new ArgumentNullException(nameof(marketService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         InitializeSelection();
