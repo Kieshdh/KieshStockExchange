@@ -6,6 +6,7 @@ using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.UserServices;
 using Microsoft.Extensions.Logging;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -88,16 +89,18 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
 
     #region Services and Constructor
     private readonly IUserPortfolioService _portfolio;
-    private readonly IUserOrderService _orders;
+    private readonly IOrderEntryService _orders;
+    private readonly IAuthService _auth;
     private readonly ILogger<PlaceOrderViewModel> _logger;
     private readonly IDispatcher _dispatcher;
 
     public PlaceOrderViewModel(ILogger<PlaceOrderViewModel> logger,
-        IUserOrderService orders, IUserPortfolioService portfolio, IDispatcher disp,
+        IOrderEntryService orders, IUserPortfolioService portfolio, IAuthService auth, IDispatcher disp,
         ISelectedStockService selected, INotificationService notification) : base(selected, notification)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
+        _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dispatcher = disp ?? throw new ArgumentNullException(nameof(disp));
 
@@ -193,7 +196,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                 return;
             }
 
-            var id = Selected.StockId!.Value; 
+            var userId = _auth.CurrentUserId;
+            var id = Selected.StockId!.Value;
             var cur = Selected.Currency;
             var ct = CancellationToken.None;
 
@@ -202,33 +206,37 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             {
                 if (NoSlippageGuard)
                 {
-                    // True Market order with no slippage protection
                     _logger.LogInformation("Placing {Side} TRUE MARKET (no guard) order for {Quantity} of {Symbol}.",
-                    IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol);
+                        IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol);
 
-                    result = IsBuySelected
-                        ? await _orders.PlaceTrueMarketBuyAsync(id, Quantity, cur, ct: ct)
-                        : await _orders.PlaceTrueMarketSellAsync(id, Quantity, cur, ct: ct);
+                    if (IsBuySelected)
+                    {
+                        var budget = _portfolio.GetFundByCurrency(cur)?.AvailableBalance ?? 0m;
+                        result = await _orders.PlaceTrueMarketBuyOrderAsync(userId, id, Quantity, budget, cur, ct);
+                    }
+                    else
+                    {
+                        result = await _orders.PlaceTrueMarketSellOrderAsync(userId, id, Quantity, cur, ct);
+                    }
                 }
                 else
                 {
-                    // Slippage Market order with slippage protection and anchor price
-                    _logger.LogInformation("Placing {Side} MARKET± order for {Quantity} of {Symbol} anchor {Price} {Currency} (slippage {Slippage:P2}).",
-                        IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, PriceForOrder, cur, SlippagePrc);
+                    _logger.LogInformation("Placing {Side} MARKET± order for {Quantity} of {Symbol} (slippage {Slippage:P2}).",
+                        IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, SlippagePrc);
 
                     result = IsBuySelected
-                        ? await _orders.PlaceSlippageMarketBuyAsync(id, Quantity, PriceForOrder, SlippagePrc, cur, ct: ct)
-                        : await _orders.PlaceSlippageMarketSellAsync(id, Quantity, PriceForOrder, SlippagePrc, cur, ct: ct);
+                        ? await _orders.PlaceSlippageMarketBuyOrderAsync(userId, id, Quantity, SlippagePrc, cur, ct)
+                        : await _orders.PlaceSlippageMarketSellOrderAsync(userId, id, Quantity, SlippagePrc, cur, ct);
                 }
             }
             else
             {
-                _logger.LogInformation("Placing {Side} LIMIT order for {Quantity} shares of {Symbol} at limit price {Price} {Currency}.",
+                _logger.LogInformation("Placing {Side} LIMIT order for {Quantity} of {Symbol} at {Price} {Currency}.",
                     IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, LimitPrice, cur);
-                
+
                 result = IsBuySelected
-                    ? await _orders.PlaceLimitBuyOrderAsync(id, Quantity, LimitPrice, cur, ct)
-                    : await _orders.PlaceLimitSellOrderAsync(id, Quantity, LimitPrice, cur, ct);
+                    ? await _orders.PlaceLimitBuyOrderAsync(userId, id, Quantity, LimitPrice, cur, ct)
+                    : await _orders.PlaceLimitSellOrderAsync(userId, id, Quantity, LimitPrice, cur, ct);
             }
 
             // Show result
