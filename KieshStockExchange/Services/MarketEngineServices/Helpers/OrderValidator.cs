@@ -133,8 +133,13 @@ public sealed class OrderValidator : IOrderValidator
         if (!_stock.TryGetById(order.StockId, out _))
             return OrderResultFactory.InvalidParams("Invalid stock ID.");
 
-        if (newQty.HasValue && newQty.Value <= 0)
-            return OrderResultFactory.InvalidParams("New quantity must be positive.");
+        if (newQty.HasValue)
+        {
+            if (newQty.Value <= 0)
+                return OrderResultFactory.InvalidParams("New quantity must be positive.");
+            if (!order.IsLimitOrder)
+                return OrderResultFactory.InvalidParams("Cannot modify quantity for non-limit orders.");
+        }
 
         if (newPrice.HasValue)
         {
