@@ -103,14 +103,6 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         set => _useSlippageMarketProb = RequiredPrc(value, nameof(UseSlippageMarketProb));
     }
 
-    // Percentage of time the AI is active (0 to 1)
-    private decimal _onlineProb = 1m;
-    [Column("OnlineProb")] public decimal OnlineProb
-    {
-        get => _onlineProb;
-        set => _onlineProb = RequiredPrc(value, nameof(OnlineProb));
-    }
-
     // Buy bias percentage (0 to 1)
     private decimal _buyBiasPrc = 0.5m;
     [Column("BuyBiasPrc")] public decimal BuyBiasPrc
@@ -261,7 +253,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     #endregion
 
     #region Temporary runtime Properties
-    [Ignore] public bool IsEnabled { get; set; } = false; // If the current AI is enabled to place active trades
+    [Ignore] public bool IsEnabled { get; set; } = true; // True unless excluded by the active bot cap.
     [Ignore] public DateOnly TradesDayUtc { get; private set; } = TimeHelper.Today();
     [Ignore] public int TradesToday { get; private set; } = 0; // Number of trades made today
     [Ignore] public int ErrorsToday { get; private set; } = 0; // Number of errors encountered today
@@ -277,7 +269,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     public bool IsInvalid => !IsValid();
 
     private static bool IsValidPrc(decimal val) => val >= 0 && val <= 1;
-    private bool IsValidPercentages() => IsValidPrc(TradeProb) && IsValidPrc(UseMarketProb) && IsValidPrc(OnlineProb) &&
+    private bool IsValidPercentages() => IsValidPrc(TradeProb) && IsValidPrc(UseMarketProb) &&
         IsValidPrc(MinTradeAmountPrc) && IsValidPrc(MaxTradeAmountPrc) && IsValidPrc(PerPositionMaxPrc) && IsValidPrc(BuyBiasPrc) &&
         IsValidPrc(MinCashReservePrc) && IsValidPrc(MaxCashReservePrc) && IsValidPrc(SlippageTolerancePrc) && IsValidPrc(AggressivenessPrc);
 
@@ -298,7 +290,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         $"{ToString()} • Strategy={Strategy} • Seed={Seed}";
 
     [Ignore] public string SummaryActivity =>
-        $"Online {OnlineProbDisplay} • Interval {IntervalString()} • " +
+        $"Interval {IntervalString()} • " +
         $"Trades {TradesToday}/{MaxDailyTrades} • Errors {ErrorsToday}";
 
     [Ignore] public string SummarySizing =>
@@ -323,7 +315,6 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     [Ignore] public string TradeProbDisplay => $"{TradeProb:P0}";
     [Ignore] public string UseMarketProbDisplay => $"{UseMarketProb:P0}";
-    [Ignore] public string OnlineProbDisplay => $"{OnlineProb:P0}";
     [Ignore] public string TradeAmountDisplay => $"{MinTradeAmountPrc:P0} - {MaxTradeAmountPrc:P0}";
     [Ignore] public string OpenPositionsDisplay => $"{MinOpenPositions} - {MaxOpenPositions}";
     [Ignore] public string PerPositionMaxDisplay => $"{PerPositionMaxPrc:P0}";

@@ -71,7 +71,7 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
     ws = reset_or_create_sheet(wb, "Profile")
     ws.append([
         "UserId", "Seed", "DecisionIntervalSeconds", "TradeProb",
-        "UseMarketProb", "UseSlippageMarketProb", "OnlineProb",
+        "UseMarketProb", "UseSlippageMarketProb",
         "BuyBiasPrc", "MinTradeAmountPrc", "MaxTradeAmountPrc",
         "PerPositionMaxPrc", "MinCashReservePrc", "MaxCashReservePrc",
         "SlippageTolerancePrc", "MinLimitOffsetPrc", "MaxLimitOffsetPrc",

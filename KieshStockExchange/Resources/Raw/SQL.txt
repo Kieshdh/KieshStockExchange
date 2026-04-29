@@ -133,7 +133,6 @@ CREATE TABLE AIUsers (
     TradeProb               REAL NOT NULL,
     UseMarketProb           REAL NOT NULL,
     UseSlippageMarketProb   REAL NOT NULL,
-    OnlineProb              REAL NOT NULL,
     BuyBiasPrc              REAL NOT NULL,
     MinTradeAmountPrc       REAL NOT NULL,
     MaxTradeAmountPrc       REAL NOT NULL,

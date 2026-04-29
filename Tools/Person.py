@@ -77,7 +77,7 @@ class Person:
         # Each AIUser gets a fixed random seed so behaviour can be reproducible
         self.seed = random.randint(1_000_000, 10_000_000)
         self.Identity()         # Full name, username, email, birthdate
-        self.TradeProperties()  # Aggressiveness, online probability, decision interval, trade probability
+        self.TradeProperties()  # Aggressiveness, decision interval, trade probability
         self.Portfolio()        # Balance, cash reserves, min/max open positions, watchlist, holdings
         self.OrderTypes()       # Probabilities for market/slippage orders, buy bias
         self.TradeLimits()      # Slippage tolerance, limit offsets, per-position max, min/max trade amounts, daily limits
@@ -96,16 +96,12 @@ class Person:
         self.aggressive  = clamp01(jitter(base_agg, rel=0.10))      # 0–1
         self.AggressivenessPrc = self.aggressive                    # alias
 
-        # Probability of being online at any given time.
-        base_online      = 0.2 + 0.8 * skewed01(skew=0.7)
-        self.online_prob = clamp01(jitter(base_online, rel=0.10))
-
         # More aggressive → shorter interval.
-        base_interval = 20.0 - 12.0 * self.aggressive * self.aggressive         # 8–20 seconds
-        self.interval_seconds = int(max(1, jitter(base_interval, rel=0.15))) 
+        base_interval = 10.0 - 7.0 * self.aggressive                            # 3–10 seconds (linear)
+        self.interval_seconds = int(max(1, jitter(base_interval, rel=0.15)))
 
         # Probability to trade each decision
-        base_trade_prob = 0.10 + 0.5 * self.aggressive * self.aggressive        # ~10–60%
+        base_trade_prob = 0.25 + 0.50 * self.aggressive                         # ~25–75% (linear)
         self.trade_prob = clamp01(jitter(base_trade_prob, rel=0.15))
         
         # Strategy: fixed for now, could vary based on aggressiveness later
@@ -148,7 +144,7 @@ class Person:
 
     def OrderTypes(self):
         # Probabilities for order types
-        self.use_market  = 0.05 + 0.20 * skewed01(skew=1.5)                 # 5–25%
+        self.use_market  = 0.10 + 0.30 * skewed01(skew=1.5)                 # 10–40%
         self.use_slip   = 0.50 + 0.40 * skewed01(skew=0.5)                  # 40–90%
 
         # Buy bias: slightly >50% buys for aggressive bots
@@ -162,9 +158,9 @@ class Person:
         self.slippage_tolerance = clamp01(jitter(base_slip_tol, rel=0.20))  
 
         # Limit offsets: more aggressive bots use wider limits.
-        base_max_limit = 0.02 + 0.03 * self.aggressive                      # 2–5%
+        base_max_limit = 0.005 + 0.015 * self.aggressive                    # 0.5–2%
         max_limit      = clamp01(jitter(base_max_limit, rel=0.20))
-        min_limit      = max_limit * random.uniform(0.02, 0.30)             # 2–30% of max limit
+        min_limit      = max(0.001, max_limit * random.uniform(0.05, 0.30)) # 5–30% of max limit, min 0.1%
         self.min_limit_offset = clamp01(min_limit)
         self.max_limit_offset = clamp01(max_limit)
 
@@ -179,8 +175,8 @@ class Person:
         self.max_trade_amount = self.per_pos_max * random.uniform(0.40, 0.80)   # 40–80% of per_pos_max
 
         # Daily limits: more aggressive bots trade more often.
-        base_trade = int(100 + 300 * self.aggressive)                           # 100-400 trades
-        self.max_daily_trades   = max(100, int(jitter(base_trade, rel=0.20)))   # at least 100   
+        base_trade = int(500 + 2500 * self.aggressive)                          # 500-3000 trades
+        self.max_daily_trades   = max(500, int(jitter(base_trade, rel=0.20)))   # at least 500
         base_open_orders = int(10 + 40 * self.aggressive)                    # 10-50 open orders
         self.max_orders  = max(10, int(jitter(base_open_orders, rel=0.20)))  # at least 10
 
@@ -201,7 +197,6 @@ class Person:
             round(self.trade_prob, 4),                      # float: trade probability
             round(self.use_market, 4),                      # float: probability of market orders
             round(self.use_slip, 4),                        # float: probability of slippage orders
-            round(self.online_prob, 4),                     # float: online probability
             round(self.buy_bias, 4),                        # float: buy bias
             round(self.min_trade_amount, 4),                # float: min trade amount (fraction)
             round(self.max_trade_amount, 4),                # float: max trade amount (fraction)
