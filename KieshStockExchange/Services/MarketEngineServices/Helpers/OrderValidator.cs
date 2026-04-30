@@ -29,7 +29,7 @@ public sealed class OrderValidator : IOrderValidator
         _stock = stock ?? throw new ArgumentNullException(nameof(stock));
     #endregion
 
-    #region Validatation Methods
+    #region Validation Methods
     public OrderResult? ValidateInput(int userId, int stockId, int quantity, decimal price, CurrencyType currency, 
         bool buyOrder, bool limitOrder, decimal? slippagePercent = null, decimal? buyBudget = null)
     {
