@@ -20,6 +20,8 @@ KieshStockExchange
 
 - Helpers
 --- CurrencyHelper.cs (Formats currency values)
+--- DepthRatioToWidthConverter.cs (Order book depth bar width converter)
+--- InvertedBoolConverter.cs (Inverts a bool for bindings)
 --- ParsingHelper.cs (For parsing data)
 --- SecurityHelper.cs (For hashing passwords)
 --- TimeHelper.cs (For handling UTC times)
@@ -42,35 +44,44 @@ KieshStockExchange
 --- iOS
 --- MacCatalyst
 --- Tizen
---- Windows 
+--- Windows
 
 - Resources
 --- AppIcon
 --- Fonts
 --- Images
 --- Raw
------ AiUserData.xlsx (Sample data for AI users)
------ AiUserDataGenerator.py (Python script to generate sample data)
+----- AIUserData.xlsx (Sample data for AI users)
 ----- FileStructure.txt (This file)
 ----- SQL.txt (SQL schema and seed data)
 --- Splash
 --- Styles
+----- AdminStyles.xaml (Styles for admin tables/pages)
+----- AuthStyles.xaml (Styles for login/register/auth pages)
+----- ChartStyles.xaml (Styles for the candle chart)
 ----- Colors.xaml
------ Styles.xaml
------ MyStyles.xaml
+----- OrderBookStyles.xaml (Styles for the order book view)
 ----- SegmentedTabStyles.xaml
+----- ShellStyles.xaml (Shell/navigation styles)
+----- Styles.xaml
+----- TradeStyles.xaml (Styles for the trade page widgets)
 
 - Services
 --- BackgroundServices
------ AiTradeService.cs (Makes trades using the AI users for price fluctuations)
------ ExcelImportService.cs (Imports Data from Excel files)
+----- AiBotContext.cs (Per-bot trading context shared between state and decision)
+----- AiBotDecisionService.cs (Decides bot actions per tick)
+----- AiBotStateService.cs (Tracks per-bot online/active state)
+----- AiTradeService.cs (Drives bot trades for price fluctuations)
+----- ExcelImportService.cs (Imports data from Excel files)
+----- IAiTradeService.cs
+----- IExcelImportService.cs
 ----- IUserSessionService.cs
 ----- PriceSnapshotService.cs (Price snapshots as fallback price data)
 ----- UserSessionService.cs (Holds session constants and manages background services)
 --- DataServices
 ----- IDataBaseService.cs
 ----- IStockService.cs
------ LocalDBService.cs (Local DB operations) 
+----- LocalDBService.cs (Local DB operations)
 ----- StockService.cs (Stock data in-memory)
 --- MarketDataServices
 ----- Helpers
@@ -78,35 +89,48 @@ KieshStockExchange
 ------- CandleChartDrawable.cs (For drawing candle charts)
 ------- CandleComparer.cs (For comparing candles)
 ------- LiveQuote.cs (For ViewModel binding of a stock)
-------- RingBuffer.cs (A buffer for rolling metrics)
+------- QuoteRegistry.cs (Live-quote map + drain loop for QuoteUpdated)
+------- SubscriptionTracker.cs (Per-book UI/bot subscriber ref-counts)
+------- TickPipeline.cs (Channel-decoupled tick ingest, candle feed, history seeding)
 ----- CandleService.cs (Candle data for charts)
 ----- ICandleService.cs
 ----- IMarketDataService.cs
------ ISelectedStockService.cs 
------ MarketDataService.cs (Source of truth for market data)
+----- IMarketLookupService.cs (Read-only price/catalog lookups)
+----- ISelectedStockService.cs
+----- MarketDataService.cs (Facade composing QuoteRegistry, SubscriptionTracker, TickPipeline)
+----- MarketLookupService.cs (Catalog reads, price fallbacks, historical-tick loads)
 ----- SelectedStockService.cs (Holds the currently selected stock)
 ----- TrendingService.cs (Trending stocks)
 --- MarketEngineServices
 ----- Helpers
 ------- MatchingEngine.cs (Order matching logic)
-------- OrderBook.cs (Order book data structure)  
+------- OrderBook.cs (Order book data structure)
 ------- OrderBookCache.cs (Caches order book data)
-------- OrderResult.cs (Shows result of order operations)
+------- OrderResult.cs (Result of order operations)
 ------- OrderResultFactory.cs (Creates OrderResult instances)
 ------- OrderValidator.cs (Validates orders)
------ EngineAdminService.cs 
+------- SettlementEngine.cs (Reservations + per-trade fund/position settlement)
+----- Tests
+------- SettlementRollbackSelfTest.cs (Self-test for settlement rollback paths)
+----- EngineAdminService.cs
 ----- IEngineAdminService.cs (Admin operations on the market engine)
 ----- IOrderEntryService.cs (Order entry operations)
 ----- IOrderExecutionService.cs (Handles order executions and market operations)
+----- OrderCacheService.cs (Caches open/recent orders)
 ----- OrderEntryService.cs
 ----- OrderExecutionService.cs
 --- OtherServices
+----- INotificationService.cs
 ----- NotificationService.cs (Displaying notifications to the user)
 ----- SeparatorLogger.cs (Logs with separators for clarity)
 --- PortfolioServices
------ PortfolioOverviewService.cs (User-specific portfolio overview)
------ PortfolioMutationService.cs (Applies portfolio changes after trades)
------ PortfolioHistoryService.cs (Tansaction history and details)
+----- AccountsCache.cs (In-memory funds + positions cache, reservation backfill)
+----- IAccountsCache.cs
+----- IPortfolioService.cs
+----- ITransactionService.cs
+----- IUserPortfolioService.cs
+----- TransactionService.cs (Transaction history and lookups)
+----- UserPortfolioService.cs (User-specific portfolio overview/mutations)
 --- UserServices
 ----- AuthService.cs (Login, registration)
 ----- ProfileService.cs (User profile management)
@@ -117,6 +141,7 @@ KieshStockExchange
 --- AdminViewModels
 ----- AdminViewModel.cs (Main ViewModel for AdminPage)
 ----- BaseAdminTableViewModel.cs (Common properties for admin table ViewModels)
+----- BotDashboardViewModel.cs (Bot activity/state dashboard)
 ----- FundTableViewModel.cs
 ----- OrderTableViewModel.cs
 ----- PositionTableViewModel.cs
@@ -124,21 +149,22 @@ KieshStockExchange
 ----- TransactionTableViewModel.cs
 ----- UserTableViewModel.cs
 --- MarketViewModels (TODO)
------ MarketViewModel.cs
+----- MarketViewModels.cs
 --- OtherViewModels
 ----- BaseViewModel.cs (Common properties for all ViewModels)
 --- PortfolioViewModels (TODO)
 ----- PortfolioViewModel.cs
---- TradeViewModels (TODO)
+--- TradeViewModels
 ----- ChartViewModel.cs
------ OpenOrderViewModel.cs 
+----- OpenOrdersViewModel.cs
 ----- OrderBookViewModel.cs
 ----- OrderHistoryViewModel.cs
 ----- PlaceOrderViewModel.cs
 ----- StockAwareViewModel.cs (Holds a SelectedStock property for binding)
------ TradeViewModel.cs (Main ViewModel for TradePage)
+----- TradeTableViewModelBase.cs (Common properties for trade-page tables)
+----- TradeViewModels.cs (Main ViewModel for TradePage)
 ----- TransactionHistoryViewModel.cs
------ UserPositionsViewModel.cs 
+----- UserPositionsViewModel.cs
 --- UserViewModels
 ----- LoginViewModel.cs
 ----- RegisterViewModel.cs
@@ -148,35 +174,37 @@ KieshStockExchange
 ----- AccountPage.xaml
 --- AdminPageViews
 ----- AdminPage.xaml
------ FundTableView.xaml 
------ OrderTableView.xam
------ PositionTableView.xaml 
+----- BotDashboardView.xaml
+----- FundTableView.xaml
+----- OrderTableView.xaml
+----- PositionTableView.xaml
 ----- StockTableView.xaml
 ----- TransactionTableView.xaml
 ----- UserTableView.xaml
 --- MarketPageViews (TODO)
------ MarketPage.xaml 
+----- MarketPage.xaml
 --- OtherViews
------ TopNavBarView.xaml
 ----- SegmentedTabView.xaml
+----- TopNavBarView.xaml
 --- PortfolioPageViews (TODO)
------ PortfolioPage.xaml 
---- TradePageViews 
------ ChartView.xaml (TODO)
+----- PortfolioPage.xaml
+--- TradePageViews
+----- ChartView.xaml
 ----- OpenOrdersView.xaml
------ OrderBookView.xaml (TODO)
+----- OrderBookView.xaml
 ----- OrderHistoryView.xaml
------ PlaceOrderView.xaml (TODO)
------ TradePage.xaml 
+----- PlaceOrderView.xaml
+----- TradePage.xaml
 ----- TransactionHistoryView.xaml
 ----- UserPositionsView.xaml
 --- UserViews
+----- ForgotPasswordPage.xaml (TODO)
 ----- LoginPage.xaml
 ----- RegisterPage.xaml
------ ForgotPasswordPage.xaml (TODO)
 
 - App.xaml
 -- App.xaml.cs
 - AppShell.xaml
--- App.xaml.cs
+-- AppShell.xaml.cs
+- GlobalXmlns.cs
 - MauiProgram.cs
