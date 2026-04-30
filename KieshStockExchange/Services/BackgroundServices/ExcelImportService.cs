@@ -248,7 +248,6 @@ public class ExcelImportService : IExcelImportService
             if (!ParsingHelper.TryToDecimal(row["TradeProb"].ToString(), out var tradeProb) ||
                 !ParsingHelper.TryToDecimal(row["UseMarketProb"].ToString(), out var useMarketProb) ||
                 !ParsingHelper.TryToDecimal(row["UseSlippageMarketProb"].ToString(), out var useSlippageMarketProb) ||
-                !ParsingHelper.TryToDecimal(row["OnlineProb"].ToString(), out var onlineProb) ||
                 !ParsingHelper.TryToDecimal(row["BuyBiasPrc"].ToString(), out var buyBiasPrc) ||
                 !ParsingHelper.TryToDecimal(row["MinTradeAmountPrc"].ToString(), out var minTradeAmountPrc) ||
                 !ParsingHelper.TryToDecimal(row["MaxTradeAmountPrc"].ToString(), out var maxTradeAmountPrc) ||
@@ -273,7 +272,7 @@ public class ExcelImportService : IExcelImportService
                 {
                     UserId = userId, Seed = seed, DecisionIntervalSeconds = intervalSeconds,
                     TradeProb = tradeProb, UseMarketProb = useMarketProb, BuyBiasPrc = buyBiasPrc,
-                    UseSlippageMarketProb = useSlippageMarketProb, OnlineProb = onlineProb, 
+                    UseSlippageMarketProb = useSlippageMarketProb,
                     MinTradeAmountPrc = minTradeAmountPrc, MaxTradeAmountPrc = maxTradeAmountPrc,
                     PerPositionMaxPrc = perPositionMaxPrc, MinCashReservePrc = minCashReservePrc,
                     MaxCashReservePrc = maxCashReservePrc, SlippageTolerancePrc = slippageTolerancePrc,
