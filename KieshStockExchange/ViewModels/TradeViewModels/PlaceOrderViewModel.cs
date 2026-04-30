@@ -8,10 +8,6 @@ using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.UserServices;
 using Microsoft.Extensions.Logging;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Globalization;
-using System.Reflection.Metadata;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -25,6 +21,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     [ObservableProperty] private string _limitPriceString = String.Empty;
     [ObservableProperty] private bool _noSlippageGuard = false; // If true, market orders have no slippage protection
     [ObservableProperty] private decimal _slippagePrc = 0.005m; // 0.5% default
+    private const decimal DefaultSlippagePrc = 0.005m;
     [ObservableProperty] private string _assetText = "Available Funds"; // Buy="Available Funds", Sell="Available Shares"
     [ObservableProperty] private string _availableAssetsText = "-"; // Based on side and portfolio
     [ObservableProperty] private string _orderValue = "-"; // Total order value based on quantity and price
@@ -42,18 +39,12 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     private decimal LimitPrice => ParsingHelper.TryToDecimal(LimitPriceString, out var val) ? val : 0m;
     private int Quantity
     {
-        get
-        {
-            if (ParsingHelper.TryToInt(QuantityString, out var val) && val > 0)
-                return val;
-            return 0;
-        }
+        get => ParsingHelper.TryToInt(QuantityString, out var v) && v > 0 ? v : 0;
         set => QuantityString = value.ToString();
     }
-
     #endregion
 
-            #region PropertyChanged events
+    #region PropertyChanged events
     partial void OnSelectedSideIndexChanged(int value) 
     { 
         RecomputeUi(); 
@@ -68,7 +59,12 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     }
     partial void OnQuantityStringChanged(string value) { RecomputeUi(); }
     partial void OnLimitPriceStringChanged(string value) { RecomputeUi(); }
-    partial void OnNoSlippageGuardChanged(bool value) { RecomputeUi(); if (value) SlippagePrc = 0m; }
+    partial void OnNoSlippageGuardChanged(bool value)
+    {
+        RecomputeUi();
+        if (value) SlippagePrc = 0m;
+        else if (SlippagePrc <= 0m) SlippagePrc = DefaultSlippagePrc;
+    }
     partial void OnSlippagePrcChanged(decimal value) { if (value > 0m) NoSlippageGuard = false; }
     #endregion
 
@@ -279,7 +275,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         _assetsTimer = _dispatcher.CreateTimer();
         _assetsTimer.Interval = AssetsRefreshInterval;
 
-        // Creaet Tick handler
+        // Tick handler
         _assetsTickHandler = async (s, e) =>
         {
             if (_assetsRefreshRunning) return;
