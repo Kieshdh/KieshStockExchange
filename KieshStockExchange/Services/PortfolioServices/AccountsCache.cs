@@ -66,7 +66,22 @@ public sealed class AccountsCache : IAccountsCache
             for (int i = 0; i < positions.Count; i++)
             {
                 var p = positions[i];
+                p.ReservedQuantity = 0;
                 _positions[(p.UserId, p.StockId)] = p;
+            }
+
+            // Backfill ReservedQuantity from the DB. Open sell limit orders advertise shares
+            // the user has already promised — without this, the first match/cancel of a
+            // pre-existing maker would underflow ReservedQuantity. Buys are unaffected.
+            var openOrders = await _db.GetOpenOrdersForUsersAsync(missing, ct).ConfigureAwait(false);
+            for (int i = 0; i < openOrders.Count; i++)
+            {
+                var o = openOrders[i];
+                if (!o.IsSellOrder) continue;
+                var remaining = o.RemainingQuantity;
+                if (remaining <= 0) continue;
+                if (!_positions.TryGetValue((o.UserId, o.StockId), out var pos)) continue;
+                pos.ReservedQuantity += remaining;
             }
 
             // Mark all requested users as loaded — even if they had no rows, so we don't
