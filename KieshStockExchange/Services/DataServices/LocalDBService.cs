@@ -14,6 +14,11 @@ public class LocalDBService: IDataBaseService, IDisposable
     private SQLiteAsyncConnection _db;
 
     private readonly SemaphoreSlim _initGate = new(1, 1);
+    // Serializes root SQLite transactions across the shared connection. Without this, two
+    // parallel async flows (e.g. Phase 3 of PlaceAndMatchBatchAsync) each see an empty
+    // _txStack, both decide they are root, and both issue BEGIN IMMEDIATE → SQLite throws
+    // "cannot start a transaction within a transaction".
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly AsyncLocal<Stack<LocalDbTransaction>> _txStack = new();
     private bool _initialized;
 
@@ -31,6 +36,9 @@ public class LocalDBService: IDataBaseService, IDisposable
         private readonly SQLiteAsyncConnection _conn;
         private readonly string? _savepoint;
         private bool _completed; // committed or rolled back
+        // 0 = writer gate still held by this root tx; 1 = released. Only meaningful when IsRoot.
+        // Atomic guard so Commit-then-Dispose (which calls Rollback) can't double-release.
+        private int _gateReleased;
 
         public bool IsRoot { get; }
 
@@ -45,32 +53,44 @@ public class LocalDBService: IDataBaseService, IDisposable
         public async ValueTask CommitAsync(CancellationToken ct = default)
         {
             if (_completed) return;
-
-            if (IsRoot)
-                await _conn.ExecuteAsync("COMMIT;");
-            else
-                await _conn.ExecuteAsync($"RELEASE SAVEPOINT {_savepoint};");
-
-            PopFromStack();
-            _completed = true;
+            try
+            {
+                if (IsRoot)
+                    await _conn.ExecuteAsync("COMMIT;");
+                else
+                    await _conn.ExecuteAsync($"RELEASE SAVEPOINT {_savepoint};");
+            }
+            finally
+            {
+                PopFromStack();
+                _completed = true;
+                if (IsRoot && Interlocked.Exchange(ref _gateReleased, 1) == 0)
+                    _owner._writeGate.Release();
+            }
         }
 
         public async ValueTask RollbackAsync(CancellationToken ct = default)
         {
             if (_completed) return;
-
-            if (IsRoot)
+            try
             {
-                await _conn.ExecuteAsync("ROLLBACK;");
+                if (IsRoot)
+                {
+                    await _conn.ExecuteAsync("ROLLBACK;");
+                }
+                else
+                {
+                    await _conn.ExecuteAsync($"ROLLBACK TO {_savepoint};");
+                    await _conn.ExecuteAsync($"RELEASE SAVEPOINT {_savepoint};");
+                }
             }
-            else
+            finally
             {
-                await _conn.ExecuteAsync($"ROLLBACK TO {_savepoint};");
-                await _conn.ExecuteAsync($"RELEASE SAVEPOINT {_savepoint};");
+                PopFromStack();
+                _completed = true;
+                if (IsRoot && Interlocked.Exchange(ref _gateReleased, 1) == 0)
+                    _owner._writeGate.Release();
             }
-
-            PopFromStack();
-            _completed = true;
         }
 
         public async ValueTask DisposeAsync()
@@ -124,8 +144,18 @@ public class LocalDBService: IDataBaseService, IDisposable
         string? spName = null;
         if (isRoot)
         {
-            // take writer lock up-front to avoid deadlocks later
-            await _db.ExecuteAsync("BEGIN IMMEDIATE;");
+            // Hold _writeGate across BEGIN..COMMIT so only one root tx exists on the
+            // shared connection at a time. Released in CommitAsync/RollbackAsync.
+            await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await _db.ExecuteAsync("BEGIN IMMEDIATE;");
+            }
+            catch
+            {
+                _writeGate.Release();
+                throw;
+            }
         }
         else
         {
@@ -843,22 +873,55 @@ public class LocalDBService: IDataBaseService, IDisposable
 
     public async Task UpsertCandle(Candle candle, CancellationToken ct = default)
     {
+        if (candle is null) throw new ArgumentNullException(nameof(candle));
+        await UpsertCandlesAsync(new[] { candle }, ct).ConfigureAwait(false);
+    }
+
+    // SQL is built once. The conflict target is the (StockId, Currency, BucketSeconds, OpenTime)
+    // unique index — declared on the model and ensured idempotently in InitializeAsync.
+    private const string UpsertCandleSql =
+        "INSERT INTO Candles (StockId, Currency, BucketSeconds, OpenTime, " +
+        "Open, High, Low, Close, Volume, TradeCount, MinTransactionId, MaxTransactionId) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "ON CONFLICT(StockId, Currency, BucketSeconds, OpenTime) DO UPDATE SET " +
+        "Open = excluded.Open, High = excluded.High, Low = excluded.Low, Close = excluded.Close, " +
+        "Volume = excluded.Volume, TradeCount = excluded.TradeCount, " +
+        "MinTransactionId = excluded.MinTransactionId, MaxTransactionId = excluded.MaxTransactionId;";
+
+    public async Task UpsertCandlesAsync(IReadOnlyList<Candle> candles, CancellationToken ct = default)
+    {
+        if (candles is null || candles.Count == 0) return;
         await InitializeAsync(ct);
-        if (!candle.IsValid())
-            throw new ArgumentException("Candle entity is not valid", nameof(candle));
 
-        // Check for existing candle with same StockId, Currency, Bucket, OpenTime
-        var existing = await GetCandlesByStockIdAndTimeRange(candle.StockId, candle.CurrencyType,
-            candle.Bucket, candle.OpenTime, candle.CloseTime, ct);
-
-        // There should be at most one match due to uniqueness constraint
-        var match = existing.FirstOrDefault(c => c.OpenTime == candle.OpenTime);
-        if (match is not null)
+        for (int i = 0; i < candles.Count; i++)
         {
-            candle.CandleId = match.CandleId;
-            await RunDbAsync(() => _db.UpdateAsync(candle), ct);
+            ct.ThrowIfCancellationRequested();
+            var c = candles[i];
+            if (!c.IsValid())
+                throw new ArgumentException(
+                    $"Candle entity is not valid (StockId={c.StockId}, OpenTime={c.OpenTime:o}).",
+                    nameof(candles));
+
+            // Capture locals so the closure doesn't re-read the indexer on Task.Run thread.
+            var stockId = c.StockId;
+            var currency = c.Currency;
+            var bucket = c.BucketSeconds;
+            var openTime = c.OpenTime;
+            var open = c.Open;
+            var high = c.High;
+            var low = c.Low;
+            var close = c.Close;
+            var volume = c.Volume;
+            var tradeCount = c.TradeCount;
+            var minTx = c.MinTransactionId;
+            var maxTx = c.MaxTransactionId;
+
+            await RunDbAsync(() => _db.ExecuteAsync(UpsertCandleSql,
+                stockId, currency, bucket, openTime,
+                open, high, low, close,
+                volume, tradeCount,
+                minTx, maxTx), ct).ConfigureAwait(false);
         }
-        else await RunDbAsync(() => _db.InsertAsync(candle), ct);
     }
     #endregion
 
@@ -1033,6 +1096,12 @@ public class LocalDBService: IDataBaseService, IDisposable
             await _db.CreateTableAsync<Candle>();
             await _db.CreateTableAsync<Message>();
             await _db.CreateTableAsync<AIUser>();
+
+            // Ensure the composite unique index exists on older DBs so the candle ON CONFLICT
+            // upsert path has a target. CreateTableAsync handles this on fresh DBs via the
+            // [Indexed(Unique=true)] attributes, but pre-existing data files may pre-date them.
+            await _db.ExecuteAsync(
+                "CREATE UNIQUE INDEX IF NOT EXISTS IX_Candle_Key ON Candles(StockId, Currency, BucketSeconds, OpenTime);");
 
             _initialized = true;
         }

@@ -110,6 +110,13 @@ public interface IDataBaseService
     Task UpdateCandle(Candle candle, CancellationToken ct = default);
     Task DeleteCandle(Candle candle, CancellationToken ct = default);
     Task UpsertCandle(Candle candle, CancellationToken ct = default);
+
+    /// <summary>
+    /// Batch upsert candles using a native ON CONFLICT clause on the (StockId, Currency,
+    /// BucketSeconds, OpenTime) unique index. One round-trip per candle, no SELECT, and
+    /// callers running inside a transaction get all writes coalesced into that tx.
+    /// </summary>
+    Task UpsertCandlesAsync(IReadOnlyList<Candle> candles, CancellationToken ct = default);
     #endregion
 
     #region Message operations
