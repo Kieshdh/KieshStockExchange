@@ -246,8 +246,8 @@ public class Candle : IValidatable
 
         // OHLC update
         var price = tick.Price;        
-        if (price > High || IsNew) High = price;
-        if (price < Low || IsNew) Low = price;
+        if (price > High) High = price;
+        if (price < Low) Low = price;
         Close = price;
 
         // Update volume and trade count
