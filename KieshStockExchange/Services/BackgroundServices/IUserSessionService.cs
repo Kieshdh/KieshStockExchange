@@ -45,6 +45,7 @@ public interface IUserSessionService
     void SetCurrentStockId(int? stockId);
 
     // Background services
+    bool AiBotsRunning { get; }
     Task InitializeBackgroundServicesAsync(CancellationToken ct = default);
     Task StartBotsAsync(CancellationToken ct = default);
     Task StopBotsAsync(CancellationToken ct = default);

@@ -116,15 +116,14 @@ public class UserSessionService : IUserSessionService
             }
 
             // One-time initialization: reset DB, import Excel, start snapshots
-            await _excel.ResetAndAddDatabases().ConfigureAwait(false);
-            //await _excel.CheckAndAddDatabases();
+            //await _excel.ResetAndAddDatabases().ConfigureAwait(false);
+            await _excel.CheckAndAddDatabases().ConfigureAwait(false);
             _logger.LogInformation("Database seeding complete.");
 
             // Start price snapshot service and configure trade service
             _ = _price.Start();
             _trade.Configure(
                 tradeInterval: TimeSpan.FromSeconds(2),
-                onlineCheckInterval: TimeSpan.FromMinutes(1),
                 dailyCheckInterval: TimeSpan.FromHours(1),
                 reloadAssetsInterval: TimeSpan.FromSeconds(30),
                 currencies: new List<CurrencyType> { BaseCurrency } // currently default USD
