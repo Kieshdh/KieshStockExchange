@@ -1,300 +1,181 @@
-﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.PortfolioServices;
 using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace KieshStockExchange.Services.BackgroundServices;
-
-/// <summary>
-/// Background service that uses configured <see cref="AIUser"/> bots
-/// to place orders in the market at a fixed cadence.
-/// </summary>
-public interface IAiTradeService
-{
-    /// <summary>Interval between trading ticks for the AI loop.</summary>
-    TimeSpan TradeInterval { get; }
-
-    /// <summary>How often to recompute which AI users are online.</summary>
-    TimeSpan OnlineCheckInterval { get; }
-
-    /// <summary>How often to run daily housekeeping checks.</summary>
-    TimeSpan DailyCheckInterval { get; }
-
-    /// <summary>How often to reload AI users' portfolios and cached prices.</summary>
-    TimeSpan ReloadAssetsInterval { get; }
-
-    /// <summary>Currencies that the AI users are allowed to trade.</summary>
-    IReadOnlyList<CurrencyType> CurrenciesToTrade { get; }
-
-    /// <summary>
-    /// Adjusts the cadence and trading universe of the AI loop at runtime.
-    /// Any null argument keeps the current value.
-    /// </summary>
-    void Configure(TimeSpan? tradeInterval = null, TimeSpan? onlineCheckInterval = null,
-        TimeSpan? dailyCheckInterval = null, TimeSpan? reloadAssetsInterval = null,
-        IEnumerable<CurrencyType>? currencies = null);
-
-    /// <summary>
-    /// Starts the background trading loop if it is not already running.
-    /// Safe to call multiple times.
-    /// </summary>
-    Task StartBotAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// Requests the background trading loop to stop and waits for it to finish.
-    /// </summary>
-    Task StopBotAsync();
-}
 
 public class AiTradeService : IAiTradeService, IAsyncDisposable
 {
     #region Public Properties
-    // Intervals
-    public TimeSpan TradeInterval { get; private set; } = TimeSpan.FromSeconds(1);
-    public TimeSpan OnlineCheckInterval { get; private set; } = TimeSpan.FromHours(1);
-    public TimeSpan DailyCheckInterval { get; private set; } = TimeSpan.FromMinutes(1);
+    public TimeSpan TradeInterval        { get; private set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan DailyCheckInterval   { get; private set; } = TimeSpan.FromMinutes(1);
     public TimeSpan ReloadAssetsInterval { get; private set; } = TimeSpan.FromMinutes(1);
-    public TimeSpan TransactionLoadInterval { get; private set; } = TimeSpan.FromSeconds(30);
+    public TimeSpan PruneInterval        { get; private set; } = TimeSpan.FromSeconds(30);
 
-    // Trade these currencies (default USD only)
     public IReadOnlyList<CurrencyType> CurrenciesToTrade { get; private set; } =
         new[] { CurrencyType.USD };
+
+    public int LoadedBotCount => _ctx.AiUsersByAiUserId.Count;
+
+    public int OnlineBotCount
+    {
+        get
+        {
+            int n = 0;
+            foreach (var u in _ctx.AiUsersByAiUserId.Values)
+                if (u.IsEnabled) n++;
+            return n;
+        }
+    }
+
+    public int? ActiveBotCap { get; private set; } = null;
+
+    public long TickCount => Interlocked.Read(ref _tickCount);
+    public long TradesPlacedThisSession => Interlocked.Read(ref _tradesPlacedThisSession);
+    public long FailuresThisSession => Interlocked.Read(ref _failuresThisSession);
+
+    public DateTime? LastTradeAtUtc { get; private set; }
+    public DateTime? LoopStartedAtUtc { get; private set; }
+
+    public IReadOnlyList<string> RecentFailures
+    {
+        get { lock (_recentFailures) return _recentFailures.ToArray(); }
+    }
+
+    public event EventHandler? StatsChanged;
     #endregion
 
     #region Private Fields
-    // Next check times
-    private DateTime NextOnlineCheck = DateTime.MinValue;
-    private DateTime NextDailyCheck = DateTime.MinValue;
-    private DateTime NextAssetReload = DateTime.MinValue;
-    private DateTime NextTxsLoad = DateTime.MinValue;
+    private DateTime _nextDailyCheck   = DateTime.MinValue;
+    private DateTime _nextAssetReload  = DateTime.MinValue;
+    private DateTime _nextPruneTime    = DateTime.MinValue;
+    private DateTime _nextStatsLogTime = DateTime.MinValue;
 
-    // Last daily refresh date
-    private DateOnly LastRefreshDate = DateOnly.MinValue;
+    private const int    PruneOrdersPerBot   = 2;
+    private const int    RecentFailuresMax   = 10;
+    private static readonly TimeSpan PruneStaleAge = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(30);
+    private const decimal PruneDistanceFactor = 2.0m;
 
-    // Hashset to store all transaction IDs processed to avoid double counting
-    private readonly HashSet<int> ProcessedTxIds = new(); // Resets per day
-
-    // Internal loop state
     private CancellationTokenSource? _cts;
-    private Task? _runner;
-    private long _tickCount = 0;
+    private Task?  _runner;
+    private long   _tickCount = 0;
+    private long   _tradesPlacedThisSession = 0;
+    private long   _failuresThisSession = 0;
+    private readonly Queue<string> _recentFailures = new();
+
+    // Cumulative counters used to emit a 30s window log (snapshot-and-diff).
+    private long _buyTotal       = 0;
+    private long _sellTotal      = 0;
+    private long _limitTotal     = 0;
+    private long _slipMarketTotal = 0;
+    private long _trueMarketTotal = 0;
+    private long _cancelledTotal  = 0;
+    private decimal _volumeTotal = 0m;
+    private readonly object _volumeLock = new();
+
+    // Last values snapshotted at the previous stats log; deltas = current − snapshot.
+    private long _buySnapshot, _sellSnapshot, _limitSnapshot, _slipSnapshot, _trueSnapshot, _cancelledSnapshot;
+    private decimal _volumeSnapshot = 0m;
     #endregion
 
-    #region Dictionaries
-    // In-memory state of AI users by AiUserId
-    private readonly Dictionary<int, AIUser> AiUsersByAiUserId = new();
-    private readonly Dictionary<int, AIUser> AiUsersByUserId = new();
-    private readonly Dictionary<int, Random> AiUserRngs = new();
-
-    // In-memory state of positions, funds and open orders for AI users identified by UserId
-    private readonly Dictionary<int, Dictionary<int, Position>> Positions = new();
-    private readonly Dictionary<int, Dictionary<CurrencyType, Fund>> Funds = new();
-    private readonly Dictionary<int, Dictionary<int, Order>> OpenOrders = new();
-
-    // In-memory cache of stock prices at last refresh to avoid repeated market data calls
-    private readonly ConcurrentDictionary<(int, CurrencyType), decimal> StockPrices = new();
+    #region Internal Helpers
+    private readonly AiBotContext         _ctx;
+    private readonly AiBotStateService    _state;
+    private readonly AiBotDecisionService _decisions;
     #endregion
 
     #region Services and Constructor
-    private readonly IDataBaseService _db;
-    private readonly IUserPortfolioService _portfolio;
-    private readonly IUserOrderService _userOrders;
-    private readonly IMarketOrderService _marketOrders;
-    private readonly IMarketDataService _market;
-    private readonly IStockService _stocks;
+    private readonly IOrderExecutionService _marketOrders;
+    private readonly IMarketDataService     _market;
+    private readonly IStockService          _stocks;
+    private readonly IAccountsCache         _accounts;
     private readonly ILogger<AiTradeService> _logger;
 
-    public AiTradeService(IUserPortfolioService portfolio, IUserOrderService userOrders, IMarketOrderService marketOrders,
-        IMarketDataService market, IStockService stocks, ILogger<AiTradeService> logger, IDataBaseService db)
+    public AiTradeService(
+        IOrderExecutionService marketOrders,
+        IMarketDataService market,
+        IStockService stocks,
+        IDataBaseService db,
+        IAccountsCache accounts,
+        ILogger<AiTradeService> logger,
+        ILoggerFactory loggerFactory)
     {
-        _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
-        _userOrders = userOrders ?? throw new ArgumentNullException(nameof(userOrders));
-        _marketOrders = marketOrders ?? throw new ArgumentNullException(nameof(marketOrders));
-        _market = market ?? throw new ArgumentNullException(nameof(market));
-        _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _marketOrders = marketOrders  ?? throw new ArgumentNullException(nameof(marketOrders));
+        _market       = market        ?? throw new ArgumentNullException(nameof(market));
+        _stocks       = stocks        ?? throw new ArgumentNullException(nameof(stocks));
+        _accounts     = accounts      ?? throw new ArgumentNullException(nameof(accounts));
+        _logger       = logger        ?? throw new ArgumentNullException(nameof(logger));
 
-        // Subscribe to market quote updates
+        _ctx       = new AiBotContext();
+        _state     = new AiBotStateService(db, loggerFactory.CreateLogger<AiBotStateService>());
+        _decisions = new AiBotDecisionService(market, loggerFactory.CreateLogger<AiBotDecisionService>());
+
         _market.QuoteUpdated += OnQuoteUpdated;
     }
     #endregion
 
-    #region Loading AIUsers and runtime caches
-    private async Task LoadAiUsers(CancellationToken ct = default)
+    #region Configure and Lifecycle
+    public void Configure(TimeSpan? tradeInterval = null,
+        TimeSpan? dailyCheckInterval = null, TimeSpan? reloadAssetsInterval = null,
+        IEnumerable<CurrencyType>? currencies = null, TimeSpan? pruneInterval = null)
     {
-        // Clear existing users
-        AiUsersByAiUserId.Clear();
-        AiUsersByUserId.Clear();
-        AiUserRngs.Clear();
-
-        // Load AI users from database
-        foreach (var user in await _db.GetAIUsersAsync(ct).ConfigureAwait(false))
-        {
-            AiUsersByAiUserId[user.AiUserId] = user;
-            AiUsersByUserId[user.UserId] = user;
-            AiUserRngs[user.AiUserId] = GetRandom(user.AiUserId);
-        }
-
-        // Preload portfolios and orders for loaded users
-        await RefreshAssetsAsync(ct).ConfigureAwait(false);
-    }
-
-    private async Task RefreshAssetsAsync(CancellationToken ct = default)
-    {
-        // Clear existing caches
-        Positions.Clear();
-        Funds.Clear();
-        OpenOrders.Clear();
-
-        // Get all enabled user IDs
-        var userIds = AiUsersByAiUserId.Values.Where(u => u.IsEnabled).Select(u => u.UserId).ToList();
-
-        if (userIds.Count == 0) return; // No enabled users
-
-        // Load funds, positions and open orders for all enabled users
-        var allFunds = await _db.GetFundsForUsersAsync(userIds, ct).ConfigureAwait(false);
-        var allPositions = await _db.GetPositionsForUsersAsync(userIds, ct).ConfigureAwait(false);
-        var allOrders = await _db.GetOpenOrdersForUsersAsync(userIds, ct).ConfigureAwait(false);
-
-        // Populate dictionaries
-        foreach (var group in allFunds.GroupBy(f => f.UserId))
-            Funds[group.Key] = group.ToDictionary(f => f.CurrencyType, f => f);
-
-        foreach (var group in allPositions.GroupBy(p => p.UserId))
-            Positions[group.Key] = group.ToDictionary(p => p.StockId, p => p);
-
-        foreach (var group in allOrders.GroupBy(o => o.UserId))
-            OpenOrders[group.Key] = group.ToDictionary(o => o.OrderId, o => o);
-    }
-
-    private async Task LoadRecentTransactionsAsync(DateTime now, CancellationToken ct = default)
-    {
-        // Load recent transactions
-        var since = now - TransactionLoadInterval * 2; // Load double the interval to avoid missing any
-        var transactions = await _db.GetTransactionsSinceTime(since, ct).ConfigureAwait(false);
-        foreach (var tx in transactions)
-            RecordTx(tx);
-    }
-    #endregion
-
-    #region AIUser state management
-    private void CheckDailyRefresh()
-    {
-        if (LastRefreshDate == TimeHelper.Today()) return; // Already refreshed today
-
-        LastRefreshDate = TimeHelper.Today(); // Update last refresh date
-
-        // Clear RNGs to force reseeding next time
-        AiUserRngs.Clear();
-        ProcessedTxIds.Clear();
-
-        // Reset daily state for each AI user
-        foreach (var user in AiUsersByAiUserId.Values)
-            user.ResetDay();
-
-        _logger.LogInformation("Performed daily refresh for AI users on {date}", 
-            TimeHelper.Today().ToString("yyyy-MM-dd"));
-    }
-
-    private void RecalculateOnlineUsers(DateTime time)
-    {
-        foreach (var user in AiUsersByAiUserId.Values)
-            user.IsEnabled = Decimal01(user.AiUserId) < user.OnlineProb;
-
-        _logger.LogInformation("Recalculated online AI users at {time}", 
-            time.ToLocalTime().ToString("HH:mm:ss"));
-    }
-
-    private async Task CheckTimers(DateTime now, CancellationToken ct)
-    {
-        // Online check
-        if (now >= NextOnlineCheck)
-        {
-            RecalculateOnlineUsers(now);
-            NextOnlineCheck = now + OnlineCheckInterval;
-        }
-        // Daily check
-        if (now >= NextDailyCheck)
-        {
-            CheckDailyRefresh();
-            NextDailyCheck = now + DailyCheckInterval;
-        }
-        // Asset and prices reload
-        if (now >= NextAssetReload)
-        {
-            await RefreshAssetsAsync(ct).ConfigureAwait(false);
-            NextAssetReload = now + ReloadAssetsInterval;
-        }
-        // Transaction load
-        if (now >= NextTxsLoad)
-        {
-            await LoadRecentTransactionsAsync(now, ct).ConfigureAwait(false);
-            NextTxsLoad = now +  TransactionLoadInterval;
-        }
-    }
-
-    private void RecordTx(Transaction tx)
-    {
-        if (tx == null || tx.IsInvalid) return; // Skip invalid transactions
-        if (tx.Timestamp < TimeHelper.UtcStartOfToday()) return; // Too old
-        if (!ProcessedTxIds.Add(tx.TransactionId)) return; // Already processed
-
-        // Buyer side
-        if (AiUsersByUserId.TryGetValue(tx.BuyerId, out var buyer))
-        {
-            buyer.RecordTrade(tx); // Let the ai user know
-            //await SyncUserStateAsync(buyer.UserId, ct); // Update assets
-        }
-
-        // Skip if self-trade
-        if (tx.SellerId == tx.BuyerId) return;
-
-        // Seller side
-        if (AiUsersByUserId.TryGetValue(tx.SellerId, out var seller))
-        {
-            seller.RecordTrade(tx); // Let the ai user know
-            //await SyncUserStateAsync(seller.UserId, ct); // Update assets
-        }
-    }
-    #endregion
-
-    #region Umbrella trading loop
-    public void Configure(TimeSpan? tradeInterval = null, TimeSpan? onlineCheckInterval = null,
-        TimeSpan? dailyCheckInterval = null, TimeSpan? reloadAssetsInterval = null, 
-        IEnumerable<CurrencyType>? currencies = null)
-    {
-        if (tradeInterval is { } ti) TradeInterval = ti;
-        if (onlineCheckInterval is { } oi) OnlineCheckInterval = oi;
-        if (dailyCheckInterval is { } di) DailyCheckInterval = di;
+        if (tradeInterval       is { } ti)  TradeInterval        = ti;
+        if (dailyCheckInterval  is { } di)  DailyCheckInterval   = di;
         if (reloadAssetsInterval is { } rai) ReloadAssetsInterval = rai;
-        if (currencies != null) CurrenciesToTrade = currencies.ToList();
+        if (currencies != null)             CurrenciesToTrade    = currencies.ToList();
+        if (pruneInterval       is { } pi)  PruneInterval        = pi;
     }
+
+    public void SetActiveBotCap(int? cap)
+    {
+        if (cap.HasValue && cap.Value < 0) cap = 0;
+        ActiveBotCap = cap;
+
+        // Apply the cap immediately and force an asset reload on the next loop tick so
+        // bots that just became active have their funds/positions/orders ready.
+        _state.ApplyActiveBotCap(_ctx, cap);
+        _nextAssetReload = DateTime.MinValue;
+        StatsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public IReadOnlyCollection<int> GetAiUserIds() => _ctx.AiUsersByUserId.Keys.ToArray();
 
     public async Task StartBotAsync(CancellationToken ct = default)
     {
-        // If already running, no-op
         if (_runner != null && !_runner.IsCompleted) return;
 
-        // Make sure the stock list is loaded
         await _stocks.EnsureLoadedAsync(ct).ConfigureAwait(false);
 
-        // Subscribe to all stocks in each currency we trade
+        // Bots are non-UI subscribers — keep _quotes populated and ref-counted, but tell
+        // MarketDataService not to dispatch tick work to the UI thread for these books.
         foreach (var currency in CurrenciesToTrade)
-            await _market.SubscribeAllAsync(currency, ct).ConfigureAwait(false);
+            await _market.SubscribeAllAsync(currency, forUi: false, ct).ConfigureAwait(false);
 
-        // Get cancellation token
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var token = _cts.Token;
+        // Reset session counters every time the loop starts.
+        Interlocked.Exchange(ref _tickCount, 0);
+        Interlocked.Exchange(ref _tradesPlacedThisSession, 0);
+        Interlocked.Exchange(ref _failuresThisSession, 0);
+        Interlocked.Exchange(ref _buyTotal, 0);
+        Interlocked.Exchange(ref _sellTotal, 0);
+        Interlocked.Exchange(ref _limitTotal, 0);
+        Interlocked.Exchange(ref _slipMarketTotal, 0);
+        Interlocked.Exchange(ref _trueMarketTotal, 0);
+        Interlocked.Exchange(ref _cancelledTotal, 0);
+        lock (_volumeLock) _volumeTotal = 0m;
+        _buySnapshot = _sellSnapshot = _limitSnapshot = _slipSnapshot = _trueSnapshot = _cancelledSnapshot = 0;
+        _volumeSnapshot = 0m;
+        _nextStatsLogTime = TimeHelper.NowUtc() + StatsLogInterval;
+        lock (_recentFailures) _recentFailures.Clear();
+        LastTradeAtUtc = null;
+        LoopStartedAtUtc = TimeHelper.NowUtc();
 
-        // Start the main loop
-        _runner = Task.Run(() => RunLoopAsync(token));
+        _cts    = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _runner = Task.Run(() => RunLoopAsync(_cts.Token));
     }
 
     public async Task StopBotAsync()
@@ -306,431 +187,341 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             await _runner.ConfigureAwait(false);
 
             foreach (var currency in CurrenciesToTrade)
-                await _market.UnsubscribeAllAsync(currency).ConfigureAwait(false);
+                await _market.UnsubscribeAllAsync(currency, forUi: false).ConfigureAwait(false);
         }
         finally
         {
             _runner = null;
             _cts?.Dispose();
             _cts = null;
+            LoopStartedAtUtc = null;
+            StatsChanged?.Invoke(this, EventArgs.Empty);
         }
     }
+    #endregion
 
+    #region Main Loop
     private async Task RunLoopAsync(CancellationToken ct)
     {
-        // First-time load AI users
-        await LoadAiUsers(ct).ConfigureAwait(false);
+        await _state.LoadAsync(_ctx, ct).ConfigureAwait(false);
+        // Bots load with IsEnabled=true; apply the current cap (if any) before the first tick.
+        _state.ApplyActiveBotCap(_ctx, ActiveBotCap);
 
-        // Main loop
+        // Warm the engine-wide accounts cache for every bot user up front so the first
+        // batch of orders doesn't pay the cold-load cost inside the per-book lock.
+        var botUserIds = new List<int>(_ctx.AiUsersByAiUserId.Count);
+        foreach (var u in _ctx.AiUsersByAiUserId.Values) botUserIds.Add(u.UserId);
+        if (botUserIds.Count > 0)
+            await _accounts.EnsureLoadedAsync(botUserIds, ct).ConfigureAwait(false);
+
         while (!ct.IsCancellationRequested)
         {
-            // Current time
             var now = TimeHelper.NowUtc();
-
-            // Check timers
             await CheckTimers(now, ct).ConfigureAwait(false);
 
-            // Per-AI decisions
-            foreach (var user in AiUsersByAiUserId.Values)
-                await AIUserNextDecision(user, now, ct).ConfigureAwait(false);
+            // Phase 1: collect orders — pure CPU, no DB reads
+            var pending = new List<(AIUser user, Order order)>();
+            foreach (var user in _ctx.AiUsersByAiUserId.Values)
+            {
+                if (!user.IsEnabled || !_decisions.CanPlaceMoreOrder(_ctx, user)) continue;
 
-            // Wait for next tick
-            _tickCount++;
+                // Spontaneous burst: rare chance (~0.2%/tick) of entering a focused session
+                var burstActive = _ctx.BurstEndTimes.TryGetValue(user.AiUserId, out var burstEnd) && now < burstEnd;
+                if (!burstActive && _ctx.Decimal01(user.AiUserId) < 0.002m)
+                {
+                    var secs = 120 + (int)(_ctx.Decimal01(user.AiUserId) * 360); // 2–8 min
+                    _ctx.BurstEndTimes[user.AiUserId] = now + TimeSpan.FromSeconds(secs);
+                    burstActive = true;
+                }
+
+                // Post-trade quiet period: more conservative bots wait longer between trades
+                var quietSecs = 60.0 - 50.0 * (double)user.AggressivenessPrc; // 10–60 s
+                if (user.LastTradeTime > DateTime.MinValue &&
+                    (now - user.LastTradeTime).TotalSeconds < quietSecs) continue;
+
+                // Burst: halve decision interval and boost trade probability
+                var effectiveInterval = burstActive
+                    ? TimeSpan.FromSeconds(Math.Max(1.0, user.DecisionInterval.TotalSeconds * 0.5))
+                    : user.DecisionInterval;
+                var effectiveTradeProb = burstActive
+                    ? Math.Min(1m, user.TradeProb * 1.5m)
+                    : user.TradeProb;
+
+                if (now - user.LastDecisionTime < effectiveInterval) continue;
+
+                user.RecordDecision(now);
+                if (_ctx.Decimal01(user.AiUserId) > effectiveTradeProb) continue;
+
+                foreach (var currency in CurrenciesToTrade)
+                {
+                    var order = await _decisions.ComputeOrderAsync(_ctx, user, currency, ct)
+                        .ConfigureAwait(false);
+                    if (order is not null) pending.Add((user, order));
+                }
+            }
+
+            // Phase 2: submit all orders in one batch (4 DB ops regardless of N)
+            if (pending.Count > 0)
+            {
+                var orderList = pending.Select(x => x.order).ToList();
+                IReadOnlyList<OrderResult> results;
+                try
+                {
+                    results = await _marketOrders.PlaceAndMatchBatchAsync(orderList, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "PlaceAndMatchBatchAsync failed on tick {Tick}", _tickCount);
+                    results = orderList
+                        .Select(_ => new OrderResult { Status = OrderStatus.OperationFailed, ErrorMessage = ex.Message })
+                        .ToList();
+                }
+
+                // Phase 3: update in-memory caches from fills — no DB reads
+                for (int i = 0; i < pending.Count; i++)
+                {
+                    var (user, order) = pending[i];
+                    var result = results[i];
+
+                    if (!result.PlacedSuccessfully)
+                    {
+                        _logger.LogWarning("Batch order AIUser {Id} stock {Stock}: {Status} — {Error}",
+                            user.AiUserId, order.StockId, result.Status, result.ErrorMessage);
+                        user.RecordError();
+                        Interlocked.Increment(ref _failuresThisSession);
+                        RecordFailure($"AIUser {user.AiUserId} stock {order.StockId}: {result.Status} — {result.ErrorMessage}");
+                        continue;
+                    }
+                    if (_logger.IsEnabled(LogLevel.Debug))
+                        _logger.LogDebug("Batch order AIUser {Id} stock {Stock}: {Status}",
+                            user.AiUserId, order.StockId, result.Status);
+
+                    Interlocked.Increment(ref _tradesPlacedThisSession);
+
+                    if (order.IsBuyOrder)  Interlocked.Increment(ref _buyTotal);
+                    else                   Interlocked.Increment(ref _sellTotal);
+
+                    if      (order.IsLimitOrder)      Interlocked.Increment(ref _limitTotal);
+                    else if (order.IsSlippageOrder)   Interlocked.Increment(ref _slipMarketTotal);
+                    else if (order.IsTrueMarketOrder) Interlocked.Increment(ref _trueMarketTotal);
+
+                    if (result.FillTransactions.Count > 0)
+                    {
+                        LastTradeAtUtc = TimeHelper.NowUtc();
+                        decimal fillVol = 0m;
+                        for (int f = 0; f < result.FillTransactions.Count; f++)
+                            fillVol += result.FillTransactions[f].TotalAmount;
+                        if (fillVol > 0m) lock (_volumeLock) _volumeTotal += fillVol;
+                    }
+
+                    _state.ApplyResultToCache(_ctx, result);
+                }
+            }
+
+            Interlocked.Increment(ref _tickCount);
+            StatsChanged?.Invoke(this, EventArgs.Empty);
             try { await Task.Delay(TradeInterval, ct).ConfigureAwait(false); }
             catch (TaskCanceledException) { /* breaking loop */ }
         }
     }
+
+    private void RecordFailure(string message)
+    {
+        if (string.IsNullOrEmpty(message)) return;
+        var stamped = $"{TimeHelper.NowUtc().ToLocalTime():HH:mm:ss}  {message}";
+        lock (_recentFailures)
+        {
+            _recentFailures.Enqueue(stamped);
+            while (_recentFailures.Count > RecentFailuresMax) _recentFailures.Dequeue();
+        }
+    }
     #endregion
 
-    #region AIUser Next Decision
-    private async Task AIUserNextDecision(AIUser user, DateTime now, CancellationToken ct = default)
+    #region Timers and Pruning
+    private async Task CheckTimers(DateTime now, CancellationToken ct)
     {
-        // Skip if not enabled or not due
-        if (!user.IsEnabled || !CanPlaceMoreOrder(user)) return;
-
-        // Check if decision is due
-        var elapsed = now - user.LastDecisionTime;
-        if (elapsed < user.DecisionInterval) return;
-
-        // Record decision time
-        user.RecordDecision(now);
-        // Roll the dice to see if we trade this tick
-        if (Decimal01(user.AiUserId) > user.TradeProb) return;
-
-        // Make trade for each currency
-        foreach (var currency in CurrenciesToTrade)
+        if (now >= _nextDailyCheck)
         {
-            // Generate order
-            var order = await ComputeOrderAsync(user, currency, ct).ConfigureAwait(false);
-            if (order is null) continue; // No order to place
-
-            // Execute the order
-            var result = await ExecuteOrderAsync(user, order, ct).ConfigureAwait(false);
-
-            // If not placed successfully, skip
-            if (result is null || !result.PlacedSuccessfully) continue;
+            _state.CheckDailyRefresh(_ctx);
+            _nextDailyCheck = now + DailyCheckInterval;
+        }
+        if (now >= _nextAssetReload)
+        {
+            await _state.RefreshAssetsAsync(_ctx, ct).ConfigureAwait(false);
+            _nextAssetReload = now + ReloadAssetsInterval;
+        }
+        if (now >= _nextPruneTime)
+        {
+            await PruneWorstOrdersAsync(ct).ConfigureAwait(false);
+            _nextPruneTime = now + PruneInterval;
+        }
+        if (now >= _nextStatsLogTime)
+        {
+            LogStatsWindow();
+            _nextStatsLogTime = now + StatsLogInterval;
         }
     }
 
-    private bool CanPlaceMoreOrder(AIUser user)
+    private void LogStatsWindow()
     {
-        // Check max open orders
-        if (OpenOrders.TryGetValue(user.UserId, out Dictionary<int, Order>? value))
-            if (value.Count >= user.MaxOpenOrders)
-                return false;
+        long buy    = Interlocked.Read(ref _buyTotal);
+        long sell   = Interlocked.Read(ref _sellTotal);
+        long lim    = Interlocked.Read(ref _limitTotal);
+        long slip   = Interlocked.Read(ref _slipMarketTotal);
+        long trueM  = Interlocked.Read(ref _trueMarketTotal);
+        long cancel = Interlocked.Read(ref _cancelledTotal);
+        decimal vol;
+        lock (_volumeLock) vol = _volumeTotal;
 
-        // Check if within daily trade limit
-        if (user.TradesToday >= user.MaxDailyTrades) return false;
+        long dBuy    = buy    - _buySnapshot;
+        long dSell   = sell   - _sellSnapshot;
+        long dLim    = lim    - _limitSnapshot;
+        long dSlip   = slip   - _slipSnapshot;
+        long dTrue   = trueM  - _trueSnapshot;
+        long dCancel = cancel - _cancelledSnapshot;
+        decimal dVol = vol - _volumeSnapshot;
 
-        return true; // Can place more orders
+        _buySnapshot       = buy;
+        _sellSnapshot      = sell;
+        _limitSnapshot     = lim;
+        _slipSnapshot      = slip;
+        _trueSnapshot      = trueM;
+        _cancelledSnapshot = cancel;
+        _volumeSnapshot    = vol;
+
+        _logger.LogInformation(
+            "BotStats[30s] @ {Time}: bots {Online}/{Loaded}, trades {Total} (buy {Buy}/sell {Sell}), type (Limit {Limit}/SlipMarket {Slip}/TrueMarket {True}), cancelled {Cancelled}, volume {Vol:F2}",
+            TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"),
+            OnlineBotCount, LoadedBotCount,
+            dBuy + dSell, dBuy, dSell,
+            dLim, dSlip, dTrue,
+            dCancel,
+            dVol);
     }
 
-    private async Task<Order?> ComputeOrderAsync(AIUser user, CurrencyType currency, CancellationToken ct = default)
+    private async Task PruneWorstOrdersAsync(CancellationToken ct)
     {
-        // Get the type of order
-        var type = ChooseOrderType(user, currency);
+        var toCancel = new List<(int userId, Order order)>();
 
-        // Choose stock
-        var stockId = ChooseStockId(user, type);
-        if (stockId <= 0) return null;
-
-        // Get the order price
-        var price = await ComputeOrderPriceAsync(user, type, stockId, currency, ct).ConfigureAwait(false);
-
-        // Get the order quantity
-        var quantity = await ComputeOrderQuantityAsync(user, type, stockId, currency, ct).ConfigureAwait(false);
-        if (quantity <= 0) return null;
-
-        return new Order
+        foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
-            UserId = user.UserId, StockId = stockId, CurrencyType = currency,
-            Quantity = quantity, Price = price, 
-            SlippagePercent = IsSlippageOrder(type) ? user.SlippageTolerancePrc * 100m : null,
-            OrderType = ToOrderTypeString(type)
-        };
-    }
+            if (!_ctx.OpenOrders.TryGetValue(user.UserId, out var userOrders) || userOrders.Count == 0)
+                continue;
 
-    private async Task<OrderResult?> ExecuteOrderAsync(AIUser user, Order order, CancellationToken ct = default)
-    {
-        if (user is null || order is null || order.UserId != user.UserId) return null;
-        if (order.IsInvalid) throw new ArgumentException("Order is invalid", nameof(order)); // Sanity check
+            var limitOrders = userOrders.Values.Where(o => o.IsOpenLimitOrder).ToList();
+            if (limitOrders.Count == 0) continue;
 
+            // Criterion 1: stale age — cancel regardless of capacity.
+            // Anchor age to max(CreatedAt, LoopStartedAtUtc) so orders that already
+            // existed when the bot loop started get a fresh grace window — otherwise
+            // every order from the previous session would be wiped on first prune.
+            var sessionStart = LoopStartedAtUtc ?? DateTime.MinValue;
+            foreach (var o in limitOrders)
+            {
+                var effectiveCreated = o.CreatedAt > sessionStart ? o.CreatedAt : sessionStart;
+                if (TimeHelper.NowUtc() - effectiveCreated >= PruneStaleAge)
+                    toCancel.Add((user.UserId, o));
+            }
+
+            // Criterion 2: capacity — only when at ≥80% of MaxOpenOrders
+            if (userOrders.Count < (int)Math.Ceiling(user.MaxOpenOrders * 0.8)) continue;
+
+            var alreadyQueued     = new HashSet<int>(toCancel.Select(x => x.order.OrderId));
+            var distanceThreshold = PruneDistanceFactor * user.MaxLimitOffsetPrc;
+
+            var scored = new List<(Order order, decimal distance)>();
+            foreach (var o in limitOrders)
+            {
+                if (alreadyQueued.Contains(o.OrderId)) continue;
+                if (!_ctx.StockPrices.TryGetValue((o.StockId, o.CurrencyType), out var m) || m <= 0m) continue;
+                var dist = o.IsBuyOrder ? (m - o.Price) / m : (o.Price - m) / m;
+                if (dist > distanceThreshold) scored.Add((o, dist));
+            }
+
+            foreach (var (o, _) in scored.OrderByDescending(x => x.distance).Take(PruneOrdersPerBot))
+                toCancel.Add((user.UserId, o));
+        }
+
+        if (toCancel.Count == 0) return;
+
+        // Filter out anything no longer tracked in-memory; one CancelOrdersBatchAsync call.
+        var ids = new List<int>(toCancel.Count);
+        for (int i = 0; i < toCancel.Count; i++)
+        {
+            var (userId, order) = toCancel[i];
+            if (!_ctx.OpenOrders.TryGetValue(userId, out var userOrders)) continue;
+            if (!userOrders.ContainsKey(order.OrderId)) continue;
+            ids.Add(order.OrderId);
+        }
+        if (ids.Count == 0) return;
+
+        IReadOnlyList<OrderResult> results;
         try
         {
-            // Sent to the MarketOrderService for placement and matching
-            var result = await _marketOrders.PlaceAndMatchAsync(order, user.UserId, ct).ConfigureAwait(false);
-
-            _logger.LogInformation("ExecuteOrderAsync for AIUser {AiUserId} on stock {StockId} resulted in {Status}",
-                user.AiUserId, order.StockId, result.Status);
-
-            // Record fills
-            foreach (var fill in result.FillTransactions)
-                RecordTx(fill);
-
-            return result;
+            results = await _marketOrders.CancelOrdersBatchAsync(ids, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ExecuteOrderAsync failed for AIUser {AiUserId} on stock {StockId}", user.AiUserId, order.StockId);
-            user.RecordError();
-            return new OrderResult { Status = OrderStatus.OperationFailed, ErrorMessage = ex.Message };
-        }
-    }
-    #endregion
-
-    #region Order computation helpers
-    private OrderType ChooseOrderType(AIUser user, CurrencyType currency)
-    {
-        // Decide buy or sell based on cash percentage
-        var cashPrc = FundsPercentagePortfolio(user.UserId, currency);
-        var buyProb = user.BuyBiasPrc; // Base buy probability
-        var maxShift = 0.40m; // Max shift of 40%
-
-        // Adjust buy probability based on cash reserves
-        if (cashPrc < user.MinCashReservePrc) // Not enough cash
-        {
-            // Below min cash → we want to SELL more often.
-            // distance = how far below min in [0,1]
-            var distance = user.MinCashReservePrc <= 0m ? 1m
-                : (user.MinCashReservePrc - cashPrc) / user.MinCashReservePrc;
-            // Reduce buy probability accordingly
-            buyProb -= maxShift * Clamp01(distance);
-        }
-        else if (cashPrc > user.MaxCashReservePrc) // Too much cash
-        {
-            // Above max cash → we want to BUY more often.
-            // distance = how far above max in [0,1]
-            var distance = 1m - user.MaxCashReservePrc <= 0m ? 1m
-                : (cashPrc - user.MaxCashReservePrc) / (1m - user.MaxCashReservePrc);
-            // Increase buy probability accordingly
-            buyProb += maxShift * Clamp01(distance); 
+            _logger.LogError(ex, "PruneWorstOrders: CancelOrdersBatchAsync failed for {Count} orders", ids.Count);
+            return;
         }
 
-        // Decide buy or sell based on adjusted probability
-        var isBuy = Decimal01(user.AiUserId) < buyProb; // Choose randomly
-
-        // Choose market or limit
-        var isMarket = Decimal01(user.AiUserId) < user.UseMarketProb;
-        var isSlippage = Decimal01(user.AiUserId) < user.UseSlippageMarketProb;
-
-        // Return appropriate order type
-        return isBuy
-            ? isMarket
-                ? isSlippage ? OrderType.SlippageMarketBuy : OrderType.TrueMarketBuy
-                : OrderType.LimitBuy
-            : isMarket
-                ? isSlippage ? OrderType.SlippageMarketSell : OrderType.TrueMarketSell
-                : OrderType.LimitSell;
-    }
-
-    private int ChooseStockId(AIUser user, OrderType type)
-    {        
-        var rng = GetRandom(user.AiUserId);
-
-        // Get the user's watchlist
-        var watch = user.Watchlist?.ToList();
-        if (watch == null || watch.Count == 0) return 0;
-
-        if (IsSellOrder(type))
+        int pruned = 0;
+        for (int i = 0; i < results.Count; i++)
         {
-            var candidates = new List<int>();
-            foreach (var id in watch)
+            var orderId = ids[i];
+            var result = results[i];
+            if (result.PlacedSuccessfully || result.Status == OrderStatus.AlreadyClosed)
             {
-                var pos = GetPosition(user.UserId, id);
-                if (pos.AvailableQuantity > 0) candidates.Add(id);
+                // Find the userId for this orderId from the original toCancel entries.
+                for (int j = 0; j < toCancel.Count; j++)
+                {
+                    if (toCancel[j].order.OrderId != orderId) continue;
+                    if (_ctx.OpenOrders.TryGetValue(toCancel[j].userId, out var userOrders))
+                        userOrders.Remove(orderId);
+                    break;
+                }
+                pruned++;
             }
-            if (candidates.Count > 0)
-                return candidates[rng.Next(candidates.Count)];
+            else
+            {
+                _logger.LogWarning("PruneWorstOrders: cancel of {OrderId} returned {Status}",
+                    orderId, result.Status);
+            }
         }
 
-        // Fall back to any watch item
-        return watch[rng.Next(watch.Count)];
-    }
-
-    private async Task<decimal> ComputeOrderPriceAsync(AIUser user, OrderType type, int stockId, CurrencyType currency, CancellationToken ct = default)
-    {
-        // True market has no price anchor
-        if (IsTrueMarketOrder(type)) return 0m;
-
-        // Get marketprice
-        var marketPrice = await GetStockPrice(stockId, currency, ct).ConfigureAwait(false);
-        if (marketPrice <= 0m) return 0m;
-
-        // Market price for slippage orders (used as anchor)
-        if (IsSlippageOrder(type)) return RoundToCurrency(marketPrice, currency);
-
-        // Compute offset based on min/max limit offset and add jitter based on aggressiveness
-        var offset = Clamp01(Lerp(user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, Decimal01(user.AiUserId)));
-        var jitter = Decimal01(user.AiUserId) * user.AggressivenessPrc; // [0, AggressivenessPrc)
-        offset *= 1m + jitter; // Increase offset by up to AggressivenessPrc
-        offset = Math.Min(offset, user.MaxLimitOffsetPrc); // Clamp to max limit offset
-
-        // Compute limit price based on offset
-        var limitPrice = IsBuyOrder(type) ? marketPrice * (1m - offset) : marketPrice * (1m + offset);
-        return RoundToCurrency(limitPrice, currency);
-    }
-
-    private async Task<int> ComputeOrderQuantityAsync(AIUser user, OrderType type, int stockId, CurrencyType currency, CancellationToken ct = default)
-    {
-        // Portfolio numbers
-        var portfolio = PortfolioValueByCurrency(user.UserId, currency);
-        if (portfolio <= 0m) return 0;
-        
-        // Get trade amount as percentage of portfolio
-        var tradePrc = Lerp(user.MinTradeAmountPrc, user.MaxTradeAmountPrc, Decimal01(user.AiUserId));
-
-        // Add some jitter based on aggressiveness
-        var jitter = Decimal01(user.AiUserId) * user.AggressivenessPrc; // [0, AggressivenessPrc)
-        tradePrc *= 1m + jitter; // Increase trade percentage by up to AggressivenessPrc
-        tradePrc = Math.Min(tradePrc, user.MaxTradeAmountPrc); // Clamp to max trade amount percentage
-        if (tradePrc <= 0m) return 0; // No trade
-
-        // Get market price
-        var marketPrice = await GetStockPrice(stockId, currency, ct).ConfigureAwait(false);
-        if (marketPrice <= 0m) return 0;
-
-        // Get the estimated execution price
-        decimal estimatePrice = type switch
+        if (pruned > 0)
         {
-            OrderType.TrueMarketBuy or OrderType.TrueMarketSell => marketPrice,
-            OrderType.SlippageMarketBuy => RoundToCurrency(marketPrice * (1m + user.SlippageTolerancePrc), currency),
-            OrderType.SlippageMarketSell => RoundToCurrency(marketPrice * (1m - user.SlippageTolerancePrc), currency),
-            _ => marketPrice // limit
-        };
-        if (estimatePrice <= 0m) return 0;
-
-        // Fetch the user's fund and position
-        var fund = GetFund(user.UserId, currency);
-        var pos = GetPosition(user.UserId, stockId);
-
-        // Get necessary values
-        var capValue = user.PerPositionMaxPrc * portfolio;
-        var currentVal = pos.Quantity > 0 ? pos.Quantity * marketPrice : 0m;
-        var roomValue = Math.Max(0m, capValue - currentVal);
-        var rawTradeValue = tradePrc * portfolio;
-
-        // Get the quantity based on buy or sell order
-        if (IsBuyOrder(type))
-        {
-            // Buy: don’t exceed available funds and roomValue
-            var allowedBalance = Math.Min(fund.AvailableBalance, rawTradeValue); // Cash available for trade
-            allowedBalance = Math.Min(allowedBalance, roomValue); // Also respect position cap
-            var qty = (int)Math.Floor(allowedBalance / estimatePrice); // Desired quantity
-            return qty > 0 ? qty : 0;
-        }
-        else
-        {
-            // Sell: don’t exceed available shares and roomValue
-            var desiredQty = (int)Math.Floor(rawTradeValue / estimatePrice);
-            desiredQty = Math.Max(1, desiredQty); // At least 1 share
-            return Math.Min(desiredQty, pos.AvailableQuantity); // Can't sell more than available
+            Interlocked.Add(ref _cancelledTotal, pruned);
+            _logger.LogInformation("PruneWorstOrders: cancelled {Count} orders at {Time}",
+                pruned, TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"));
         }
     }
     #endregion
 
-    #region Static Helpers
-    private static decimal RoundToCurrency(decimal price, CurrencyType currency) =>
-        CurrencyHelper.RoundMoney(price, currency);
-
-    private static decimal Lerp(decimal left, decimal right, decimal t) => left + (right - left) * t;
-
-    private static decimal Clamp01(decimal x) => x < 0m ? 0m : x > 1m ? 1m : x;
-
-    private static int DailySeed(int baseSeed, int userId, DateOnly date)
-    {
-        unchecked
-        {
-            int h = 17;
-            h = h * 31 + baseSeed;
-            h = h * 31 + userId;
-            h = h * 31 + date.Year;
-            h = h * 31 + date.Month;
-            h = h * 31 + date.Day;
-            return h & int.MaxValue; // ensure non-negative for Random
-        }
-    }
-    #endregion
-
-    #region OrderType helpers
-    private enum OrderType { TrueMarketBuy, TrueMarketSell, SlippageMarketBuy, SlippageMarketSell, LimitBuy, LimitSell }
-
-    private bool IsBuyOrder(OrderType t) => t is OrderType.TrueMarketBuy or OrderType.SlippageMarketBuy or OrderType.LimitBuy;
-    private bool IsSellOrder(OrderType t) => t is OrderType.TrueMarketSell or OrderType.SlippageMarketSell or OrderType.LimitSell;
-
-    private bool IsSlippageOrder(OrderType t) => t is OrderType.SlippageMarketBuy or OrderType.SlippageMarketSell;
-    private bool IsLimitOrder(OrderType t) => t is OrderType.LimitBuy or OrderType.LimitSell;
-    private bool IsTrueMarketOrder(OrderType t) => t is OrderType.TrueMarketBuy or OrderType.TrueMarketSell;
-
-    private static string ToOrderTypeString(OrderType t) => t switch
-    {
-        OrderType.TrueMarketBuy => Order.Types.TrueMarketBuy,
-        OrderType.TrueMarketSell => Order.Types.TrueMarketSell,
-        OrderType.SlippageMarketBuy => Order.Types.SlippageMarketBuy,
-        OrderType.SlippageMarketSell => Order.Types.SlippageMarketSell,
-        OrderType.LimitBuy => Order.Types.LimitBuy,
-        OrderType.LimitSell => Order.Types.LimitSell,
-        _ => throw new ArgumentOutOfRangeException(nameof(t))
-    };
-    #endregion
-
-    #region Data fetching and caching helpers
-    private Fund GetFund(int userId, CurrencyType currency)
-    {
-        // If no fund dictionary is available create a new one
-        if (!Funds.ContainsKey(userId))
-            Funds[userId] = new Dictionary<CurrencyType, Fund>();
-
-        // If the fund of the currency is unavailable create a new one
-        if (!Funds[userId].ContainsKey(currency))
-            Funds[userId][currency] = new Fund { UserId = userId, CurrencyType = currency };
-
-        return Funds[userId][currency];
-    }
-
-    private Position GetPosition(int userId, int stockId)
-    {
-        // If no position dictionary is  available create a new one
-        if (!Positions.ContainsKey(userId))
-            Positions[userId] = new Dictionary<int, Position>();
-
-        // If no position for that stock is available create a new one
-        if (!Positions[userId].ContainsKey(stockId))
-            Positions[userId][stockId] = new Position { UserId = userId, StockId = stockId };
-
-        return Positions[userId][stockId];
-    }
-
-    private Random GetRandom(int aiUserId)
-    {
-        // If no user
-        if (!AiUserRngs.ContainsKey(aiUserId))
-        {
-            if (!AiUsersByAiUserId.TryGetValue(aiUserId, out var ai))
-                throw new KeyNotFoundException($"AIUser not found for userId {aiUserId}");
-            AiUserRngs[aiUserId] = new Random(DailySeed(ai.Seed, ai.AiUserId, TimeHelper.Today()));
-        }
-        return AiUserRngs[aiUserId];
-    }
-
-    private decimal Decimal01(int aiUserId) => (decimal)GetRandom(aiUserId).NextDouble();
-    #endregion
-
-    #region Financial methods
-    private async Task<decimal> GetStockPrice(int stockId, CurrencyType currency, CancellationToken ct)
-    {
-        if (!StockPrices.TryGetValue((stockId, currency), out var marketPrice) || marketPrice <= 0m)
-        {
-            marketPrice = await _market.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
-            StockPrices[(stockId, currency)] = marketPrice;
-        }
-        return marketPrice;
-    }
-
+    #region Quote Handler
     private void OnQuoteUpdated(object? sender, LiveQuote quote)
     {
-        if (quote == null) return;
-        if (quote.LastPrice <= 0m) return;
-
-        // Adjust property names if your LiveQuote uses e.g. CurrencyType instead of Currency
+        if (quote == null || quote.LastPrice <= 0m) return;
         var key = (quote.StockId, quote.Currency);
-        StockPrices[key] = quote.LastPrice;
+
+        // Snapshot old raw price for tick-to-tick delta
+        if (_ctx.StockPrices.TryGetValue(key, out var oldPrice) && oldPrice > 0m)
+            _ctx.PreviousPrices[key] = oldPrice;
+
+        _ctx.StockPrices[key] = quote.LastPrice;
+
+        // EWMA smoothing (α=0.15): reacts over ~6 ticks, dampens spike noise
+        var smoothed = _ctx.SmoothedPrices.TryGetValue(key, out var s) ? s : quote.LastPrice;
+        _ctx.SmoothedPrices[key] = 0.85m * smoothed + 0.15m * quote.LastPrice;
     }
-
-    private decimal PortfolioValueByCurrency(int userId, CurrencyType currency)
-    {
-        decimal total = 0m;
-        var fund = GetFund(userId, currency);
-        total += fund.TotalBalance;
-
-        if (!Positions.ContainsKey(userId)) return total;
-        foreach (var position in Positions[userId].Values)
-        {
-            if (position.Quantity <= 0) continue;
-            if (StockPrices.TryGetValue((position.StockId, currency), out var price))
-                total += position.Quantity * price;  // Multiply quantity by price 
-        }
-        return total;
-    }
-
-    private decimal FundsPercentagePortfolio(int userId, CurrencyType currency)
-    {
-        var freeCash = GetFund(userId, currency).AvailableBalance;
-        var total = PortfolioValueByCurrency(userId, currency);
-
-        // If we have no portfolio value at all, treat as 100% or 0% cash
-        if (total <= 0m)
-            return freeCash > 0m ? 1m : 0m;
-        // Otherwise compute percentage and clamp to [0,1]
-        return Clamp01(freeCash / total);
-    }
-
     #endregion
 
-    #region IDisposable implementation
+    #region IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
-        _logger.LogInformation("Disposing AItradeService...");
-        
+        _logger.LogInformation("Disposing AiTradeService...");
         _market.QuoteUpdated -= OnQuoteUpdated;
         await StopBotAsync().ConfigureAwait(false);
     }
