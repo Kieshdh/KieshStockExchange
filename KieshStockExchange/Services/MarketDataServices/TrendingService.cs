@@ -48,14 +48,13 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
     private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(SecondsBetweenUpdates));
     private readonly CancellationTokenSource _cts = new();
-    private readonly EventHandler<LiveQuote> _onQuoteUpdated;
 
     private const int MaxMovers = 5;
     private const int SecondsBetweenUpdates = 5;
 
     public CurrencyType Currency { get; set; } = CurrencyType.USD;
 
-    public TrendingService(IDispatcher dispatcher, ILogger<TrendingService> logger, 
+    public TrendingService(IDispatcher dispatcher, ILogger<TrendingService> logger,
         IDataBaseService db, IMarketDataService market)
     {
         // Dependencies
@@ -69,14 +68,10 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
         _topLosersView = new ReadOnlyObservableCollection<LiveQuote>(_topLosers);
         _mostActiveView = new ReadOnlyObservableCollection<LiveQuote>(_mostActive);
 
-        // React to live quote pushes from the single source of truth
-        _onQuoteUpdated = (_, __) => _ = RecomputeMoversAsync();
-        _market.QuoteUpdated += _onQuoteUpdated;
-
-        // Subscribe to all stocks in the specified currency
-        _ = _market.SubscribeAllAsync(Currency);
-
-        // Start the periodic recompute loop
+        // Top movers refresh every 5s — that's enough for a sidebar.
+        // Intentionally NOT subscribing to QuoteUpdated (would cause UI-thread storms on
+        // every settlement) and NOT calling SubscribeAllAsync (forces ring/candle/timer
+        // machinery for every stock even when no UI is watching).
         _ = RunLoopAsync(_cts.Token);
     }
     #endregion
@@ -114,7 +109,6 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
     public void Dispose()
     {
-        _market.QuoteUpdated -= _onQuoteUpdated;
         _cts.Cancel();
         _cts.Dispose();
         _timer.Dispose();
