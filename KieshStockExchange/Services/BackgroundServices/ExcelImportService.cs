@@ -193,9 +193,14 @@ public class ExcelImportService : IExcelImportService
             users.Add(user);
         }
 
-        // Reset the existing users table and insert the new users
+        // Reset the existing users table and insert the new users. Also cascade-reset
+        // Orders and Transactions in the same root tx — those reference UserIds whose
+        // ownership semantics may have shifted in the new xlsx. Leaving them behind is
+        // what produces stale orders against fresh positions.
         await _db.RunInTransactionAsync(async ct =>
         {
+            await _db.ResetTableAsync<Order>(ct);
+            await _db.ResetTableAsync<Transaction>(ct);
             await _db.ResetTableAsync<User>(ct);
             await _db.InsertAllAsync(users, ct);
         }).ConfigureAwait(false);
@@ -385,9 +390,15 @@ public class ExcelImportService : IExcelImportService
             positions.AddRange(userPositions);
         }
 
-        // Drop the existing funds table from the database
+        // Drop the existing funds + positions tables and reseed. Cascade-reset Orders and
+        // Transactions in the same root tx — old orders/trades reference user/stock combos
+        // whose backing positions were just replaced, so they would be stale after this
+        // reseed. AddUsersFromExcelAsync may already have reset them; ResetTableAsync is
+        // idempotent on an empty table.
         await _db.RunInTransactionAsync(async ct =>
         {
+            await _db.ResetTableAsync<Order>(ct);
+            await _db.ResetTableAsync<Transaction>(ct);
             await _db.ResetTableAsync<Position>(ct);
             await _db.ResetTableAsync<Fund>(ct);
             await _db.InsertAllAsync(funds, ct);
