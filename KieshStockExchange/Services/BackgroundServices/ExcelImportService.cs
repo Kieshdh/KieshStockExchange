@@ -35,6 +35,7 @@ public class ExcelImportService : IExcelImportService
         await _db.ResetTableAsync<Order>().ConfigureAwait(false);
         await _db.ResetTableAsync<Transaction>().ConfigureAwait(false);
         await _db.ResetTableAsync<Message>().ConfigureAwait(false);
+        await _db.ResetTableAsync<Candle>().ConfigureAwait(false);
         await AddStocksFromExcelAsync(false).ConfigureAwait(false);
         await AddUsersFromExcelAsync(false).ConfigureAwait(false);
         await AddAIProfileFromExcelAsync(false).ConfigureAwait(false);
