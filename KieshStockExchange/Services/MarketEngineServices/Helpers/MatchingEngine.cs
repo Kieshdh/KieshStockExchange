@@ -1,12 +1,22 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using KieshStockExchange.Models;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
 public interface IMatchingEngine
 {
-    Task<List<Transaction>> MatchAsync(Order taker, OrderBook book, CancellationToken ct);
+    MatchResult Match(Order taker, OrderBook book, CancellationToken ct);
 }
+
+/// <summary> Returned by Match: the fills plus everything needed to undo them if settlement fails. </summary>
+public sealed record MatchResult(
+    List<Transaction> Fills,
+    int TakerOriginalFilled,
+    List<MakerSnapshot> MakerSnapshots
+);
+
+/// <summary> State of one maker order captured before it was filled, so it can be restored on rollback. </summary>
+public readonly record struct MakerSnapshot(Order Order, int OriginalAmountFilled, bool WasRemovedFromBook);
 
 public sealed class MatchingEngine : IMatchingEngine
 {
@@ -19,10 +29,11 @@ public sealed class MatchingEngine : IMatchingEngine
     #endregion
 
     #region Order matching and helpers
-    public async Task<List<Transaction>> MatchAsync(Order taker, OrderBook book, CancellationToken ct)
+    public MatchResult Match(Order taker, OrderBook book, CancellationToken ct)
     {
-        // Collect transactions here; settlement will apply them later
-        var fills = new List<Transaction>();
+        var fills = new List<Transaction>(16);
+        var makerSnapshots = new List<MakerSnapshot>(16);
+        var takerOriginalFilled = taker.AmountFilled;
 
         var remainingBudget = taker.IsTrueMarketBuyOrder ? taker.BuyBudget : 0m;
 
@@ -35,7 +46,7 @@ public sealed class MatchingEngine : IMatchingEngine
             if (tryAgain) continue; // Cleaned up invalid maker, try again
             if (bestOpposite is null) break; // No more makers
 
-            // If The price is not crossed, stop matching
+            // If the price is not crossed, stop matching
             if (!IsPriceCrossed(taker, bestOpposite)) break;
 
             // Determine fill quantity
@@ -51,9 +62,12 @@ public sealed class MatchingEngine : IMatchingEngine
                     var affordable = (int)(remainingBudget / bestOpposite.Price);
                     if (affordable <= 0) break; // Cannot afford any more
                     qty = Math.Min(qty, affordable);
-                    remainingBudget -= qty * bestOpposite.Price;
                 }
+                remainingBudget -= qty * bestOpposite.Price;
             }
+
+            // Snapshot maker state before mutation so we can undo if settlement fails
+            var makerOriginalFilled = bestOpposite.AmountFilled;
 
             // Build an in-memory transaction (not persisted yet)
             fills.Add(CreateTransaction(taker, bestOpposite, qty));
@@ -62,19 +76,17 @@ public sealed class MatchingEngine : IMatchingEngine
             if (DebugMode) _logger.LogInformation("Matched {Taker} with {bestOpposite} for {Qty} @ {Price}",
                 taker.OrderId, bestOpposite.OrderId, qty, bestOpposite.Price);
 
-            // Update in-memory remaining quantities
+            // Taker is not in the book; mutate it directly. Maker fill must go through
+            // the book so per-level totals stay in sync.
             taker.Fill(qty);
-            bestOpposite.Fill(qty);
+            var wasRemoved = book.ApplyMakerFill(bestOpposite, qty);
+            if (wasRemoved && DebugMode)
+                _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);
 
-            // If maker is fully filled, pop from book
-            if (bestOpposite.IsClosed)
-            {
-                book.RemoveById(bestOpposite.OrderId);
-                if (DebugMode) _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);
-            }
+            makerSnapshots.Add(new MakerSnapshot(bestOpposite, makerOriginalFilled, wasRemoved));
         }
 
-        return await Task.FromResult(fills);
+        return new MatchResult(fills, takerOriginalFilled, makerSnapshots);
     }
 
     private (bool, Order?) GetBestOpposite(Order taker, OrderBook book)
