@@ -4,9 +4,9 @@
              xmlns:views="clr-namespace:KieshStockExchange.Views.OtherViews"
              x:Class="KieshStockExchange.Views.TradePageViews.PlaceOrderView">
 
-    <VerticalStackLayout Spacing="15" Padding="15" WidthRequest="300">
+    <VerticalStackLayout Spacing="15" Padding="15">
 
-        <!-- BUY | SELL Segmented -->
+        <!-- BUY | SELL -->
         <views:SegmentedTabView
             SelectedIndex="{Binding SelectedSideIndex}"
             SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
@@ -17,7 +17,7 @@
             </views:SegmentedTabView.Tabs>
         </views:SegmentedTabView>
 
-        <!-- MARKET | LIMIT Segmented -->
+        <!-- MARKET | LIMIT -->
         <views:SegmentedTabView
             SelectedIndex="{Binding SelectedTypeIndex}"
             SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
@@ -28,50 +28,49 @@
             </views:SegmentedTabView.Tabs>
         </views:SegmentedTabView>
 
-        <!-- Asset Display -->
-        <Grid RowDefinitions="Auto,*" ColumnSpacing="10" >
-            <Label Text="{Binding AssetText}" Style="{StaticResource StockPlacerLabel}" />
+        <!-- Available assets display -->
+        <Grid RowDefinitions="Auto,Auto" ColumnSpacing="10">
+            <Label Grid.Row="0" Text="{Binding AssetText}"           Style="{StaticResource StockPlacerLabel}" />
             <Label Grid.Row="1" Text="{Binding AvailableAssetsText}" Style="{StaticResource ValueLabel}" />
         </Grid>
 
-        <!-- MARKET pane -->
+        <!-- MARKET pane: slippage guard -->
         <Grid x:Name="MarketPane" IsVisible="{Binding IsMarketSelected}"
               RowDefinitions="Auto,Auto" Margin="0,15,0,0">
-            <!-- Slippage -->
             <Label Grid.Row="0" Text="Slippage guard" Style="{StaticResource StockPlacerLabel}" />
-            <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto">
-                <Label Grid.Column="0" Text="None" VerticalOptions="Center" />
+            <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="6">
+                <Label    Grid.Column="0" Text="None" Style="{StaticResource StockPlacerLabel}" />
                 <CheckBox Grid.Column="1" IsChecked="{Binding NoSlippageGuard}" />
-                <Label Grid.Column="2" Text="±" VerticalOptions="Center" />
-                <Slider Grid.Column="3" Minimum="0" Maximum="0.05"
-                        Value="{Binding SlippagePrc, Mode=TwoWay}" VerticalOptions="Center" />
-                <Label Grid.Column="4" VerticalOptions="Center"
-                       Text="{Binding SlippagePrc, StringFormat='{}{0:P2}'}" />
+                <Label    Grid.Column="2" Text="±"    Style="{StaticResource StockPlacerLabel}" />
+                <Slider   Grid.Column="3" Minimum="0" Maximum="0.05"
+                          Value="{Binding SlippagePrc, Mode=TwoWay}" VerticalOptions="Center" />
+                <Label    Grid.Column="4" Text="{Binding SlippagePrc, StringFormat='{}{0:P2}'}"
+                          Style="{StaticResource StockPlacerLabel}" />
             </Grid>
         </Grid>
 
-        <!-- LIMIT pane -->
+        <!-- LIMIT pane: limit price entry -->
         <Grid x:Name="LimitPane" IsVisible="{Binding IsLimitSelected}"
-               ColumnDefinitions="Auto,*" Margin="0,15,0,0" ColumnSpacing="8">
-            <!-- Limit Price entry -->
+              ColumnDefinitions="Auto,*" Margin="0,15,0,0" ColumnSpacing="8">
             <Label Grid.Column="0" Text="Limit price" Style="{StaticResource StockPlacerLabel}" />
             <Entry Grid.Column="1" Style="{StaticResource StockPlacerEntry}"
-                   Text="{Binding LimitPriceString, Mode=TwoWay}" Placeholder="{Binding Selected.CurrentPriceDisplay}" />
+                   Text="{Binding LimitPriceString, Mode=TwoWay}"
+                   Placeholder="{Binding Selected.CurrentPriceDisplay}" />
         </Grid>
 
-        <!-- Quantity, TotalValue and Submit -->
-        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*" Margin="0,15,0,0" RowSpacing="12" ColumnSpacing="8">
-            <!-- Quantity label-->
+        <!-- Quantity, total preview, submit -->
+        <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*"
+              Margin="0,15,0,0" RowSpacing="12" ColumnSpacing="8">
             <Label Grid.Row="0" Grid.Column="0" Text="Quantity" Style="{StaticResource StockPlacerLabel}" />
-            <Entry Grid.Row="0" Grid.Column="1" Keyboard="Numeric" Text="{Binding QuantityString, Mode=TwoWay}" />
-            
-            <!-- Total ordervalue label-->
-            <Label Grid.Row="1" Grid.Column="0" Text="Total" Style="{StaticResource StockPlacerLabel}" />
+            <Entry Grid.Row="0" Grid.Column="1" Style="{StaticResource StockPlacerEntry}"
+                   Text="{Binding QuantityString, Mode=TwoWay}" />
+
+            <Label Grid.Row="1" Grid.Column="0" Text="Total"           Style="{StaticResource StockPlacerLabel}" />
             <Label Grid.Row="1" Grid.Column="1" Text="{Binding OrderValue}" Style="{StaticResource ValueLabel}" />
 
-            <!-- Submit button -->
             <Button Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding SubmitButtonText}"
-                    Style="{StaticResource StockPlacerButton}"  BackgroundColor="{Binding SubmitButtonColor}" 
+                    Style="{StaticResource StockPlacerButton}"
+                    BackgroundColor="{Binding SubmitButtonColor}"
                     Command="{Binding PlaceOrderCommand}" />
         </Grid>
 

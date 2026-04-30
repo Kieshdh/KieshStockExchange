@@ -4,7 +4,7 @@
              x:Class="KieshStockExchange.Views.UserViews.LoginPage"
              xmlns:vm="KieshStockExchange.ViewModels.UserViewModels.LoginViewModel"
              Title="Login">
-    <Grid BackgroundColor="{StaticResource DarkNavy}"
+    <Grid Style="{StaticResource AuthPageGrid}"
           RowDefinitions="180, *">
 
         <!-- Top Part with Logo -->
@@ -27,11 +27,11 @@
             </Grid.RowDefinitions>
 
             <!-- Opening Labels -->
-            <Label Grid.Row="1" Text="Welcome!" 
-                   FontSize="Title" FontAttributes="Bold" 
-                   HorizontalOptions="Center" Padding="0" Margin="0"/>
+            <Label Grid.Row="1" Text="Welcome!"
+                   Style="{StaticResource AuthPageTitle}"
+                   Padding="0" Margin="0"/>
             <Label Grid.Row="2" Text="Sign in to continue"
-                   HorizontalOptions="Center" FontSize="Subtitle"/>
+                   Style="{StaticResource AuthPageSubtitle}"/>
             
             <!-- Login form -->
             <VerticalStackLayout Grid.Row="3"  MinimumWidthRequest="300"
@@ -62,11 +62,10 @@
                 <!-- Remember me & Forgot Password -->
                 <StackLayout Orientation="Horizontal" Margin="0,0,0,0" Padding="0" Spacing="-10">
                     <CheckBox IsChecked="False" />
-                    <Label Text="Remember me" TextColor="White" FontSize="Micro"
-                           VerticalTextAlignment="Center" HorizontalTextAlignment="Center" />
-                    <Label Text="Forgot Password" TextColor="{StaticResource DarkGreen}" 
-                           FontAttributes="Bold" FontSize="Micro" HorizontalOptions="EndAndExpand" 
-                           VerticalTextAlignment="Center" HorizontalTextAlignment="Center" />
+                    <Label Text="Remember me"
+                           Style="{StaticResource LoginCheckboxLabel}" />
+                    <Label Text="Forgot Password"
+                           Style="{StaticResource LoginLinkLabelMicro}" />
                 </StackLayout>
 
                 <!-- Sign in Button -->
@@ -76,9 +75,10 @@
                 <!-- Register new user -->
                 <HorizontalStackLayout HorizontalOptions="CenterAndExpand"
                                        Margin="0,20,0,0" Padding="0">
-                    <Label Text="New user?"  TextColor="White" FontSize="Small"/>
-                    <Label Text=" Sign Up" TextColor="{StaticResource DarkGreen}"
-                           FontAttributes="Bold" FontSize="Small" >
+                    <Label Text="New user?"
+                           Style="{StaticResource LoginPromptLabel}" />
+                    <Label Text=" Sign Up"
+                           Style="{StaticResource LoginLinkLabelSmall}">
                         <Label.GestureRecognizers>
                             <TapGestureRecognizer Tapped="OnRegisterClicked" NumberOfTapsRequired="1" />
                         </Label.GestureRecognizers>

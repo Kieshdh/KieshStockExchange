@@ -27,11 +27,11 @@
                             ItemDisplayBinding="{Binding Symbol}"
                             Style="{StaticResource StockSelectorPicker}" />
                     <!-- Stock Price Display -->
-                    <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="1" 
-                           Style="{StaticResource SelectedStockDisplayLabel}" />
+                    <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="1"
+                           Style="{StaticResource SelectedStockHeaderLabel}" />
                     <!-- Stock Company Name Display -->
                     <Label Text="{Binding Selected.CompanyName}" Grid.Column="2"
-                           Style="{StaticResource SelectedStockDisplayLabel}" />
+                           Style="{StaticResource SelectedStockHeaderLabel}" />
                 </Grid>
             </Border>
 
@@ -57,8 +57,7 @@
                     <other:SegmentedTabView.HeaderRightContent>
                         <HorizontalStackLayout Spacing="8" Padding="8,0"
                                    VerticalOptions="Center" >
-                            <Label Text="Show all" VerticalTextAlignment="Center"
-                                   Style="{StaticResource SelectedStockDisplayLabel}" />
+                            <Label Text="Show all" Style="{StaticResource SelectedStockHeaderLabel}" />
                             <!-- Bind to a bool on the TradePage ViewModel -->
                             <CheckBox IsChecked="{Binding Source={x:Reference TradePageRoot},
                                       Path=BindingContext.ShowAll, Mode=TwoWay}"

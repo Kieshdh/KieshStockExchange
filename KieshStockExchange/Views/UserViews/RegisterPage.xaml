@@ -5,7 +5,7 @@
              x:Class="KieshStockExchange.Views.UserViews.RegisterPage"
              xmlns:vm="KieshStockExchange.ViewModels.UserViewModels.RegisterViewModel"
              Title="Register">
-    <Grid BackgroundColor="{StaticResource DarkNavy}"
+    <Grid Style="{StaticResource AuthPageGrid}"
           RowDefinitions="180, *, 50" >
 
         <!-- Top Part with Logo -->
@@ -18,9 +18,9 @@
         <!-- Bottom Part -->
         <VerticalStackLayout Grid.Row="1">
             <!-- Opening Label -->
-            <Label Grid.Row="1" Text="Create a new account" 
-                   FontSize="Title" FontAttributes="Bold" 
-                   HorizontalOptions="Center" Padding="20" Margin="0"/>
+            <Label Grid.Row="1" Text="Create a new account"
+                   Style="{StaticResource AuthPageTitle}"
+                   Padding="20" Margin="0"/>
 
             <!-- Register form -->
             <Grid Padding="20,0,20,0" RowSpacing="10" ColumnSpacing="15"
@@ -104,12 +104,15 @@
                 <Grid Grid.Row="3" Grid.Column="0" ColumnDefinitions="90,*">
                     <Label Text="Birthday:" Style="{StaticResource RegistrationLabel}"  />
                     <Grid Grid.Column="1" ColumnSpacing="10" ColumnDefinitions="3*,4*,3*">
-                        <Picker Grid.Column="0" ItemsSource="{Binding DayOptions}" 
-                                TextColor="White" SelectedItem="{Binding BirthDay, Mode=TwoWay}" />
-                        <Picker Grid.Column="1" ItemsSource="{Binding MonthOptions}" 
-                                TextColor="White" SelectedItem="{Binding BirthMonth, Mode=TwoWay}" />
-                        <Picker Grid.Column="2" ItemsSource="{Binding YearOptions}" 
-                                TextColor="White" SelectedItem="{Binding BirthYear, Mode=TwoWay}" />
+                        <Picker Grid.Column="0" ItemsSource="{Binding DayOptions}"
+                                Style="{StaticResource RegistrationPicker}"
+                                SelectedItem="{Binding BirthDay, Mode=TwoWay}" />
+                        <Picker Grid.Column="1" ItemsSource="{Binding MonthOptions}"
+                                Style="{StaticResource RegistrationPicker}"
+                                SelectedItem="{Binding BirthMonth, Mode=TwoWay}" />
+                        <Picker Grid.Column="2" ItemsSource="{Binding YearOptions}"
+                                Style="{StaticResource RegistrationPicker}"
+                                SelectedItem="{Binding BirthYear, Mode=TwoWay}" />
                     </Grid>
                     <Label Text="Select a valid birth date (18+)." 
                            Style="{StaticResource RegistrationErrorLabel}"

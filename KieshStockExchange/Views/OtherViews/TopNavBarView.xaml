@@ -16,8 +16,7 @@
             
             <!-- Page Title -->
             <Label Grid.Column="1" Text="{Binding Title}"
-                   VerticalOptions="Center"
-                   FontSize="20" FontAttributes="Bold"/>
+                   Style="{StaticResource NavBarTitleLabel}"/>
 
             <!-- -->
            
