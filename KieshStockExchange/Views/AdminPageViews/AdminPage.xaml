@@ -7,76 +7,101 @@
              xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
-             Title="Admin" 
+             Title="Admin"
              x:DataType="local:AdminViewModel">
     <Grid RowDefinitions="Auto,*" Style="{StaticResource MainGrid}">
 
-        <!-- Navigation bar at the Top -->
+        <!-- Navigation bar at the top -->
         <navbar:TopNavBarView Title="Admin" Grid.Row="0"/>
 
         <!-- Main section -->
-        <VerticalStackLayout Grid.Row="1">
-            
-            <!-- Show loading text-->
-            <Label Text="{Binding LoadingText}" TextColor="White" Padding="50"
-                    FontSize="25" IsVisible="{Binding IsLoading}"
-                    VerticalOptions="Center" HorizontalOptions="Center" />
-            <!-- The Data Table -->
-            <Grid IsVisible="{Binding DoneLoading}">
-                <other:SegmentedTabView HeaderContainerHorizontalOptions="Center"
+        <Grid Grid.Row="1">
+
+            <!-- Loading card overlay -->
+            <Border IsVisible="{Binding IsLoading}"
+                    Style="{StaticResource AdminCardStyle}"
+                    HorizontalOptions="Center"
+                    VerticalOptions="Center"
+                    Padding="24">
+                <VerticalStackLayout Spacing="12" HorizontalOptions="Center">
+                    <ActivityIndicator IsRunning="{Binding IsLoading}"
+                                       Style="{StaticResource AdminActivityIndicator}" />
+                    <Label Text="{Binding LoadingText}"
+                           Style="{StaticResource AdminMetricValue}"
+                           HorizontalOptions="Center" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Loaded content -->
+            <ScrollView IsVisible="{Binding DoneLoading}">
+                <VerticalStackLayout Spacing="0">
+
+                    <!-- AI Bot Dashboard -->
+                    <adminViews:BotDashboardView
+                        BindingContext="{Binding Source={x:Reference AdminPageRoot}, Path=BindingContext.BotDashboardVm}" />
+
+                    <!-- Tables card -->
+                    <Border Style="{StaticResource AdminCardStyle}">
+                        <other:SegmentedTabView
+                            HeaderContainerHorizontalOptions="Start"
+                            SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}"
                             SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
-                            UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}" >
-                    <other:SegmentedTabView.Tabs>
-                        <!-- User Table -->
-                        <other:SegmentedTabItem Header="Users">
-                            <other:SegmentedTabItem.Content>
-                                <adminViews:UserTableView BindingContext="{Binding Source=
-                                    {x:Reference AdminPageRoot}, Path=BindingContext.UsersVm}" />
-                            </other:SegmentedTabItem.Content>
-                        </other:SegmentedTabItem>
+                            UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}">
 
-                        <!-- Stock Table -->
-                        <other:SegmentedTabItem Header="Stocks">
-                            <other:SegmentedTabItem.Content>
-                                <adminViews:StockTableView BindingContext="{Binding Source=
-                                    {x:Reference AdminPageRoot}, Path=BindingContext.StocksVm}" />
-                            </other:SegmentedTabItem.Content>
-                        </other:SegmentedTabItem>
+                            <other:SegmentedTabView.HeaderRightContent>
+                                <Button Text="↻ Refresh"
+                                        Style="{StaticResource AdminRefreshButton}"
+                                        Command="{Binding Source={x:Reference AdminPageRoot}, Path=BindingContext.RefreshActiveTabCommand}" />
+                            </other:SegmentedTabView.HeaderRightContent>
 
-                        <!-- Orders Table -->
-                        <other:SegmentedTabItem Header="Orders">
-                            <other:SegmentedTabItem.Content>
-                                <adminViews:OrderTableView BindingContext="{Binding Source=
-                                    {x:Reference AdminPageRoot}, Path=BindingContext.OrdersVm}" />
-                            </other:SegmentedTabItem.Content>
-                        </other:SegmentedTabItem>
+                            <other:SegmentedTabView.Tabs>
+                                <other:SegmentedTabItem Header="Users">
+                                    <other:SegmentedTabItem.Content>
+                                        <adminViews:UserTableView BindingContext="{Binding Source=
+                                            {x:Reference AdminPageRoot}, Path=BindingContext.UsersVm}" />
+                                    </other:SegmentedTabItem.Content>
+                                </other:SegmentedTabItem>
 
-                        <!-- Transactions Table -->
-                        <other:SegmentedTabItem Header="Transactions">
-                            <other:SegmentedTabItem.Content>
-                                <adminViews:TransactionTableView BindingContext="{Binding Source=
-                                    {x:Reference AdminPageRoot}, Path=BindingContext.TransactionsVm}" />
-                            </other:SegmentedTabItem.Content>
-                        </other:SegmentedTabItem>
+                                <other:SegmentedTabItem Header="Stocks">
+                                    <other:SegmentedTabItem.Content>
+                                        <adminViews:StockTableView BindingContext="{Binding Source=
+                                            {x:Reference AdminPageRoot}, Path=BindingContext.StocksVm}" />
+                                    </other:SegmentedTabItem.Content>
+                                </other:SegmentedTabItem>
 
-                        <!-- Fund Table -->
-                        <other:SegmentedTabItem Header="Funds">
-                            <other:SegmentedTabItem.Content>
-                                <adminViews:FundTableView BindingContext="{Binding Source=
-                                    {x:Reference AdminPageRoot}, Path=BindingContext.FundsVm}" />
-                            </other:SegmentedTabItem.Content>
-                        </other:SegmentedTabItem>
+                                <other:SegmentedTabItem Header="Orders">
+                                    <other:SegmentedTabItem.Content>
+                                        <adminViews:OrderTableView BindingContext="{Binding Source=
+                                            {x:Reference AdminPageRoot}, Path=BindingContext.OrdersVm}" />
+                                    </other:SegmentedTabItem.Content>
+                                </other:SegmentedTabItem>
 
-                        <!-- User Table -->
-                        <other:SegmentedTabItem Header="Positions">
-                            <other:SegmentedTabItem.Content>
-                                <adminViews:PositionTableView BindingContext="{Binding Source=
-                                    {x:Reference AdminPageRoot}, Path=BindingContext.PositionsVm}" />
-                            </other:SegmentedTabItem.Content>
-                        </other:SegmentedTabItem>
-                    </other:SegmentedTabView.Tabs>
-                </other:SegmentedTabView>
-            </Grid>
-        </VerticalStackLayout>
+                                <other:SegmentedTabItem Header="Transactions">
+                                    <other:SegmentedTabItem.Content>
+                                        <adminViews:TransactionTableView BindingContext="{Binding Source=
+                                            {x:Reference AdminPageRoot}, Path=BindingContext.TransactionsVm}" />
+                                    </other:SegmentedTabItem.Content>
+                                </other:SegmentedTabItem>
+
+                                <other:SegmentedTabItem Header="Funds">
+                                    <other:SegmentedTabItem.Content>
+                                        <adminViews:FundTableView BindingContext="{Binding Source=
+                                            {x:Reference AdminPageRoot}, Path=BindingContext.FundsVm}" />
+                                    </other:SegmentedTabItem.Content>
+                                </other:SegmentedTabItem>
+
+                                <other:SegmentedTabItem Header="Positions">
+                                    <other:SegmentedTabItem.Content>
+                                        <adminViews:PositionTableView BindingContext="{Binding Source=
+                                            {x:Reference AdminPageRoot}, Path=BindingContext.PositionsVm}" />
+                                    </other:SegmentedTabItem.Content>
+                                </other:SegmentedTabItem>
+                            </other:SegmentedTabView.Tabs>
+                        </other:SegmentedTabView>
+                    </Border>
+
+                </VerticalStackLayout>
+            </ScrollView>
+        </Grid>
     </Grid>
 </ContentPage>
