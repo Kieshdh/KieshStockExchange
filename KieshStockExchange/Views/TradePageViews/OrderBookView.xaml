@@ -2,60 +2,108 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
-             x:Class="KieshStockExchange.Views.TradePageViews.OrderBookView" >
-    <Grid WidthRequest="180" RowDefinitions="Auto,Auto,*,Auto,*" VerticalOptions="Fill">
-        <!-- Title -->
-        <Label Text="Order Book" Style="{StaticResource OrderBookBigLabel}" />
+             x:Class="KieshStockExchange.Views.TradePageViews.OrderBookView"
+             x:DataType="vm:OrderBookViewModel" >
+    <Grid Style="{StaticResource OrderBookContainer}"
+          MinimumWidthRequest="180"
+          RowDefinitions="Auto,Auto,*,Auto,*"
+          VerticalOptions="Fill">
 
-        <!-- Header -->
+        <!-- Title -->
+        <Label Grid.Row="0" Text="Order Book"
+               Style="{StaticResource OrderBookBigLabel}"
+               Padding="6,4,6,2" />
+
+        <!-- Header (Price | Qty | Cum) -->
         <Grid Grid.Row="1" ColumnDefinitions="1.5*,*,*" Padding="4,2">
-            <Label Grid.Column="0" Text="{Binding PriceTitle}" 
-                   Style="{StaticResource OrderBookLabel}" HorizontalOptions="Start" />
-            <Label Grid.Column="1" Text="Qty" Style="{StaticResource OrderBookLabel}" />
-            <Label Grid.Column="2" Text="Cum" Style="{StaticResource OrderBookLabel}" />
+            <Label Grid.Column="0" Text="{Binding PriceTitle}"
+                   Style="{StaticResource OrderBookHeaderLabel}"
+                   HorizontalOptions="Start"
+                   HorizontalTextAlignment="Start" />
+            <Label Grid.Column="1" Text="Qty"
+                   Style="{StaticResource OrderBookHeaderLabel}" />
+            <Label Grid.Column="2" Text="Cum"
+                   Style="{StaticResource OrderBookHeaderLabel}" />
         </Grid>
 
-        <!-- Sell Orders -->
+        <!-- Asks: best ask sits flush against the spread row (VerticalOptions=End) -->
         <CollectionView Grid.Row="2" ItemsSource="{Binding VisibleSellLevels}"
-                        SelectionMode="None" ItemSizingStrategy="MeasureAllItems"
+                        SelectionMode="None"
+                        ItemSizingStrategy="MeasureAllItems"
+                        VerticalOptions="End"
                         x:DataType="vm:OrderBookViewModel">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:LevelRow">
-                    <Grid ColumnDefinitions="1.5*,*,*" Padding="4,2">
-                        <Label Grid.Column="0" Text="{Binding PriceDisplay}" TextColor="DarkRed"
-                               HorizontalOptions="Start" Style="{StaticResource OrderBookLabel}"/>
-                        <Label Grid.Column="1" Text="{Binding Quantity}" Style="{StaticResource OrderBookLabel}"/>
-                        <Label Grid.Column="2" Text="{Binding CumQuantity}" Style="{StaticResource OrderBookLabel}"/>
-                    </Grid>
+                    <Border Style="{StaticResource OrderBookBestLevelRow}">
+                        <Grid Padding="4,1" ColumnDefinitions="1.5*,*,*">
+                            <Border Grid.ColumnSpan="3"
+                                    Style="{StaticResource OrderBookDepthBar.Sell}"
+                                    WidthRequest="{Binding DepthRatio,
+                                                   Converter={StaticResource DepthRatioToWidthConverter},
+                                                   ConverterParameter=160}" />
+                            <Label Grid.Column="0" Text="{Binding PriceDisplay}"
+                                   Style="{StaticResource OrderBookAskPriceLabel}" />
+                            <Label Grid.Column="1" Text="{Binding QuantityDisplay}"
+                                   Style="{StaticResource OrderBookQuantityLabel}" />
+                            <Label Grid.Column="2" Text="{Binding CumQuantityDisplay}"
+                                   Style="{StaticResource OrderBookQuantityLabel}" />
+                        </Grid>
+                    </Border>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>
 
-        <!-- Current price-->
-        <Grid Grid.Row="3" ColumnDefinitions="Auto, * ">
-            <!-- Up/Down arrow -->
-            <Label Style="{StaticResource OrderBookBigLabel}" Text="{Binding PriceDirectionArrow}" 
+        <!-- Spread divider: arrow + current price + spread/% -->
+        <Grid Grid.Row="3" Style="{StaticResource OrderBookSpreadRow}"
+              ColumnDefinitions="Auto,*,Auto">
+            <Label Grid.Column="0" Text="{Binding PriceDirectionArrow}"
+                   Style="{StaticResource OrderBookSpreadPriceLabel}"
                    TextColor="{Binding PriceTextColour}" />
-            <!-- Current price-->
-            <Label Grid.Column="1" Style="{StaticResource OrderBookBigLabel}"
-                   Text="{Binding Selected.CurrentPriceDisplay}" TextColor="{Binding PriceTextColour}" />
+            <Label Grid.Column="1" Text="{Binding Selected.CurrentPriceDisplay}"
+                   Style="{StaticResource OrderBookSpreadPriceLabel}"
+                   TextColor="{Binding PriceTextColour}"
+                   HorizontalTextAlignment="Center" />
+            <VerticalStackLayout Grid.Column="2" Spacing="0"
+                                 IsVisible="{Binding HasSpread}"
+                                 VerticalOptions="Center">
+                <Label Text="{Binding SpreadDisplay}"
+                       Style="{StaticResource OrderBookHeaderLabel}" />
+                <Label Text="{Binding SpreadPercentDisplay}"
+                       Style="{StaticResource OrderBookHeaderLabel}" />
+            </VerticalStackLayout>
         </Grid>
-        
-        <!-- Buy Orders -->
+
+        <!-- Bids: best bid sits flush against the spread row (default VerticalOptions=Start) -->
         <CollectionView Grid.Row="4" ItemsSource="{Binding VisibleBuyLevels}"
-                SelectionMode="None" ItemSizingStrategy="MeasureAllItems"
-                x:DataType="vm:OrderBookViewModel">
+                        SelectionMode="None"
+                        ItemSizingStrategy="MeasureAllItems"
+                        VerticalOptions="Start"
+                        x:DataType="vm:OrderBookViewModel">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:LevelRow">
-                    <Grid ColumnDefinitions="1.5*,*,*" Padding="4,2">
-                        <Label Grid.Column="0" Text="{Binding PriceDisplay}" TextColor="DarkGreen"
-                               HorizontalOptions="Start" Style="{StaticResource OrderBookLabel}"/>
-                        <Label Grid.Column="1" Text="{Binding Quantity}" Style="{StaticResource OrderBookLabel}"/>
-                        <Label Grid.Column="2" Text="{Binding CumQuantity}" Style="{StaticResource OrderBookLabel}"/>
-                    </Grid>
+                    <Border Style="{StaticResource OrderBookBestLevelRow}">
+                        <Grid Padding="4,1" ColumnDefinitions="1.5*,*,*">
+                            <Border Grid.ColumnSpan="3"
+                                    Style="{StaticResource OrderBookDepthBar.Buy}"
+                                    WidthRequest="{Binding DepthRatio,
+                                                   Converter={StaticResource DepthRatioToWidthConverter},
+                                                   ConverterParameter=160}" />
+                            <Label Grid.Column="0" Text="{Binding PriceDisplay}"
+                                   Style="{StaticResource OrderBookBidPriceLabel}" />
+                            <Label Grid.Column="1" Text="{Binding QuantityDisplay}"
+                                   Style="{StaticResource OrderBookQuantityLabel}" />
+                            <Label Grid.Column="2" Text="{Binding CumQuantityDisplay}"
+                                   Style="{StaticResource OrderBookQuantityLabel}" />
+                        </Grid>
+                    </Border>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>
 
+        <!-- Empty-state overlay: covers asks/spread/bids while ladder is empty -->
+        <Label Grid.Row="2" Grid.RowSpan="3"
+               Text="{Binding EmptyMessage}"
+               Style="{StaticResource OrderBookEmptyMessageLabel}"
+               IsVisible="{Binding IsEmpty}" />
     </Grid>
 </ContentView>
