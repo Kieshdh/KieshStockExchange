@@ -1,4 +1,3 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
@@ -8,26 +7,11 @@ using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.Services.UserServices;
 using Microsoft.Extensions.Logging;
-using System.Collections.ObjectModel;
-
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
-public partial class OrderHistoryViewModel : StockAwareViewModel
+public partial class OrderHistoryViewModel : TradeTableViewModelBase<ClosedOrderRow>
 {
-    #region Properties
-    [ObservableProperty] private ObservableCollection<ClosedOrderRow> _currentView = new();
-
-    private bool ShowAll = false;
-
-    public void SetShowAll(bool show)
-    {
-        if (ShowAll == show) return;
-        ShowAll = show;
-        UpdateFromCache();
-    }
-    #endregion
-
     #region Services and Constructor
     private readonly ILogger<OrderHistoryViewModel> _logger;
     private readonly IOrderCacheService _cache;
@@ -43,24 +27,9 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _auth   = auth   ?? throw new ArgumentNullException(nameof(auth));
 
-        // Subscribe to order changes
         _cache.OrdersChanged += OnOrdersChanged;
-
-        // Initial load
         InitializeSelection();
     }
-    #endregion
-
-    #region Abstract Overrides
-    protected override Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct)
-    {
-        UpdateFromCache(stockId, currency);
-        return Task.CompletedTask;
-    }
-
-    protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency,
-        decimal price, DateTime? updatedAt, CancellationToken ct)
-        => Task.CompletedTask;
 
     protected override void Dispose(bool disposing)
     {
@@ -71,7 +40,6 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
     #endregion
 
     #region Commands
-    // Manual refresh command
     [RelayCommand] public async Task RefreshAsync()
     {
         if (IsBusy) return;
@@ -89,64 +57,42 @@ public partial class OrderHistoryViewModel : StockAwareViewModel
     }
     #endregion
 
-    #region Private methods
-    private void OnOrdersChanged(object? s, EventArgs e)
-    {
-        try { MainThread.BeginInvokeOnMainThread(() => UpdateFromCache()); }
-        catch (Exception ex) { _logger.LogError(ex, "Error updating order history."); }
-    }
-
-    private void UpdateFromCache(int? stockId = null, CurrencyType? currency = null)
-    {
-        // If no stock selected, clear view
-        if (!Selected.HasSelectedStock)
-        {
-            CurrentView.Clear();
-            return;
-        }
-        // Use selected stock if none provided
-        stockId ??= Selected.StockId;
-        currency ??= Selected.Currency;
-        UpdateFromCache(stockId!.Value, currency.Value);
-    }
-
-    private void UpdateFromCache(int stockId, CurrencyType currency)
+    #region Row Building
+    protected override IEnumerable<ClosedOrderRow> BuildRows(int stockId, CurrencyType currency)
     {
         var snapshot = _cache.ClosedOrders.ToList();
-        var rows = new List<ClosedOrderRow>(capacity: snapshot.Count);
 
         if (stockId > 0)
         {
-            // Get all orders for the current stock and currency
-            var current = snapshot.Where(o => o.StockId == stockId && o.CurrencyType == currency);
-
-            // Create OpenOrderRow objects and add to list
-            foreach (var order in current.OrderByDescending(o => o.UpdatedAt))
-                if (order.StockId > 0) rows.Add(CreateClosedOrderRow(order));
+            foreach (var order in snapshot
+                .Where(o => o.StockId == stockId && o.CurrencyType == currency)
+                .OrderByDescending(o => o.UpdatedAt))
+            {
+                if (order.StockId > 0) yield return CreateClosedOrderRow(order);
+            }
         }
 
-        // If showing all, add other orders
-        if (ShowAll)
-            foreach (var o in snapshot.OrderByDescending(o => o.UpdatedAt))
-            {
-                if (o.StockId <= 0) continue;
-                if (o.StockId == stockId && o.CurrencyType == currency) continue;
-                rows.Add(CreateClosedOrderRow(o));
-            }
+        if (!ShowAll) yield break;
 
-        // Update the observable collection
-        CurrentView = new ObservableCollection<ClosedOrderRow>(rows);
+        foreach (var order in snapshot.OrderByDescending(o => o.UpdatedAt))
+        {
+            if (order.StockId <= 0) continue;
+            if (order.StockId == stockId && order.CurrencyType == currency) continue;
+            yield return CreateClosedOrderRow(order);
+        }
     }
 
     private ClosedOrderRow CreateClosedOrderRow(Order order)
     {
         if (!_stocks.TryGetSymbol(order.StockId, out string symbol))
             symbol = "-";
-        return new ClosedOrderRow
-        {
-            Order = order,
-            Symbol = symbol
-        };
+        return new ClosedOrderRow { Order = order, Symbol = symbol };
+    }
+
+    private void OnOrdersChanged(object? s, EventArgs e)
+    {
+        try { PostUpdateFromCache(); }
+        catch (Exception ex) { _logger.LogError(ex, "Error updating order history."); }
     }
     #endregion
 }
@@ -162,4 +108,6 @@ public sealed class ClosedOrderRow
     public string Qty => Order.AmountFilledDisplay;
     public string Price => Order.PriceDisplay;
     public string Total => Order.TotalAmountDisplay;
+    public bool IsBuyOrder => Order.IsBuyOrder;
+    public bool IsSellOrder => Order.IsSellOrder;
 }

@@ -1,4 +1,4 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
@@ -8,27 +8,13 @@ using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.UserServices;
 using Microsoft.Extensions.Logging;
-using System.Collections.ObjectModel;
 using System.ComponentModel;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
-public partial class UserPositionsViewModel : StockAwareViewModel
+public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRow>
 {
-    #region Properties
-    [ObservableProperty] private ObservableCollection<PositionRow> _currentView = new();
-
     private readonly HashSet<(int StockId, CurrencyType Currency)> _subscriptions = new();
-
-    private bool ShowAll = false;
-
-    public void SetShowAll(bool show)
-    {
-        if (ShowAll == show) return;
-        ShowAll = show;
-        UpdateFromCache();
-    }
-    #endregion
 
     #region Services and Constructor
     private readonly ILogger<UserPositionsViewModel> _logger;
@@ -47,30 +33,14 @@ public partial class UserPositionsViewModel : StockAwareViewModel
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _auth      = auth      ?? throw new ArgumentNullException(nameof(auth));
 
-        // Subscribe to Position changes and price updates
         _portfolio.SnapshotChanged += OnPositionsChanged;
-
-        // Initial load
         InitializeSelection();
     }
-    #endregion
-
-    #region Abstract Overrides
-    protected override Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct)
-    {
-        UpdateFromCache(stockId, currency); // Use the current selection; no nullables needed
-        return Task.CompletedTask;
-    }
-
-    protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency,
-        decimal price, DateTime? updatedAt, CancellationToken ct)
-        => Task.CompletedTask;
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            // Unsubscribe from _subscriptions data
             foreach (var key in _subscriptions)
                 _ = _market.Unsubscribe(key.StockId, key.Currency);
             foreach (var row in CurrentView)
@@ -86,14 +56,14 @@ public partial class UserPositionsViewModel : StockAwareViewModel
     {
         if (IsBusy) return;
         IsBusy = true;
-        try 
-        { 
+        try
+        {
             await _portfolio.RefreshAsync(_auth.CurrentUserId);
             UpdateFromCache();
         }
-        catch (Exception ex) 
-        { 
-            _logger.LogError(ex, "Error refreshing user positions."); 
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error refreshing user positions.");
         }
         finally { IsBusy = false; }
     }
@@ -101,94 +71,73 @@ public partial class UserPositionsViewModel : StockAwareViewModel
     [RelayCommand] public async Task TradeAsync(PositionRow? row)
     {
         if (row is null) return;
-
-        // Notify to trade the selected stock
         await Selected.Set(row.StockId);
         await Selected.ChangeCurrencyAsync(row.Currency);
     }
     #endregion
 
-    #region Private Methods
-    private void OnPositionsChanged(object? sender, EventArgs e)
+    #region Row Building
+    protected override IEnumerable<PositionRow> BuildRows(int stockId, CurrencyType currency)
     {
-        try { MainThread.BeginInvokeOnMainThread(() => UpdateFromCache()); }
-        catch (Exception ex) { _logger.LogError(ex, "Error updating user positions."); }
-    }
-
-    private void UpdateFromCache(int? stockId = null, CurrencyType? currency = null)
-    {
-        // If no stock selected, clear view
-        if (!Selected.HasSelectedStock)
-        {
-            CurrentView.Clear();
-            return;
-        }
-        // Use selected stock if none provided
-        stockId ??= Selected.StockId;
-        currency ??= Selected.Currency;
-        UpdateFromCache(stockId!.Value, currency.Value);
-    }
-
-    private void UpdateFromCache(int stockId, CurrencyType currency)
-    {
-        // Get the positions and set the current stock as first
         var snapshot = _portfolio.GetPositions().Where(p => p.Quantity > 0).ToList();
-        var rows = new List<PositionRow>(capacity: snapshot.Count);
+        var rows = new List<PositionRow>(snapshot.Count);
 
-        // If showing all, add all non current positions
         if (ShowAll)
         {
             foreach (var pos in snapshot)
             {
-                if (pos.StockId <= 0) continue; // Skip invalid stocks
-                if (pos.StockId == stockId) continue; // Skip current stock
-                rows.Add(CreatePostionRow(pos, currency));
+                if (pos.StockId <= 0) continue;          // Skip invalid stocks
+                if (pos.StockId == stockId) continue;    // Skip current stock; added below
+                rows.Add(CreatePositionRow(pos, currency));
             }
-
-            // Sort based on total value descending
+            // Sort non-current positions by total value descending
             rows.Sort((a, b) => b.TotalValue.CompareTo(a.TotalValue));
         }
 
-        // Add current position first
+        // Always add the currently selected stock first (even if quantity == 0)
         if (stockId > 0)
         {
-            var current = snapshot.FirstOrDefault(p => p.StockId == stockId);
-            var position = current ?? new Position { StockId = stockId };
-            rows.Insert(0, CreatePostionRow(position, currency));
+            var current = snapshot.FirstOrDefault(p => p.StockId == stockId)
+                ?? new Position { StockId = stockId };
+            rows.Insert(0, CreatePositionRow(current, currency));
         }
 
-        // Dispose old rows and update collection
-        foreach (var row in CurrentView)
-            row.Dispose();
-
-        // Update the observable collection
-        CurrentView = new ObservableCollection<PositionRow>(rows);
+        return rows;
     }
 
-    private PositionRow CreatePostionRow(Position pos, CurrencyType currency)
+    protected override void OnCurrentViewReplacing(IEnumerable<PositionRow> oldRows)
     {
-        // Get stock symbol
+        foreach (var row in oldRows)
+            row.Dispose();
+    }
+
+    private PositionRow CreatePositionRow(Position pos, CurrencyType currency)
+    {
         if (!_stocks.TryGetSymbol(pos.StockId, out string symbol))
             symbol = "-";
-        
-        var key = (pos.StockId, currency);
 
-        // Subscribe to market data if not already subscribed
+        var key = (pos.StockId, currency);
         if (_subscriptions.Add(key))
         {
-            // Create/activate and build the LiveQuote
             _ = _market.SubscribeAsync(pos.StockId, currency);
             _ = _market.BuildFromHistoryAsync(pos.StockId, currency);
         }
 
-        // Fetch the live quote (should be available after subscription)
         _market.Quotes.TryGetValue((pos.StockId, currency), out var live);
 
         return new PositionRow
         {
-            Symbol = symbol, Currency = currency,
-            Live = live, Pos = pos, 
+            Symbol = symbol,
+            Currency = currency,
+            Live = live,
+            Pos = pos,
         };
+    }
+
+    private void OnPositionsChanged(object? sender, EventArgs e)
+    {
+        try { PostUpdateFromCache(); }
+        catch (Exception ex) { _logger.LogError(ex, "Error updating user positions."); }
     }
     #endregion
 }
@@ -220,26 +169,22 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
     #region Live Quote Change Handler and Disposal
     partial void OnLiveChanged(LiveQuote? oldQuote, LiveQuote? newQuote)
     {
-        if (_disposed) return; // Ignore if disposed
-        if (oldQuote == newQuote) return; // No change
+        if (_disposed) return;
+        if (oldQuote == newQuote) return;
 
-        // Unsubscribe from old quote and subscribe to new quote
         if (oldQuote is not null)
             oldQuote.PropertyChanged -= OnLivePropertyChanged;
         if (newQuote is not null)
             newQuote.PropertyChanged += OnLivePropertyChanged;
 
-        // Refresh dependent properties
         OnPropertyChanged(nameof(Price));
         OnPropertyChanged(nameof(Total));
     }
 
     private void OnLivePropertyChanged(object? s, PropertyChangedEventArgs e)
     {
-        // Only raise for price changes
         if (e.PropertyName is nameof(LiveQuote.LastPrice))
         {
-            // Refresh dependent properties
             OnPropertyChanged(nameof(Price));
             OnPropertyChanged(nameof(Total));
         }
@@ -247,14 +192,12 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return; // Already disposed
-        _disposed = true; // Mark as disposed
-        if (Live is not null) // Unsubscribe from events
+        if (_disposed) return;
+        _disposed = true;
+        if (Live is not null)
             Live.PropertyChanged -= OnLivePropertyChanged;
-        Live = null; // Clear reference
-        GC.SuppressFinalize(this); // Prevent finalization
+        Live = null;
+        GC.SuppressFinalize(this);
     }
     #endregion
 }
-
-
