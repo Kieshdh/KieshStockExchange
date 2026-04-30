@@ -42,7 +42,7 @@ public sealed class AuthService : IAuthService
     }
     #endregion
 
-    #region Methods
+    #region Authentication Methods
     public async Task<bool> RegisterAsync(string username, string fullname,
         string email, string password, DateTime birthdate) 
     {
