@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+            xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+            xmlns:converters="clr-namespace:KieshStockExchange.Helpers">
+    <!-- Converters -->
+    <converters:DepthRatioToWidthConverter x:Key="DepthRatioToWidthConverter" />
+    <converters:InvertedBoolConverter      x:Key="InvertedBoolConverter" />
+
+    <!-- Shell containers -->
+    <Style x:Key="MainGrid" TargetType="Grid">
+        <Setter Property="BackgroundColor"   Value="{StaticResource DarkNavy}"  />
+        <Setter Property="RowDefinitions"    Value="Auto,*" />
+    </Style>
+    <Style x:Key="MainPath" TargetType="Path">
+        <Setter Property="Fill"   Value="{StaticResource DarkGreen}" />
+        <Setter Property="Data"   Value="m0,0l200,0l0,246c-190,0 -190,93 -381,40l0,-286z" />
+        <Setter Property="Stroke" Value="Transparent"/>
+        <Setter Property="Aspect" Value="Fill"/>
+        <Setter Property="HorizontalOptions"    Value="FillAndExpand"/>
+        <Setter Property="VerticalOptions"      Value="FillAndExpand"/>
+    </Style>
+    <Style x:Key="LogoImage"                    TargetType="Image">
+        <Setter Property="Source"               Value="kse_logo.png" />
+        <Setter Property="BackgroundColor"      Value="Transparent" />
+        <Setter Property="HeightRequest"        Value="80"/>
+        <Setter Property="WidthRequest"         Value="80"/>
+        <Setter Property="HorizontalOptions"    Value="Center"/>
+        <Setter Property="VerticalOptions"      Value="Center"/>
+    </Style>
+
+    <!-- Navbar -->
+    <Style x:Key="NavBarButton" TargetType="Button">
+        <Setter Property="WidthRequest"  Value="100" />
+        <Setter Property="HeightRequest" Value="50" />
+        <Setter Property="BackgroundColor" Value="{StaticResource MutedGrey}" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="FontAttributes" Value="Bold" />
+    </Style>
+    <Style x:Key="NavBarTitleLabel" TargetType="Label">
+        <Setter Property="VerticalOptions"  Value="Center" />
+        <Setter Property="FontSize"         Value="20" />
+        <Setter Property="FontAttributes"   Value="Bold" />
+    </Style>
+
+    <!-- SegmentButtons -->
+    <Style x:Key="SegmentButtonBase" TargetType="Button">
+        <Setter Property="Margin" Value="0,8,0,0" />
+        <Setter Property="Padding" Value="4" />
+        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="BorderWidth" Value="1" />
+        <Setter Property="BorderColor" Value="Transparent" />
+        <Setter Property="HeightRequest" Value="36" />
+        <Setter Property="MinimumWidthRequest" Value="72" />
+    </Style>
+    <Style x:Key="SegmentButton.Unselected" TargetType="Button" BasedOn="{StaticResource SegmentButtonBase}">
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor" Value="White" />
+        <Setter Property="BorderColor" Value="Grey" />
+    </Style>
+    <Style x:Key="SegmentButton.Selected" TargetType="Button" BasedOn="{StaticResource SegmentButtonBase}">
+        <Setter Property="BackgroundColor" Value="LightGrey" />
+        <Setter Property="TextColor" Value="White" />
+        <Setter Property="BorderColor" Value="Grey" />
+    </Style>
+</ResourceDictionary>

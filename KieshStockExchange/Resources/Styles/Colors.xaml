@@ -63,4 +63,29 @@
     <Color x:Key="SellRed">#B21E1E</Color>
     <SolidColorBrush x:Key="BuyPriceBrush"  Color="{StaticResource BuyGreen}"/>
     <SolidColorBrush x:Key="SellPriceBrush" Color="{StaticResource SellRed}"/>
+
+    <!-- Shared neutral greys (used by segmented tabs and table rows) -->
+    <Color x:Key="LightGrey">#E5E7EB</Color>
+    <Color x:Key="DarkGrey">#9CA3AF</Color>
+
+    <!-- Trade table row surface -->
+    <Color x:Key="TableRowBackground">#1A2129</Color>
+    <SolidColorBrush x:Key="TableRowBackgroundBrush" Color="{StaticResource TableRowBackground}" />
+
+    <!-- TradingView-style chart palette -->
+    <Color x:Key="ChartBg">#0F1419</Color>
+    <Color x:Key="ChartPanel">#131A22</Color>
+    <Color x:Key="ChartGrid">#1E2A36</Color>
+    <Color x:Key="ChartAxis">#8B98A5</Color>
+    <Color x:Key="ChartBull">#26A69A</Color>
+    <Color x:Key="ChartBear">#EF5350</Color>
+    <Color x:Key="ChartWickUp">#26A69A</Color>
+    <Color x:Key="ChartWickDown">#EF5350</Color>
+    <Color x:Key="ChartPriceLineUp">#26A69A</Color>
+    <Color x:Key="ChartPriceLineDown">#EF5350</Color>
+
+    <SolidColorBrush x:Key="ChartBgBrush"     Color="{StaticResource ChartBg}"/>
+    <SolidColorBrush x:Key="ChartPanelBrush"  Color="{StaticResource ChartPanel}"/>
+    <SolidColorBrush x:Key="ChartGridBrush"   Color="{StaticResource ChartGrid}"/>
+    <SolidColorBrush x:Key="ChartAxisBrush"   Color="{StaticResource ChartAxis}"/>
 </ResourceDictionary>

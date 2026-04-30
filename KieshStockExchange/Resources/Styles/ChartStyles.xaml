@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+            xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
+    <!-- Chart toolbar -->
+    <Style x:Key="ChartFrame" TargetType="Grid">
+        <Setter Property="BackgroundColor"      Value="{StaticResource ChartBg}" />
+        <Setter Property="Padding"              Value="0" />
+        <Setter Property="MinimumHeightRequest" Value="320" />
+        <Setter Property="RowDefinitions"       Value="Auto,*" />
+    </Style>
+    <Style x:Key="ChartSurface" TargetType="GraphicsView">
+        <Setter Property="BackgroundColor"   Value="{StaticResource ChartBg}" />
+        <Setter Property="HorizontalOptions" Value="Fill" />
+        <Setter Property="VerticalOptions"   Value="Fill" />
+    </Style>
+    <Style x:Key="ChartToolbar" TargetType="Grid">
+        <Setter Property="BackgroundColor" Value="{StaticResource ChartPanel}" />
+        <Setter Property="Padding"         Value="8,6" />
+        <Setter Property="ColumnSpacing"   Value="6" />
+    </Style>
+    <Style x:Key="ChartToolbarSeparator" TargetType="BoxView">
+        <Setter Property="Color"           Value="{StaticResource ChartGrid}" />
+        <Setter Property="WidthRequest"    Value="1" />
+        <Setter Property="HeightRequest"   Value="20" />
+        <Setter Property="Margin"          Value="6,0" />
+        <Setter Property="VerticalOptions" Value="Center" />
+    </Style>
+    <Style x:Key="ChartResolutionButtonBase" TargetType="Button">
+        <Setter Property="Padding"         Value="8,2" />
+        <Setter Property="MinimumWidthRequest" Value="40" />
+        <Setter Property="HeightRequest"   Value="28" />
+        <Setter Property="CornerRadius"    Value="4" />
+        <Setter Property="FontSize"        Value="12" />
+        <Setter Property="FontAttributes"  Value="Bold" />
+        <Setter Property="BorderWidth"     Value="0" />
+    </Style>
+    <Style x:Key="ChartResolutionButton.Unselected" TargetType="Button"
+           BasedOn="{StaticResource ChartResolutionButtonBase}">
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor"       Value="{StaticResource ChartAxis}" />
+    </Style>
+    <Style x:Key="ChartResolutionButton.Selected" TargetType="Button"
+           BasedOn="{StaticResource ChartResolutionButtonBase}">
+        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+        <Setter Property="TextColor"       Value="White" />
+    </Style>
+    <Style x:Key="ChartIconButton" TargetType="Button">
+        <Setter Property="Padding"         Value="0" />
+        <Setter Property="WidthRequest"    Value="28" />
+        <Setter Property="HeightRequest"   Value="28" />
+        <Setter Property="CornerRadius"    Value="4" />
+        <Setter Property="FontSize"        Value="14" />
+        <Setter Property="FontAttributes"  Value="Bold" />
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor"       Value="{StaticResource ChartAxis}" />
+        <Setter Property="BorderWidth"     Value="0" />
+    </Style>
+    <Style x:Key="ChartLiveButton.Off" TargetType="Button">
+        <Setter Property="Padding"         Value="8,2" />
+        <Setter Property="HeightRequest"   Value="28" />
+        <Setter Property="CornerRadius"    Value="4" />
+        <Setter Property="FontSize"        Value="11" />
+        <Setter Property="FontAttributes"  Value="Bold" />
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor"       Value="{StaticResource ChartAxis}" />
+        <Setter Property="BorderWidth"     Value="1" />
+        <Setter Property="BorderColor"     Value="{StaticResource ChartGrid}" />
+    </Style>
+    <Style x:Key="ChartLiveButton.On" TargetType="Button"
+           BasedOn="{StaticResource ChartLiveButton.Off}">
+        <Setter Property="BackgroundColor" Value="{StaticResource ChartBull}" />
+        <Setter Property="TextColor"       Value="White" />
+        <Setter Property="BorderColor"     Value="{StaticResource ChartBull}" />
+    </Style>
+</ResourceDictionary>

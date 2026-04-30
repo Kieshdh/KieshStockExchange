@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+            xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
+    <!-- Order Book — DOM ladder styles -->
+    <Style x:Key="OrderBookContainer" TargetType="Grid">
+        <Setter Property="BackgroundColor" Value="{StaticResource ChartPanel}" />
+        <Setter Property="RowSpacing"      Value="0" />
+        <Setter Property="Padding"         Value="0" />
+    </Style>
+    <Style x:Key="OrderBookHeaderLabel" TargetType="Label">
+        <Setter Property="TextColor"               Value="{StaticResource ChartAxis}" />
+        <Setter Property="FontSize"                Value="11" />
+        <Setter Property="HorizontalTextAlignment" Value="End" />
+        <Setter Property="VerticalTextAlignment"   Value="Center" />
+    </Style>
+    <Style x:Key="OrderBookAskPriceLabel" TargetType="Label">
+        <Setter Property="TextColor"               Value="{StaticResource SellRed}" />
+        <Setter Property="FontAttributes"          Value="Bold" />
+        <Setter Property="FontSize"                Value="12" />
+        <Setter Property="HorizontalOptions"       Value="Start" />
+        <Setter Property="HorizontalTextAlignment" Value="Start" />
+        <Setter Property="VerticalTextAlignment"   Value="Center" />
+    </Style>
+    <Style x:Key="OrderBookBidPriceLabel" TargetType="Label">
+        <Setter Property="TextColor"               Value="{StaticResource BuyGreen}" />
+        <Setter Property="FontAttributes"          Value="Bold" />
+        <Setter Property="FontSize"                Value="12" />
+        <Setter Property="HorizontalOptions"       Value="Start" />
+        <Setter Property="HorizontalTextAlignment" Value="Start" />
+        <Setter Property="VerticalTextAlignment"   Value="Center" />
+    </Style>
+    <Style x:Key="OrderBookQuantityLabel" TargetType="Label">
+        <Setter Property="TextColor"               Value="{StaticResource Gray400}" />
+        <Setter Property="FontSize"                Value="12" />
+        <Setter Property="HorizontalOptions"       Value="End" />
+        <Setter Property="HorizontalTextAlignment" Value="End" />
+        <Setter Property="VerticalTextAlignment"   Value="Center" />
+    </Style>
+    <Style x:Key="OrderBookSpreadRow" TargetType="Grid">
+        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+        <Setter Property="Padding"         Value="6,4" />
+        <Setter Property="ColumnSpacing"   Value="6" />
+    </Style>
+    <Style x:Key="OrderBookSpreadPriceLabel" TargetType="Label">
+        <Setter Property="FontAttributes"           Value="Bold" />
+        <Setter Property="FontSize"                 Value="14" />
+        <Setter Property="VerticalTextAlignment"    Value="Center" />
+    </Style>
+    <Style x:Key="OrderBookEmptyMessageLabel" TargetType="Label">
+        <Setter Property="TextColor"            Value="{StaticResource ChartAxis}" />
+        <Setter Property="FontAttributes"       Value="Italic" />
+        <Setter Property="FontSize"             Value="13" />
+        <Setter Property="HorizontalOptions"    Value="Center" />
+        <Setter Property="VerticalOptions"      Value="Center" />
+    </Style>
+    <Style x:Key="OrderBookDepthBar.Sell" TargetType="Border">
+        <Setter Property="BackgroundColor"   Value="{StaticResource SellRed}" />
+        <Setter Property="Stroke"            Value="Transparent" />
+        <Setter Property="StrokeThickness"   Value="0" />
+        <Setter Property="Opacity"           Value="0.22" />
+        <Setter Property="HorizontalOptions" Value="End" />
+        <Setter Property="VerticalOptions"   Value="Fill" />
+        <Setter Property="InputTransparent"  Value="True" />
+    </Style>
+    <Style x:Key="OrderBookDepthBar.Buy" TargetType="Border">
+        <Setter Property="BackgroundColor"   Value="{StaticResource BuyGreen}" />
+        <Setter Property="Stroke"            Value="Transparent" />
+        <Setter Property="StrokeThickness"   Value="0" />
+        <Setter Property="Opacity"           Value="0.22" />
+        <Setter Property="HorizontalOptions" Value="End" />
+        <Setter Property="VerticalOptions"   Value="Fill" />
+        <Setter Property="InputTransparent"  Value="True" />
+    </Style>
+    <Style x:Key="OrderBookBestLevelRow" TargetType="Border">
+        <Setter Property="Stroke"          Value="Transparent" />
+        <Setter Property="StrokeThickness" Value="0" />
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="Padding"         Value="0" />
+        <Setter Property="StrokeShape"     Value="Rectangle" />
+        <Style.Triggers>
+            <DataTrigger TargetType="Border" Binding="{Binding IsBestLevel}" Value="True">
+                <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="TableCheckBox"           TargetType="CheckBox" >
+        <Setter Property="BackgroundColor"      Value="Transparent" />
+        <Setter Property="HorizontalOptions"    Value="End" />
+        <Setter Property="VerticalOptions"      Value="Center" />
+    </Style>
+
+    <!-- Shared trade-table styles (used by OpenOrders, OrderHistory,
+         TransactionHistory and Positions tables) -->
+    <Style x:Key="TradeTableContainer"          TargetType="VerticalStackLayout">
+        <Setter Property="Spacing"              Value="8" />
+        <Setter Property="Padding"              Value="12,8" />
+    </Style>
+    <Style x:Key="TradeTableHeaderGrid"         TargetType="Grid">
+        <Setter Property="Padding"              Value="8,6" />
+        <Setter Property="ColumnSpacing"        Value="4" />
+        <Setter Property="BackgroundColor"      Value="{StaticResource Gray950}" />
+    </Style>
+    <Style x:Key="TradeTableHeaderLabel"        TargetType="Label">
+        <Setter Property="TextColor"                Value="{StaticResource Gray100}" />
+        <Setter Property="FontAttributes"           Value="Bold" />
+        <Setter Property="FontSize"                 Value="Small" />
+        <Setter Property="HorizontalTextAlignment"  Value="Center" />
+        <Setter Property="VerticalTextAlignment"    Value="Center" />
+    </Style>
+    <Style x:Key="TradeTableRowGrid"            TargetType="Grid">
+        <Setter Property="Padding"              Value="8,6" />
+        <Setter Property="ColumnSpacing"        Value="4" />
+        <Setter Property="BackgroundColor"      Value="{StaticResource TableRowBackground}" />
+    </Style>
+    <Style x:Key="TradeTableRowLabel"           TargetType="Label">
+        <Setter Property="TextColor"                Value="White" />
+        <Setter Property="FontSize"                 Value="Small" />
+        <Setter Property="HorizontalTextAlignment"  Value="Center" />
+        <Setter Property="VerticalTextAlignment"    Value="Center" />
+    </Style>
+    <Style x:Key="TradeTableSymbolLabel"        TargetType="Label"
+           BasedOn="{StaticResource TradeTableRowLabel}">
+        <Setter Property="FontAttributes"           Value="Bold" />
+        <Setter Property="HorizontalTextAlignment"  Value="Start" />
+    </Style>
+    <Style x:Key="TradeTableSideLabel"          TargetType="Label"
+           BasedOn="{StaticResource TradeTableRowLabel}">
+        <Setter Property="FontAttributes"           Value="Bold" />
+        <Style.Triggers>
+            <DataTrigger TargetType="Label" Binding="{Binding IsBuyOrder}"  Value="True">
+                <Setter Property="TextColor" Value="{StaticResource BuyGreen}" />
+            </DataTrigger>
+            <DataTrigger TargetType="Label" Binding="{Binding IsSellOrder}" Value="True">
+                <Setter Property="TextColor" Value="{StaticResource SellRed}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="TradeTableButton"             TargetType="Button">
+        <Setter Property="BackgroundColor"      Value="Transparent" />
+        <Setter Property="TextColor"            Value="{StaticResource SellRed}" />
+        <Setter Property="FontAttributes"       Value="Bold" />
+        <Setter Property="FontSize"             Value="14" />
+        <Setter Property="Padding"              Value="0" />
+        <Setter Property="WidthRequest"         Value="28" />
+        <Setter Property="HeightRequest"        Value="28" />
+        <Setter Property="CornerRadius"         Value="14" />
+        <Setter Property="BorderWidth"          Value="0" />
+    </Style>
+    <Style x:Key="TableActionButton"            TargetType="Button">
+        <Setter Property="BackgroundColor"      Value="Transparent" />
+        <Setter Property="TextColor"            Value="{StaticResource AccentGreen}" />
+        <Setter Property="FontAttributes"       Value="Bold" />
+        <Setter Property="FontSize"             Value="12" />
+        <Setter Property="Padding"              Value="8,2" />
+        <Setter Property="MinimumWidthRequest"  Value="60" />
+        <Setter Property="HeightRequest"        Value="28" />
+        <Setter Property="CornerRadius"         Value="14" />
+        <Setter Property="BorderColor"          Value="{StaticResource AccentGreen}" />
+        <Setter Property="BorderWidth"          Value="1" />
+    </Style>
+</ResourceDictionary>
