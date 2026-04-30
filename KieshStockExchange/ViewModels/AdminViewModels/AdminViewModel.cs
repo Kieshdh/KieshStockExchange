@@ -1,4 +1,5 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -12,7 +13,8 @@ public partial class AdminViewModel : BaseViewModel
 {
     [ObservableProperty] private bool _isLoading = true;
     [ObservableProperty] private bool _doneLoading = false;
-    [ObservableProperty] private string _loadingText = String.Empty;
+    [ObservableProperty] private string _loadingText = string.Empty;
+    [ObservableProperty] private int _selectedTabIndex = 0;
 
     public UserTableViewModel UsersVm { get; }
     public StockTableViewModel StocksVm { get; }
@@ -20,13 +22,14 @@ public partial class AdminViewModel : BaseViewModel
     public OrderTableViewModel OrdersVm { get; }
     public PositionTableViewModel PositionsVm { get; }
     public FundTableViewModel FundsVm { get; }
+    public BotDashboardViewModel BotDashboardVm { get; }
 
     private readonly IExcelImportService ExcelService;
 
-    // Constructor
-    public AdminViewModel( IExcelImportService excelService,
+    public AdminViewModel(IExcelImportService excelService,
         UserTableViewModel usersVm, TransactionTableViewModel transactionsVm, OrderTableViewModel ordersVm,
-        StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm)
+        StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm,
+        BotDashboardViewModel botDashboardVm)
     {
         Title = "Admin Dashboard";
 
@@ -36,37 +39,58 @@ public partial class AdminViewModel : BaseViewModel
         OrdersVm = ordersVm;
         PositionsVm = positionsVm;
         FundsVm = fundsVm;
+        BotDashboardVm = botDashboardVm;
 
         ExcelService = excelService;
-        Debug.WriteLine($"Succesfully created viewmodels");
     }
 
     public async Task InitializeAsync()
     {
         IsBusy = true;
+        LoadingText = "Loading admin data…";
         try
         {
-            // Initialize table viewmodels
-            LoadingText = "Getting user data";
-            await UsersVm.InitializeAsync();
-            LoadingText = "Getting stock data";
-            await StocksVm.InitializeAsync();
-            LoadingText = "Getting transaction data";
-            await TransactionsVm.InitializeAsync();
-            LoadingText = "Getting order data";
-            await OrdersVm.InitializeAsync();
-            LoadingText = "Getting position data";
-            await PositionsVm.InitializeAsync();
-            LoadingText = "Getting fund data";
-            await FundsVm.InitializeAsync();
+            await Task.WhenAll(
+                UsersVm.InitializeAsync(),
+                StocksVm.InitializeAsync(),
+                TransactionsVm.InitializeAsync(),
+                OrdersVm.InitializeAsync(),
+                PositionsVm.InitializeAsync(),
+                FundsVm.InitializeAsync()).ConfigureAwait(false);
         }
-        finally 
-        { 
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"AdminViewModel.InitializeAsync failed: {ex}");
+        }
+        finally
+        {
             IsBusy = false;
             IsLoading = false;
             DoneLoading = true;
             LoadingText = string.Empty;
         }
-        Debug.WriteLine($"Succesfully loaded tables");
+
+        BotDashboardVm.StartPolling();
+    }
+
+    public void OnDisappearing()
+    {
+        BotDashboardVm.StopPolling();
+    }
+
+    [RelayCommand]
+    private async Task RefreshActiveTabAsync()
+    {
+        var task = SelectedTabIndex switch
+        {
+            0 => UsersVm.InitializeAsync(),
+            1 => StocksVm.InitializeAsync(),
+            2 => OrdersVm.InitializeAsync(),
+            3 => TransactionsVm.InitializeAsync(),
+            4 => FundsVm.InitializeAsync(),
+            5 => PositionsVm.InitializeAsync(),
+            _ => Task.CompletedTask
+        };
+        await task.ConfigureAwait(false);
     }
 }
