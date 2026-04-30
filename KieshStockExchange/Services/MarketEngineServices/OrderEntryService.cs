@@ -74,14 +74,20 @@ public sealed class OrderEntryService : IOrderEntryService
     {
         ct.ThrowIfCancellationRequested();
 
+        // For SlippageMarket orders, populate the anchor price first so that the
+        // validator can verify it. Fast path: cached LiveQuote; fallback: async lookup.
+        if (!limitOrder && slippagePercent.HasValue)
+        {
+            if (_data.Quotes.TryGetValue((stockId, currency), out var q) && q.LastPrice > 0m)
+                price = q.LastPrice;
+            else
+                price = await _data.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
+        }
+
         // Check input parameters
         var inputValidation = _validator.ValidateInput(userId, stockId, quantity, price,
-            currency, buyOrder, limitOrder, slippagePercent);
+            currency, buyOrder, limitOrder, slippagePercent, buyBudget);
         if (inputValidation != null) return inputValidation;
-
-        // Get the price for SlippageMarket orders
-        if (!limitOrder && slippagePercent.HasValue)
-            price = await _data.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
 
         // Create order object
         var order = CreateOrder(userId, stockId, quantity, price, buyBudget, 
