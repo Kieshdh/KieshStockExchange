@@ -32,7 +32,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
     }
 
-    public int? ActiveBotCap { get; private set; } = null;
+    public int? ActiveBotCap { get; private set; } = 200;
 
     public long TickCount => Interlocked.Read(ref _tickCount);
     public long TradesPlacedThisSession => Interlocked.Read(ref _tradesPlacedThisSession);
