@@ -60,14 +60,41 @@ public sealed class OrderExecutionService : IOrderExecutionService
             // Build ordersById from in-memory objects — no DB reload needed
             var ordersById = BuildOrdersById(incoming, result);
 
-            var settleErr = await _settlement.SettleTradesAsync(result.Fills, ordersById, ct).ConfigureAwait(false);
+            var (settleErr, rejected) = await _settlement.SettleTradesAsync(result.Fills, ordersById, ct).ConfigureAwait(false);
             if (settleErr != null)
             {
                 RollbackMatch(incoming, result, book);
                 throw new InvalidOperationException(settleErr.ToString());
             }
 
-            trades.AddRange(result.Fills);
+            // Cancel makers that couldn't honor their fills + roll back their per-fill effect.
+            // The single-order path's apply-pass tx has already committed — so we issue a
+            // separate UpdateAllAsync for the cancelled makers. (In the batch path, this
+            // happens inside the still-open root tx instead.)
+            if (rejected.Count > 0)
+            {
+                RollbackRejectedFills(new[] { (incoming, result) }, book, rejected, ordersById);
+                var cancelled = new List<Order>(rejected.Count);
+                for (int i = 0; i < rejected.Count; i++)
+                {
+                    if (ordersById.TryGetValue(rejected[i].MakerOrderId, out var maker)
+                        && maker.Status == Order.Statuses.Cancelled)
+                        cancelled.Add(maker);
+                }
+                if (cancelled.Count > 0)
+                    await _db.UpdateAllAsync(cancelled, ct).ConfigureAwait(false);
+            }
+
+            // Publish accepted fills only (rejected ones never happened).
+            if (rejected.Count == 0)
+                trades.AddRange(result.Fills);
+            else
+            {
+                var rejectedSet = new HashSet<Transaction>(ReferenceEqualityComparer.Instance);
+                foreach (var rj in rejected) rejectedSet.Add(rj.Trade);
+                for (int i = 0; i < result.Fills.Count; i++)
+                    if (!rejectedSet.Contains(result.Fills[i])) trades.Add(result.Fills[i]);
+            }
 
             if (incoming.IsOpenLimitOrder)
                 book.UpsertOrder(incoming);
@@ -125,7 +152,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
             var ordersById = BuildOrdersById(order, result);
 
-            var settleErr = await _settlement.SettleTradesAsync(result.Fills, ordersById, ct).ConfigureAwait(false);
+            var (settleErr, rejected) = await _settlement.SettleTradesAsync(result.Fills, ordersById, ct).ConfigureAwait(false);
             if (settleErr != null)
             {
                 RollbackMatch(order, result, book);
@@ -133,7 +160,30 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     book.UpsertOrder(order);
                 throw new InvalidOperationException(settleErr.ToString());
             }
-            txs.AddRange(result.Fills);
+
+            if (rejected.Count > 0)
+            {
+                RollbackRejectedFills(new[] { (order, result) }, book, rejected, ordersById);
+                var cancelled = new List<Order>(rejected.Count);
+                for (int i = 0; i < rejected.Count; i++)
+                {
+                    if (ordersById.TryGetValue(rejected[i].MakerOrderId, out var maker)
+                        && maker.Status == Order.Statuses.Cancelled)
+                        cancelled.Add(maker);
+                }
+                if (cancelled.Count > 0)
+                    await _db.UpdateAllAsync(cancelled, ct).ConfigureAwait(false);
+            }
+
+            if (rejected.Count == 0)
+                txs.AddRange(result.Fills);
+            else
+            {
+                var rejectedSet = new HashSet<Transaction>(ReferenceEqualityComparer.Instance);
+                foreach (var rj in rejected) rejectedSet.Add(rj.Trade);
+                for (int i = 0; i < result.Fills.Count; i++)
+                    if (!rejectedSet.Contains(result.Fills[i])) txs.Add(result.Fills[i]);
+            }
 
             if (order.IsOpen && order.IsLimitOrder)
                 book.UpsertOrder(order);
@@ -171,8 +221,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         // Per-tx mutation tracking. fund/pos/budget snapshots flow into SettleTradesNoTxAsync
         // so the cache can be rolled back if commit fails. Allocated up front because Phase 1.5
-        // also writes into posSnapshots when it reserves position quantity.
-        var fundSnapshots = new Dictionary<(int, CurrencyType), decimal>();
+        // also writes into posSnapshots and fundSnapshots when it reserves stock and funds.
+        var fundSnapshots = new Dictionary<(int, CurrencyType), (decimal Total, decimal Reserved)>();
         var posSnapshots = new Dictionary<(int, int), (int Quantity, int Reserved)>();
         var budgetSnapshots = new Dictionary<int, decimal?>();
         var pendingNewPositions = new Dictionary<(int, int), Position>();
@@ -251,6 +301,73 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
         }
 
+        // Phase 1.6: pre-flight fund check + reservation for buy orders. Mirrors the seller
+        // pre-flight above. AvailableBalance accounts for the user's prior open buys (now
+        // hydrated into ReservedBalance), so multi-order over-promise is rejected here
+        // instead of at settlement.
+        HashSet<int>? buyerIds = null;
+        List<(int index, Order order)>? buyOrders = null;
+        for (int i = 0; i < validOrders.Count; i++)
+        {
+            var vo = validOrders[i];
+            if (!vo.order.IsBuyOrder) continue;
+            buyerIds ??= new HashSet<int>();
+            buyOrders ??= new List<(int, Order)>();
+            buyerIds.Add(vo.order.UserId);
+            buyOrders.Add(vo);
+        }
+
+        if (buyOrders is not null)
+        {
+            var buyerIdList = new List<int>(buyerIds!.Count);
+            foreach (var id in buyerIds) buyerIdList.Add(id);
+            await _accounts.EnsureLoadedAsync(buyerIdList, ct).ConfigureAwait(false);
+
+            HashSet<int>? buyRejected = null;
+            for (int i = 0; i < buyOrders.Count; i++)
+            {
+                var (idx, order) = buyOrders[i];
+                var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
+                var reservation = SettlementEngine.InitialBuyReservation(order);
+                if (fund is null || reservation <= 0m || fund.AvailableBalance < reservation)
+                {
+                    results[idx] = OrderResultFactory.InsufficientFunds(
+                        $"Insufficient funds for buy order (user {order.UserId}).");
+                    buyRejected ??= new HashSet<int>();
+                    buyRejected.Add(idx);
+                    continue;
+                }
+
+                var fundKey = (order.UserId, order.CurrencyType);
+                if (!fundSnapshots.ContainsKey(fundKey))
+                    fundSnapshots[fundKey] = (fund.TotalBalance, fund.ReservedBalance);
+
+                try { fund.ReserveFunds(reservation); }
+                catch (ArgumentException)
+                {
+                    results[idx] = OrderResultFactory.InsufficientFunds(
+                        $"Insufficient funds for buy order (user {order.UserId}).");
+                    buyRejected ??= new HashSet<int>();
+                    buyRejected.Add(idx);
+                }
+            }
+
+            if (buyRejected is not null)
+            {
+                int write = 0;
+                for (int read = 0; read < validOrders.Count; read++)
+                    if (!buyRejected.Contains(validOrders[read].index))
+                        validOrders[write++] = validOrders[read];
+                validOrders.RemoveRange(write, validOrders.Count - write);
+                if (validOrders.Count == 0)
+                {
+                    _settlement.RestoreCacheSnapshots(
+                        new Dictionary<int, Order>(), fundSnapshots, posSnapshots, budgetSnapshots);
+                    return results;
+                }
+            }
+        }
+
         // Phases 2 + 3 share one root SQLite transaction. Inserting the orders, matching,
         // and settling per-book all run inside it — one BEGIN, one COMMIT, regardless of
         // how many books the batch touches. On any failure we roll back the tx, undo the
@@ -318,13 +435,46 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
                     if (groupFills.Count > 0)
                     {
-                        var settleErr = await _settlement.SettleTradesNoTxAsync(
+                        var (settleErr, rejected) = await _settlement.SettleTradesNoTxAsync(
                             groupFills, groupOrdersById,
                             fundSnapshots, posSnapshots, budgetSnapshots, pendingNewPositions,
                             ct).ConfigureAwait(false);
                         if (settleErr != null)
                             throw new InvalidOperationException(
                                 settleErr.ErrorMessage ?? "Settlement failed.");
+
+                        if (rejected.Count > 0)
+                        {
+                            // Aggregate across all takers in this group — the same maker
+                            // can appear in multiple MatchResults if partially filled by
+                            // taker A then fully filled by taker B.
+                            var pairs = new (Order, MatchResult)[outcome.Records.Count];
+                            for (int r = 0; r < outcome.Records.Count; r++)
+                                pairs[r] = (outcome.Records[r].Order, outcome.Records[r].Match);
+                            RollbackRejectedFills(pairs, book, rejected, groupOrdersById);
+
+                            // Persist cancelled makers in the same root tx. The apply-pass
+                            // already wrote groupOrdersById.Values once; this second write
+                            // updates the rows we just flipped to Cancelled.
+                            var cancelled = new List<Order>(rejected.Count);
+                            for (int i = 0; i < rejected.Count; i++)
+                            {
+                                if (groupOrdersById.TryGetValue(rejected[i].MakerOrderId, out var maker)
+                                    && maker.Status == Order.Statuses.Cancelled)
+                                    cancelled.Add(maker);
+                            }
+                            if (cancelled.Count > 0)
+                                await _db.UpdateAllAsync(cancelled, ct).ConfigureAwait(false);
+
+                            // Filter rejected from groupFills (publishes ticks downstream)
+                            // and from each per-taker MatchResult.Fills (drives the per-order
+                            // Success result at the end of PlaceAndMatchBatchAsync).
+                            var rejectedSet = new HashSet<Transaction>(ReferenceEqualityComparer.Instance);
+                            foreach (var rj in rejected) rejectedSet.Add(rj.Trade);
+                            groupFills.RemoveAll(rejectedSet.Contains);
+                            for (int r = 0; r < outcome.Records.Count; r++)
+                                outcome.Records[r].Match.Fills.RemoveAll(rejectedSet.Contains);
+                        }
                     }
 
                     // Upsert remainders / cancel non-open orders. Both happen inside the
@@ -546,18 +696,29 @@ public sealed class OrderExecutionService : IOrderExecutionService
             return results;
         }
 
-        // Tx committed — release the reservations held by cancelled sell orders. Done
+        // Tx committed — release the reservations held by cancelled orders. Done
         // post-commit so the failure path doesn't have to undo reservation releases.
         for (int i = 0; i < toCancel.Count; i++)
         {
             var o = toCancel[i];
-            if (!o.IsSellOrder) continue;
-            var unreserve = o.Quantity - o.AmountFilled;
-            if (unreserve <= 0) continue;
-            var pos = _accounts.GetPosition(o.UserId, o.StockId);
-            if (pos is null) continue;
-            try { pos.UnreserveStock(unreserve); }
-            catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+            if (o.IsSellOrder)
+            {
+                var unreserve = o.Quantity - o.AmountFilled;
+                if (unreserve <= 0) continue;
+                var pos = _accounts.GetPosition(o.UserId, o.StockId);
+                if (pos is null) continue;
+                try { pos.UnreserveStock(unreserve); }
+                catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+            }
+            else if (o.IsBuyOrder)
+            {
+                var unreserve = SettlementEngine.RemainingBuyReservation(o);
+                if (unreserve <= 0m) continue;
+                var fund = _accounts.GetFund(o.UserId, o.CurrencyType);
+                if (fund is null) continue;
+                try { fund.UnreserveFunds(unreserve); }
+                catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+            }
         }
 
         for (int i = 0; i < toCancel.Count; i++)
@@ -577,6 +738,118 @@ public sealed class OrderExecutionService : IOrderExecutionService
         foreach (var snap in result.MakerSnapshots)
             map[snap.Order.OrderId] = snap.Order;
         return map;
+    }
+
+    /// <summary>
+    /// Recovery for fills the seller can't honor. Aggregates across all MatchResults in the
+    /// group (a maker partially filled by taker A and then fully filled by taker B is rolled
+    /// back once with the cumulative delta), cancels each offending maker, removes from book,
+    /// and reduces each taker's <c>AmountFilled</c> by the rejected qty for that taker.
+    /// Cancelled makers are added to <paramref name="ordersById"/> so the caller can persist
+    /// them in the same root tx.
+    /// </summary>
+    private void RollbackRejectedFills(
+        IReadOnlyList<(Order Taker, MatchResult Match)> matches,
+        OrderBook book,
+        IReadOnlyList<RejectedFill> rejected,
+        Dictionary<int, Order> ordersById)
+    {
+        if (rejected.Count == 0) return;
+
+        // Per-maker aggregates: earliest snapshot (smallest OriginalAmountFilled) and OR of
+        // WasRemovedFromBook across all snapshots for that maker. Rolling back to the earliest
+        // snapshot's state, with the cumulative filled delta, restores the maker as if it had
+        // never been touched in this batch.
+        var earliestSnapByMaker = new Dictionary<int, MakerSnapshot>();
+        var anyRemovedByMaker = new Dictionary<int, bool>();
+        var fillToTaker = new Dictionary<Transaction, Order>(ReferenceEqualityComparer.Instance);
+
+        for (int m = 0; m < matches.Count; m++)
+        {
+            var (taker, match) = matches[m];
+            for (int s = 0; s < match.MakerSnapshots.Count; s++)
+            {
+                var snap = match.MakerSnapshots[s];
+                var id = snap.Order.OrderId;
+                if (earliestSnapByMaker.TryGetValue(id, out var existing))
+                {
+                    if (snap.OriginalAmountFilled < existing.OriginalAmountFilled)
+                        earliestSnapByMaker[id] = snap;
+                    anyRemovedByMaker[id] = anyRemovedByMaker[id] || snap.WasRemovedFromBook;
+                }
+                else
+                {
+                    earliestSnapByMaker[id] = snap;
+                    anyRemovedByMaker[id] = snap.WasRemovedFromBook;
+                }
+            }
+            for (int f = 0; f < match.Fills.Count; f++)
+                fillToTaker[match.Fills[f]] = taker;
+        }
+
+        // Aggregate rejected qty by maker (for the single rollback per maker) and by taker
+        // (for AmountFilled adjustment).
+        var rejectedQtyByMaker = new Dictionary<int, int>();
+        var reasonByMaker = new Dictionary<int, string>();
+        var rejectedQtyByTaker = new Dictionary<Order, int>();
+        for (int i = 0; i < rejected.Count; i++)
+        {
+            var rj = rejected[i];
+            rejectedQtyByMaker.TryGetValue(rj.MakerOrderId, out var mqty);
+            rejectedQtyByMaker[rj.MakerOrderId] = mqty + rj.Trade.Quantity;
+            reasonByMaker[rj.MakerOrderId] = rj.Reason;
+
+            if (fillToTaker.TryGetValue(rj.Trade, out var taker))
+            {
+                rejectedQtyByTaker.TryGetValue(taker, out var tqty);
+                rejectedQtyByTaker[taker] = tqty + rj.Trade.Quantity;
+            }
+            else
+            {
+                _logger.LogError(
+                    "Rejected fill (maker #{MakerId}, qty {Qty}) not found in any MatchResult.Fills",
+                    rj.MakerOrderId, rj.Trade.Quantity);
+            }
+        }
+
+        // Roll back each maker exactly once with the cumulative delta.
+        foreach (var kv in rejectedQtyByMaker)
+        {
+            var makerId = kv.Key;
+            if (!earliestSnapByMaker.TryGetValue(makerId, out var snap))
+            {
+                _logger.LogError(
+                    "Rejected fill references maker #{MakerId} not in any MatchResult.MakerSnapshots",
+                    makerId);
+                continue;
+            }
+            var maker = snap.Order;
+            var wasRemoved = anyRemovedByMaker[makerId];
+
+            // RollbackMakerFill handles both "still in book" (credit level qty) and
+            // "was removed" (re-insert + credit) cases. We then remove the maker since
+            // it's being cancelled.
+            var filledDelta = maker.AmountFilled - snap.OriginalAmountFilled;
+            maker.AmountFilled = snap.OriginalAmountFilled;
+            maker.Status = Order.Statuses.Open;
+            book.RollbackMakerFill(maker, filledDelta, wasRemoved);
+
+            maker.Cancel();
+            book.RemoveById(makerId);
+            ordersById[makerId] = maker;
+
+            _logger.LogWarning(
+                "Cancelled stale maker order #{OrderId} (seller {UserId}, stock {StockId}): {Reason}",
+                makerId, maker.UserId, maker.StockId, reasonByMaker[makerId]);
+        }
+
+        // Reduce each taker's AmountFilled and reopen if matcher had flipped it to Filled.
+        foreach (var kv in rejectedQtyByTaker)
+        {
+            var taker = kv.Key;
+            taker.AmountFilled -= kv.Value;
+            if (taker.Status == Order.Statuses.Filled) taker.Status = Order.Statuses.Open;
+        }
     }
 
     /// <summary>
