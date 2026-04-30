@@ -85,7 +85,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         // Prime quote from history and start streaming ticks for (stock, currency)
         await _market.SubscribeAsync(stock.StockId, Currency, ct);
         await _market.BuildFromHistoryAsync(stock.StockId, Currency, ct);
-        //_market.StartRandomDisplayTicker(stock.StockId, Currency);
 
         // Set Stock variables
         Symbol = stock.Symbol;
@@ -115,7 +114,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
         await _market.SubscribeAsync(stockId, currency, ct);
         await _market.BuildFromHistoryAsync(stockId, currency, ct);
-        //_market.StartRandomDisplayTicker(stockId, currency);
 
         Quote = TryGetQuote();
         await UpdateFromLiveAsync(Quote);
