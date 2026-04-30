@@ -67,11 +67,12 @@ public sealed class OrderBookCache : IOrderBookCache
             // Double check if already loaded
             if (_loaded.TryGetValue(key, out ready) && ready) return;
 
-            // Load all open limit orders from DB and populate the book
+            // Load all open limit orders from DB and populate the book.
+            // BulkLoad takes the gate once + skips per-order index lookups since we know
+            // this is a fresh book.
             var book = GetOrCreate(stockId, currency);
             var openLimits = await _db.GetOpenLimitOrders(stockId, currency, ct).ConfigureAwait(false);
-            foreach (var o in openLimits) 
-                book.UpsertOrder(o);
+            book.BulkLoad(openLimits);
 
             _loaded[key] = true; // Mark as loaded
         }
@@ -93,12 +94,17 @@ public sealed class OrderBookCache : IOrderBookCache
         await EnsureLoadedAsync(stockId, currency, ct).ConfigureAwait(false);
         var gate = GetGate(stockId, currency);
         await gate.WaitAsync(ct).ConfigureAwait(false);
+        OrderBook book;
         try
         {
-            var book = GetOrCreate(stockId, currency);
+            book = GetOrCreate(stockId, currency);
             await body(book).ConfigureAwait(false);
         }
         finally { gate.Release(); }
+
+        // Fire one Changed notification per atomic body. Outside the lock so
+        // slow subscribers can't back-pressure matching.
+        book.FlushChanged();
     }
 
     public async Task<(bool ok, string reason)> ValidateAsync(int stockId, CurrencyType currency, CancellationToken ct)
