@@ -1,29 +1,144 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartView">
 
-    <Grid RowDefinitions="auto,*" RowSpacing="8" Padding="8" MinimumHeightRequest="320" >
-        <!-- Controls row -->
-        <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12" Padding="0,0,0,4">
-            <Label Text="Candles:" VerticalOptions="Center" />
-            <HorizontalStackLayout Grid.Column="1" Spacing="8">
-                <Stepper x:Name="CandlesStepper" VerticalOptions="Center" 
-                         Minimum="20" Maximum="360" Increment="10" />
-                <Label VerticalOptions="Center"
-                       Text="{Binding Source={x:Reference CandlesStepper}, Path=Value, StringFormat='{}{0:0}'}"/>
+    <Grid Style="{StaticResource ChartFrame}">
+
+        <!-- Toolbar -->
+        <Grid Grid.Row="0" Style="{StaticResource ChartToolbar}"
+              ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+
+            <!-- Resolution segments -->
+            <HorizontalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
+                <Button Text="15s"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SelectResolutionCommand}"
+                        CommandParameter="{x:Static models:CandleResolution.FifteenSeconds}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding SelectedResolution}"
+                                     Value="{x:Static models:CandleResolution.FifteenSeconds}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Text="1m"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SelectResolutionCommand}"
+                        CommandParameter="{x:Static models:CandleResolution.OneMinute}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding SelectedResolution}"
+                                     Value="{x:Static models:CandleResolution.OneMinute}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Text="5m"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SelectResolutionCommand}"
+                        CommandParameter="{x:Static models:CandleResolution.FiveMinutes}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding SelectedResolution}"
+                                     Value="{x:Static models:CandleResolution.FiveMinutes}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Text="15m"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SelectResolutionCommand}"
+                        CommandParameter="{x:Static models:CandleResolution.FifteenMinutes}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding SelectedResolution}"
+                                     Value="{x:Static models:CandleResolution.FifteenMinutes}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Text="1h"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SelectResolutionCommand}"
+                        CommandParameter="{x:Static models:CandleResolution.OneHour}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding SelectedResolution}"
+                                     Value="{x:Static models:CandleResolution.OneHour}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Text="4h"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SelectResolutionCommand}"
+                        CommandParameter="{x:Static models:CandleResolution.FourHours}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding SelectedResolution}"
+                                     Value="{x:Static models:CandleResolution.FourHours}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Text="1D"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SelectResolutionCommand}"
+                        CommandParameter="{x:Static models:CandleResolution.OneDay}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding SelectedResolution}"
+                                     Value="{x:Static models:CandleResolution.OneDay}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
             </HorizontalStackLayout>
 
-            <!-- Delete later -->
-            <Label Grid.Column="2" Text="Y pad:" VerticalOptions="Center"/>
-            <StackLayout Grid.Column="3" Orientation="Horizontal" Spacing="6">
-                <Slider x:Name="YPadSlider" Minimum="0" Maximum="0.2" Value="0.06" WidthRequest="120" />
-                <Label VerticalOptions="Center"
-                       Text="{Binding Source={x:Reference YPadSlider}, Path=Value, StringFormat='{}{0:P0}'}"/>
-            </StackLayout>
+            <!-- Spacer -->
+            <BoxView Grid.Column="1" Color="Transparent" />
+
+            <!-- Zoom out -->
+            <Button Grid.Column="2" Text="−"
+                    Style="{StaticResource ChartIconButton}"
+                    Command="{Binding ZoomOutCommand}" />
+            <!-- Zoom in -->
+            <Button Grid.Column="3" Text="+"
+                    Style="{StaticResource ChartIconButton}"
+                    Command="{Binding ZoomInCommand}" />
+            <!-- Separator -->
+            <BoxView Grid.Column="4" Style="{StaticResource ChartToolbarSeparator}" />
+            <!-- Live -->
+            <Button Grid.Column="5" Text="LIVE"
+                    Style="{StaticResource ChartLiveButton.Off}"
+                    Command="{Binding GoLiveCommand}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding IsLive}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartBull}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        <Setter Property="BorderColor"     Value="{StaticResource ChartBull}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
         </Grid>
-        
+
         <!-- Chart -->
-        <GraphicsView x:Name="Chart" Grid.Row="1" HorizontalOptions="Fill" VerticalOptions="Fill" />
+        <GraphicsView x:Name="Chart" Grid.Row="1"
+                      Style="{StaticResource ChartSurface}">
+            <GraphicsView.GestureRecognizers>
+                <PanGestureRecognizer x:Name="ChartPan" />
+            </GraphicsView.GestureRecognizers>
+        </GraphicsView>
     </Grid>
 </ContentView>
