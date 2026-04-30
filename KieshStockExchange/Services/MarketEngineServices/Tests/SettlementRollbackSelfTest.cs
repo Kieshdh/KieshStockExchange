@@ -201,7 +201,7 @@ public static class SettlementRollbackSelfTest
     private static (FakeDb db, AccountsCache cache, SettlementEngine engine) BuildEngine(ILoggerFactory factory)
     {
         var db = new FakeDb();
-        var cache = new AccountsCache(db);
+        var cache = new AccountsCache(db, factory.CreateLogger<AccountsCache>());
         var engine = new SettlementEngine(db, cache, factory.CreateLogger<SettlementEngine>());
         return (db, cache, engine);
     }
