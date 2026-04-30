@@ -35,6 +35,12 @@ public interface ICandleService
     /// <summary> Feed a new executed transaction (tick) into the appropriate CandleAggregator instance. </summary>
     Task OnTransactionTickAsync(Transaction tick, CancellationToken ct = default);
 
+    /// <summary>
+    /// Synchronous variant of <see cref="OnTransactionTickAsync"/>. The aggregator update path is
+    /// CPU-only — call this from hot loops that don't need a Task allocation.
+    /// </summary>
+    void OnTransactionTick(Transaction tick);
+
     /// <summary> Stream closed candles as they are created, for the given stock, currency and resolution. </summary>
     IAsyncEnumerable<Candle> StreamClosedCandles(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct);
 

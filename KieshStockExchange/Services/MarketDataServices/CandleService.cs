@@ -12,15 +12,23 @@ namespace KieshStockExchange.Services.MarketDataServices;
 
 public sealed class CandleService : ICandleService, IDisposable
 {
-    #region Dictionaries keyed by (stockId, currency, bucketSec), with public accessors
+    #region Aggregator State and Subscriptions
     // Candle aggregators
     private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), CandleAggregator> _aggs = new();
     public ConcurrentDictionary<(int, CurrencyType, CandleResolution), CandleAggregator> Aggregators => _aggs;
 
+    // Per-book aggregator index: avoids the O(N_aggs) LINQ scan in OnTransactionTickAsync.
+    // Rebuilt on Subscribe / Unsubscribe (rare); read on every tick (hot).
+    private readonly ConcurrentDictionary<(int, CurrencyType), CandleAggregator[]> _aggsByBook = new();
+
     // Subscription reference counting
     private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), int> _subRefCount = new();
-    public IReadOnlyCollection<(int, CurrencyType, CandleResolution)> Subscribed =>
-        _subRefCount.Where(kv => kv.Value > 0).Select(kv => kv.Key).ToList().AsReadOnly();
+
+    // Cached snapshot of subscribed keys; rebuilt on Subscribe/Unsubscribe to avoid
+    // per-read LINQ allocations (PriceSnapshotService reads this hourly).
+    private volatile IReadOnlyCollection<(int, CurrencyType, CandleResolution)> _subscribedSnapshot =
+        Array.Empty<(int, CurrencyType, CandleResolution)>();
+    public IReadOnlyCollection<(int, CurrencyType, CandleResolution)> Subscribed => _subscribedSnapshot;
 
     // Live candle streams
     private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), Channel<Candle>> _streams = new();
@@ -52,9 +60,12 @@ public sealed class CandleService : ICandleService, IDisposable
         var key = (stockId, currency, resolution);
         CheckKey(key);
 
-        _subRefCount.AddOrUpdate(key, 1, (_, c) => c + 1);
+        var newCount = _subRefCount.AddOrUpdate(key, 1, (_, c) => c + 1);
         GetOrAddAggregator(stockId, currency, resolution);
-        GetOrAddLiveStream(key);
+        // _streams is created lazily by StreamClosedCandles — bot-driven candle subs
+        // that never open a chart pay zero per-tick channel-write cost.
+        RebuildAggsByBook(stockId, currency);
+        if (newCount == 1) RebuildSubscribedSnapshot();
 
         // Start the flush loop if not already running
         if (_flushLoop is null || _flushLoop.IsCompleted)
@@ -77,6 +88,8 @@ public sealed class CandleService : ICandleService, IDisposable
             _aggs.TryRemove(key, out var agg);
             if (_streams.TryRemove(key, out var stream))
                 stream.Writer.TryComplete();
+            RebuildAggsByBook(stockId, currency);
+            RebuildSubscribedSnapshot();
         }
 
         if (_subRefCount.IsEmpty && _flushLoop is not null)
@@ -91,8 +104,12 @@ public sealed class CandleService : ICandleService, IDisposable
     public async Task SubscribeAllAsync(CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
     {
         await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
-        await Task.WhenAll(_stock.All.Select(s => Task.Run(() => 
-            Subscribe(s.StockId, currency, resolution), ct))).ConfigureAwait(false);
+        // Subscribe is synchronous; no need to wrap in Task.Run/WhenAll.
+        foreach (var s in _stock.All)
+        {
+            ct.ThrowIfCancellationRequested();
+            Subscribe(s.StockId, currency, resolution);
+        }
     }
 
     public async Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default)
@@ -101,48 +118,53 @@ public sealed class CandleService : ICandleService, IDisposable
     public void Dispose()
     {
         _flushCts.Cancel();
-        if (_flushLoop is not null) 
+        if (_flushLoop is not null)
             try { _flushLoop.Wait(); } catch { }
-        foreach (var ch in _streams.Values) 
+        foreach (var ch in _streams.Values)
             ch.Writer.TryComplete();
         _aggs.Clear();
+        _aggsByBook.Clear();
         _streams.Clear();
         _subRefCount.Clear();
     }
     #endregion
 
     #region Public methods
-    public async Task OnTransactionTickAsync(Transaction tick, CancellationToken ct = default)
+    public Task OnTransactionTickAsync(Transaction tick, CancellationToken ct = default)
+    {
+        OnTransactionTick(tick);
+        return Task.CompletedTask;
+    }
+
+    public void OnTransactionTick(Transaction tick)
     {
         if (!tick.IsValid()) return;
 
-        // Find matching aggregators
-        var stockId = tick.StockId; 
-        var currency = tick.CurrencyType;
-        var matching = _aggs.Keys.Where(k => k.Item1 == stockId && k.Item2 == currency).ToArray();
+        // O(1) per-book lookup; no LINQ, no allocation on the hot path.
+        if (!_aggsByBook.TryGetValue((tick.StockId, tick.CurrencyType), out var aggs)
+            || aggs.Length == 0)
+            return;
 
-        // Apply the tick to each matching aggregator
-        foreach (var key in matching)
+        for (int i = 0; i < aggs.Length; i++)
         {
-            // Should always succeed as we got the key from the dictionary
-            if (!_aggs.TryGetValue(key, out var agg)) 
-                continue;
+            var agg = aggs[i];
 
-            // Apply the tick
+            // Update in-memory candle state (O(1)).
             agg.OnTick(tick);
 
-            // Push snapshot to live stream
+            // Push live snapshot to the chart stream (no DB). TryGetLiveSnapshot allocates,
+            // so guard it behind the channel existence check — bot-only books skip the alloc.
+            var key = (agg.StockId, agg.Currency, agg.Resolution);
             if (_streams.TryGetValue(key, out var stream))
             {
-                var live = agg.TryGetLiveSnapshot();   // returns a cloned Candle or null
+                var live = agg.TryGetLiveSnapshot();
                 if (live is not null)
-                    // Use TryWrite to avoid blocking if no readers
                     stream.Writer.TryWrite(live);
             }
 
-            // If any closed candles, persist and publish
-            var closed = agg.DrainClosedCandles();
-            await PersistAndPublishAsync(key, closed, ct).ConfigureAwait(false);
+            // Closed candles are deliberately NOT drained here. FlushLoopAsync runs every
+            // FlushInterval (1s) and persists them in a single batched DB transaction.
+            // This keeps the hot-path tick handler off the DB.
         }
     }
 
@@ -221,39 +243,29 @@ public sealed class CandleService : ICandleService, IDisposable
 
         if (!fillGaps) return list;
 
-        // Fill gaps with flat candles
-        var result = new List<Candle>();
-        var i = 0; var t = fromAligned;
+        // No real candles → no fabricated pre-history.
+        if (list.Count == 0) return list;
 
-        // Get the latest price at or before 'fromAligned' to use as fallback
-        decimal lastPrice = await GetPriceAtOrBeforeAsync(
-            stockId, currency, fromAligned, ct).ConfigureAwait(false);
+        // Fill gaps from the first real candle onward. Anything before that stays empty
+        // so the chart's left edge is the stock's first real trade, not a synthetic flat line.
+        var result = new List<Candle>(list.Count);
+        var firstRealOpen = list[0].OpenTime;
+        decimal lastPrice = list[0].Open;
+        var i = 0;
 
-        while (t < toAligned)
+        for (var t = firstRealOpen; t < toAligned; t = t.Add(span))
         {
             if (i < list.Count && list[i].OpenTime == t)
             {
-                // Use the stored candle
-                var c = list[i++]; // Advance index
+                var c = list[i++];
                 result.Add(c);
-                lastPrice = c.Close; // Update last known price
+                lastPrice = c.Close;
             }
-            else // Gap detected
+            else
             {
-                // Create a flat candle at the last known price
-                var candle = NewCandle(stockId, currency, t, span, lastPrice);
-
-                // Add random percentage to the last price to simulate some movement
-                /*lastPrice *= 1m + (decimal)(Random.Shared.NextDouble() * 2 - 1) * 0.002m;
-                candle.Close = lastPrice;
-                candle.Low = Math.Min(candle.Open, candle.Close) * (1m - (decimal)(Random.Shared.NextDouble()) * 0.001m);
-                candle.High = Math.Max(candle.Open, candle.Close) * (1m + (decimal)(Random.Shared.NextDouble()) * 0.001m);
-                */
-                result.Add(candle);
+                // Inter-bucket or post-last-trade gap: extend at last known close.
+                result.Add(NewCandle(stockId, currency, t, span, lastPrice));
             }
-
-            // Advance to next bucket
-            t = t.Add(span);
         }
 
         return result;
@@ -379,8 +391,13 @@ public sealed class CandleService : ICandleService, IDisposable
             new CandleAggregator(stockId, currency, resolution, _logger));
 
     private Channel<Candle> GetOrAddLiveStream((int, CurrencyType, CandleResolution) key) =>
-        _streams.GetOrAdd(key, _ => Channel.CreateUnbounded<Candle>(
-            new UnboundedChannelOptions { SingleReader = false, SingleWriter = false }));
+        _streams.GetOrAdd(key, _ => Channel.CreateBounded<Candle>(
+            new BoundedChannelOptions(64)
+            {
+                FullMode = BoundedChannelFullMode.DropOldest,
+                SingleReader = false,
+                SingleWriter = false,
+            }));
 
     private async Task PersistAndPublishAsync((int, CurrencyType, CandleResolution) key,
         List<Candle> candles, CancellationToken ct)
@@ -393,12 +410,9 @@ public sealed class CandleService : ICandleService, IDisposable
                 if (!c.IsValid())
                     throw new InvalidOperationException($"Invalid candle {c.Summary}");
 
-            // Persist to DB
-            await _db.RunInTransactionAsync(async txCt =>
-            {
-                foreach (var c in candles)
-                    await _db.UpsertCandle(c, txCt).ConfigureAwait(false);
-            }, ct).ConfigureAwait(false);
+            // Persist to DB — single tx, batched ON CONFLICT upsert.
+            await _db.RunInTransactionAsync(txCt =>
+                _db.UpsertCandlesAsync(candles, txCt), ct).ConfigureAwait(false);
 
             // Publish to live stream if any subscribers
             if (_streams.TryGetValue(key, out var stream))
@@ -417,52 +431,101 @@ public sealed class CandleService : ICandleService, IDisposable
     private async Task FlushLoopAsync(CancellationToken ct)
     {
         // Close buckets even when no fresh ticks arrive.
-        using var timer = new PeriodicTimer(FlushInterval); 
+        using var timer = new PeriodicTimer(FlushInterval);
         while (!ct.IsCancellationRequested)
         {
             try
             {
                 var now = TimeHelper.NowUtc();
+
+                // Phase 1: drain every aggregator's closed candles (in-memory only).
+                var perKeyClosed = new List<((int, CurrencyType, CandleResolution) key, List<Candle> closed)>();
                 foreach (var (key, agg) in _aggs)
                 {
                     if (ct.IsCancellationRequested) break;
                     agg.FlushIfElapsed(now);
                     var closed = agg.DrainClosedCandles();
-                    await PersistAndPublishAsync(key, closed, ct).ConfigureAwait(false);
+                    if (closed.Count > 0) perKeyClosed.Add((key, closed));
                 }
+
+                // Phase 2: persist everything in a single DB transaction (batched across keys).
+                if (perKeyClosed.Count > 0)
+                {
+                    // Flatten valid candles across all keys into one batch — one tx, one
+                    // ON CONFLICT upsert per candle, no per-candle SELECT.
+                    var batch = new List<Candle>();
+                    foreach (var (_, closed) in perKeyClosed)
+                    {
+                        for (int i = 0; i < closed.Count; i++)
+                        {
+                            var c = closed[i];
+                            if (c.IsValid()) batch.Add(c);
+                            else _logger.LogError("Dropping invalid candle in flush loop: {Summary}", c.Summary);
+                        }
+                    }
+
+                    if (batch.Count > 0)
+                    {
+                        try
+                        {
+                            await _db.RunInTransactionAsync(txCt =>
+                                _db.UpsertCandlesAsync(batch, txCt), ct).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error persisting closed candles in flush loop.");
+                        }
+                    }
+
+                    // Phase 3: publish closed candles to per-key live streams (no DB).
+                    foreach (var (key, closed) in perKeyClosed)
+                    {
+                        if (ct.IsCancellationRequested) break;
+                        if (_streams.TryGetValue(key, out var stream))
+                        {
+                            for (int i = 0; i < closed.Count; i++)
+                                stream.Writer.TryWrite(closed[i]);
+                        }
+                    }
+                }
+
                 await timer.WaitForNextTickAsync(ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { } // Ignore
             catch (Exception ex) { _logger.LogError(ex, "Error in candle flush loop."); }
         }
-            
+
     }
 
-    private async Task<decimal> GetPriceAtOrBeforeAsync(int stockId, CurrencyType currency, 
-        DateTime time, CancellationToken ct)
+    /// <summary>
+    /// Rebuilds the per-book aggregator index for one (stockId, currency) pair after
+    /// Subscribe/Unsubscribe. The hot path (OnTransactionTickAsync) reads this array
+    /// without LINQ or allocation.
+    /// </summary>
+    private void RebuildAggsByBook(int stockId, CurrencyType currency)
     {
-        // Try latest price from transactions
-        var tx = await _db.GetLatestTransactionBeforeTime(
-            stockId, currency, time, ct).ConfigureAwait(false);
-        if (tx is not null && tx.Price > 0m) return tx.Price;
-
-        // Fall back to latest stock price
-        var sp = await _db.GetLatestStockPriceBeforeTime(
-            stockId, currency, time, ct).ConfigureAwait(false);
-        if (sp is not null && sp.Price > 0m) return sp.Price;
-
-
-        // Fall back to the USD latest price converted
-        if (currency != CurrencyType.USD)
+        var book = (stockId, currency);
+        var matches = new List<CandleAggregator>(2);
+        foreach (var kv in _aggs)
         {
-            var usdPrice = await GetPriceAtOrBeforeAsync(
-                stockId, CurrencyType.USD, time, ct).ConfigureAwait(false);
-            if (usdPrice > 0m) return CurrencyHelper.Convert(usdPrice, CurrencyType.USD, currency);
+            if (kv.Key.Item1 == stockId && kv.Key.Item2 == currency)
+                matches.Add(kv.Value);
         }
 
-        // Final fallback to default seed price
-        return 100m; // Default seed price
+        if (matches.Count == 0)
+            _aggsByBook.TryRemove(book, out _);
+        else
+            _aggsByBook[book] = matches.ToArray();
     }
+
+    private void RebuildSubscribedSnapshot()
+    {
+        var list = new List<(int, CurrencyType, CandleResolution)>(_subRefCount.Count);
+        foreach (var kv in _subRefCount)
+            if (kv.Value > 0) list.Add(kv.Key);
+        _subscribedSnapshot = list;
+    }
+
     #endregion
 
     #region Candle Creation and Aggregation
@@ -582,11 +645,8 @@ public sealed class CandleService : ICandleService, IDisposable
         var aggregated = AggregateMultipleCandles(src, targetRes, true, allowPartialEdges);
 
         // Persist to DB
-        await _db.RunInTransactionAsync(async tx =>
-        {
-            foreach (var c in aggregated)
-                await _db.UpsertCandle(c, tx).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+        await _db.RunInTransactionAsync(tx =>
+            _db.UpsertCandlesAsync(aggregated, tx), ct).ConfigureAwait(false);
 
         return aggregated;
     }
