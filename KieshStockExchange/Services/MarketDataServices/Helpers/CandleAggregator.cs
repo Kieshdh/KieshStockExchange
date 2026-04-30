@@ -178,9 +178,12 @@ public sealed class CandleAggregator
             cur += Bucket;
         }
 
-        // Warn if too many gaps
+        // Long gaps are normal during bootstrap (fresh DB after reseed, first chart open
+        // long after market data went quiet). Demoted from Warning to Debug — the next live
+        // tick resumes the candle timeline; nothing actionable to do here.
         if (cur < toStart)
-            _log.LogWarning("Too many gaps to fill for {Key}, stopped at {Time:u}", KeyString, cur);
+            _log.LogDebug("Capped gap fill for {Key} at {Count} candles, stopped at {Time:u}",
+                KeyString, MaxGapCandles, cur);
     }
 
     private Candle NewCandle(DateTime openTime, decimal price) =>  new() 
