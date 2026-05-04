@@ -39,6 +39,8 @@ public partial class BotDashboardViewModel : BaseViewModel
     private readonly IDataBaseService _db;
     private readonly ILogger<BotDashboardViewModel> _logger;
 
+    public TopNavBarViewModel TopNavBarVm { get; }
+
     private IDispatcherTimer? _timer;
     private DateTime _next24hRefreshUtc = DateTime.MinValue;
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
@@ -46,12 +48,14 @@ public partial class BotDashboardViewModel : BaseViewModel
     #endregion
 
     public BotDashboardViewModel(IAiTradeService trade, IUserSessionService session,
-        IDataBaseService db, ILogger<BotDashboardViewModel> logger)
+        IDataBaseService db, ILogger<BotDashboardViewModel> logger,
+        TopNavBarViewModel topNavBarVm)
     {
         _trade = trade ?? throw new ArgumentNullException(nameof(trade));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
         Title = "AI Bot Dashboard";
         Refresh();

@@ -15,6 +15,7 @@ public partial class PortfolioViewModel : BaseViewModel
     public PortfolioOpenOrdersViewModel  OpenOrdersVm   { get; }
     public PortfolioOrderHistoryViewModel OrderHistoryVm { get; }
     public PortfolioTransactionViewModel TransactionVm  { get; }
+    public TopNavBarViewModel            TopNavBarVm    { get; }
 
     [ObservableProperty] private string _totalEquityDisplay       = "—";
     [ObservableProperty] private string _totalEquityChangeDisplay = "—";
@@ -36,7 +37,8 @@ public partial class PortfolioViewModel : BaseViewModel
         PortfolioTransactionViewModel  transactionVm,
         IUserPortfolioService          portfolio,
         IMarketDataService             market,
-        ILogger<PortfolioViewModel>    logger)
+        ILogger<PortfolioViewModel>    logger,
+        TopNavBarViewModel             topNavBarVm)
     {
         Title          = "Portfolio";
         HoldingsVm     = holdingsVm     ?? throw new ArgumentNullException(nameof(holdingsVm));
@@ -46,6 +48,7 @@ public partial class PortfolioViewModel : BaseViewModel
         _portfolio     = portfolio      ?? throw new ArgumentNullException(nameof(portfolio));
         _market        = market         ?? throw new ArgumentNullException(nameof(market));
         _logger        = logger         ?? throw new ArgumentNullException(nameof(logger));
+        TopNavBarVm    = topNavBarVm    ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
         _portfolio.SnapshotChanged += OnPortfolioChanged;
         RefreshMetrics();
