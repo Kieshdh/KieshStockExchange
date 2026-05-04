@@ -90,7 +90,6 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Aud}" />
             </HorizontalStackLayout>
-            <!-- TotalValue sort removed: requires live FX conversion, not sortable in DB -->
         </Grid>
 
         <!-- CollectionView for displaying user data -->
