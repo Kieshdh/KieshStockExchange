@@ -70,6 +70,30 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <Compile Update="Resources\Styles\Themes\Theme.ExchangeLight.xaml.cs">
+	    <DependentUpon>Theme.ExchangeLight.xaml</DependentUpon>
+	  </Compile>
+	  <Compile Update="Resources\Styles\Themes\Theme.ExchangeDark.xaml.cs">
+	    <DependentUpon>Theme.ExchangeDark.xaml</DependentUpon>
+	  </Compile>
+	  <Compile Update="Resources\Styles\Themes\Theme.NordicTerminal.xaml.cs">
+	    <DependentUpon>Theme.NordicTerminal.xaml</DependentUpon>
+	  </Compile>
+	  <Compile Update="Resources\Styles\Themes\Theme.SoftBroker.xaml.cs">
+	    <DependentUpon>Theme.SoftBroker.xaml</DependentUpon>
+	  </Compile>
+	  <Compile Update="Resources\Styles\Themes\Theme.InstitutionalBlue.xaml.cs">
+	    <DependentUpon>Theme.InstitutionalBlue.xaml</DependentUpon>
+	  </Compile>
+	  <Compile Update="Resources\Styles\Themes\Theme.MidnightTrader.xaml.cs">
+	    <DependentUpon>Theme.MidnightTrader.xaml</DependentUpon>
+	  </Compile>
+	  <Compile Update="Resources\Styles\Themes\Theme.CarbonMarket.xaml.cs">
+	    <DependentUpon>Theme.CarbonMarket.xaml</DependentUpon>
+	  </Compile>
+	  <Compile Update="Resources\Styles\Themes\Theme.DeepNavyPro.xaml.cs">
+	    <DependentUpon>Theme.DeepNavyPro.xaml</DependentUpon>
+	  </Compile>
 	  <Compile Update="Views\AdminPageViews\FundTableView.xaml.cs">
 	    <DependentUpon>FundTableView.xaml</DependentUpon>
 	  </Compile>
@@ -91,6 +115,30 @@
 	</ItemGroup>
 
 	<ItemGroup>
+	  <MauiXaml Update="Resources\Styles\Themes\Theme.ExchangeLight.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Resources\Styles\Themes\Theme.ExchangeDark.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Resources\Styles\Themes\Theme.NordicTerminal.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Resources\Styles\Themes\Theme.SoftBroker.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Resources\Styles\Themes\Theme.InstitutionalBlue.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Resources\Styles\Themes\Theme.MidnightTrader.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Resources\Styles\Themes\Theme.CarbonMarket.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Resources\Styles\Themes\Theme.DeepNavyPro.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
 	  <MauiXaml Update="Resources\Styles\ShellStyles.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>

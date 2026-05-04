@@ -6,9 +6,12 @@ using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.UserServices;
+using KieshStockExchange.ViewModels.AccountViewModels;
 using KieshStockExchange.ViewModels.AdminViewModels;
+using KieshStockExchange.ViewModels.PortfolioViewModels;
 using KieshStockExchange.ViewModels.TradeViewModels;
 using KieshStockExchange.ViewModels.UserViewModels;
+using KieshStockExchange.ViewModels.MarketViewModels;
 using KieshStockExchange.Views.AccountPageViews;
 using KieshStockExchange.Views.AdminPageViews;
 using KieshStockExchange.Views.MarketPageViews;
@@ -40,6 +43,7 @@ public static class MauiProgram
         builder.Services.AddTransient<AccountPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<AdminPage>();
+        builder.Services.AddTransient<BotDashboardPage>();
         builder.Services.AddTransient<PortfolioPage>();
         builder.Services.AddTransient<MarketPage>();
         builder.Services.AddTransient<TradePage>();
@@ -61,6 +65,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IAccountsCache, AccountsCache>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
+        builder.Services.AddSingleton<IThemeService, ThemeService>();
         // Market engine
         builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
         builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();
@@ -75,6 +80,7 @@ public static class MauiProgram
         // - User
         builder.Services.AddTransient<RegisterViewModel>();
         builder.Services.AddTransient<LoginViewModel>();
+        builder.Services.AddTransient<AccountViewModel>();
         // - Admin
         builder.Services.AddTransient<UserTableViewModel>();
         builder.Services.AddTransient<StockTableViewModel>();
@@ -84,7 +90,14 @@ public static class MauiProgram
         builder.Services.AddTransient<FundTableViewModel>();
         builder.Services.AddTransient<BotDashboardViewModel>();
         builder.Services.AddTransient<AdminViewModel>();
+        // - Portfolio
+        builder.Services.AddTransient<PortfolioViewModel>();
+        builder.Services.AddTransient<PortfolioHoldingsViewModel>();
+        builder.Services.AddTransient<PortfolioOpenOrdersViewModel>();
+        builder.Services.AddTransient<PortfolioOrderHistoryViewModel>();
+        builder.Services.AddTransient<PortfolioTransactionViewModel>();
         // - Trade
+        builder.Services.AddTransient<MarketViewModel>();
         builder.Services.AddTransient<TradeViewModel>();
         builder.Services.AddTransient<PlaceOrderViewModel>();
         builder.Services.AddTransient<TransactionHistoryViewModel>();

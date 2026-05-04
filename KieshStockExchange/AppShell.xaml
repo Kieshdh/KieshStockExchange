@@ -21,11 +21,13 @@
         ContentTemplate="{DataTemplate account:AccountPage}" />
     <ShellContent Title="Admin" Route="AdminPage"
         ContentTemplate="{DataTemplate admin:AdminPage}" />
-    <ShellContent Title="Admin" Route="PortfolioPage"
+    <ShellContent Title="Bots" Route="BotDashboardPage"
+        ContentTemplate="{DataTemplate admin:BotDashboardPage}" />
+    <ShellContent Title="Portfolio" Route="PortfolioPage"
         ContentTemplate="{DataTemplate portfolio:PortfolioPage}" />
-    <ShellContent Title="Admin" Route="StocksPage"
+    <ShellContent Title="Market" Route="MarketPage"
         ContentTemplate="{DataTemplate market:MarketPage}" />
-    <ShellContent Title="Admin" Route="TradePage"
+    <ShellContent Title="Trade" Route="TradePage"
         ContentTemplate="{DataTemplate trade:TradePage}" />
 
 </Shell>
