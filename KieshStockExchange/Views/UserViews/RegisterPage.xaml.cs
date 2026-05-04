@@ -1,13 +1,17 @@
-using System;
 using KieshStockExchange.Services.UserServices;
 
 namespace KieshStockExchange.Views.UserViews;
 
 public partial class RegisterPage : ContentPage
 {
-	public RegisterPage(IAuthService auth)
+    public RegisterPage(IAuthService auth)
     {
-		InitializeComponent();
+        InitializeComponent();
         BindingContext = new ViewModels.UserViewModels.RegisterViewModel(Navigation, auth);
+    }
+
+    private async void OnSignInClicked(object sender, TappedEventArgs e)
+    {
+        await Shell.Current.GoToAsync("..");
     }
 }

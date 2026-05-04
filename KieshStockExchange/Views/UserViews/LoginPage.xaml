@@ -2,89 +2,126 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.UserViews.LoginPage"
-             xmlns:vm="KieshStockExchange.ViewModels.UserViewModels.LoginViewModel"
              Title="Login">
-    <Grid Style="{StaticResource AuthPageGrid}"
-          RowDefinitions="180, *">
 
-        <!-- Top Part with Logo -->
-        <Path Style="{StaticResource MainPath}" />
+    <Grid Style="{StaticResource AuthPageGrid}">
 
-        <StackLayout Padding="50">
-            <Image Style="{StaticResource LogoImage}"/>
-        </StackLayout>
+        <!-- Split-card centered on the page. -->
+        <Border Style="{StaticResource AuthCardOuter}"
+                HorizontalOptions="Center"
+                VerticalOptions="Center"
+                WidthRequest="820"
+                HeightRequest="500">
+            <Grid ColumnDefinitions="*,*">
 
-        <!-- Bottom Part -->
-        <Grid RowSpacing="5" Grid.Row="1" Margin="20,20,20,0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="50" />
-                <RowDefinition Height="50" />
-                <RowDefinition Height="auto" />
-                <RowDefinition Height="40" />
-                <RowDefinition Height="40" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-
-            <!-- Opening Labels -->
-            <Label Grid.Row="1" Text="Welcome!"
-                   Style="{StaticResource AuthPageTitle}"
-                   Padding="0" Margin="0"/>
-            <Label Grid.Row="2" Text="Sign in to continue"
-                   Style="{StaticResource AuthPageSubtitle}"/>
-            
-            <!-- Login form -->
-            <VerticalStackLayout Grid.Row="3"  MinimumWidthRequest="300"
-                                 HorizontalOptions="CenterAndExpand" >
-                <!-- Username Entry -->
-                <Border Style="{StaticResource LoginBaseBorder}" Margin="0,0,0,0" >
-                    <StackLayout Orientation="Horizontal">
-                        <Border Style="{StaticResource LoginImageBorder}" >
-                            <Image Source="user_icon.png" 
-                                   Style="{StaticResource LoginImage}"/>
-                        </Border>
-                        <Entry Text="{Binding Username}" Placeholder="Username"
-                               Style="{StaticResource LoginEntry}" />
-                    </StackLayout>
+                <!-- LEFT: brand-coloured art panel -->
+                <Border Grid.Column="0"
+                        Style="{StaticResource AuthArtPanel}">
+                    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto"
+                          RowSpacing="8">
+                        <Label Grid.Row="0"
+                               Text="KIESH STOCK EXCHANGE"
+                               FontFamily="OpenSansSemibold"
+                               FontSize="11"
+                               CharacterSpacing="2"
+                               TextColor="{DynamicResource TextOnPrimary}"
+                               Opacity="0.85" />
+                        <Label Grid.Row="1"
+                               Text="The trading floor, on your desktop."
+                               Style="{StaticResource AuthArtHeading}" />
+                        <Label Grid.Row="2"
+                               Text="Live order books, limit orders, portfolio tracking. Sign in to continue."
+                               Style="{StaticResource AuthArtBody}" />
+                        <HorizontalStackLayout Grid.Row="4"
+                                               Spacing="8"
+                                               VerticalOptions="End">
+                            <Image Source="kse_logo.png"
+                                   HeightRequest="22"
+                                   WidthRequest="22"
+                                   VerticalOptions="Center" />
+                            <Label Text="KSE"
+                                   FontFamily="OpenSansSemibold"
+                                   FontSize="14"
+                                   TextColor="{DynamicResource TextOnPrimary}"
+                                   VerticalTextAlignment="Center" />
+                        </HorizontalStackLayout>
+                    </Grid>
                 </Border>
-                
-                <!-- Password Entry -->
-                <Border Style="{StaticResource LoginBaseBorder}" Margin="0,15,0,0" >
-                    <StackLayout Orientation="Horizontal">
-                        <Border Style="{StaticResource LoginImageBorder}"  >
-                            <Image Source="password_icon.png" 
-                                   Style="{StaticResource LoginImage}"/>
+
+                <!-- RIGHT: form -->
+                <VerticalStackLayout Grid.Column="1"
+                                     Padding="40,32"
+                                     Spacing="20"
+                                     VerticalOptions="Center">
+
+                    <!-- Title -->
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Sign In"
+                               FontFamily="OpenSansSemibold"
+                               FontSize="24"
+                               TextColor="{DynamicResource TextPrimary}" />
+                        <Label Text="Sign in to continue"
+                               FontSize="13"
+                               TextColor="{DynamicResource TextSecondary}" />
+                    </VerticalStackLayout>
+
+                    <!-- Inputs -->
+                    <VerticalStackLayout Spacing="12">
+                        <!-- Username -->
+                        <Border Style="{StaticResource LoginBaseBorder}">
+                            <StackLayout Orientation="Horizontal">
+                                <Border Style="{StaticResource LoginImageBorder}">
+                                    <Image Source="user_icon.png"
+                                           Style="{StaticResource LoginImage}" />
+                                </Border>
+                                <Entry Text="{Binding Username}"
+                                       Placeholder="Username"
+                                       Style="{StaticResource LoginEntry}"
+                                       HorizontalOptions="FillAndExpand"
+                                       VerticalOptions="Center" />
+                            </StackLayout>
                         </Border>
-                        <Entry Text="{Binding Password}" Placeholder="Password" 
-                               Style="{StaticResource LoginEntry}" IsPassword="True" />
-                    </StackLayout>
-                </Border>
-                <!-- Remember me & Forgot Password -->
-                <StackLayout Orientation="Horizontal" Margin="0,0,0,0" Padding="0" Spacing="-10">
-                    <CheckBox IsChecked="False" />
-                    <Label Text="Remember me"
-                           Style="{StaticResource LoginCheckboxLabel}" />
-                    <Label Text="Forgot Password"
-                           Style="{StaticResource LoginLinkLabelMicro}" />
-                </StackLayout>
 
-                <!-- Sign in Button -->
-                <Button Text="SIGN IN" Command="{Binding LoginCommand}"
-                        Style="{StaticResource ConfirmButton}"  />
+                        <!-- Password -->
+                        <Border Style="{StaticResource LoginBaseBorder}">
+                            <StackLayout Orientation="Horizontal">
+                                <Border Style="{StaticResource LoginImageBorder}">
+                                    <Image Source="password_icon.png"
+                                           Style="{StaticResource LoginImage}" />
+                                </Border>
+                                <Entry Text="{Binding Password}"
+                                       Placeholder="Password"
+                                       IsPassword="True"
+                                       Style="{StaticResource LoginEntry}"
+                                       HorizontalOptions="FillAndExpand"
+                                       VerticalOptions="Center" />
+                            </StackLayout>
+                        </Border>
+                    </VerticalStackLayout>
 
-                <!-- Register new user -->
-                <HorizontalStackLayout HorizontalOptions="CenterAndExpand"
-                                       Margin="0,20,0,0" Padding="0">
-                    <Label Text="New user?"
-                           Style="{StaticResource LoginPromptLabel}" />
-                    <Label Text=" Sign Up"
-                           Style="{StaticResource LoginLinkLabelSmall}">
-                        <Label.GestureRecognizers>
-                            <TapGestureRecognizer Tapped="OnRegisterClicked" NumberOfTapsRequired="1" />
-                        </Label.GestureRecognizers>
-                    </Label>
-                </HorizontalStackLayout>
-            </VerticalStackLayout>
-        </Grid>
+                    <!-- Sign In (full-width primary) -->
+                    <Button Text="Sign In"
+                            Command="{Binding LoginCommand}"
+                            Style="{StaticResource PrimaryActionButtonStyle}" />
+
+                    <!-- Register link -->
+                    <HorizontalStackLayout HorizontalOptions="Center"
+                                           Spacing="4">
+                        <Label Text="No account?"
+                               Style="{StaticResource LoginPromptLabel}"
+                               VerticalTextAlignment="Center" />
+                        <Label Text="Register"
+                               Style="{StaticResource LoginLinkLabelSmall}"
+                               VerticalTextAlignment="Center">
+                            <Label.GestureRecognizers>
+                                <TapGestureRecognizer Tapped="OnRegisterClicked"
+                                                      NumberOfTapsRequired="1" />
+                            </Label.GestureRecognizers>
+                        </Label>
+                    </HorizontalStackLayout>
+
+                </VerticalStackLayout>
+            </Grid>
+        </Border>
     </Grid>
 </ContentPage>
