@@ -17,8 +17,9 @@
               Padding="8" >
 
             <!-- Navigation bar at the Top -->
-            <other:TopNavBarView Title="Trade" Grid.Row="0"
-                                  Grid.ColumnSpan="3" />
+            <other:TopNavBarView Grid.Row="0"
+                                 Grid.ColumnSpan="3"
+                                 BindingContext="{Binding TopNavBarVm}" />
 
             <!-- Stock picker and price display -->
             <Border Style="{StaticResource TradeContentOutline}"

@@ -14,7 +14,8 @@
           Padding="0,0,0,8">
 
         <!-- Top nav -->
-        <navbar:TopNavBarView Title="Portfolio" Grid.Row="0" />
+        <navbar:TopNavBarView Grid.Row="0"
+                              BindingContext="{Binding TopNavBarVm}" />
 
         <!-- Page heading -->
         <Grid Grid.Row="1"
