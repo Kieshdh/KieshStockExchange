@@ -18,6 +18,7 @@ public interface IDataBaseService
 
     #region User operations
     Task<List<User>> GetUsersAsync(CancellationToken ct = default);
+    Task<(List<User> Items, int Total)> GetUsersPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default);
     Task<User?> GetUserById(int userId, CancellationToken ct = default);
     Task<User?> GetUserByUsername(string username, CancellationToken ct = default);
     Task<bool> UserExists(int userId, CancellationToken ct = default);
@@ -52,6 +53,7 @@ public interface IDataBaseService
 
     #region Order operations
     Task<List<Order>> GetOrdersAsync(CancellationToken ct = default);
+    Task<(List<Order> Items, int Total)> GetOrdersPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, string? statusFilter, CancellationToken ct = default);
     Task<Order?> GetOrderById(int orderId, CancellationToken ct = default);
     Task<List<Order>> GetOrdersByIds(List<int> orderIds, CancellationToken ct = default);
     Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default);
@@ -65,6 +67,7 @@ public interface IDataBaseService
 
     #region Transaction operations
     Task<List<Transaction>> GetTransactionsAsync(CancellationToken ct = default);
+    Task<(List<Transaction> Items, int Total)> GetTransactionsPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default);
     Task<Transaction?> GetTransactionById(int transactionId, CancellationToken ct = default);
     Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default);
     Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default);
@@ -78,6 +81,7 @@ public interface IDataBaseService
 
     #region Position operations
     Task<List<Position>> GetPositionsAsync(CancellationToken ct = default);
+    Task<(List<Position> Items, int Total)> GetPositionsPageAsync(int stockId, int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default);
     Task<Position?> GetPositionById(int positionId, CancellationToken ct = default);
     Task<List<Position>> GetPositionsByUserId(int userId, CancellationToken ct = default);
     Task<Position?> GetPositionByUserIdAndStockId(int userId, int stockId, CancellationToken ct = default);
@@ -90,6 +94,7 @@ public interface IDataBaseService
 
     #region Fund operations
     Task<List<Fund>> GetFundsAsync(CancellationToken ct = default);
+    Task<(List<int> UserIds, int Total)> GetFundsUserIdsPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default);
     Task<Fund?> GetFundById(int fundId, CancellationToken ct = default);
     Task<List<Fund>> GetFundsByUserId(int userId, CancellationToken ct = default);
     Task<Fund?> GetFundByUserIdAndCurrency(int userId, CurrencyType currency, CancellationToken ct = default);

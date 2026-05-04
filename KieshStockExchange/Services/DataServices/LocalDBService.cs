@@ -219,6 +219,37 @@ public class LocalDBService: IDataBaseService, IDisposable
         return await RunDbAsync(() => _db.Table<User>().ToListAsync(), ct);
     }
 
+    public async Task<(List<User> Items, int Total)> GetUsersPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(async () =>
+        {
+            var q = _db.Table<User>();
+            if (!string.IsNullOrWhiteSpace(filter))
+            {
+                if (int.TryParse(filter.Trim(), out var id))
+                    q = q.Where(u => u.UserId == id);
+                else
+                {
+                    string f = filter.Trim();
+                    q = q.Where(u => u.Username.Contains(f));
+                }
+            }
+            var total = await q.CountAsync();
+            var ordered = (sortKey, desc) switch
+            {
+                ("Username", true)  => q.OrderByDescending(u => u.Username),
+                ("Username", false) => q.OrderBy(u => u.Username),
+                ("UserId",   true)  => q.OrderByDescending(u => u.UserId),
+                ("UserId",   false) => q.OrderBy(u => u.UserId),
+                (_,          true)  => q.OrderByDescending(u => u.CreatedAt),
+                (_,          false) => q.OrderBy(u => u.CreatedAt),
+            };
+            var items = await ordered.Skip(skip).Take(take).ToListAsync();
+            return (items, total);
+        }, ct);
+    }
+
     public async Task<User?> GetUserById(int userId, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
@@ -438,6 +469,33 @@ public class LocalDBService: IDataBaseService, IDisposable
         return await RunDbAsync(() => _db.Table<Order>().ToListAsync(), ct);
     }
 
+    public async Task<(List<Order> Items, int Total)> GetOrdersPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, string? statusFilter, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(async () =>
+        {
+            var q = _db.Table<Order>().Where(o => o.CreatedAt >= fromUtc && o.CreatedAt <= toUtc);
+            if (!string.IsNullOrWhiteSpace(statusFilter))
+                q = q.Where(o => o.Status == statusFilter);
+            var total = await q.CountAsync();
+            var ordered = (sortKey, desc) switch
+            {
+                ("OrderId",  true)  => q.OrderByDescending(o => o.OrderId),
+                ("OrderId",  false) => q.OrderBy(o => o.OrderId),
+                ("UserId",   true)  => q.OrderByDescending(o => o.UserId),
+                ("UserId",   false) => q.OrderBy(o => o.UserId),
+                ("StockId",  true)  => q.OrderByDescending(o => o.StockId),
+                ("StockId",  false) => q.OrderBy(o => o.StockId),
+                ("Quantity", true)  => q.OrderByDescending(o => o.Quantity),
+                ("Quantity", false) => q.OrderBy(o => o.Quantity),
+                (_,          true)  => q.OrderByDescending(o => o.CreatedAt),
+                (_,          false) => q.OrderBy(o => o.CreatedAt),
+            };
+            var items = await ordered.Skip(skip).Take(take).ToListAsync();
+            return (items, total);
+        }, ct);
+    }
+
     public async Task<Order?> GetOrderById(int orderId, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
@@ -533,6 +591,29 @@ public class LocalDBService: IDataBaseService, IDisposable
     {
         await InitializeAsync(ct);
         return await RunDbAsync(() => _db.Table<Transaction>().ToListAsync(), ct);
+    }
+
+    public async Task<(List<Transaction> Items, int Total)> GetTransactionsPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(async () =>
+        {
+            var q = _db.Table<Transaction>().Where(t => t.Timestamp >= fromUtc && t.Timestamp <= toUtc);
+            var total = await q.CountAsync();
+            var ordered = (sortKey, desc) switch
+            {
+                ("TransactionId", true)  => q.OrderByDescending(t => t.TransactionId),
+                ("TransactionId", false) => q.OrderBy(t => t.TransactionId),
+                ("StockId",       true)  => q.OrderByDescending(t => t.StockId),
+                ("StockId",       false) => q.OrderBy(t => t.StockId),
+                ("Quantity",      true)  => q.OrderByDescending(t => t.Quantity),
+                ("Quantity",      false) => q.OrderBy(t => t.Quantity),
+                (_,               true)  => q.OrderByDescending(t => t.Timestamp),
+                (_,               false) => q.OrderBy(t => t.Timestamp),
+            };
+            var items = await ordered.Skip(skip).Take(take).ToListAsync();
+            return (items, total);
+        }, ct);
     }
 
     public async Task<Transaction?> GetTransactionById(int transactionId, CancellationToken ct = default)
@@ -634,6 +715,31 @@ public class LocalDBService: IDataBaseService, IDisposable
         return await RunDbAsync(() => _db.Table<Position>().ToListAsync(), ct);
     }
 
+    public async Task<(List<Position> Items, int Total)> GetPositionsPageAsync(int stockId, int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(async () =>
+        {
+            var q = _db.Table<Position>().Where(p => p.StockId == stockId);
+            if (!string.IsNullOrWhiteSpace(filter) && int.TryParse(filter.Trim(), out var userId))
+                q = q.Where(p => p.UserId == userId);
+            var total = await q.CountAsync();
+            var ordered = (sortKey, desc) switch
+            {
+                ("UserId",   true)  => q.OrderByDescending(p => p.UserId),
+                ("UserId",   false) => q.OrderBy(p => p.UserId),
+                ("Quantity", true)  => q.OrderByDescending(p => p.Quantity),
+                ("Quantity", false) => q.OrderBy(p => p.Quantity),
+                ("Reserved", true)  => q.OrderByDescending(p => p.ReservedQuantity),
+                ("Reserved", false) => q.OrderBy(p => p.ReservedQuantity),
+                (_,          true)  => q.OrderByDescending(p => p.UserId),
+                (_,          false) => q.OrderBy(p => p.UserId),
+            };
+            var items = await ordered.Skip(skip).Take(take).ToListAsync();
+            return (items, total);
+        }, ct);
+    }
+
     public async Task<Position?> GetPositionById(int positionId, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
@@ -720,6 +826,52 @@ public class LocalDBService: IDataBaseService, IDisposable
     {
         await InitializeAsync(ct);
         return await RunDbAsync(() => _db.Table<Fund>().ToListAsync(), ct);
+    }
+
+    // Returns paged user IDs for the Fund table. sortKey is "UserId" or a currency code ("USD", "EUR", …).
+    public async Task<(List<int> UserIds, int Total)> GetFundsUserIdsPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(async () =>
+        {
+            var knownCurrencies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "USD", "EUR", "GBP", "JPY", "CHF", "AUD" };
+
+            if (knownCurrencies.Contains(sortKey))
+            {
+                // Sort by TotalBalance for the given currency
+                string code = sortKey.ToUpperInvariant();
+                var q = _db.Table<Fund>().Where(f => f.Currency == code);
+                if (!string.IsNullOrWhiteSpace(filter) && int.TryParse(filter.Trim(), out var filterId))
+                    q = q.Where(f => f.UserId == filterId);
+                var total = await q.CountAsync();
+                var ordered = desc ? q.OrderByDescending(f => f.TotalBalance) : q.OrderBy(f => f.TotalBalance);
+                var funds = await ordered.Skip(skip).Take(take).ToListAsync();
+                return (funds.Select(f => f.UserId).ToList(), total);
+            }
+            else if (sortKey == "Reserved")
+            {
+                // Sort by ReservedBalance of USD fund
+                var q = _db.Table<Fund>().Where(f => f.Currency == "USD");
+                if (!string.IsNullOrWhiteSpace(filter) && int.TryParse(filter.Trim(), out var filterId))
+                    q = q.Where(f => f.UserId == filterId);
+                var total = await q.CountAsync();
+                var ordered = desc ? q.OrderByDescending(f => f.ReservedBalance) : q.OrderBy(f => f.ReservedBalance);
+                var funds = await ordered.Skip(skip).Take(take).ToListAsync();
+                return (funds.Select(f => f.UserId).ToList(), total);
+            }
+            else
+            {
+                // Sort by UserId — query Users table
+                var q = _db.Table<User>();
+                if (!string.IsNullOrWhiteSpace(filter) && int.TryParse(filter.Trim(), out var filterId))
+                    q = q.Where(u => u.UserId == filterId);
+                var total = await q.CountAsync();
+                var ordered = desc ? q.OrderByDescending(u => u.UserId) : q.OrderBy(u => u.UserId);
+                var users = await ordered.Skip(skip).Take(take).ToListAsync();
+                return (users.Select(u => u.UserId).ToList(), total);
+            }
+        }, ct);
     }
 
     public async Task<Fund?> GetFundById(int fundId, CancellationToken ct = default)
