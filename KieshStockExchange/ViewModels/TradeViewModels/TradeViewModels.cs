@@ -29,7 +29,9 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         }
     }
 
-    [ObservableProperty] private bool _showAll = false;
+    // Always show all orders/positions across stocks. The "Show all" toggle
+    // was removed from TradePage; this stays true for the lifetime of the VM.
+    [ObservableProperty] private bool _showAll = true;
     #endregion
 
     #region ViewModel Properties

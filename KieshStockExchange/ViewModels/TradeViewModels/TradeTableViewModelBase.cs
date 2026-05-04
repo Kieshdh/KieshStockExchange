@@ -10,7 +10,7 @@ public abstract partial class TradeTableViewModelBase<TRow> : StockAwareViewMode
 {
     [ObservableProperty] private ObservableCollection<TRow> _currentView = new();
 
-    protected bool ShowAll { get; private set; }
+    protected bool ShowAll { get; private set; } = true;
 
     protected TradeTableViewModelBase(ISelectedStockService selected, INotificationService notification)
         : base(selected, notification) { }

@@ -9,17 +9,21 @@
              xmlns:models="clr-namespace:KieshStockExchange.Models"
              Title="TradePage" >
     <ScrollView>
-        <Grid Style="{StaticResource MainGrid}" 
-              RowDefinitions="Auto, Auto, *, Auto" 
-              ColumnDefinitions="*, Auto, Auto" >
+        <Grid Style="{StaticResource MainGrid}"
+              RowDefinitions="Auto, Auto, *, Auto"
+              ColumnDefinitions="*, Auto, Auto"
+              RowSpacing="8"
+              ColumnSpacing="8"
+              Padding="8" >
 
             <!-- Navigation bar at the Top -->
             <other:TopNavBarView Title="Trade" Grid.Row="0"
                                   Grid.ColumnSpan="3" />
-            
+
             <!-- Stock picker and price display -->
             <Border Style="{StaticResource TradeContentOutline}"
-                   Grid.Row="1" Grid.Column="0">
+                   Grid.Row="1" Grid.Column="0"
+                   Margin="0">
                 <Grid ColumnDefinitions="Auto, Auto, Auto" ColumnSpacing="10">
                     <!-- Stock Picker -->
                     <Picker ItemsSource="{Binding Stocks}" Grid.Column="0"
@@ -35,35 +39,31 @@
                 </Grid>
             </Border>
 
-            <!-- The chart that displays the price-->
-            <Border Style="{StaticResource TradeContentOutline}"
-                   Grid.Row="2" Grid.Column="0">
-                <views:ChartView BindingContext="{Binding ChartVm}"/>
-            </Border>
+            <!-- The chart that displays the price - ChartView is its own card -->
+            <views:ChartView Grid.Row="2" Grid.Column="0"
+                             BindingContext="{Binding ChartVm}"/>
 
-            <!-- The Orderbook that displays current orders-->
-            <Border Style="{StaticResource TradeContentOutline}"
-                   Grid.Row="1" Grid.Column="1" Grid.RowSpan="2">
-                <views:OrderBookView BindingContext="{Binding OrderBookVm}"/>
-            </Border>
+            <!-- The Orderbook that displays current orders - OrderBookView is its own card -->
+            <views:OrderBookView Grid.Row="1" Grid.Column="1" Grid.RowSpan="2"
+                                 BindingContext="{Binding OrderBookVm}"/>
 
-            <!-- Shows the current orders, order history and current positions -->
+            <!-- Section for placing orders - PlaceOrderView is its own card.
+                 Spans only Rows 1-2 (same height as OrderBookView) so the
+                 trade-tabs section below can run full width. -->
+            <views:PlaceOrderView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
+                                  WidthRequest="260"
+                                  BindingContext="{Binding PlacingVm}"/>
+
+            <!-- Shows the current orders, order history and current positions.
+                 Spans all 3 columns so the table is as wide as the page. -->
             <Border Style="{StaticResource TradeContentOutline}"
-                    Grid.Row="3" Grid.ColumnSpan="2">
+                    Grid.Row="3" Grid.ColumnSpan="3"
+                    Margin="0">
                 <other:SegmentedTabView HeaderContainerHorizontalOptions="Start"
-                        SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
-                        UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}" >
-                    <!-- Header right side -->
-                    <other:SegmentedTabView.HeaderRightContent>
-                        <HorizontalStackLayout Spacing="8" Padding="8,0"
-                                   VerticalOptions="Center" >
-                            <Label Text="Show all" Style="{StaticResource SelectedStockHeaderLabel}" />
-                            <!-- Bind to a bool on the TradePage ViewModel -->
-                            <CheckBox IsChecked="{Binding Source={x:Reference TradePageRoot},
-                                      Path=BindingContext.ShowAll, Mode=TwoWay}"
-                                      VerticalOptions="Center" />
-                        </HorizontalStackLayout>
-                    </other:SegmentedTabView.HeaderRightContent>
+                        ContainerStyle="{StaticResource SegmentedRailContainer}"
+                        SelectedButtonStyle="{StaticResource RailSegmentSelected}"
+                        UnselectedButtonStyle="{StaticResource RailSegmentUnselected}"
+                        ShowUnderline="True" >
 
                     <!-- Content -->
                     <other:SegmentedTabView.Tabs>
@@ -100,12 +100,6 @@
                         </other:SegmentedTabItem>
                     </other:SegmentedTabView.Tabs>
                 </other:SegmentedTabView>
-            </Border>
-
-            <!-- Section for placing orders -->
-            <Border Style="{StaticResource TradeContentOutline}"
-                   Grid.Column="2" Grid.Row="1" Grid.RowSpan="3" MinimumWidthRequest="300">
-                <views:PlaceOrderView BindingContext="{Binding PlacingVm}"/>
             </Border>
         </Grid>
     </ScrollView>
