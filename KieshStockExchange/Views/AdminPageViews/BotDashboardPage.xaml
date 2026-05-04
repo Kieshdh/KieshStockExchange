@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+             xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
+             x:Class="KieshStockExchange.Views.AdminPageViews.BotDashboardPage"
+             x:Name="BotDashboardPageRoot"
+             Title="Bot Dashboard"
+             x:DataType="vm:BotDashboardViewModel">
+
+    <Grid Style="{StaticResource MainGrid}"
+          RowDefinitions="Auto,Auto,*"
+          RowSpacing="8"
+          Padding="0,0,0,8">
+
+        <!-- Top nav -->
+        <navbar:TopNavBarView Grid.Row="0"
+                              BindingContext="{Binding TopNavBarVm}" />
+
+        <!-- Page heading -->
+        <Grid Grid.Row="1"
+              Style="{StaticResource PageHeadingGrid}">
+            <Label Grid.Column="0"
+                   Text="AI Bots"
+                   Style="{StaticResource PageHeadingTitle}" />
+            <Label Grid.Column="1"
+                   Text="Live status, controls, and recent activity for the trading bots"
+                   Style="{StaticResource PageHeadingSub}" />
+        </Grid>
+
+        <!-- Bot dashboard body -->
+        <ScrollView Grid.Row="2" Padding="24,0,24,0">
+            <VerticalStackLayout Spacing="10">
+
+                <!-- Header row: title + status + start/stop -->
+                <Border Style="{StaticResource AdminCardStyle}">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto" ColumnSpacing="8">
+                        <Label Grid.Column="0" Text="AI Bot Dashboard"
+                               Style="{StaticResource AdminCardTitle}" />
+
+                        <Ellipse Grid.Column="1" Style="{StaticResource AdminStatusDot.Online}"
+                                 IsVisible="{Binding IsRunning}" />
+                        <Ellipse Grid.Column="1" Style="{StaticResource AdminStatusDot.Offline}"
+                                 IsVisible="{Binding IsRunning, Converter={StaticResource InvertedBoolConverter}}" />
+
+                        <Label Grid.Column="2" Text="{Binding StatusText}"
+                               Style="{StaticResource AdminMetricValue}" />
+
+                        <Button Grid.Column="4" Text="Start"
+                                Style="{StaticResource AdminPrimaryButton}"
+                                Command="{Binding StartBotsCommand}"
+                                IsVisible="{Binding IsRunning, Converter={StaticResource InvertedBoolConverter}}" />
+                        <Button Grid.Column="5" Text="Stop"
+                                Style="{StaticResource AdminDangerButton}"
+                                Command="{Binding StopBotsCommand}"
+                                IsVisible="{Binding IsRunning}" />
+                    </Grid>
+                </Border>
+
+                <!-- KPI card grid: 4 cols × 2 rows -->
+                <Grid ColumnDefinitions="*,*,*,*"
+                      RowDefinitions="Auto,Auto"
+                      ColumnSpacing="10"
+                      RowSpacing="10"
+                      Padding="12,0">
+
+                    <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource AdminBotStatCard}">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Loaded" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Text="{Binding LoadedBots}" Style="{StaticResource AdminBotStatValue}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource AdminBotStatCard}">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Online" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Text="{Binding OnlineBots}" Style="{StaticResource AdminBotStatValue}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource AdminBotStatCard}">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Cap" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Text="{Binding ActiveBotCap, TargetNullValue=none, FallbackValue=none}"
+                                   Style="{StaticResource AdminBotStatValue}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource AdminBotStatCard}">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Tick" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Text="{Binding TickCount}" Style="{StaticResource AdminBotStatValue}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource AdminBotStatCard}">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Trades" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Text="{Binding TradesPlaced}" Style="{StaticResource AdminBotStatValue}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource AdminBotStatCard}">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Failures" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Text="{Binding Failures}" Style="{StaticResource AdminBotStatValue}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource AdminBotStatCard}">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Uptime" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Text="{Binding UptimeText}" Style="{StaticResource AdminBotStatValue}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Row="1" Grid.Column="3" Style="{StaticResource AdminBotStatCard}">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Last fill" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Text="{Binding LastTradeText}" Style="{StaticResource AdminBotStatValue}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                </Grid>
+
+                <!-- Cap setter -->
+                <Border Style="{StaticResource AdminCardStyle}">
+                    <Grid ColumnDefinitions="Auto,120,Auto,Auto,*" ColumnSpacing="8">
+                        <Label Grid.Column="0" Text="Active bot cap"
+                               Style="{StaticResource AdminMetricLabel}"
+                               VerticalOptions="Center" />
+                        <Entry Grid.Column="1" Style="{StaticResource AdminEntry}"
+                               Keyboard="Numeric" Placeholder="no cap"
+                               Text="{Binding BotCapText, Mode=TwoWay}" />
+                        <Button Grid.Column="2" Text="Apply"
+                                Style="{StaticResource AdminPrimaryButton}"
+                                Command="{Binding ApplyBotCapCommand}" />
+                        <Label Grid.Column="4" Text="Capped at runtime; resets on app restart."
+                               Style="{StaticResource AdminMetricLabel}"
+                               HorizontalOptions="End" VerticalOptions="Center" />
+                    </Grid>
+                </Border>
+
+                <!-- 24h stats -->
+                <Border Style="{StaticResource AdminCardStyle}">
+                    <VerticalStackLayout Spacing="10">
+                        <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
+                            <Label Grid.Column="0" Text="Last 24h"
+                                   Style="{StaticResource AdminCardSubtitle}"
+                                   VerticalOptions="Center" />
+                            <Button Grid.Column="1" Text="Refresh"
+                                    Style="{StaticResource AdminGhostButton}"
+                                    Command="{Binding Refresh24hStatsCommand}"
+                                    MinimumWidthRequest="70" />
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="16">
+                            <Label Grid.Column="0" Text="Trades"
+                                   Style="{StaticResource AdminBotStatLabel}"
+                                   VerticalOptions="Center" />
+                            <Label Grid.Column="1" Text="{Binding Last24hTrades}"
+                                   Style="{StaticResource AdminMetricValue}"
+                                   VerticalOptions="Center" />
+                            <Label Grid.Column="2" Text="Volume"
+                                   Style="{StaticResource AdminBotStatLabel}"
+                                   VerticalOptions="Center" />
+                            <Label Grid.Column="3" Text="{Binding Last24hVolumeText}"
+                                   Style="{StaticResource AdminMetricValue}"
+                                   VerticalOptions="Center" />
+                            <Label Grid.Column="4" Text="Active bots"
+                                   Style="{StaticResource AdminBotStatLabel}"
+                                   VerticalOptions="Center" />
+                            <Label Grid.Column="5" Text="{Binding Last24hActiveBots}"
+                                   Style="{StaticResource AdminMetricValue}"
+                                   VerticalOptions="Center" />
+                        </Grid>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- Recent failures -->
+                <Border Style="{StaticResource AdminCardStyle}">
+                    <Border Style="{StaticResource AdminInsetPanel}">
+                        <VerticalStackLayout Spacing="2">
+                            <Label Text="Recent failures" Style="{StaticResource AdminMetricLabel}" />
+                            <Label Text="{Binding RecentFailuresText}"
+                                   Style="{StaticResource AdminMutedNote}" />
+                        </VerticalStackLayout>
+                    </Border>
+                </Border>
+
+            </VerticalStackLayout>
+        </ScrollView>
+    </Grid>
+</ContentPage>
