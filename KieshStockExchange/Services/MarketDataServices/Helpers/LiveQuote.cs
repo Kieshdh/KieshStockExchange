@@ -21,8 +21,13 @@ public sealed partial class LiveQuote : ObservableObject
     [ObservableProperty] private decimal _open = 0m;
     [ObservableProperty] private decimal _high = 0m;
     [ObservableProperty] private decimal _low = 0m;
-    [ObservableProperty] private decimal _changePct = 0m;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBullish))]
+    [NotifyPropertyChangedFor(nameof(IsBearish))]
+    private decimal _changePct = 0m;
     [ObservableProperty] private int _volume = 0;
+    // Cumulative traded value for the session (sum of price*shares per tick).
+    [ObservableProperty] private decimal _dollarVolume = 0m;
 
     // Pre-formatted strings used by the UI
     [ObservableProperty] private string _lastPriceDisplay = "-";
@@ -30,6 +35,7 @@ public sealed partial class LiveQuote : ObservableObject
     [ObservableProperty] private string _highPriceDisplay = "-";
     [ObservableProperty] private string _lowPriceDisplay = "-";
     [ObservableProperty] private string _changePctDisplay = "-";
+    [ObservableProperty] private string _dollarVolumeDisplay = "-";
     #endregion
 
     #region Constructor
@@ -57,6 +63,7 @@ public sealed partial class LiveQuote : ObservableObject
             SessionStartUtc = TimeHelper.UtcStartOfDay(utcTime);
             Open = High = Low = price;
             Volume = 0;
+            DollarVolume = 0m;
         }
         // Ignore out-of-order ticks from previous sessions
         else if (utcTime.Date < SessionStartUtc.Date)
@@ -67,6 +74,7 @@ public sealed partial class LiveQuote : ObservableObject
         if (High == 0m || price > High) High = price;
         if (Low == 0m || price < Low) Low = price;
         Volume += shares;
+        DollarVolume += price * shares;
 
         // Only advance LastPrice/LastUpdated if the tick is newer or equal
         if (utcTime >= LastUpdated)
@@ -99,6 +107,10 @@ public sealed partial class LiveQuote : ObservableObject
         Open = open; High = high; Low = low;
         LastUpdated = lastUtc; LastPrice = lastPrice;
         Volume = Math.Max(0, sessionVolume);
+        // We don't have per-tick history at snapshot time; approximate dollar
+        // volume as shares * average(open, last). Re-derived correctly as soon
+        // as live ticks start applying via ApplyTick.
+        DollarVolume = Math.Max(0m, Volume * ((Open + LastPrice) / 2m));
         ChangePct = Open > 0 ? (LastPrice - Open) / Open * 100m : 0m;
 
         UpdatePriceDisplays();
@@ -113,6 +125,7 @@ public sealed partial class LiveQuote : ObservableObject
     private decimal _fmtHigh = decimal.MinValue;
     private decimal _fmtLow = decimal.MinValue;
     private decimal _fmtChangePct = decimal.MinValue;
+    private decimal _fmtDollarVolume = decimal.MinValue;
     private CurrencyType _fmtCurrency = (CurrencyType)(-1);
 
     // Reformat everything on currency change; otherwise only what actually moved.
@@ -146,8 +159,23 @@ public sealed partial class LiveQuote : ObservableObject
             _fmtChangePct = ChangePct;
             ChangePctDisplay = ChangePct >= 0 ? $"+{ChangePct:F2}%" : $"{ChangePct:F2}%";
         }
+        if (currencyChanged || _fmtDollarVolume != DollarVolume)
+        {
+            _fmtDollarVolume = DollarVolume;
+            DollarVolumeDisplay = CurrencyHelper.Format(DollarVolume, Currency);
+        }
     }
 
     public override string ToString() => $"LiveQuote: #{StockId} {Symbol} ({Currency})";
+    #endregion
+
+    #region Display helpers (for XAML data triggers)
+    /// <summary>True when the day-change is positive — used by Market/Trending
+    /// rows to colour the Change cell green via DataTrigger.</summary>
+    public bool IsBullish => ChangePct > 0m;
+
+    /// <summary>True when the day-change is negative — colours the Change
+    /// cell red.</summary>
+    public bool IsBearish => ChangePct < 0m;
     #endregion
 }
