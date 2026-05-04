@@ -8,7 +8,7 @@
     <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
 
         <!-- Table headers -->
-        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
+        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*,*"
               Style="{StaticResource TradeTableHeaderGrid}">
             <Label Grid.Column="0" Text="Symbol" Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="1" Text="Date"   Style="{StaticResource TradeTableHeaderLabel}" />
@@ -17,7 +17,8 @@
             <Label Grid.Column="4" Text="Qty"    Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="5" Text="Price"  Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="6" Text="Total"  Style="{StaticResource TradeTableHeaderLabel}" />
-            <Label Grid.Column="7" Text="Action" Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="7" Text="Status" Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="8" Text="Action" Style="{StaticResource TradeTableHeaderLabel}" />
         </Grid>
 
         <!-- Rows -->
@@ -32,7 +33,7 @@
 
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="vm:OpenOrderRow">
-                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
+                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*,*"
                               Style="{StaticResource TradeTableRowGrid}">
                             <Label Grid.Column="0" Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" />
                             <Label Grid.Column="1" Text="{Binding When}"   Style="{StaticResource TradeTableRowLabel}" />
@@ -42,8 +43,44 @@
                             <Label Grid.Column="5" Text="{Binding Price}"  Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="6" Text="{Binding Total}"  Style="{StaticResource TradeTableRowLabel}" />
 
+                            <!-- Status pill: Open vs Filled vs Cancelled.
+                                 Default is the muted Open look; data triggers
+                                 swap to BuyGreen for Filled, SellRed for Cancelled. -->
+                            <Border Grid.Column="7"
+                                    HorizontalOptions="Center"
+                                    VerticalOptions="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource StatusPillOpen}">
+                                        <Style.Triggers>
+                                            <DataTrigger TargetType="Border" Binding="{Binding Order.IsFilled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource BuyGreen}" />
+                                                <Setter Property="Stroke"     Value="Transparent" />
+                                            </DataTrigger>
+                                            <DataTrigger TargetType="Border" Binding="{Binding Order.IsCancelled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource SellRed}" />
+                                                <Setter Property="Stroke"     Value="Transparent" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Label Text="{Binding Order.StatusDisplay}">
+                                    <Label.Style>
+                                        <Style TargetType="Label" BasedOn="{StaticResource StatusPillLabelMuted}">
+                                            <Style.Triggers>
+                                                <DataTrigger TargetType="Label" Binding="{Binding Order.IsFilled}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource White}" />
+                                                </DataTrigger>
+                                                <DataTrigger TargetType="Label" Binding="{Binding Order.IsCancelled}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource White}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Label.Style>
+                                </Label>
+                            </Border>
+
                             <!-- Cancel action -->
-                            <Button Grid.Column="7" Text="✕"
+                            <Button Grid.Column="8" Text="✕"
                                     IsVisible="{Binding Order.IsOpen}"
                                     Style="{StaticResource TradeTableButton}"
                                     Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}},
