@@ -1,5 +1,7 @@
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.ViewModels.TradeViewModels;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KieshStockExchange.Views.TradePageViews;
 
@@ -7,6 +9,7 @@ public partial class ChartView : ContentView
 {
     private readonly CandleChartDrawable _drawable = new();
     private ChartViewModel? _vm;
+    private readonly IThemeService? _theme;
 
     // Pan-gesture tracking
     private int _panLastDelta;
@@ -19,9 +22,28 @@ public partial class ChartView : ContentView
         Chart.Drawable = _drawable;
         ChartPan.PanUpdated += OnPanUpdated;
 
+        // Re-pull the chart palette and repaint when the user switches theme,
+        // so candles/grid/axis colors follow the active theme dictionary
+        // alongside the GraphicsView's DynamicResource-driven BackgroundColor.
+        _theme = Application.Current?.Handler?.MauiContext?.Services?.GetService<IThemeService>();
+        if (_theme != null)
+            _theme.ThemeChanged += OnThemeChanged;
+        Unloaded += OnUnloaded;
+
 #if WINDOWS
         Chart.HandlerChanged += OnChartHandlerChanged;
 #endif
+    }
+
+    private void OnThemeChanged(object? sender, string newKey)
+    {
+        ApplyChartPalette();
+        Chart.Invalidate();
+    }
+
+    private void OnUnloaded(object? sender, EventArgs e)
+    {
+        if (_theme != null) _theme.ThemeChanged -= OnThemeChanged;
     }
 
     // Pull the palette from Colors.xaml so the drawable doesn't carry its own hex values.

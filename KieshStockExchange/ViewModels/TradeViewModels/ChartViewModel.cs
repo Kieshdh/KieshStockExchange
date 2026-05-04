@@ -35,7 +35,18 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly List<Candle> _candleBuffer = new();
     public IReadOnlyList<Candle> CandleItems => _candleBuffer;
 
+    // Last candle in the buffer; bound by ChartView's OHLCV overlay strip.
+    [ObservableProperty] private Candle? _latestCandle;
+
     public event Action? RedrawRequested;
+
+    // Keeps LatestCandle in sync with the buffer's last entry. Called from the
+    // same UI-thread blocks that mutate _candleBuffer, so the property setter
+    // fires PropertyChanged on the UI thread.
+    private void SyncLatestCandle()
+    {
+        LatestCandle = _candleBuffer.Count > 0 ? _candleBuffer[^1] : null;
+    }
 
     // Coalesce redraw notifications: many ticks per frame collapse into one paint.
     private int _redrawPending;
@@ -168,6 +179,7 @@ public partial class ChartViewModel : StockAwareViewModel
                 {
                     _candleBuffer.Clear();
                     OffsetFromLatest = 0;
+                    SyncLatestCandle();
                     RequestRedraw();
                 }).ConfigureAwait(false);
                 Key = null;
@@ -212,6 +224,7 @@ public partial class ChartViewModel : StockAwareViewModel
             // History from CandleService is already sorted; preserve order on insert.
             _candleBuffer.AddRange(history);
             OffsetFromLatest = 0; // snap to live on (re)load
+            SyncLatestCandle();
             RequestRedraw();
         }).ConfigureAwait(false);
 
@@ -229,6 +242,7 @@ public partial class ChartViewModel : StockAwareViewModel
                 await MainThread.InvokeOnMainThreadAsync(() =>
                 {
                     UpsertCandle(_candleBuffer, candle);
+                    SyncLatestCandle();
                     RequestRedraw();
                 });
             }

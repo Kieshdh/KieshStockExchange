@@ -4,7 +4,14 @@
              xmlns:models="clr-namespace:KieshStockExchange.Models"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartView">
 
-    <Grid Style="{StaticResource ChartFrame}">
+    <Border BackgroundColor="{DynamicResource ChartBg}"
+            Stroke="{DynamicResource Divider}"
+            StrokeThickness="1"
+            StrokeShape="RoundRectangle 10"
+            Padding="0">
+    <Grid RowDefinitions="Auto,*"
+          BackgroundColor="Transparent"
+          MinimumHeightRequest="320">
 
         <!-- Toolbar -->
         <Grid Grid.Row="0" Style="{StaticResource ChartToolbar}"
@@ -140,5 +147,61 @@
                 <PanGestureRecognizer x:Name="ChartPan" />
             </GraphicsView.GestureRecognizers>
         </GraphicsView>
+
+        <!-- OHLCV overlay: top-left of the chart canvas. InputTransparent so
+             pan / wheel gestures still reach the GraphicsView underneath. -->
+        <HorizontalStackLayout Grid.Row="1"
+                               VerticalOptions="Start"
+                               HorizontalOptions="Start"
+                               Margin="14,10,0,0"
+                               Spacing="14"
+                               InputTransparent="True">
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="O" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding LatestCandle.OpenDisplay, FallbackValue=''}"
+                       Style="{StaticResource ChartOhlcValue}" />
+            </HorizontalStackLayout>
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="H" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding LatestCandle.HighDisplay, FallbackValue=''}"
+                       Style="{StaticResource ChartOhlcValue}" />
+            </HorizontalStackLayout>
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="L" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding LatestCandle.LowDisplay, FallbackValue=''}"
+                       Style="{StaticResource ChartOhlcValue}" />
+            </HorizontalStackLayout>
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="C" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding LatestCandle.CloseDisplay, FallbackValue=''}">
+                    <Label.Style>
+                        <Style TargetType="Label" BasedOn="{StaticResource ChartOhlcValue}">
+                            <Style.Triggers>
+                                <DataTrigger TargetType="Label"
+                                             Binding="{Binding LatestCandle.IsBullish}" Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource ChartBull}" />
+                                </DataTrigger>
+                                <DataTrigger TargetType="Label"
+                                             Binding="{Binding LatestCandle.IsBearish}" Value="True">
+                                    <Setter Property="TextColor" Value="{DynamicResource ChartBear}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Label.Style>
+                </Label>
+            </HorizontalStackLayout>
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="VOL" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding LatestCandle.Volume, FallbackValue='', StringFormat='{0:N0}'}"
+                       Style="{StaticResource ChartOhlcValue}" />
+            </HorizontalStackLayout>
+
+        </HorizontalStackLayout>
     </Grid>
+    </Border>
 </ContentView>
