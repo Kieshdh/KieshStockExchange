@@ -1,4 +1,4 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -7,28 +7,23 @@ using KieshStockExchange.Services.DataServices;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-public abstract partial class BaseTableViewModel<TItem> : BaseViewModel
+public interface ILazyTab
+{
+    Task EnsureInitializedAsync();
+    Task RefreshAsync();
+}
+
+public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTab
 {
     #region Page Properties
-    // Backing storage for all rows
-    protected List<TItem> AllItems = new();
-
-    private List<TItem> CurrentView = new();
-
-    protected virtual IEnumerable<TItem> GetCurrentView() => AllItems;
-
     [ObservableProperty] private ObservableCollection<TItem> _pagedItems = new();
-
     [ObservableProperty] private int _pageNumber;
+    private int _total;
 
-    /// <summary>How many rows to show per page</summary>
     public int PageSize { get; set; } = 20;
 
-    /// <summary>Total number of pages</summary>
-    public int TotalPages =>
-        (int)Math.Ceiling((double)(CurrentView?.Count ?? 0) / PageSize);
+    public int TotalPages => (int)Math.Ceiling((double)_total / PageSize);
 
-    /// <summary>Which page-buttons to show in the pager</summary>
     public List<int> VisiblePageNumbers
     {
         get
@@ -49,10 +44,17 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel
     }
     #endregion
 
+    #region Sort / Filter state (set by subclasses)
+    protected string? SortKey;
+    protected bool SortDesc = true;
+    protected string? CurrentFilter;
+    #endregion
+
     #region Services, Commands and Constructor
     protected readonly IDataBaseService _db;
+    private CancellationTokenSource _loadCts = new();
+    private bool _initialized;
 
-    /// <summary>Command to jump to a given page</summary>
     public ICommand GoToPageCommand { get; }
 
     protected BaseTableViewModel(IDataBaseService dbService)
@@ -61,52 +63,55 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel
         GoToPageCommand = new Command<int>(page =>
         {
             PageNumber = page - 1;
-            RefreshPagedItems();
+            _ = RefreshAsync();
         });
     }
     #endregion
 
-    #region Methods
-    /// <summary>Call this once on startup to load data and seed the first page.</summary>
-    public async Task InitializeAsync()
+    #region Abstract contract
+    protected abstract Task<(IReadOnlyList<TItem> Items, int Total)> LoadPageAsync(
+        int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct);
+    #endregion
+
+    #region ILazyTab
+    public virtual async Task EnsureInitializedAsync()
     {
+        if (_initialized) return;
+        _initialized = true;
+        await RefreshAsync();
+    }
+
+    public async Task RefreshAsync()
+    {
+        _loadCts.Cancel();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
         IsBusy = true;
         try
         {
-            AllItems = await LoadItemsAsync();
-            PageNumber = 0;
-            RefreshPagedItems();
+            var (items, total) = await LoadPageAsync(PageNumber * PageSize, PageSize, SortKey, SortDesc, CurrentFilter, ct);
+            _total = total;
+            PagedItems.Clear();
+            foreach (var item in items)
+                PagedItems.Add(item);
+            OnPropertyChanged(nameof(TotalPages));
+            OnPropertyChanged(nameof(VisiblePageNumbers));
+            IsBusy = false;
         }
-        finally { IsBusy = false; }
+        catch (OperationCanceledException) { /* superseded by a newer request */ }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[{GetType().Name}] LoadPage failed: {ex.Message}");
+            IsBusy = false;
+        }
     }
+    #endregion
 
-    /// <summary>Derived classes implement this to fetch & map their rows.</summary>
-    protected abstract Task<List<TItem>> LoadItemsAsync();
-
-    /// <summary>Re-compute which items appear on the current page.</summary>
-    protected void RefreshPagedItems()
+    #region Helpers for subclasses
+    protected async Task ApplyViewChange()
     {
-        PagedItems.Clear();
-        if (AllItems == null) return;
-
-        CurrentView = GetCurrentView().ToList();
-
-        int start = PageNumber * PageSize;
-        for (int i = 0; i < PageSize && start + i < CurrentView.Count; i++)
-            PagedItems.Add(CurrentView[start + i]);
-
-        OnPropertyChanged(nameof(TotalPages));
-        OnPropertyChanged(nameof(VisiblePageNumbers));
-    }
-
-    /// <summary>
-    /// Called when the view changes (e.g. sorting, filtering) to reset to page 1 and re-page.
-    /// </summary>
-    protected void ApplyViewChange()
-    {
-        PageNumber = 0;        // back to first page
-        RefreshPagedItems();   // and re-page
+        PageNumber = 0;
+        await RefreshAsync();
     }
     #endregion
 }
-

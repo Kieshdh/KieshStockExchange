@@ -1,60 +1,89 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
-using KieshStockExchange.ViewModels.OtherViewModels;
 using System.Diagnostics;
-using System.Globalization;
-using System.Transactions;
-using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
 public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
 {
+    #region Date range + status filter
+    [ObservableProperty] private DateTime _fromDate = DateTime.UtcNow.Date.AddDays(-7);
+    [ObservableProperty] private DateTime _toDate = DateTime.UtcNow.Date.AddDays(1);
+    [ObservableProperty] private string _statusFilter = string.Empty;
+
+    partial void OnFromDateChanged(DateTime value) => _ = ApplyViewChange();
+    partial void OnToDateChanged(DateTime value) => _ = ApplyViewChange();
+    partial void OnStatusFilterChanged(string value) => _ = ApplyViewChange();
+    #endregion
+
+    // Cached stocks for display (small table, loaded once)
+    private Dictionary<int, Stock> _stocksById = new();
+    // Users are looked up per page from the page's distinct user IDs
+    private readonly IDataBaseService _dbRef;
+
     public OrderTableViewModel(IDataBaseService dbService) : base(dbService)
     {
-        Title = "Orders"; // from BaseViewModel
+        Title = "Orders";
+        SortKey = "CreatedAt";
+        SortDesc = true;
+        _dbRef = dbService;
     }
 
-    protected override async Task<List<OrderTableObject>> LoadItemsAsync()
+    protected override async Task<(IReadOnlyList<OrderTableObject> Items, int Total)> LoadPageAsync(
+        int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        IsBusy = true;
-        try
+        // Lazy-load stock catalog (small, cached after first fetch)
+        if (_stocksById.Count == 0)
         {
-            var rows = new List<OrderTableObject>();
-
-            // Fetch all data
-            var users = await _db.GetUsersAsync();
-            var stocks = await _db.GetStocksAsync();
-            var orders = await _db.GetOrdersAsync();
-
-            // Create fast lookup structures in memory.
-            var usersById = users.ToDictionary(u => u.UserId);
-            var stocksById = stocks.ToDictionary(s => s.StockId);
-
-            foreach (var order in orders)
-            {
-                // Get user and stock or default
-                if (!usersById.TryGetValue(order.UserId, out var user))
-                    user = new User { UserId = order.UserId, Username = "Unknown" };
-                if (!stocksById.TryGetValue(order.StockId, out var stock))
-                    stock = new Stock { StockId = order.StockId, CompanyName = "Unknown", Symbol = "-" };
-
-                // Create the table object
-                rows.Add(new OrderTableObject(order, user, stock));
-            }
-            // Sort by most recent first
-            rows.Sort((a, b) => b.Order.CreatedAt.CompareTo(a.Order.CreatedAt));
-            Debug.WriteLine($"The Order table has {rows.Count} orders.");
-            return rows;
+            var stocks = await _dbRef.GetStocksAsync(ct);
+            _stocksById = stocks.ToDictionary(s => s.StockId);
         }
-        catch (Exception ex)
+
+        string? statusArg = string.IsNullOrWhiteSpace(StatusFilter) ? null : StatusFilter;
+        var (orders, total) = await _dbRef.GetOrdersPageAsync(skip, take, sortKey ?? "CreatedAt", desc,
+            FromDate.ToUniversalTime(), ToDate.ToUniversalTime(), statusArg, ct);
+
+        if (orders.Count == 0) return (Array.Empty<OrderTableObject>(), total);
+
+        // Per-page user lookup: only the distinct users on this page
+        var userIds = orders.Select(o => o.UserId).Distinct().ToList();
+        var users = await Task.WhenAll(userIds.Select(id => _dbRef.GetUserById(id, ct)));
+        var usersById = users.Where(u => u != null).ToDictionary(u => u!.UserId, u => u!);
+
+        var rows = orders.Select(o =>
         {
-            Debug.WriteLine($"[OrderTableViewModel] Error loading orders: {ex.Message}");
-            return new List<OrderTableObject>();
-        }
-        finally { IsBusy = false; }
+            if (!usersById.TryGetValue(o.UserId, out var user))
+                user = new User { UserId = o.UserId, Username = "Unknown" };
+            if (!_stocksById.TryGetValue(o.StockId, out var stock))
+                stock = new Stock { StockId = o.StockId, CompanyName = "Unknown", Symbol = "-" };
+            return new OrderTableObject(o, user, stock);
+        }).ToList();
+
+        return (rows, total);
+    }
+
+    [RelayCommand]
+    private async Task SetLast7Days()
+    {
+        FromDate = DateTime.UtcNow.Date.AddDays(-7);
+        ToDate = DateTime.UtcNow.Date.AddDays(1);
+    }
+
+    [RelayCommand]
+    private async Task SetLast30Days()
+    {
+        FromDate = DateTime.UtcNow.Date.AddDays(-30);
+        ToDate = DateTime.UtcNow.Date.AddDays(1);
+    }
+
+    [RelayCommand]
+    private async Task SetAllTime()
+    {
+        FromDate = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        ToDate = DateTime.UtcNow.Date.AddDays(1);
     }
 }
 

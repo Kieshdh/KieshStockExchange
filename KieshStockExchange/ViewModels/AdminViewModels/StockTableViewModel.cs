@@ -1,4 +1,4 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
@@ -17,17 +17,18 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
         _market = market ?? throw new ArgumentNullException(nameof(market));
     }
 
-    protected override async Task<List<StockTableObject>> LoadItemsAsync()
+    protected override async Task<(IReadOnlyList<StockTableObject> Items, int Total)> LoadPageAsync(
+        int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        // Fetch all stocks and their latest prices
-        var rows = new List<StockTableObject>();
-        foreach (var stock in await _market.GetAllStocksAsync())
+        // Small table — load all stocks, prices come from the in-memory registry (O(1) each)
+        var stocks = (await _market.GetAllStocksAsync(ct)).OrderBy(s => s.StockId).ToList();
+        var rows = new List<StockTableObject>(stocks.Count);
+        foreach (var stock in stocks)
         {
-            var price = await _market.GetLastPriceAsync(stock.StockId, CurrencyType.USD);
+            var price = await _market.GetLastPriceAsync(stock.StockId, CurrencyType.USD, ct);
             rows.Add(new StockTableObject(stock, CurrencyType.USD, price));
         }
-        rows.Sort((a, b) => a.Stock.StockId.CompareTo(b.Stock.StockId));
-        return rows;
+        return (rows, rows.Count);
     }
 }
 
@@ -61,5 +62,4 @@ public partial class StockTableObject : ObservableObject
         _currency = currency;
         OnPropertyChanged(nameof(PriceDisplay));
     }
-
 }

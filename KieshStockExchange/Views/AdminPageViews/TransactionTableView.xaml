@@ -2,70 +2,78 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
-             x:Class="KieshStockExchange.Views.AdminPageViews.TransactionTableView"  >
+             x:Class="KieshStockExchange.Views.AdminPageViews.TransactionTableView"
+             x:Name="TransactionTableRoot">
 
-    <!-- Labels -->
-    <VerticalStackLayout>
-        <Grid ColumnDefinitions="50, 3*, 2*, *, *, 3*, 2*, 3*, 3" 
-              Style="{StaticResource TableHeaderGrid}" >
-            <Label Text="ID" Grid.Column="0" 
-                   Style="{StaticResource TableHeaderLabel}"/>
-            <Label Text="Timestamp" Grid.Column="1" 
-                   Style="{StaticResource TableHeaderLabel}"/>
-            <Label Text="Symbol" Grid.Column="2" 
-                   Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="BuyerId" Grid.Column="3" 
-                   Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="SellerId" Grid.Column="4" 
-                   Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Price" Grid.Column="5" 
-                   Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Quantity" Grid.Column="6" 
-                   Style="{StaticResource TableHeaderLabel}" />
-            <Label Text="Total Price" Grid.Column="7" 
-                   Style="{StaticResource TableHeaderLabel}" />
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Column headers -->
+        <Grid ColumnDefinitions="50, 3*, 2*, *, *, 3*, 2*, 3*, 3"
+              Style="{StaticResource TableHeaderGrid}">
+            <Label Text="ID"          Grid.Column="0" Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="Timestamp"   Grid.Column="1" Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="Symbol"      Grid.Column="2" Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="BuyerId"     Grid.Column="3" Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="SellerId"    Grid.Column="4" Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="Price"       Grid.Column="5" Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="Quantity"    Grid.Column="6" Style="{StaticResource TableHeaderLabel}"/>
+            <Label Text="Total Price" Grid.Column="7" Style="{StaticResource TableHeaderLabel}"/>
         </Grid>
 
-        <!-- CollectionView for displaying Stock data -->
-        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="1">
+        <!-- Date range toolbar -->
+        <HorizontalStackLayout Grid.Row="1" Spacing="8" Padding="10,4">
+            <Label Text="From:" VerticalOptions="Center"/>
+            <DatePicker Date="{Binding FromDate, Mode=TwoWay}" VerticalOptions="Center"/>
+            <Label Text="To:" VerticalOptions="Center"/>
+            <DatePicker Date="{Binding ToDate, Mode=TwoWay}" VerticalOptions="Center"/>
+            <Button Text="7d"  Command="{Binding SetLast7DaysCommand}"  Style="{StaticResource TableSortingButton}"/>
+            <Button Text="30d" Command="{Binding SetLast30DaysCommand}" Style="{StaticResource TableSortingButton}"/>
+            <Button Text="All" Command="{Binding SetAllTimeCommand}"    Style="{StaticResource TableSortingButton}"/>
+        </HorizontalStackLayout>
+
+        <!-- CollectionView -->
+        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="2">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:TransactionTableObject">
-                    <Grid ColumnDefinitions="50, 3*, 2*, *, *, 3*, 2*, 3*, 3" 
+                    <Grid ColumnDefinitions="50, 3*, 2*, *, *, 3*, 2*, 3*, 3"
                           Style="{StaticResource TableRowGrid}">
-                        <!-- Content -->
-                        <Label Text="{Binding Transaction.TransactionId}" Grid.Column="0" 
-                               Style="{StaticResource TableRowLabel}"/>
-                        <Label Text="{Binding Transaction.TimestampDisplay}" Grid.Column="1" 
-                               Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Stock.Symbol}" Grid.Column="2" 
-                               Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Buyer.UserId}" Grid.Column="3" 
-                               Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Seller.UserId}" Grid.Column="4" 
-                               Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Transaction.PriceDisplay}" Grid.Column="5" 
-                               Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Transaction.Quantity}" Grid.Column="6" 
-                               Style="{StaticResource TableRowLabel}" />
-                        <Label Text="{Binding Transaction.TotalAmountDisplay}" Grid.Column="7" 
-                           Style="{StaticResource TableRowLabel}" />
+                        <Label Text="{Binding Transaction.TransactionId}"   Grid.Column="0" Style="{StaticResource TableRowLabel}"/>
+                        <Label Text="{Binding Transaction.TimestampDisplay}" Grid.Column="1" Style="{StaticResource TableRowLabel}"/>
+                        <Label Text="{Binding Stock.Symbol}"                Grid.Column="2" Style="{StaticResource TableRowLabel}"/>
+                        <Label Text="{Binding Buyer.UserId}"                Grid.Column="3" Style="{StaticResource TableRowLabel}"/>
+                        <Label Text="{Binding Seller.UserId}"               Grid.Column="4" Style="{StaticResource TableRowLabel}"/>
+                        <Label Text="{Binding Transaction.PriceDisplay}"    Grid.Column="5" Style="{StaticResource TableRowLabel}"/>
+                        <Label Text="{Binding Transaction.Quantity}"        Grid.Column="6" Style="{StaticResource TableRowLabel}"/>
+                        <Label Text="{Binding Transaction.TotalAmountDisplay}" Grid.Column="7" Style="{StaticResource TableRowLabel}"/>
 
-                        <!-- Vertical Lines -->
                         <BoxView Grid.Column="0" Style="{StaticResource TableVerticalSeparator}"/>
-                        <BoxView Grid.Column="1" Style="{StaticResource TableVerticalSeparator}" />
-                        <BoxView Grid.Column="2" Style="{StaticResource TableVerticalSeparator}" />
-                        <BoxView Grid.Column="3" Style="{StaticResource TableVerticalSeparator}" />
-                        <BoxView Grid.Column="4" Style="{StaticResource TableVerticalSeparator}" />
-                        <BoxView Grid.Column="5" Style="{StaticResource TableVerticalSeparator}" />
-                        <BoxView Grid.Column="6" Style="{StaticResource TableVerticalSeparator}" />
-                        <BoxView Grid.Column="7" Style="{StaticResource TableVerticalSeparator}" />
-                        <BoxView Grid.Column="8" Style="{StaticResource TableVerticalSeparator}" />
+                        <BoxView Grid.Column="1" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="2" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="3" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="4" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="5" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="6" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="7" Style="{StaticResource TableVerticalSeparator}"/>
+                        <BoxView Grid.Column="8" Style="{StaticResource TableVerticalSeparator}"/>
 
-                        <!-- Horizontal line (bottom of the row) -->
-                        <BoxView Style="{StaticResource TableHorizontalSeparator}" />
+                        <BoxView Style="{StaticResource TableHorizontalSeparator}"/>
                     </Grid>
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>
-    </VerticalStackLayout>
+
+        <!-- Pager -->
+        <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}" Grid.Row="3"
+                    BindableLayout.ItemsSource="{Binding VisiblePageNumbers}">
+            <BindableLayout.ItemTemplate>
+                <DataTemplate>
+                    <Button Text="{Binding .}"
+                            Command="{Binding Source={x:Reference TransactionTableRoot}, Path=BindingContext.GoToPageCommand}"
+                            CommandParameter="{Binding .}"
+                            Style="{StaticResource PageNumberButton}"/>
+                </DataTemplate>
+            </BindableLayout.ItemTemplate>
+        </HorizontalStackLayout>
+
+    </Grid>
 </ContentView>

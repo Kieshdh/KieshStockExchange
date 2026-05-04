@@ -1,45 +1,35 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using System.Diagnostics;
-using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
 public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
 {
-    public UserTableViewModel(IDataBaseService dbService) : base(dbService)
+    [ObservableProperty] private string _idFilter = string.Empty;
+
+    partial void OnIdFilterChanged(string value)
     {
-        Title = "Users"; // from BaseViewModel
+        CurrentFilter = string.IsNullOrWhiteSpace(value) ? null : value;
+        _ = ApplyViewChange();
     }
 
-    protected override async Task<List<UserTableObject>> LoadItemsAsync()
+    public UserTableViewModel(IDataBaseService dbService) : base(dbService)
     {
-        IsBusy = true;
-        try
-        {
-            var rows = new List<UserTableObject>();
+        Title = "Users";
+        SortKey = "CreatedAt";
+        SortDesc = true;
+    }
 
-            // Fetch all data
-            var users = await _db.GetUsersAsync();
-
-            // Convert to table objects
-            foreach (var user in users)
-                rows.Add(new UserTableObject(_db, user));
-
-            // Sort by most recent first
-            rows = rows.OrderByDescending(r => r.User.CreatedAt).ToList();
-            Debug.WriteLine($"The User table has {rows.Count} users.");
-            return rows;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Error loading users: {ex.Message}");
-            return new List<UserTableObject>();
-        }
-        finally { IsBusy = false; }
+    protected override async Task<(IReadOnlyList<UserTableObject> Items, int Total)> LoadPageAsync(
+        int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
+    {
+        var (users, total) = await _db.GetUsersPageAsync(skip, take, sortKey ?? "CreatedAt", desc, filter, ct);
+        var rows = users.Select(u => new UserTableObject(_db, u)).ToList();
+        return (rows, total);
     }
 }
 
@@ -80,9 +70,8 @@ public partial class UserTableObject : ObservableObject
             return;
         }
 
-        // Attempt to save changes
         var saved = await SaveAsync();
-        if (!saved) // If save failed, revert changes
+        if (!saved)
         {
             await ResetAsync();
             SetBirthDateText();
@@ -99,16 +88,12 @@ public partial class UserTableObject : ObservableObject
     {
         try
         {
-            // Validate user data
             if (!VerifyUser()) return false;
-            // Extra safety check, should not happen
-            if (User.IsInvalid) 
+            if (User.IsInvalid)
             {
                 Debug.WriteLine($"User #{User.UserId} is invalid.");
                 return false;
             }
-
-            // Save to database
             await _db.UpsertUser(User);
             Debug.WriteLine($"User #{User.UserId} saved successfully.");
             return true;
@@ -148,10 +133,9 @@ public partial class UserTableObject : ObservableObject
             ? User.BirthDate.Value.ToString("dd/MM/yyyy")
             : string.Empty;
     }
-    
+
     private bool VerifyUser()
     {
-        // Verify Empty text
         if (string.IsNullOrWhiteSpace(BirthDateText) || string.IsNullOrWhiteSpace(User.Email) ||
             string.IsNullOrWhiteSpace(User.Username) || string.IsNullOrWhiteSpace(User.FullName))
         {
@@ -159,7 +143,6 @@ public partial class UserTableObject : ObservableObject
             return false;
         }
 
-        // Verify birth date
         if (!DateTime.TryParseExact(BirthDateText, "dd/MM/yyyy", null, System.Globalization.DateTimeStyles.None, out var parsedDate))
         {
             Debug.WriteLine("Invalid birth date format.");
@@ -172,28 +155,24 @@ public partial class UserTableObject : ObservableObject
             return false;
         }
 
-        // Verify email
         if (!User.IsValidEmail())
         {
             Debug.WriteLine("Invalid email format.");
             return false;
         }
 
-        // Verify username
         if (!User.IsValidUsername())
         {
             Debug.WriteLine("Invalid username format (must be alphanumeric and 5-20 characters).");
             return false;
         }
 
-        // Verify full name
         if (!User.IsValidName())
         {
             Debug.WriteLine("Invalid full name format (3-100 characters, letters and some punctuation).");
             return false;
         }
 
-        // All checks passed
         return true;
     }
     #endregion

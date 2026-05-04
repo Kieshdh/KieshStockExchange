@@ -48,30 +48,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:PosSortColumn.Reserved}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Row="1" Grid.Column="4" Style="{StaticResource SortingStackLayout}">
-                <Button Text="↓" Command="{Binding SetSortDescCommand}"
-                        Style="{StaticResource TableSortingButton}"
-                        CommandParameter="{x:Static vm:PosSortColumn.Price}" />
-                <Button Text="↑" Command="{Binding SetSortAscCommand}"
-                        Style="{StaticResource TableSortingButton}"
-                        CommandParameter="{x:Static vm:PosSortColumn.Price}" />
-            </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Row="1" Grid.Column="5" Style="{StaticResource SortingStackLayout}">
-                <Button Text="↓" Command="{Binding SetSortDescCommand}"
-                        Style="{StaticResource TableSortingButton}"
-                        CommandParameter="{x:Static vm:PosSortColumn.StockValue}" />
-                <Button Text="↑" Command="{Binding SetSortAscCommand}"
-                        Style="{StaticResource TableSortingButton}"
-                        CommandParameter="{x:Static vm:PosSortColumn.StockValue}" />
-            </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Row="1" Grid.Column="6" Style="{StaticResource SortingStackLayout}">
-                <Button Text="↓" Command="{Binding SetSortDescCommand}"
-                        Style="{StaticResource TableSortingButton}"
-                        CommandParameter="{x:Static vm:PosSortColumn.TotalValue}" />
-                <Button Text="↑" Command="{Binding SetSortAscCommand}"
-                        Style="{StaticResource TableSortingButton}"
-                        CommandParameter="{x:Static vm:PosSortColumn.TotalValue}" />
-            </HorizontalStackLayout>
+            <!-- Price/StockValue/TotalValue sorts removed: depend on live prices, not sortable in DB -->
         </Grid>
 
         <!-- CollectionView for displaying user data -->

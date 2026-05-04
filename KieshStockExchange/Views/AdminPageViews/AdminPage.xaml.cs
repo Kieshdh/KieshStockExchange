@@ -18,10 +18,4 @@ public partial class AdminPage : ContentPage
         base.OnAppearing();
         await _vm.InitializeAsync();
     }
-
-    protected override void OnDisappearing()
-    {
-        base.OnDisappearing();
-        _vm.OnDisappearing();
-    }
 }

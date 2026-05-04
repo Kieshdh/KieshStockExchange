@@ -1,4 +1,4 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
@@ -7,137 +7,84 @@ using System.Diagnostics;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-public enum FundSortColumn { None, UserId, Usd, Reserved, Eur, Gbp, Jpy, Chf, Aud, TotalValue }
+// TotalValue removed — requires FX conversion that the DB cannot order by
+public enum FundSortColumn { None, UserId, Usd, Reserved, Eur, Gbp, Jpy, Chf, Aud }
 public enum FundSortDir { Asc, Desc }
 
 public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
 {
-    #region Properties and Constructor
     public CurrencyType BaseCurrency = CurrencyType.USD;
 
     [ObservableProperty] private string _idFilter = string.Empty;
-    [ObservableProperty] private FundSortColumn _sortBy = FundSortColumn.None;
-    [ObservableProperty] private FundSortDir _sortDirection = FundSortDir.Desc;
 
-    partial void OnIdFilterChanged(string value) => ApplyViewChange(); // refresh on change
+    partial void OnIdFilterChanged(string value)
+    {
+        CurrentFilter = string.IsNullOrWhiteSpace(value) ? null : value;
+        _ = ApplyViewChange();
+    }
 
     public FundTableViewModel(IDataBaseService db) : base(db)
     {
-        Title = "Funds"; // For BaseViewModel
+        Title = "Funds";
+        SortKey = "UserId";
+        SortDesc = true;
     }
-    #endregion
 
-    #region Data loading
-    protected override async Task<List<FundTableObject>> LoadItemsAsync()
+    protected override async Task<(IReadOnlyList<FundTableObject> Items, int Total)> LoadPageAsync(
+        int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        IsBusy = true;
-        try
+        var (userIds, total) = await _db.GetFundsUserIdsPageAsync(skip, take, sortKey ?? "UserId", desc, filter, ct);
+        if (userIds.Count == 0) return (Array.Empty<FundTableObject>(), total);
+
+        var allFunds = await _db.GetFundsForUsersAsync(userIds, ct);
+        var byUser = allFunds.GroupBy(f => f.UserId)
+            .ToDictionary(g => g.Key, g => g.ToDictionary(f => f.CurrencyType, f => f));
+
+        var rows = new List<FundTableObject>();
+        foreach (var userId in userIds)
         {
-            var rows = new List<FundTableObject>();
+            if (!byUser.TryGetValue(userId, out var fundsDict))
+                fundsDict = new Dictionary<CurrencyType, Fund>();
 
-            // Fetch all data
-            var users = await _db.GetUsersAsync();
-            var allFunds = await _db.GetFundsAsync();
-
-            // Index existing funds by (UserId -> Currency)
-            var byUser = allFunds.GroupBy(f => f.UserId)
-                .ToDictionary(g => g.Key, g => g.ToDictionary(f => f.CurrencyType, f => f));
-
-            foreach (var user in users)
+            // Ensure all currencies are present
+            foreach (var c in CurrencyHelper.SupportedCurrencies)
             {
-                // Get the funds the user has
-                if (!byUser.TryGetValue(user.UserId, out var fundsDict))
-                    fundsDict = byUser[user.UserId] = new Dictionary<CurrencyType, Fund>();
-
-                // Ensure all currencies are represented
-                foreach (var c in CurrencyHelper.SupportedCurrencies)
-                {
-                    if (!fundsDict.TryGetValue(c, out var fund))
-                    {
-                        fund = new Fund { UserId = user.UserId, CurrencyType = c };
-                        fundsDict[c] = fund;
-                    }
-                }
-
-                // Create the table object
-                rows.Add(new FundTableObject(_db, user.UserId, fundsDict, BaseCurrency));
+                if (!fundsDict.ContainsKey(c))
+                    fundsDict[c] = new Fund { UserId = userId, CurrencyType = c };
             }
-            // Sort by UserId descending (most recent first)
-            rows = rows.OrderByDescending(r => r.UserId).ToList();
-            Debug.WriteLine($"The Fund table has {rows.Count} users.");
-            return rows;
+
+            rows.Add(new FundTableObject(_db, userId, fundsDict, BaseCurrency));
         }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Error loading funds: {ex.Message}");
-            return new List<FundTableObject>();
-        }
-        finally { IsBusy = false; }
+        return (rows, total);
     }
 
-    protected override IEnumerable<FundTableObject> GetCurrentView()
+    [RelayCommand]
+    private void SetSortDesc(FundSortColumn column)
     {
-        IEnumerable<FundTableObject> items = AllItems;
-
-        // ID filter on substring of UserId
-        if (!string.IsNullOrWhiteSpace(IdFilter))
-        {
-            var needle = IdFilter.Trim();
-            items = items.Where(r => r.UserId.ToString().Contains(needle, StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Sorting based on selected column and direction
-        items = (SortBy, SortDirection) switch
-        {
-            (FundSortColumn.UserId, FundSortDir.Desc) => items.OrderByDescending(r => r.UserId),
-            (FundSortColumn.UserId, FundSortDir.Asc) => items.OrderBy(r => r.UserId),
-
-            (FundSortColumn.Usd, FundSortDir.Desc) => items.OrderByDescending(r => r.UsdBalance),
-            (FundSortColumn.Usd, FundSortDir.Asc) => items.OrderBy(r => r.UsdBalance),
-
-            (FundSortColumn.Reserved, FundSortDir.Desc) => items.OrderByDescending(r => r.ReservedBalance),
-            (FundSortColumn.Reserved, FundSortDir.Asc) => items.OrderBy(r => r.ReservedBalance),
-
-            (FundSortColumn.Eur, FundSortDir.Desc) => items.OrderByDescending(r => r.EurBalance),
-            (FundSortColumn.Eur, FundSortDir.Asc) => items.OrderBy(r => r.EurBalance),
-
-            (FundSortColumn.Gbp, FundSortDir.Desc) => items.OrderByDescending(r => r.GbpBalance),
-            (FundSortColumn.Gbp, FundSortDir.Asc) => items.OrderBy(r => r.GbpBalance),
-
-            (FundSortColumn.Jpy, FundSortDir.Desc) => items.OrderByDescending(r => r.JpyBalance),
-            (FundSortColumn.Jpy, FundSortDir.Asc) => items.OrderBy(r => r.JpyBalance),
-
-            (FundSortColumn.Chf, FundSortDir.Desc) => items.OrderByDescending(r => r.ChfBalance),
-            (FundSortColumn.Chf, FundSortDir.Asc) => items.OrderBy(r => r.ChfBalance),
-
-            (FundSortColumn.Aud, FundSortDir.Desc) => items.OrderByDescending(r => r.AudBalance),
-            (FundSortColumn.Aud, FundSortDir.Asc) => items.OrderBy(r => r.AudBalance),
-
-            (FundSortColumn.TotalValue, FundSortDir.Desc) => items.OrderByDescending(r => r.TotalFundsValue),
-            (FundSortColumn.TotalValue, FundSortDir.Asc) => items.OrderBy(r => r.TotalFundsValue),
-
-            _ => items // keep default order if no sort selected
-        };
-
-        return items;
+        SortKey = ColumnToSortKey(column);
+        SortDesc = true;
+        _ = ApplyViewChange();
     }
-    #endregion
 
-    #region Commands
-    [RelayCommand] private void SetSortDesc(FundSortColumn column)
+    [RelayCommand]
+    private void SetSortAsc(FundSortColumn column)
     {
-        SortBy = column;
-        SortDirection = FundSortDir.Desc;
-        ApplyViewChange();
+        SortKey = ColumnToSortKey(column);
+        SortDesc = false;
+        _ = ApplyViewChange();
     }
 
-    [RelayCommand] private void SetSortAsc(FundSortColumn column)
+    private static string ColumnToSortKey(FundSortColumn column) => column switch
     {
-        SortBy = column;
-        SortDirection = FundSortDir.Asc;
-        ApplyViewChange();
-    }
-    #endregion
+        FundSortColumn.Usd      => "USD",
+        FundSortColumn.Reserved => "Reserved",
+        FundSortColumn.Eur      => "EUR",
+        FundSortColumn.Gbp      => "GBP",
+        FundSortColumn.Jpy      => "JPY",
+        FundSortColumn.Chf      => "CHF",
+        FundSortColumn.Aud      => "AUD",
+        _                       => "UserId",
+    };
 }
 
 public partial class FundTableObject : ObservableObject
@@ -156,7 +103,7 @@ public partial class FundTableObject : ObservableObject
     #region Table Properties
     public decimal UsdBalance => Usd.TotalBalance;
     public decimal ReservedBalance => Usd.ReservedBalance;
-    public decimal EurBalance => Usd.TotalBalance;
+    public decimal EurBalance => Eur.TotalBalance;
     public decimal GbpBalance => Gbp.TotalBalance;
     public decimal JpyBalance => Jpy.TotalBalance;
     public decimal ChfBalance => Chf.TotalBalance;
@@ -289,7 +236,7 @@ public partial class FundTableObject : ObservableObject
     [ObservableProperty] private int userId;
 
     public CurrencyType BaseCurrency;
-    
+
     private readonly IDataBaseService _db;
 
     public FundTableObject(IDataBaseService db, int userId, Dictionary<CurrencyType, Fund> fundsDict, CurrencyType baseCurrency)
@@ -298,7 +245,6 @@ public partial class FundTableObject : ObservableObject
         UserId = userId;
         _fundsDict = fundsDict;
         BaseCurrency = baseCurrency;
-
         UpdateTotalFundsValue();
     }
     #endregion
@@ -314,9 +260,8 @@ public partial class FundTableObject : ObservableObject
             return;
         }
 
-        // Attempt to save changes
         var saved = await SaveAsync();
-        if (!saved) // If save failed, revert changes
+        if (!saved)
         {
             await ResetAsync();
             UpdateBindings();
@@ -335,7 +280,6 @@ public partial class FundTableObject : ObservableObject
     {
         try
         {
-            // Validate all funds first
             foreach (var fund in _fundsDict.Values)
             {
                 if (fund.TotalBalance < 0)
@@ -345,7 +289,6 @@ public partial class FundTableObject : ObservableObject
                 }
             }
 
-            // Save all funds in a transaction
             await _db.RunInTransactionAsync(async ct =>
             {
                 foreach (var fund in _fundsDict.Values)
@@ -373,10 +316,7 @@ public partial class FundTableObject : ObservableObject
             foreach (var currency in CurrencyHelper.SupportedCurrencies)
             {
                 if (!fundsDict.ContainsKey(currency))
-                {
-                    var fund = new Fund { UserId = UserId, CurrencyType = currency };
-                    fundsDict[currency] = fund;
-                }
+                    fundsDict[currency] = new Fund { UserId = UserId, CurrencyType = currency };
             }
             _fundsDict = fundsDict;
             Debug.WriteLine($"Successfully reverted funds for user #{UserId}.");
@@ -397,7 +337,6 @@ public partial class FundTableObject : ObservableObject
         OnPropertyChanged(nameof(Jpy)); OnPropertyChanged(nameof(JpyBalanceDisplay));
         OnPropertyChanged(nameof(Chf)); OnPropertyChanged(nameof(ChfBalanceDisplay));
         OnPropertyChanged(nameof(Aud)); OnPropertyChanged(nameof(AudBalanceDisplay));
-
         UpdateTotalFundsValue();
     }
 

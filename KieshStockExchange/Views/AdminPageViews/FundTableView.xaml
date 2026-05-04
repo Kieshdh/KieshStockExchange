@@ -90,14 +90,7 @@
                         Style="{StaticResource TableSortingButton}"
                         CommandParameter="{x:Static vm:FundSortColumn.Aud}" />
             </HorizontalStackLayout>
-            <HorizontalStackLayout Grid.Row="1" Grid.Column="8" Style="{StaticResource SortingStackLayout}">
-                <Button Text="↓" Command="{Binding SetSortDescCommand}"
-                        Style="{StaticResource TableSortingButton}"
-                        CommandParameter="{x:Static vm:FundSortColumn.TotalValue}" />
-                <Button Text="↑" Command="{Binding SetSortAscCommand}"
-                        Style="{StaticResource TableSortingButton}"
-                        CommandParameter="{x:Static vm:FundSortColumn.TotalValue}" />
-            </HorizontalStackLayout>
+            <!-- TotalValue sort removed: requires live FX conversion, not sortable in DB -->
         </Grid>
 
         <!-- CollectionView for displaying user data -->

@@ -1,9 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Services.BackgroundServices;
 
@@ -22,25 +20,20 @@ public partial class AdminViewModel : BaseViewModel
     public OrderTableViewModel OrdersVm { get; }
     public PositionTableViewModel PositionsVm { get; }
     public FundTableViewModel FundsVm { get; }
-    public BotDashboardViewModel BotDashboardVm { get; }
 
     private readonly IExcelImportService ExcelService;
 
     public AdminViewModel(IExcelImportService excelService,
         UserTableViewModel usersVm, TransactionTableViewModel transactionsVm, OrderTableViewModel ordersVm,
-        StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm,
-        BotDashboardViewModel botDashboardVm)
+        StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm)
     {
         Title = "Admin Dashboard";
-
         UsersVm = usersVm;
         StocksVm = stocksVm;
         TransactionsVm = transactionsVm;
         OrdersVm = ordersVm;
         PositionsVm = positionsVm;
         FundsVm = fundsVm;
-        BotDashboardVm = botDashboardVm;
-
         ExcelService = excelService;
     }
 
@@ -50,13 +43,7 @@ public partial class AdminViewModel : BaseViewModel
         LoadingText = "Loading admin data…";
         try
         {
-            await Task.WhenAll(
-                UsersVm.InitializeAsync(),
-                StocksVm.InitializeAsync(),
-                TransactionsVm.InitializeAsync(),
-                OrdersVm.InitializeAsync(),
-                PositionsVm.InitializeAsync(),
-                FundsVm.InitializeAsync()).ConfigureAwait(false);
+            await UsersVm.EnsureInitializedAsync();
         }
         catch (Exception ex)
         {
@@ -69,28 +56,21 @@ public partial class AdminViewModel : BaseViewModel
             DoneLoading = true;
             LoadingText = string.Empty;
         }
-
-        BotDashboardVm.StartPolling();
     }
 
-    public void OnDisappearing()
+    partial void OnSelectedTabIndexChanged(int value) => _ = GetTabVm(value).EnsureInitializedAsync();
+
+    private ILazyTab GetTabVm(int index) => index switch
     {
-        BotDashboardVm.StopPolling();
-    }
+        0 => UsersVm,
+        1 => StocksVm,
+        2 => OrdersVm,
+        3 => TransactionsVm,
+        4 => FundsVm,
+        5 => PositionsVm,
+        _ => UsersVm
+    };
 
     [RelayCommand]
-    private async Task RefreshActiveTabAsync()
-    {
-        var task = SelectedTabIndex switch
-        {
-            0 => UsersVm.InitializeAsync(),
-            1 => StocksVm.InitializeAsync(),
-            2 => OrdersVm.InitializeAsync(),
-            3 => TransactionsVm.InitializeAsync(),
-            4 => FundsVm.InitializeAsync(),
-            5 => PositionsVm.InitializeAsync(),
-            _ => Task.CompletedTask
-        };
-        await task.ConfigureAwait(false);
-    }
+    private async Task RefreshActiveTabAsync() => await GetTabVm(SelectedTabIndex).RefreshAsync();
 }

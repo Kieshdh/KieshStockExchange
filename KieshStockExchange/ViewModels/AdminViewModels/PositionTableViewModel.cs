@@ -1,26 +1,22 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.MarketDataServices;
-using KieshStockExchange.ViewModels.OtherViewModels;
-using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Globalization;
-using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-public enum PosSortColumn { None, UserId, Quantity, Reserved, Price, StockValue, TotalValue }
+// Price, StockValue, TotalValue removed — depend on live FX that the DB cannot order by
+public enum PosSortColumn { None, UserId, Quantity, Reserved }
 public enum PosSortDir { Asc, Desc }
 
 public partial class PositionTableViewModel : BaseTableViewModel<PositionTableObject>
 {
-    #region Data properties 
-    public Dictionary<int, decimal> LatestPrices = new();  // Id → StockPrice
-    public Dictionary<int, Stock> Stocks = new(); // Id → Stock
+    #region Data properties
+    public Dictionary<int, Stock> Stocks = new();
     public Dictionary<int, string> StockSymbols => Stocks.ToDictionary(kv => kv.Key, kv => kv.Value.Symbol);
     public CurrencyType BaseCurrency = CurrencyType.USD;
 
@@ -28,25 +24,26 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
     private Stock? _pickerSelection;
     public Stock? PickerSelection
     {
-        get => _pickerSelection ?? null;
+        get => _pickerSelection;
         set
         {
             if (value is null || value == _pickerSelection || value.StockId <= 0) return;
-            _pickerSelection = value; // only to reflect the UI's selected item immediately
-            // Update all table objects to the new stock
-            foreach (var item in AllItems)
-                item.CurrentStockId = value.StockId;
-            OnPropertyChanged(); // ensures the picker reflects the new selection
+            _pickerSelection = value;
+            OnPropertyChanged();
+            PageNumber = 0;
+            _ = RefreshAsync();
         }
     }
     #endregion
 
-    #region Filtering and Sorting
+    #region Filter and Sorting
     [ObservableProperty] private string _idFilter = string.Empty;
-    [ObservableProperty] private PosSortColumn _sortBy = PosSortColumn.None;
-    [ObservableProperty] private PosSortDir _sortDirection = PosSortDir.Desc;
 
-    partial void OnIdFilterChanged(string value) => ApplyViewChange(); // refresh on change
+    partial void OnIdFilterChanged(string value)
+    {
+        CurrentFilter = string.IsNullOrWhiteSpace(value) ? null : value;
+        _ = ApplyViewChange();
+    }
     #endregion
 
     #region Services and Constructor
@@ -54,163 +51,89 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
 
     public PositionTableViewModel(IDataBaseService dbService, IMarketDataService market) : base(dbService)
     {
-        Title = "Positions"; // from BaseViewModel
+        Title = "Positions";
+        SortKey = "UserId";
+        SortDesc = true;
         _market = market ?? throw new ArgumentNullException(nameof(market));
     }
     #endregion
 
-    #region Data loading
-    protected override async Task<List<PositionTableObject>> LoadItemsAsync()
+    #region Lazy init — stocks must be loaded before first page query
+    public override async Task EnsureInitializedAsync()
     {
-        IsBusy = true;
-        try
-        {
-            var rows = new List<PositionTableObject>();
-
-            // Fetch all data
-            var users = await _db.GetUsersAsync();
-            var allPositions = await _db.GetPositionsAsync(); 
-            var stocks = await _db.GetStocksAsync();
-
-            // Ensure at least one stock exists
-            if (stocks.Count == 0)
-            {
-                Debug.WriteLine("No stocks found in database.");
-                await Shell.Current.DisplayAlert("Error", "No stocks found in database. Please add stocks first.", "OK");
-                return rows;
-            }
-            // Add to picker and set selection
-            foreach (var stock in stocks)
-                PickerStocks.Add(stock);
-            PickerSelection = stocks[0];
-
-            // Set the Stocks dictionary for easy lookup
-            Stocks = stocks.ToDictionary(s => s.StockId, s => s);
-
-            // Index existing positions by (UserId -> List<Position>)
-            var byUser = allPositions.GroupBy(f => f.UserId)
-                .ToDictionary(g => g.Key, g => g.ToDictionary(f => f.StockId, f => f));
-
-            // At last get the current prices for all stocks
-            await UpdateStockPrices();
-
-            foreach (var user in users)
-            {
-                // Get the user's Positions (empty if none).
-                if (!byUser.TryGetValue(user.UserId, out var positionsDict))
-                    positionsDict = byUser[user.UserId] = new Dictionary<int, Position>();
-
-                // Ensure all stocks are represented
-                foreach (var stock in stocks)
-                {
-                    if (!positionsDict.TryGetValue(stock.StockId, out var pos))
-                    {
-                        pos = new Position { UserId = user.UserId, StockId = stock.StockId };
-                        positionsDict[stock.StockId] = pos;
-                    }
-                }
-
-                // Create the table object
-                rows.Add(new PositionTableObject(_db, user.UserId, BaseCurrency, positionsDict, LatestPrices, StockSymbols));
-            }
-
-            // Sort by most recent first
-            rows = rows.OrderByDescending(r => r.UserId).ToList();
-            Debug.WriteLine($"The User table has {rows.Count} users.");
-            return rows;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Error loading users: {ex.Message}");
-            await Shell.Current.DisplayAlert("Error", "Failed to load users.", "OK");
-            return new List<PositionTableObject>();
-        }
-        finally { IsBusy = false; }
+        await EnsureStocksLoadedAsync();
+        await base.EnsureInitializedAsync();
     }
 
-    protected override IEnumerable<PositionTableObject> GetCurrentView()
+    private async Task EnsureStocksLoadedAsync()
     {
-        IEnumerable<PositionTableObject> items = AllItems;
-
-        // ID filter on substring of UserId
-        if (!string.IsNullOrWhiteSpace(IdFilter))
-        {
-            var needle = IdFilter.Trim();
-            items = items.Where(r => r.UserId.ToString().Contains(needle, StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Sorting based on selected column and direction
-        items = (SortBy, SortDirection) switch
-        {
-            (PosSortColumn.UserId, PosSortDir.Desc) => items.OrderByDescending(r => r.UserId),
-            (PosSortColumn.UserId, PosSortDir.Asc) => items.OrderBy(r => r.UserId),
-
-            (PosSortColumn.Quantity, PosSortDir.Desc) => items.OrderByDescending(r => r.Quantity),
-            (PosSortColumn.Quantity, PosSortDir.Asc) => items.OrderBy(r => r.Quantity),
-
-            (PosSortColumn.Reserved, PosSortDir.Desc) => items.OrderByDescending(r => r.ReservedQuantity),
-            (PosSortColumn.Reserved, PosSortDir.Asc) => items.OrderBy(r => r.ReservedQuantity),
-
-            // nulls last: use ?? to push nulls to the bottom on Desc, top on Asc
-            (PosSortColumn.Price, PosSortDir.Desc) => items.OrderByDescending(r => r.Price ?? decimal.MinValue),
-            (PosSortColumn.Price, PosSortDir.Asc) => items.OrderBy(r => r.Price ?? decimal.MaxValue),
-
-            (PosSortColumn.StockValue, PosSortDir.Desc) => items.OrderByDescending(r => r.StockValue ?? decimal.MinValue),
-            (PosSortColumn.StockValue, PosSortDir.Asc) => items.OrderBy(r => r.StockValue ?? decimal.MaxValue),
-
-            (PosSortColumn.TotalValue, PosSortDir.Desc) => items.OrderByDescending(r => r.TotalValue),
-            (PosSortColumn.TotalValue, PosSortDir.Asc) => items.OrderBy(r => r.TotalValue),
-
-            _ => items // keep default order if no sort selected
-        };
-
-        return items;
+        if (Stocks.Count > 0) return;
+        var stocks = await _db.GetStocksAsync();
+        if (stocks.Count == 0) return;
+        Stocks = stocks.ToDictionary(s => s.StockId, s => s);
+        foreach (var stock in stocks)
+            PickerStocks.Add(stock);
+        _pickerSelection = stocks[0];
+        OnPropertyChanged(nameof(PickerSelection));
     }
     #endregion
 
-    #region Price updating
-    private async Task UpdateStockPrices()
+    #region Data loading
+    protected override async Task<(IReadOnlyList<PositionTableObject> Items, int Total)> LoadPageAsync(
+        int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
+        if (_pickerSelection is null) return (Array.Empty<PositionTableObject>(), 0);
 
-        foreach (var stockId in Stocks.Keys)
-        {
-            try { LatestPrices[stockId] = await _market.GetLastPriceAsync(stockId, BaseCurrency); }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error fetching price for StockId {stockId}: {ex.Message}");
-                LatestPrices[stockId] = 0m; // Default to 0 on error
-            }
-        }
-    }
+        var (positions, total) = await _db.GetPositionsPageAsync(
+            _pickerSelection.StockId, skip, take, sortKey ?? "UserId", desc, filter, ct);
 
-    public async Task UpdatePricesOfTableObjects(CurrencyType baseCurrency = CurrencyType.USD)
-    {
-        IsBusy = true;
-        BaseCurrency = baseCurrency;
-        try
+        if (positions.Count == 0) return (Array.Empty<PositionTableObject>(), total);
+
+        // Fetch all positions for these users so TotalValue sums across all stocks
+        var userIds = positions.Select(p => p.UserId).Distinct().ToList();
+        var allUserPositions = await _db.GetPositionsForUsersAsync(userIds, ct);
+        var byUser = allUserPositions.GroupBy(p => p.UserId)
+            .ToDictionary(g => g.Key, g => g.ToDictionary(p => p.StockId, p => p));
+
+        // Current price for the selected stock only
+        decimal latestPrice = 0m;
+        try { latestPrice = await _market.GetLastPriceAsync(_pickerSelection.StockId, BaseCurrency, ct); }
+        catch (Exception ex) { Debug.WriteLine($"Price fetch failed: {ex.Message}"); }
+
+        var prices = new Dictionary<int, decimal> { { _pickerSelection.StockId, latestPrice } };
+
+        var rows = new List<PositionTableObject>();
+        foreach (var pos in positions)
         {
-            await UpdateStockPrices();
-            foreach (var user in AllItems)
-                user.RefreshData(baseCurrency, LatestPrices);
+            if (!byUser.TryGetValue(pos.UserId, out var posDict))
+                posDict = new Dictionary<int, Position>();
+            rows.Add(new PositionTableObject(_db, pos.UserId, BaseCurrency, posDict, prices, StockSymbols));
         }
-        finally { IsBusy = false; }
+        return (rows, total);
     }
     #endregion
 
     #region Commands
     [RelayCommand] private void SetSortDesc(PosSortColumn column)
     {
-        SortBy = column;
-        SortDirection = PosSortDir.Desc;
-        ApplyViewChange();
+        SortKey = ColumnToSortKey(column);
+        SortDesc = true;
+        _ = ApplyViewChange();
     }
 
     [RelayCommand] private void SetSortAsc(PosSortColumn column)
     {
-        SortBy = column;
-        SortDirection = PosSortDir.Asc;
-        ApplyViewChange();
+        SortKey = ColumnToSortKey(column);
+        SortDesc = false;
+        _ = ApplyViewChange();
     }
+
+    private static string ColumnToSortKey(PosSortColumn column) => column switch
+    {
+        PosSortColumn.Quantity => "Quantity",
+        PosSortColumn.Reserved => "Reserved",
+        _                      => "UserId",
+    };
     #endregion
 }
 
@@ -246,12 +169,11 @@ public partial class PositionTableObject : ObservableObject
         }
     }
 
-    private Position CurrentPosition => PosDict.TryGetValue(CurrentStockId, out var p) 
-        ? p : new Position { UserId = UserId, StockId = CurrentStockId };
+    private Position? CurrentPosition => PosDict.TryGetValue(CurrentStockId, out var p) ? p : null;
 
-    public int Quantity => CurrentPosition.Quantity;
+    public int Quantity => CurrentPosition?.Quantity ?? 0;
 
-    public int ReservedQuantity => CurrentPosition.ReservedQuantity;
+    public int ReservedQuantity => CurrentPosition?.ReservedQuantity ?? 0;
 
     public decimal? Price => Prices.TryGetValue(CurrentStockId, out var p) ? p : (decimal?)null;
 
@@ -273,9 +195,10 @@ public partial class PositionTableObject : ObservableObject
     #region Display properties
     public string QuantityDisplay
     {
-        get => Quantity == 0? "-" : Quantity.ToString();
-        set         
+        get => Quantity == 0 ? "-" : Quantity.ToString();
+        set
         {
+            if (CurrentPosition is null) return;
             if (ParsingHelper.TryToInt(value, out var qty) && qty >= 0)
             {
                 CurrentPosition.Quantity = qty;
@@ -289,7 +212,8 @@ public partial class PositionTableObject : ObservableObject
         get => ReservedQuantity == 0 ? "-" : ReservedQuantity.ToString();
         set
         {
-            if (ParsingHelper.TryToInt(value, out var qty) && qty >= 0 && qty <= CurrentPosition.Quantity)
+            if (CurrentPosition is null) return;
+            if (ParsingHelper.TryToInt(value, out var qty) && qty >= 0 && qty <= (CurrentPosition?.Quantity ?? 0))
             {
                 CurrentPosition.ReservedQuantity = qty;
                 NotifyAllProperties();
@@ -302,7 +226,7 @@ public partial class PositionTableObject : ObservableObject
 
     public string StockSymbol => Symbols.TryGetValue(CurrentStockId, out var symbol) ? symbol : "-";
 
-    public string StockValueDisplay 
+    public string StockValueDisplay
         => StockValue.HasValue ? CurrencyHelper.Format(StockValue.Value, BaseCurrency) : "-";
 
     public string TotalValueDisplay => CurrencyHelper.Format(TotalValue, BaseCurrency);
@@ -311,18 +235,16 @@ public partial class PositionTableObject : ObservableObject
     #region Other properties and Constructor
     private readonly IDataBaseService _db;
 
-    public PositionTableObject( IDataBaseService db, int userId, CurrencyType baseCurrency, Dictionary<int, Position> posDict,
+    public PositionTableObject(IDataBaseService db, int userId, CurrencyType baseCurrency, Dictionary<int, Position> posDict,
           Dictionary<int, decimal> prices, Dictionary<int, string> symbols)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
-
         UserId = userId;
         BaseCurrency = baseCurrency;
         PosDict = posDict;
         Prices = prices;
         Symbols = symbols;
-
-        CurrentStockId = 1; // default to first stock
+        CurrentStockId = prices.Keys.FirstOrDefault(1);
     }
     #endregion
 
@@ -337,9 +259,8 @@ public partial class PositionTableObject : ObservableObject
             return;
         }
 
-        // Attempt to save changes
         var saved = await SaveAsync();
-        if (!saved) // If save failed, revert changes
+        if (!saved)
         {
             await ResetAsync();
             NotifyAllProperties();
@@ -356,7 +277,6 @@ public partial class PositionTableObject : ObservableObject
     {
         try
         {
-            // Validate all positions
             foreach (var (id, pos) in PosDict)
             {
                 if (pos.IsInvalid)
@@ -366,7 +286,6 @@ public partial class PositionTableObject : ObservableObject
                 }
             }
 
-            // Save all positions in one transaction
             await _db.RunInTransactionAsync(async ct =>
             {
                 foreach (var pos in PosDict.Values)
@@ -390,17 +309,7 @@ public partial class PositionTableObject : ObservableObject
         try
         {
             var positions = await _db.GetPositionsByUserId(UserId);
-            var posDict = positions.ToDictionary(p => p.StockId, p => p);
-
-            foreach (var stockId in Prices.Keys)
-            {
-                if (!posDict.ContainsKey(stockId))
-                {
-                    var pos = new Position { UserId = UserId, StockId = stockId };
-                    posDict[stockId] = pos;
-                }
-            }
-            PosDict = posDict;
+            PosDict = positions.ToDictionary(p => p.StockId, p => p);
             Debug.WriteLine($"Successfully reverted positions for UserId #{UserId}.");
             return true;
         }
@@ -427,7 +336,6 @@ public partial class PositionTableObject : ObservableObject
     {
         BaseCurrency = baseCurrency;
         Prices = latestPrices;
-
         NotifyAllProperties();
     }
     #endregion

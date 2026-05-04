@@ -1,62 +1,84 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
-using KieshStockExchange.ViewModels.OtherViewModels;
 using System.Diagnostics;
-using System.Globalization;
-using System.Windows.Input;
-using User = KieshStockExchange.Models.User;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
+
 public partial class TransactionTableViewModel : BaseTableViewModel<TransactionTableObject>
 {
+    #region Date range
+    [ObservableProperty] private DateTime _fromDate = DateTime.UtcNow.Date.AddDays(-7);
+    [ObservableProperty] private DateTime _toDate = DateTime.UtcNow.Date.AddDays(1);
+
+    partial void OnFromDateChanged(DateTime value) => _ = ApplyViewChange();
+    partial void OnToDateChanged(DateTime value) => _ = ApplyViewChange();
+    #endregion
+
+    private Dictionary<int, Stock> _stocksById = new();
+    private readonly IDataBaseService _dbRef;
+
     public TransactionTableViewModel(IDataBaseService dbService) : base(dbService)
     {
         Title = "Transactions";
+        SortKey = "Timestamp";
+        SortDesc = true;
+        _dbRef = dbService;
     }
 
-    protected override async Task<List<TransactionTableObject>> LoadItemsAsync()
+    protected override async Task<(IReadOnlyList<TransactionTableObject> Items, int Total)> LoadPageAsync(
+        int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        IsBusy = true;
-        try
+        if (_stocksById.Count == 0)
         {
-            // Fetch all data
-            var transactions = await _db.GetTransactionsAsync();
-            var users = await _db.GetUsersAsync();
-            var stocks = await _db.GetStocksAsync();
-
-            // Create fast lookup structures in memory.
-            var usersById = users.ToDictionary(u => u.UserId);
-            var stocksById = stocks.ToDictionary(s => s.StockId);
-
-            // Create table objects
-            var rows = new List<TransactionTableObject>();
-            foreach (var transaction in transactions)
-            {
-                // Lookup related entities
-                if (!usersById.TryGetValue(transaction.BuyerId, out var buyer))
-                    buyer = new User { UserId = transaction.BuyerId, Username = "Unknown" };
-                if (!usersById.TryGetValue(transaction.SellerId, out var seller))
-                    seller = new User { UserId = transaction.SellerId, Username = "Unknown" };
-                if (!stocksById.TryGetValue(transaction.StockId, out var stock))
-                    stock = new Stock { StockId = transaction.StockId, CompanyName = "Unknown", Symbol = "-" };
-
-                // Create the table object
-                rows.Add(new TransactionTableObject(transaction, buyer, seller, stock));
-            }
-            // Sort by most recent first
-            rows = rows.OrderByDescending(r => r.Transaction.Timestamp).ToList();
-            Debug.WriteLine($"The Transaction table has {rows.Count} transactions.");
-            return rows;
+            var stocks = await _dbRef.GetStocksAsync(ct);
+            _stocksById = stocks.ToDictionary(s => s.StockId);
         }
-        catch (Exception ex)
+
+        var (transactions, total) = await _dbRef.GetTransactionsPageAsync(skip, take, sortKey ?? "Timestamp", desc,
+            FromDate.ToUniversalTime(), ToDate.ToUniversalTime(), ct);
+
+        if (transactions.Count == 0) return (Array.Empty<TransactionTableObject>(), total);
+
+        // Collect distinct buyer and seller IDs on this page
+        var userIds = transactions.SelectMany(t => new[] { t.BuyerId, t.SellerId }).Distinct().ToList();
+        var users = await Task.WhenAll(userIds.Select(id => _dbRef.GetUserById(id, ct)));
+        var usersById = users.Where(u => u != null).ToDictionary(u => u!.UserId, u => u!);
+
+        var rows = transactions.Select(t =>
         {
-            Debug.WriteLine($"[TransactionTableViewModel] Error loading transactions: {ex.Message}");
-            return new List<TransactionTableObject>();
-        }
-        finally { IsBusy = false; }
+            if (!usersById.TryGetValue(t.BuyerId, out var buyer))
+                buyer = new User { UserId = t.BuyerId, Username = "Unknown" };
+            if (!usersById.TryGetValue(t.SellerId, out var seller))
+                seller = new User { UserId = t.SellerId, Username = "Unknown" };
+            if (!_stocksById.TryGetValue(t.StockId, out var stock))
+                stock = new Stock { StockId = t.StockId, CompanyName = "Unknown", Symbol = "-" };
+            return new TransactionTableObject(t, buyer, seller, stock);
+        }).ToList();
+
+        return (rows, total);
+    }
+
+    [RelayCommand]
+    private void SetLast7Days()
+    {
+        FromDate = DateTime.UtcNow.Date.AddDays(-7);
+        ToDate = DateTime.UtcNow.Date.AddDays(1);
+    }
+
+    [RelayCommand]
+    private void SetLast30Days()
+    {
+        FromDate = DateTime.UtcNow.Date.AddDays(-30);
+        ToDate = DateTime.UtcNow.Date.AddDays(1);
+    }
+
+    [RelayCommand]
+    private void SetAllTime()
+    {
+        FromDate = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        ToDate = DateTime.UtcNow.Date.AddDays(1);
     }
 }
 
