@@ -32,7 +32,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
     }
 
-    public int? ActiveBotCap { get; private set; } = 200;
+    public int? ActiveBotCap { get; private set; } = 50;
 
     public long TickCount => Interlocked.Read(ref _tickCount);
     public long TradesPlacedThisSession => Interlocked.Read(ref _tradesPlacedThisSession);
@@ -391,18 +391,17 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _volumeSnapshot    = vol;
 
         _logger.LogInformation(
-            "BotStats[30s] @ {Time}: bots {Online}/{Loaded}, trades {Total} (buy {Buy}/sell {Sell}), type (Limit {Limit}/SlipMarket {Slip}/TrueMarket {True}), cancelled {Cancelled}, volume {Vol:F2}",
-            TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"),
-            OnlineBotCount, LoadedBotCount,
-            dBuy + dSell, dBuy, dSell,
-            dLim, dSlip, dTrue,
-            dCancel,
-            dVol);
+            "BotStats[30s] @ {Time}: bots {Online}/{Loaded}, trades {Total} (buy {Buy}/sell {Sell}), " +
+            "type (Limit {Limit}/SlipMarket {Slip}/TrueMarket {True}), cancelled {Cancelled}, volume {Vol}",
+            TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"), OnlineBotCount, LoadedBotCount,
+            dBuy + dSell, dBuy, dSell, dLim, dSlip, dTrue, dCancel,
+            CurrencyHelper.Format(dVol, CurrencyType.USD));
     }
 
     private async Task PruneWorstOrdersAsync(CancellationToken ct)
     {
         var toCancel = new List<(int userId, Order order)>();
+        bool logging = false;
 
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
@@ -491,7 +490,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             }
         }
 
-        if (pruned > 0)
+        if (pruned > 0 && logging)
         {
             Interlocked.Add(ref _cancelledTotal, pruned);
             _logger.LogInformation("PruneWorstOrders: cancelled {Count} orders at {Time}",
