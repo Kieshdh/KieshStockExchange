@@ -372,6 +372,7 @@ internal sealed class FakeDb : IDataBaseService
     public Task DropAndRecreateAsync(bool keepBackup = false, CancellationToken ct = default) => throw new NotImplementedException();
 
     public Task<List<User>> GetUsersAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<(List<User> Items, int Total)> GetUsersPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<User?> GetUserById(int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<User?> GetUserByUsername(string username, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<bool> UserExists(int userId, CancellationToken ct = default) => throw new NotImplementedException();
@@ -400,6 +401,7 @@ internal sealed class FakeDb : IDataBaseService
     public Task DeleteStockPrice(StockPrice stockPrice, CancellationToken ct = default) => throw new NotImplementedException();
 
     public Task<List<Order>> GetOrdersAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<(List<Order> Items, int Total)> GetOrdersPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, string? statusFilter, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Order?> GetOrderById(int orderId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Order>> GetOrdersByIds(List<int> orderIds, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
@@ -414,6 +416,7 @@ internal sealed class FakeDb : IDataBaseService
     public Task DeleteOrder(Order order, CancellationToken ct = default) => throw new NotImplementedException();
 
     public Task<List<Transaction>> GetTransactionsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<(List<Transaction> Items, int Total)> GetTransactionsPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Transaction?> GetTransactionById(int transactionId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default) => throw new NotImplementedException();
@@ -425,6 +428,7 @@ internal sealed class FakeDb : IDataBaseService
     public Task DeleteTransaction(Transaction transaction, CancellationToken ct = default) => throw new NotImplementedException();
 
     public Task<List<Position>> GetPositionsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<(List<Position> Items, int Total)> GetPositionsPageAsync(int stockId, int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Position?> GetPositionById(int positionId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Position>> GetPositionsByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Position?> GetPositionByUserIdAndStockId(int userId, int stockId, CancellationToken ct = default) => throw new NotImplementedException();
@@ -434,6 +438,7 @@ internal sealed class FakeDb : IDataBaseService
     public Task UpsertPosition(Position position, CancellationToken ct = default) => throw new NotImplementedException();
 
     public Task<List<Fund>> GetFundsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<(List<int> UserIds, int Total)> GetFundsUserIdsPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Fund?> GetFundById(int fundId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Fund>> GetFundsByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Fund?> GetFundByUserIdAndCurrency(int userId, CurrencyType currency, CancellationToken ct = default) => throw new NotImplementedException();
