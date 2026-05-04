@@ -20,12 +20,14 @@ public partial class AdminViewModel : BaseViewModel
     public OrderTableViewModel OrdersVm { get; }
     public PositionTableViewModel PositionsVm { get; }
     public FundTableViewModel FundsVm { get; }
+    public TopNavBarViewModel TopNavBarVm { get; }
 
     private readonly IExcelImportService ExcelService;
 
     public AdminViewModel(IExcelImportService excelService,
         UserTableViewModel usersVm, TransactionTableViewModel transactionsVm, OrderTableViewModel ordersVm,
-        StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm)
+        StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm,
+        TopNavBarViewModel topNavBarVm)
     {
         Title = "Admin Dashboard";
         UsersVm = usersVm;
@@ -34,6 +36,7 @@ public partial class AdminViewModel : BaseViewModel
         OrdersVm = ordersVm;
         PositionsVm = positionsVm;
         FundsVm = fundsVm;
+        TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
         ExcelService = excelService;
     }
 

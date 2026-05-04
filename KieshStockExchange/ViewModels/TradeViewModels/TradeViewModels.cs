@@ -42,6 +42,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     public UserPositionsViewModel PositionsVm { get; }
     public ChartViewModel ChartVm { get; }
     public OrderBookViewModel OrderBookVm { get; }
+    public TopNavBarViewModel TopNavBarVm { get; }
     #endregion
 
     #region Fields and Constructor
@@ -54,7 +55,8 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         ILogger<TradeViewModel> logger, IUserSessionService userSession,
         PlaceOrderViewModel placingVm, TransactionHistoryViewModel historyVm,
         OpenOrdersViewModel openOrdersVm, UserPositionsViewModel positionsVm,
-        ChartViewModel chartVm, OrderBookViewModel orderBookVm, OrderHistoryViewModel orderHistoryVm)
+        ChartViewModel chartVm, OrderBookViewModel orderBookVm, OrderHistoryViewModel orderHistoryVm,
+        TopNavBarViewModel topNavBarVm)
     {
         // Initialize services
         _market = market ?? throw new ArgumentNullException(nameof(market));
@@ -70,6 +72,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         ChartVm = chartVm;
         OrderBookVm = orderBookVm;
         OrderHistoryVm = orderHistoryVm;
+        TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
         // Other initialization
         Title = "Trade";
@@ -120,6 +123,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     public void Dispose()
     {
         _selected.PropertyChanged -= OnSelectedChanged;
+        TopNavBarVm.Dispose();
     }
     #endregion
 

@@ -261,7 +261,7 @@ public partial class FundTableObject : ObservableObject
         }
 
         var saved = await SaveAsync();
-        if (!saved)
+        if (!saved) // If save failed, revert changes
         {
             await ResetAsync();
             UpdateBindings();
