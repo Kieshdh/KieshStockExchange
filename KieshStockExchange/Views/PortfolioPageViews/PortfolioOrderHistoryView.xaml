@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:tradeVm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
+             x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioOrderHistoryView"
+             x:Name="PortfolioOrderHistoryRoot">
+
+    <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
+
+        <!-- Table headers -->
+        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
+              Style="{StaticResource TradeTableHeaderGrid}">
+            <Label Grid.Column="0" Text="Symbol"  Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="1" Text="Created" Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="2" Text="Closed"  Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="3" Text="Side"    Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="4" Text="Type"    Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="5" Text="Qty"     Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="6" Text="Price"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="7" Text="Total"   Style="{StaticResource TradeTableHeaderLabel}" />
+        </Grid>
+
+        <!-- Rows -->
+        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
+            <CollectionView ItemsSource="{Binding CurrentView}"
+                            SelectionMode="None" Margin="0,4,0,0">
+                <CollectionView.EmptyView>
+                    <StackLayout Padding="12" Spacing="4">
+                        <Label Text="No order history" Opacity="0.7" />
+                    </StackLayout>
+                </CollectionView.EmptyView>
+
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="tradeVm:ClosedOrderRow">
+                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
+                              Style="{StaticResource TradeTableRowGrid}">
+                            <Label Grid.Column="0" Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" />
+                            <Label Grid.Column="1" Text="{Binding Opened}" Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="2" Text="{Binding Closed}" Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="3" Text="{Binding Side}"   Style="{StaticResource TradeTableSideLabel}" />
+                            <Label Grid.Column="4" Text="{Binding Type}"   Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="5" Text="{Binding Qty}"    Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="6" Text="{Binding Price}"  Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="7" Text="{Binding Total}"  Style="{StaticResource TradeTableRowLabel}" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </VerticalStackLayout>
+</ContentView>

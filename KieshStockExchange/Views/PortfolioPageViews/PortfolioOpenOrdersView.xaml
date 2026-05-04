@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:tradeVm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
+             x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioOpenOrdersView"
+             x:Name="PortfolioOpenOrdersRoot">
+
+    <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
+
+        <!-- Table headers -->
+        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*,*"
+              Style="{StaticResource TradeTableHeaderGrid}">
+            <Label Grid.Column="0" Text="Symbol" Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="1" Text="Date"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="2" Text="Side"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="3" Text="Type"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="4" Text="Qty"    Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="5" Text="Price"  Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="6" Text="Total"  Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="7" Text="Status" Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="8" Text="Action" Style="{StaticResource TradeTableHeaderLabel}" />
+        </Grid>
+
+        <!-- Rows -->
+        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
+            <CollectionView ItemsSource="{Binding CurrentView}"
+                            SelectionMode="None" Margin="0,4,0,0">
+                <CollectionView.EmptyView>
+                    <StackLayout Padding="12" Spacing="4">
+                        <Label Text="No open orders" Opacity="0.7" />
+                    </StackLayout>
+                </CollectionView.EmptyView>
+
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="tradeVm:OpenOrderRow">
+                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*,*"
+                              Style="{StaticResource TradeTableRowGrid}">
+                            <Label Grid.Column="0" Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" />
+                            <Label Grid.Column="1" Text="{Binding When}"   Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="2" Text="{Binding Side}"   Style="{StaticResource TradeTableSideLabel}" />
+                            <Label Grid.Column="3" Text="{Binding Type}"   Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="4" Text="{Binding Qty}"    Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="5" Text="{Binding Price}"  Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="6" Text="{Binding Total}"  Style="{StaticResource TradeTableRowLabel}" />
+
+                            <Border Grid.Column="7"
+                                    HorizontalOptions="Center"
+                                    VerticalOptions="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource StatusPillOpen}">
+                                        <Style.Triggers>
+                                            <DataTrigger TargetType="Border" Binding="{Binding Order.IsFilled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource BuyGreen}" />
+                                                <Setter Property="Stroke"     Value="Transparent" />
+                                            </DataTrigger>
+                                            <DataTrigger TargetType="Border" Binding="{Binding Order.IsCancelled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource SellRed}" />
+                                                <Setter Property="Stroke"     Value="Transparent" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Label Text="{Binding Order.StatusDisplay}">
+                                    <Label.Style>
+                                        <Style TargetType="Label" BasedOn="{StaticResource StatusPillLabelMuted}">
+                                            <Style.Triggers>
+                                                <DataTrigger TargetType="Label" Binding="{Binding Order.IsFilled}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource White}" />
+                                                </DataTrigger>
+                                                <DataTrigger TargetType="Label" Binding="{Binding Order.IsCancelled}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource White}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Label.Style>
+                                </Label>
+                            </Border>
+
+                            <Button Grid.Column="8" Text="✕"
+                                    IsVisible="{Binding Order.IsOpen}"
+                                    Style="{StaticResource TradeTableButton}"
+                                    Command="{Binding Source={x:Reference PortfolioOpenOrdersRoot}, Path=BindingContext.CancelCommand}"
+                                    CommandParameter="{Binding Order}" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </VerticalStackLayout>
+</ContentView>

@@ -1,18 +1,141 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioPage"
-             xmlns:local="clr-namespace:KieshStockExchange.ViewModels.PortfolioViewModels"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
-             Title="PortfolioPage">
-    <ScrollView>
-        <Grid Style="{StaticResource MainGrid}">
+             xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
+             xmlns:views="clr-namespace:KieshStockExchange.Views.PortfolioPageViews"
+             x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioPage"
+             x:Name="PortfolioPageRoot"
+             Title="Portfolio">
 
-            <!-- Navigation bar at the Top -->
-            <navbar:TopNavBarView Title="Portfolio" Grid.Row="0"/>
+    <Grid Style="{StaticResource MainGrid}"
+          RowDefinitions="Auto,Auto,Auto,*"
+          RowSpacing="8"
+          Padding="0,0,0,8">
 
-            <!-- Main section -->
-            
+        <!-- Top nav -->
+        <navbar:TopNavBarView Title="Portfolio" Grid.Row="0" />
+
+        <!-- Page heading -->
+        <Grid Grid.Row="1"
+              Style="{StaticResource PageHeadingGrid}">
+            <Label Grid.Column="0"
+                   Text="Portfolio"
+                   Style="{StaticResource PageHeadingTitle}" />
+            <Label Grid.Column="1"
+                   Text="Your positions, balances, and performance"
+                   Style="{StaticResource PageHeadingSub}" />
         </Grid>
-    </ScrollView>
+
+        <!-- KPI cards row -->
+        <Grid Grid.Row="2"
+              ColumnDefinitions="*,*,*,*"
+              ColumnSpacing="12"
+              Padding="24,0,24,0">
+
+            <!-- Total Equity -->
+            <Border Grid.Column="0"
+                    Style="{StaticResource DashboardCardStyle}"
+                    Padding="20">
+                <VerticalStackLayout Spacing="6">
+                    <Label Text="Total Equity"
+                           Style="{StaticResource MutedLabelStyle}" />
+                    <Label Text="{Binding TotalEquityDisplay}"
+                           Style="{StaticResource QuotePriceLabel}" />
+                    <Label Text="{Binding TotalEquityChangeDisplay}"
+                           Style="{StaticResource MutedLabelStyle}" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Available Cash -->
+            <Border Grid.Column="1"
+                    Style="{StaticResource DashboardCardStyle}"
+                    Padding="20">
+                <VerticalStackLayout Spacing="6">
+                    <Label Text="Available Cash"
+                           Style="{StaticResource MutedLabelStyle}" />
+                    <Label Text="{Binding CashDisplay}"
+                           Style="{StaticResource QuotePriceLabel}" />
+                    <Label Text="{Binding PositionCountDisplay}"
+                           Style="{StaticResource MutedLabelStyle}" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Today P/L -->
+            <Border Grid.Column="2"
+                    Style="{StaticResource DashboardCardStyle}"
+                    Padding="20">
+                <VerticalStackLayout Spacing="6">
+                    <Label Text="Today P/L"
+                           Style="{StaticResource MutedLabelStyle}" />
+                    <Label Text="{Binding TodayPlDisplay}"
+                           Style="{StaticResource QuotePriceLabel}" />
+                    <Label Text="{Binding TodayPlSubDisplay}"
+                           Style="{StaticResource MutedLabelStyle}" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- All-time P/L -->
+            <Border Grid.Column="3"
+                    Style="{StaticResource DashboardCardStyle}"
+                    Padding="20">
+                <VerticalStackLayout Spacing="6">
+                    <Label Text="All-time P/L"
+                           Style="{StaticResource MutedLabelStyle}" />
+                    <Label Text="{Binding AllTimePlDisplay}"
+                           Style="{StaticResource QuotePriceLabel}" />
+                    <Label Text="{Binding AllTimePlSubDisplay}"
+                           Style="{StaticResource MutedLabelStyle}" />
+                </VerticalStackLayout>
+            </Border>
+
+        </Grid>
+
+        <!-- Tabbed table area -->
+        <Border Grid.Row="3"
+                Style="{StaticResource TradeContentOutline}"
+                Margin="24,0,24,0"
+                Padding="0">
+            <other:SegmentedTabView
+                    HeaderContainerHorizontalOptions="Start"
+                    ContainerStyle="{StaticResource SegmentedRailContainer}"
+                    SelectedButtonStyle="{StaticResource RailSegmentSelected}"
+                    UnselectedButtonStyle="{StaticResource RailSegmentUnselected}"
+                    ShowUnderline="True">
+
+                <other:SegmentedTabView.Tabs>
+
+                    <other:SegmentedTabItem Header="Holdings">
+                        <other:SegmentedTabItem.Content>
+                            <views:PortfolioHoldingsView BindingContext="{Binding Source={x:Reference PortfolioPageRoot},
+                                                         Path=BindingContext.HoldingsVm}" />
+                        </other:SegmentedTabItem.Content>
+                    </other:SegmentedTabItem>
+
+                    <other:SegmentedTabItem Header="Open Orders">
+                        <other:SegmentedTabItem.Content>
+                            <views:PortfolioOpenOrdersView BindingContext="{Binding Source={x:Reference PortfolioPageRoot},
+                                                           Path=BindingContext.OpenOrdersVm}" />
+                        </other:SegmentedTabItem.Content>
+                    </other:SegmentedTabItem>
+
+                    <other:SegmentedTabItem Header="Order History">
+                        <other:SegmentedTabItem.Content>
+                            <views:PortfolioOrderHistoryView BindingContext="{Binding Source={x:Reference PortfolioPageRoot},
+                                                             Path=BindingContext.OrderHistoryVm}" />
+                        </other:SegmentedTabItem.Content>
+                    </other:SegmentedTabItem>
+
+                    <other:SegmentedTabItem Header="Transactions">
+                        <other:SegmentedTabItem.Content>
+                            <views:PortfolioTransactionHistoryView BindingContext="{Binding Source={x:Reference PortfolioPageRoot},
+                                                                   Path=BindingContext.TransactionVm}" />
+                        </other:SegmentedTabItem.Content>
+                    </other:SegmentedTabItem>
+
+                </other:SegmentedTabView.Tabs>
+            </other:SegmentedTabView>
+        </Border>
+
+    </Grid>
 </ContentPage>
