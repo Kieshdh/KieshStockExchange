@@ -1,76 +1,116 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- SegmentedTabStyles.xaml - segmented pill control.
+     All colors come from the active theme dictionary.
+     Old inline color keys are removed; theme provides SegmentedPillBackground,
+     SegmentedPillStroke, SelectedTabBg/Fg, UnselectedTabFg. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml" >
-    
-    <!-- Segmented-tab specific palette. Shared colors (BuyGreen, SellRed,
-         LightGrey, DarkGrey) live in Colors.xaml. -->
-    <Color x:Key="SegmentedPillBackgroundColor">#E6EAF2</Color>
-    <Color x:Key="SegmentedPillStrokeColor">#D0D6E2</Color>
-    <Color x:Key="SegmentSelectedTextColor">#111111</Color>
-    <Color x:Key="SegmentUnselectedTextColor">#4A5568</Color>
-    <Color x:Key="SegmentDividerColor">#C9D1E2</Color>
-    <Color x:Key="SegTextDark">#111111</Color>
-    <Color x:Key="SegTextMuted">#4A5568</Color>
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
 
-    <!-- Outer container: the full pill strip -->
+    <!-- Outer pill container -->
     <Style x:Key="SegmentedPillContainerStyle" TargetType="Border">
-        <Setter Property="Background" Value="{StaticResource SegmentedPillBackgroundColor}" />
-        <Setter Property="Stroke" Value="{StaticResource SegmentedPillStrokeColor}" />
+        <Setter Property="Background"      Value="{DynamicResource SegmentedPillBackground}" />
+        <Setter Property="Stroke"          Value="{DynamicResource SegmentedPillStroke}" />
         <Setter Property="StrokeThickness" Value="1" />
-        <Setter Property="Padding" Value="3" />
+        <Setter Property="Padding"         Value="3" />
         <Setter Property="StrokeShape">
             <Setter.Value>
-                <RoundRectangle CornerRadius="100" />
+                <RoundRectangle CornerRadius="16" />
             </Setter.Value>
         </Setter>
     </Style>
 
-    <!-- Unselected button inside the pill -->
+    <!-- Unselected tab button -->
     <Style x:Key="UnselectedSegmentButtonStyle" TargetType="Button">
         <Setter Property="BackgroundColor" Value="Transparent" />
-        <Setter Property="TextColor" Value="{StaticResource SegmentUnselectedTextColor}" />
-        <Setter Property="Padding" Value="14,8" />
-        <Setter Property="CornerRadius" Value="20" />
-        <Setter Property="BorderColor" Value="Transparent" />
-        <Setter Property="BorderWidth" Value="1" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="TextColor"       Value="{DynamicResource UnselectedTabFg}" />
+        <Setter Property="FontFamily"      Value="OpenSansSemibold" />
+        <Setter Property="Padding"         Value="14,8" />
+        <Setter Property="CornerRadius"    Value="14" />
+        <Setter Property="BorderColor"     Value="Transparent" />
+        <Setter Property="BorderWidth"     Value="1" />
+        <Setter Property="FontSize"        Value="13" />
+        <Setter Property="VisualStateManager.VisualStateGroups">
+            <VisualStateGroupList>
+                <VisualStateGroup x:Name="CommonStates">
+                    <VisualState x:Name="Normal" />
+                    <VisualState x:Name="PointerOver">
+                        <VisualState.Setters>
+                            <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
+                        </VisualState.Setters>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateGroupList>
+        </Setter>
     </Style>
 
-    <!-- Selected button (white, slightly raised) -->
-    <Style x:Key="SelectedSegmentButtonStyle" TargetType="Button" 
+    <!-- Selected (raised, surface-colored) -->
+    <Style x:Key="SelectedSegmentButtonStyle" TargetType="Button"
            BasedOn="{StaticResource UnselectedSegmentButtonStyle}">
-        <Setter Property="BackgroundColor" Value="{StaticResource DarkGreen}" />
-        <Setter Property="TextColor" Value="{StaticResource SegmentSelectedTextColor}" />
-        <Setter Property="BorderColor" Value="#E9E9EA" />
+        <Setter Property="BackgroundColor" Value="{DynamicResource SelectedTabBg}" />
+        <Setter Property="TextColor"       Value="{DynamicResource SelectedTabFg}" />
+        <Setter Property="BorderColor"     Value="{DynamicResource Divider}" />
         <Setter Property="Shadow">
             <Setter.Value>
-                <Shadow Radius="8" Opacity="0.15" />
+                <Shadow Brush="{DynamicResource TextPrimaryBrush}" Radius="6" Opacity="0.08" Offset="0,1" />
             </Setter.Value>
         </Setter>
     </Style>
-    
-    <!-- Trade Page Variants -->
-    <Style x:Key="Seg_Selected_Buy" TargetType="Button" 
+
+    <!-- BUY / SELL variants for the place-order toggle -->
+    <Style x:Key="Seg_Selected_Buy" TargetType="Button"
            BasedOn="{StaticResource UnselectedSegmentButtonStyle}">
-        <Setter Property="BackgroundColor" Value="{StaticResource BuyGreen}"/>
-        <Setter Property="TextColor" Value="White"/>
+        <Setter Property="BackgroundColor" Value="{DynamicResource BuyGreen}" />
+        <Setter Property="TextColor"       Value="{DynamicResource White}" />
     </Style>
 
-    <Style x:Key="Seg_Selected_Sell" TargetType="Button" 
+    <Style x:Key="Seg_Selected_Sell" TargetType="Button"
            BasedOn="{StaticResource UnselectedSegmentButtonStyle}">
-        <Setter Property="BackgroundColor" Value="{StaticResource SellRed}"/>
-        <Setter Property="TextColor" Value="White"/>
+        <Setter Property="BackgroundColor" Value="{DynamicResource SellRed}" />
+        <Setter Property="TextColor"       Value="{DynamicResource White}" />
     </Style>
 
-    <Style x:Key="Seg_Selected_LightGrey" TargetType="Button" 
-           BasedOn="{StaticResource SelectedSegmentButtonStyle}">
-        <Setter Property="BackgroundColor" Value="{StaticResource LightGrey}"/>
-        <Setter Property="TextColor" Value="{StaticResource SegTextDark}"/>
+    <!-- ============================================================
+         RAIL VARIANT - underline tabs (used by trade-tabs section)
+         ============================================================ -->
+
+    <!-- Transparent container, no border, no padding; the rail is just a
+         row of bare tab buttons with optional underlines below. -->
+    <Style x:Key="SegmentedRailContainer" TargetType="Border">
+        <Setter Property="Background"      Value="Transparent" />
+        <Setter Property="Stroke"          Value="Transparent" />
+        <Setter Property="StrokeThickness" Value="0" />
+        <Setter Property="Padding"         Value="0" />
     </Style>
 
-    <Style x:Key="Seg_Selected_DarkGrey" TargetType="Button" 
-           BasedOn="{StaticResource SelectedSegmentButtonStyle}">
-        <Setter Property="BackgroundColor" Value="{StaticResource DarkGrey}"/>
-        <Setter Property="TextColor" Value="White"/>
+    <!-- Rail tab button - inactive state -->
+    <Style x:Key="RailSegmentUnselected" TargetType="Button">
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor"       Value="{DynamicResource TextSecondary}" />
+        <Setter Property="FontFamily"      Value="OpenSansSemibold" />
+        <Setter Property="Padding"         Value="12,10" />
+        <Setter Property="CornerRadius"    Value="0" />
+        <Setter Property="BorderColor"     Value="Transparent" />
+        <Setter Property="BorderWidth"     Value="0" />
+        <Setter Property="FontSize"        Value="13" />
+        <Setter Property="VisualStateManager.VisualStateGroups">
+            <VisualStateGroupList>
+                <VisualStateGroup x:Name="CommonStates">
+                    <VisualState x:Name="Normal" />
+                    <VisualState x:Name="PointerOver">
+                        <VisualState.Setters>
+                            <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
+                        </VisualState.Setters>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateGroupList>
+        </Setter>
     </Style>
+
+    <!-- Rail tab button - active state (primary text; underline is painted
+         on the BoxView the SegmentedTabView places under the button). -->
+    <Style x:Key="RailSegmentSelected" TargetType="Button"
+           BasedOn="{StaticResource RailSegmentUnselected}">
+        <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
+    </Style>
+
 </ResourceDictionary>

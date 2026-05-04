@@ -1,98 +1,126 @@
 <?xml version="1.0" encoding="utf-8" ?>
+<!-- AuthStyles.xaml - Login and Register page surfaces.
+     All colors come from the active theme dictionary.
+     Legacy key names (LoginBaseBorder, LoginEntry, RegistrationLabel, etc.)
+     are preserved as theme-aware wrappers so existing XAML keeps compiling. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
-    <!-- User Pages -->
-    <Style x:Key="AuthPageGrid" TargetType="Grid">
-        <Setter Property="BackgroundColor"  Value="{StaticResource DarkNavy}" />
+
+    <!-- ============================================================
+         NEW DESIGN SYSTEM STYLES
+         ============================================================ -->
+
+    <!-- Outer split-card shell -->
+    <Style x:Key="AuthCardOuter" TargetType="Border">
+        <Setter Property="BackgroundColor" Value="{DynamicResource CardSurface}" />
+        <Setter Property="Stroke"          Value="{DynamicResource Divider}" />
+        <Setter Property="StrokeShape"     Value="RoundRectangle 16" />
+        <Setter Property="StrokeThickness" Value="1" />
+        <Setter Property="Padding"         Value="0" />
     </Style>
-    <Style x:Key="AuthPageTitle" TargetType="Label">
-        <Setter Property="FontSize"             Value="Title" />
-        <Setter Property="FontAttributes"       Value="Bold" />
-        <Setter Property="HorizontalOptions"    Value="Center" />
+
+    <!-- Left art panel (brand-colored column) -->
+    <Style x:Key="AuthArtPanel" TargetType="Border">
+        <Setter Property="BackgroundColor" Value="{DynamicResource Primary}" />
+        <Setter Property="Stroke"          Value="Transparent" />
+        <Setter Property="StrokeShape"     Value="RoundRectangle 16,0,16,0" />
+        <Setter Property="Padding"         Value="32" />
     </Style>
-    <Style x:Key="AuthPageSubtitle" TargetType="Label">
-        <Setter Property="FontSize"             Value="Subtitle" />
-        <Setter Property="HorizontalOptions"    Value="Center" />
+
+    <Style x:Key="AuthArtHeading" TargetType="Label">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize"   Value="32" />
+        <Setter Property="TextColor"  Value="{DynamicResource TextOnPrimary}" />
+        <Setter Property="LineHeight" Value="1.1" />
     </Style>
-    <Style x:Key="LoginCheckboxLabel" TargetType="Label">
-        <Setter Property="TextColor"                Value="White" />
-        <Setter Property="FontSize"                 Value="Micro" />
-        <Setter Property="VerticalTextAlignment"    Value="Center" />
-        <Setter Property="HorizontalTextAlignment"  Value="Center" />
+
+    <Style x:Key="AuthArtBody" TargetType="Label">
+        <Setter Property="FontSize"  Value="14" />
+        <Setter Property="TextColor" Value="{DynamicResource TextOnPrimary}" />
+        <Setter Property="Opacity"   Value="0.85" />
     </Style>
-    <Style x:Key="LoginLinkLabelMicro" TargetType="Label">
-        <Setter Property="TextColor"                Value="{StaticResource DarkGreen}" />
-        <Setter Property="FontAttributes"           Value="Bold" />
-        <Setter Property="FontSize"                 Value="Micro" />
-        <Setter Property="HorizontalOptions"        Value="EndAndExpand" />
-        <Setter Property="VerticalTextAlignment"    Value="Center" />
-        <Setter Property="HorizontalTextAlignment"  Value="Center" />
+
+    <!-- Shared form entry (Login + Register) -->
+    <Style x:Key="FormEntryStyle" TargetType="Entry">
+        <Setter Property="BackgroundColor"      Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="TextColor"            Value="{DynamicResource TextPrimary}" />
+        <Setter Property="PlaceholderColor"     Value="{DynamicResource TextMuted}" />
+        <Setter Property="FontFamily"           Value="OpenSansRegular" />
+        <Setter Property="FontSize"             Value="14" />
+        <Setter Property="MinimumHeightRequest" Value="44" />
     </Style>
-    <Style x:Key="LoginPromptLabel" TargetType="Label">
-        <Setter Property="TextColor"    Value="White" />
-        <Setter Property="FontSize"     Value="Small" />
+
+    <Style x:Key="FormLabelStyle" TargetType="Label">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize"   Value="13" />
+        <Setter Property="TextColor"  Value="{DynamicResource TextSecondary}" />
+        <Setter Property="Margin"     Value="0,0,0,4" />
     </Style>
-    <Style x:Key="LoginLinkLabelSmall" TargetType="Label">
-        <Setter Property="TextColor"        Value="{StaticResource DarkGreen}" />
-        <Setter Property="FontAttributes"   Value="Bold" />
-        <Setter Property="FontSize"         Value="Small" />
+
+    <!-- Icon border (user / password icon left of the entry) -->
+    <Style x:Key="LoginImageBorder" TargetType="Border">
+        <Setter Property="BackgroundColor" Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="Stroke"          Value="Transparent" />
+        <Setter Property="Padding"         Value="0" />
+        <Setter Property="Margin"          Value="6" />
+        <Setter Property="StrokeShape"     Value="RoundRectangle 8" />
+        <Setter Property="HeightRequest"   Value="36" />
+        <Setter Property="WidthRequest"    Value="36" />
     </Style>
-    <Style x:Key="RegistrationPicker" TargetType="Picker">
-        <Setter Property="TextColor"    Value="White" />
-    </Style>
-    <Style x:Key="RegistrationLabel"                TargetType="Label" >
-        <Setter Property="VerticalTextAlignment"    Value="Center" />
-        <Setter Property="TextColor"                Value="White" />
-        <Setter Property="Grid.Column"              Value="0" />
-    </Style>
-    <Style x:Key="RegistrationEntry"        TargetType="Entry">
-        <Setter Property="TextColor"        Value="White" />
-        <Setter Property="FontAttributes"   Value="Bold" />
-        <Setter Property="Grid.Column"      Value="1" />
-        <Setter Property="PlaceholderColor" Value="Grey" />
-    </Style>
-    <Style x:Key="RegistrationErrorLabel" TargetType="Label">
-        <Setter Property="TextColor"      Value="Red" />
-    </Style>
-    <Style x:Key="LoginBaseBorder" TargetType="Border" >
-        <Setter Property="BackgroundColor" Value="Transparent" />
-        <Setter Property="Stroke" Value="ForestGreen" />
-        <Setter Property="Padding" Value="0" />
-        <Setter Property="StrokeShape" Value="RoundRectangle 30" />
-        <Setter Property="HorizontalOptions" Value="FillAndExpand" />
-    </Style>
-    <Style x:Key="LoginImageBorder" TargetType="Border" >
-        <Setter Property="BackgroundColor" Value="White" />
-        <Setter Property="Stroke" Value="Black" />
-        <Setter Property="Padding" Value="0" />
-        <Setter Property="Margin" Value="5" />
-        <Setter Property="StrokeShape" Value="RoundRectangle 30" />
-        <Setter Property="HeightRequest" Value="40" />
-        <Setter Property="WidthRequest" Value="40" />
-    </Style>
-    <Style x:Key="LoginImage" TargetType="Image" >
-        <Setter Property="BackgroundColor" Value="White" />
-        <Setter Property="Aspect" Value="AspectFit" />
-        <Setter Property="Margin" Value="0" />
-        <Setter Property="VerticalOptions" Value="Center" />
+
+    <Style x:Key="LoginImage" TargetType="Image">
+        <Setter Property="BackgroundColor"   Value="Transparent" />
+        <Setter Property="Aspect"            Value="AspectFit" />
+        <Setter Property="VerticalOptions"   Value="Center" />
         <Setter Property="HorizontalOptions" Value="Center" />
-        <Setter Property="HeightRequest" Value="25" />
-        <Setter Property="WidthRequest" Value="25" />
+        <Setter Property="HeightRequest"     Value="20" />
+        <Setter Property="WidthRequest"      Value="20" />
     </Style>
-    <Style x:Key="LoginEntry" TargetType="Entry" >
-        <Setter Property="TextColor" Value="White" />
-        <Setter Property="FontAttributes" Value="Bold" />
-        <Setter Property="Margin" Value="0,0,20,0" />
-        <Setter Property="VerticalOptions" Value="Center" />
+
+    <!-- ============================================================
+         LEGACY ALIASES - kept so existing LoginPage / RegisterPage compile.
+         ============================================================ -->
+
+    <Style x:Key="AuthPageGrid" TargetType="Grid">
+        <Setter Property="BackgroundColor" Value="{DynamicResource PageBackground}" />
+    </Style>
+
+    <Style x:Key="LoginPromptLabel" TargetType="Label">
+        <Setter Property="TextColor" Value="{DynamicResource TextSecondary}" />
+        <Setter Property="FontSize"  Value="Small" />
+    </Style>
+
+    <Style x:Key="LoginLinkLabelSmall" TargetType="Label">
+        <Setter Property="TextColor"  Value="{DynamicResource Primary}" />
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize"   Value="Small" />
+    </Style>
+
+    <Style x:Key="RegistrationPicker" TargetType="Picker">
+        <Setter Property="TextColor"            Value="{DynamicResource TextPrimary}" />
+        <Setter Property="BackgroundColor"      Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="FontFamily"           Value="OpenSansRegular" />
+        <Setter Property="FontSize"             Value="14" />
+        <Setter Property="MinimumHeightRequest" Value="44" />
+    </Style>
+
+    <Style x:Key="RegistrationErrorLabel" TargetType="Label">
+        <Setter Property="TextColor" Value="{DynamicResource SellRed}" />
+        <Setter Property="FontSize"  Value="11" />
+    </Style>
+
+    <!-- The rounded border wrapping the login entry row -->
+    <Style x:Key="LoginBaseBorder" TargetType="Border">
+        <Setter Property="BackgroundColor" Value="{DynamicResource CardSurface}" />
+        <Setter Property="Stroke"          Value="{DynamicResource Divider}" />
+        <Setter Property="Padding"         Value="0" />
+        <Setter Property="StrokeShape"     Value="RoundRectangle 10" />
         <Setter Property="HorizontalOptions" Value="FillAndExpand" />
     </Style>
-    <Style x:Key="ConfirmButton" TargetType="Button" >
-        <Setter Property="TextColor" Value="White" />
-        <Setter Property="FontAttributes" Value="Bold" />
-        <Setter Property="Margin" Value="0,15,0,0" />
-        <Setter Property="CornerRadius" Value="30" />
-        <Setter Property="WidthRequest" Value="200" />
-        <Setter Property="BackgroundColor" Value="{StaticResource DarkGreen}" />
-        <Setter Property="FontSize" Value="Small" />
+
+    <Style x:Key="LoginEntry" TargetType="Entry" BasedOn="{StaticResource FormEntryStyle}">
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="Margin"          Value="0,0,12,0" />
     </Style>
+
 </ResourceDictionary>

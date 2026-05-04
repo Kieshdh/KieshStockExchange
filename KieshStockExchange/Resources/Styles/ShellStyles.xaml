@@ -1,65 +1,138 @@
 <?xml version="1.0" encoding="utf-8" ?>
+<!-- ShellStyles.xaml - TopNavBarView, page heading, funds chip, theme picker.
+     Converters are registered here so they are app-globally accessible.
+     All colors come from the active theme dictionary. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
             xmlns:converters="clr-namespace:KieshStockExchange.Helpers">
-    <!-- Converters -->
+
+    <!-- Converters - registered globally so any view can reference them. -->
     <converters:DepthRatioToWidthConverter x:Key="DepthRatioToWidthConverter" />
     <converters:InvertedBoolConverter      x:Key="InvertedBoolConverter" />
 
-    <!-- Shell containers -->
-    <Style x:Key="MainGrid" TargetType="Grid">
-        <Setter Property="BackgroundColor"   Value="{StaticResource DarkNavy}"  />
-        <Setter Property="RowDefinitions"    Value="Auto,*" />
-    </Style>
-    <Style x:Key="MainPath" TargetType="Path">
-        <Setter Property="Fill"   Value="{StaticResource DarkGreen}" />
-        <Setter Property="Data"   Value="m0,0l200,0l0,246c-190,0 -190,93 -381,40l0,-286z" />
-        <Setter Property="Stroke" Value="Transparent"/>
-        <Setter Property="Aspect" Value="Fill"/>
-        <Setter Property="HorizontalOptions"    Value="FillAndExpand"/>
-        <Setter Property="VerticalOptions"      Value="FillAndExpand"/>
-    </Style>
-    <Style x:Key="LogoImage"                    TargetType="Image">
-        <Setter Property="Source"               Value="kse_logo.png" />
-        <Setter Property="BackgroundColor"      Value="Transparent" />
-        <Setter Property="HeightRequest"        Value="80"/>
-        <Setter Property="WidthRequest"         Value="80"/>
-        <Setter Property="HorizontalOptions"    Value="Center"/>
-        <Setter Property="VerticalOptions"      Value="Center"/>
+    <!-- ============================================================
+         TOP NAV BAR
+         ============================================================ -->
+    <Style x:Key="TopNavBarStyle" TargetType="Grid">
+        <Setter Property="BackgroundColor"   Value="{DynamicResource CardSurface}" />
+        <Setter Property="HeightRequest"     Value="56" />
+        <Setter Property="Padding"           Value="24,0" />
+        <Setter Property="ColumnDefinitions" Value="Auto,Auto,*,Auto" />
+        <Setter Property="ColumnSpacing"     Value="16" />
     </Style>
 
-    <!-- Navbar -->
-    <Style x:Key="NavBarButton" TargetType="Button">
-        <Setter Property="WidthRequest"  Value="100" />
-        <Setter Property="HeightRequest" Value="50" />
-        <Setter Property="BackgroundColor" Value="{StaticResource MutedGrey}" />
-        <Setter Property="CornerRadius" Value="10" />
-        <Setter Property="FontAttributes" Value="Bold" />
-    </Style>
-    <Style x:Key="NavBarTitleLabel" TargetType="Label">
-        <Setter Property="VerticalOptions"  Value="Center" />
-        <Setter Property="FontSize"         Value="20" />
-        <Setter Property="FontAttributes"   Value="Bold" />
+    <Style x:Key="TopNavBarBottomBorder" TargetType="BoxView">
+        <Setter Property="BackgroundColor"   Value="{DynamicResource Divider}" />
+        <Setter Property="HeightRequest"     Value="1" />
+        <Setter Property="VerticalOptions"   Value="End" />
+        <Setter Property="HorizontalOptions" Value="Fill" />
     </Style>
 
-    <!-- SegmentButtons -->
-    <Style x:Key="SegmentButtonBase" TargetType="Button">
-        <Setter Property="Margin" Value="0,8,0,0" />
-        <Setter Property="Padding" Value="4" />
-        <Setter Property="CornerRadius" Value="12" />
-        <Setter Property="BorderWidth" Value="1" />
-        <Setter Property="BorderColor" Value="Transparent" />
-        <Setter Property="HeightRequest" Value="36" />
-        <Setter Property="MinimumWidthRequest" Value="72" />
+    <Style x:Key="BrandLabel" TargetType="Label">
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+        <Setter Property="FontSize"              Value="15" />
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="VerticalTextAlignment" Value="Center" />
     </Style>
-    <Style x:Key="SegmentButton.Unselected" TargetType="Button" BasedOn="{StaticResource SegmentButtonBase}">
+
+    <!-- Navigation link buttons (Trending / Trade / Portfolio / Account / Admin) -->
+    <Style x:Key="NavLinkButton" TargetType="Button">
+        <Setter Property="Padding"         Value="14,8" />
+        <Setter Property="CornerRadius"    Value="8" />
         <Setter Property="BackgroundColor" Value="Transparent" />
-        <Setter Property="TextColor" Value="White" />
-        <Setter Property="BorderColor" Value="Grey" />
+        <Setter Property="TextColor"       Value="{DynamicResource TextSecondary}" />
+        <Setter Property="FontFamily"      Value="OpenSansSemibold" />
+        <Setter Property="FontSize"        Value="13" />
+        <Setter Property="VisualStateManager.VisualStateGroups">
+            <VisualStateGroupList>
+                <VisualStateGroup x:Name="CommonStates">
+                    <VisualState x:Name="Normal" />
+                    <VisualState x:Name="PointerOver">
+                        <VisualState.Setters>
+                            <Setter Property="BackgroundColor" Value="{DynamicResource CardSurfaceMuted}" />
+                            <Setter Property="TextColor"       Value="{DynamicResource TextPrimary}" />
+                        </VisualState.Setters>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateGroupList>
+        </Setter>
     </Style>
-    <Style x:Key="SegmentButton.Selected" TargetType="Button" BasedOn="{StaticResource SegmentButtonBase}">
-        <Setter Property="BackgroundColor" Value="LightGrey" />
-        <Setter Property="TextColor" Value="White" />
-        <Setter Property="BorderColor" Value="Grey" />
+
+    <!-- Funds chip ("Funds  $ 18,302.10") on the right side of the nav bar. -->
+    <Style x:Key="FundsChipBorder" TargetType="Border">
+        <Setter Property="Background"      Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="Stroke"          Value="{DynamicResource Divider}" />
+        <Setter Property="StrokeShape"     Value="RoundRectangle 10" />
+        <Setter Property="StrokeThickness" Value="1" />
+        <Setter Property="Padding"         Value="10,6" />
     </Style>
+
+    <Style x:Key="FundsChipKeyLabel" TargetType="Label">
+        <Setter Property="FontSize"  Value="11" />
+        <Setter Property="TextColor" Value="{DynamicResource TextSecondary}" />
+    </Style>
+
+    <Style x:Key="FundsChipValueLabel" TargetType="Label">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize"   Value="13" />
+        <Setter Property="TextColor"  Value="{DynamicResource TextPrimary}" />
+    </Style>
+
+    <!-- Theme picker control (Picker in the top nav / account page). -->
+    <Style x:Key="ThemePickerStyle" TargetType="Picker">
+        <Setter Property="BackgroundColor"     Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="TextColor"           Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontSize"            Value="12" />
+        <Setter Property="MinimumWidthRequest" Value="160" />
+    </Style>
+
+    <!-- Page heading shared across MarketPage / PortfolioPage / AccountPage / AdminPage. -->
+    <Style x:Key="PageHeadingGrid" TargetType="Grid">
+        <Setter Property="Padding"           Value="24,16,24,8" />
+        <Setter Property="ColumnDefinitions" Value="Auto,Auto" />
+        <Setter Property="ColumnSpacing"     Value="14" />
+    </Style>
+
+    <Style x:Key="PageHeadingTitle" TargetType="Label">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize"   Value="22" />
+        <Setter Property="TextColor"  Value="{DynamicResource TextPrimary}" />
+    </Style>
+
+    <Style x:Key="PageHeadingSub" TargetType="Label">
+        <Setter Property="FontSize"              Value="13" />
+        <Setter Property="TextColor"             Value="{DynamicResource TextMuted}" />
+        <Setter Property="VerticalTextAlignment" Value="End" />
+    </Style>
+
+    <!-- ============================================================
+         LEGACY ALIASES - kept so existing XAML continues to compile.
+         ============================================================ -->
+
+    <!-- Login/auth decorative path background -->
+    <Style x:Key="MainGrid" TargetType="Grid">
+        <Setter Property="BackgroundColor" Value="{DynamicResource PageBackground}" />
+        <Setter Property="RowDefinitions"  Value="Auto,*" />
+    </Style>
+
+    <Style x:Key="MainPath" TargetType="Path">
+        <Setter Property="Fill"              Value="{DynamicResource Primary}" />
+        <Setter Property="Data"              Value="m0,0l200,0l0,246c-190,0 -190,93 -381,40l0,-286z" />
+        <Setter Property="Stroke"            Value="Transparent" />
+        <Setter Property="Aspect"            Value="Fill" />
+        <Setter Property="HorizontalOptions" Value="FillAndExpand" />
+        <Setter Property="VerticalOptions"   Value="FillAndExpand" />
+        <Setter Property="Opacity"           Value="0.85" />
+    </Style>
+
+    <Style x:Key="LogoImage" TargetType="Image">
+        <Setter Property="Source"            Value="kse_logo.png" />
+        <Setter Property="BackgroundColor"   Value="Transparent" />
+        <Setter Property="HeightRequest"     Value="40" />
+        <Setter Property="WidthRequest"      Value="40" />
+        <Setter Property="HorizontalOptions" Value="Center" />
+        <Setter Property="VerticalOptions"   Value="Center" />
+    </Style>
+
+
 </ResourceDictionary>

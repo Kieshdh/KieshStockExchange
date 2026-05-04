@@ -1,71 +1,71 @@
 <?xml version="1.0" encoding="utf-8" ?>
+<!-- TradeStyles.xaml - PlaceOrderView, stock selector, quote strip, order action buttons.
+     Legacy keys preserved; new styles use theme semantic tokens. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
-    <!-- Trade page -->
-    <Style x:Key="TradeContentOutline"      TargetType="Border">
-        <Setter Property="Stroke"           Value="Black" />
+
+    <!-- ============================================================
+         LEGACY STYLES - kept so existing views continue to compile
+         ============================================================ -->
+
+    <Style x:Key="TradeContentOutline" TargetType="Border">
+        <Setter Property="Stroke"           Value="{DynamicResource Divider}" />
         <Setter Property="StrokeShape"      Value="RoundRectangle 6" />
         <Setter Property="Padding"          Value="8" />
         <Setter Property="Margin"           Value="4" />
-        <Setter Property="BackgroundColor"  Value="Black" />
+        <Setter Property="BackgroundColor"  Value="{DynamicResource CardSurface}" />
     </Style>
-    <Style x:Key="StockPlacerButton"            TargetType="Button" >
-        <Setter Property="MinimumWidthRequest"  Value="100" />
-        <Setter Property="HorizontalOptions"    Value="Fill" />
-        <Setter Property="Padding"              Value="5" />
-        <Setter Property="TextColor"            Value="Black" />
-        <Setter Property="FontAttributes"       Value="Bold" />
-        <Setter Property="CornerRadius"         Value="20" />
+
+    <Style x:Key="StockSelectorPicker" TargetType="Picker">
+        <Setter Property="MinimumWidthRequest" Value="80" />
+        <Setter Property="BackgroundColor"     Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="TextColor"           Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontSize"            Value="Medium" />
+        <Setter Property="VerticalOptions"     Value="Center" />
+        <Setter Property="FontFamily"          Value="OpenSansSemibold" />
     </Style>
-    <Style x:Key="StockPlacerEntry"             TargetType="Entry" >
-        <Setter Property="Keyboard"                 Value="Numeric" />
-        <Setter Property="HeightRequest"            Value="20" />
-        <Setter Property="HorizontalTextAlignment"  Value="Center" />
-        <Setter Property="VerticalOptions"          Value="Fill" />
-        <Setter Property="HeightRequest"            Value="30" />
-    </Style>
-    <Style x:Key="StockPlacerLabel"             TargetType="Label">
-        <Setter Property="FontAttributes"           Value="Bold" />
-        <Setter Property="VerticalTextAlignment"    Value="Center" />
-        <Setter Property="HorizontalTextAlignment"  Value="Center" />
-    </Style>
-    <Style x:Key="StockSelectorPicker"          TargetType="Picker">
-        <Setter Property="MinimumWidthRequest"  Value="80" />
-        <Setter Property="BackgroundColor"      Value="Grey" />
-        <Setter Property="TextColor"            Value="Black" />
-        <Setter Property="FontSize"             Value="Medium" />
-        <Setter Property="VerticalOptions"      Value="Center" />
-        <Setter Property="FontAttributes"       Value="Bold" />
-    </Style>
-    <Style x:Key="SelectedStockHeaderLabel"     TargetType="Label">
-        <Setter Property="TextColor"            Value="White" />
-        <Setter Property="FontSize"             Value="Large" />
-        <Setter Property="FontAttributes"       Value="Bold" />
+
+    <Style x:Key="SelectedStockHeaderLabel" TargetType="Label">
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontSize"              Value="Large" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
         <Setter Property="VerticalTextAlignment" Value="Center" />
-        <Setter Property="VerticalOptions"      Value="Center" />
+        <Setter Property="VerticalOptions"       Value="Center" />
     </Style>
-    <Style x:Key="ValueLabel"                   TargetType="Label">
-        <Setter Property="FontAttributes"           Value="Bold"/>
-        <Setter Property="HorizontalTextAlignment"  Value="Center"/>
+
+    <!-- ============================================================
+         NEW DESIGN SYSTEM STYLES
+         ============================================================ -->
+
+    <!-- Large current-price readout on the quote strip -->
+    <Style x:Key="QuotePriceLabel" TargetType="Label">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize"   Value="26" />
+        <Setter Property="TextColor"  Value="{DynamicResource TextPrimary}" />
     </Style>
-    <Style x:Key="OrderBookBigLabel"            TargetType="Label" >
-        <Setter Property="HorizontalOptions"        Value="Start" />
-        <Setter Property="FontSize"                 Value="17" />
-        <Setter Property="HorizontalTextAlignment"  Value="Start" />
+
+    <!-- Order totals summary (Est. Total / Remaining Funds ...) -->
+    <Style x:Key="OrderTotalsLabel" TargetType="Label">
+        <Setter Property="FontSize"  Value="12" />
+        <Setter Property="TextColor" Value="{DynamicResource TextSecondary}" />
     </Style>
-    <Style x:Key="OrderBookLabel"               TargetType="Label" >
-        <Setter Property="HorizontalTextAlignment"  Value="End" />
-        <Setter Property="HorizontalOptions"        Value="End" />
-        <Setter Property="Margin"                   Value="0,0,0,0" />
+
+    <Style x:Key="OrderTotalsValue" TargetType="Label">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize"   Value="13" />
+        <Setter Property="TextColor"  Value="{DynamicResource TextPrimary}" />
     </Style>
-    <Style x:Key="OrderBookPriceBuy"            TargetType="Label"
-           BasedOn="{StaticResource OrderBookLabel}" >
-        <Setter Property="TextColor"            Value="{StaticResource BuyGreen}"/>
-        <Setter Property="FontAttributes"       Value="Bold"/>
-        <Setter Property="HorizontalOptions"    Value="Start" />
+
+    <!-- Full-width BUY / SELL action buttons -->
+    <Style x:Key="BuyButtonStyle" TargetType="Button">
+        <Setter Property="BackgroundColor"   Value="{DynamicResource BuyGreen}" />
+        <Setter Property="TextColor"         Value="{DynamicResource White}" />
+        <Setter Property="FontFamily"        Value="OpenSansSemibold" />
+        <Setter Property="FontSize"          Value="15" />
+        <Setter Property="CornerRadius"      Value="10" />
+        <Setter Property="HeightRequest"     Value="44" />
+        <Setter Property="HorizontalOptions" Value="Fill" />
     </Style>
-    <Style x:Key="OrderBookPriceSell"           TargetType="Label"
-           BasedOn="{StaticResource OrderBookPriceBuy}" >
-        <Setter Property="TextColor"    Value="{StaticResource SellRed}"/>
-    </Style>
+
+
 </ResourceDictionary>

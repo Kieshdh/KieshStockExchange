@@ -1,182 +1,263 @@
 <?xml version="1.0" encoding="utf-8" ?>
+<!-- AdminStyles.xaml - AdminPage shell, cards, tables, pagination, status dots.
+     All surfaces use theme semantic tokens; legacy keys are preserved.
+     Bot-stat card styles (AdminBotStat*) are used by BotDashboardPage. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
-    <!-- Admin shared shells (cards, dashboard, refresh button) -->
+
+    <!-- ============================================================
+         ADMIN SHELL - cards, metrics, buttons, status dots
+         ============================================================ -->
+
     <Style x:Key="AdminCardStyle" TargetType="Border">
-        <Setter Property="BackgroundColor"  Value="{StaticResource ChartPanel}" />
-        <Setter Property="Stroke"           Value="{StaticResource ChartGrid}" />
-        <Setter Property="StrokeThickness"  Value="1" />
-        <Setter Property="StrokeShape"      Value="RoundRectangle 10" />
-        <Setter Property="Padding"          Value="12" />
-        <Setter Property="Margin"           Value="12,6" />
-    </Style>
-    <Style x:Key="AdminCardTitle" TargetType="Label">
-        <Setter Property="TextColor"        Value="{StaticResource Gray100}" />
-        <Setter Property="FontAttributes"   Value="Bold" />
-        <Setter Property="FontSize"         Value="16" />
-        <Setter Property="VerticalOptions"  Value="Center" />
-    </Style>
-    <Style x:Key="AdminMetricLabel" TargetType="Label">
-        <Setter Property="TextColor"        Value="{StaticResource ChartAxis}" />
-        <Setter Property="FontSize"         Value="12" />
-        <Setter Property="VerticalOptions"  Value="Center" />
-    </Style>
-    <Style x:Key="AdminMetricValue" TargetType="Label">
-        <Setter Property="TextColor"        Value="White" />
-        <Setter Property="FontAttributes"   Value="Bold" />
-        <Setter Property="FontSize"         Value="14" />
-        <Setter Property="VerticalOptions"  Value="Center" />
-    </Style>
-    <Style x:Key="AdminEntry" TargetType="Entry">
-        <Setter Property="TextColor"        Value="White" />
-        <Setter Property="PlaceholderColor" Value="{StaticResource Gray400}" />
-        <Setter Property="BackgroundColor"  Value="{StaticResource ChartGrid}" />
-        <Setter Property="HeightRequest"    Value="32" />
-        <Setter Property="FontSize"         Value="13" />
-    </Style>
-    <Style x:Key="AdminPrimaryButton" TargetType="Button">
-        <Setter Property="BackgroundColor"  Value="{StaticResource AccentGreen}" />
-        <Setter Property="TextColor"        Value="Black" />
-        <Setter Property="FontAttributes"   Value="Bold" />
-        <Setter Property="FontSize"         Value="13" />
-        <Setter Property="CornerRadius"     Value="6" />
-        <Setter Property="HeightRequest"    Value="32" />
-        <Setter Property="MinimumWidthRequest" Value="80" />
-        <Setter Property="Padding"          Value="10,0" />
-    </Style>
-    <Style x:Key="AdminDangerButton" TargetType="Button" BasedOn="{StaticResource AdminPrimaryButton}">
-        <Setter Property="BackgroundColor"  Value="{StaticResource SellRed}" />
-        <Setter Property="TextColor"        Value="White" />
-    </Style>
-    <Style x:Key="AdminGhostButton" TargetType="Button">
-        <Setter Property="BackgroundColor"  Value="Transparent" />
-        <Setter Property="TextColor"        Value="{StaticResource AccentGreen}" />
-        <Setter Property="FontAttributes"   Value="Bold" />
-        <Setter Property="FontSize"         Value="13" />
-        <Setter Property="CornerRadius"     Value="6" />
-        <Setter Property="HeightRequest"    Value="32" />
-        <Setter Property="MinimumWidthRequest" Value="80" />
-        <Setter Property="BorderColor"      Value="{StaticResource AccentGreen}" />
-        <Setter Property="BorderWidth"      Value="1" />
-        <Setter Property="Padding"          Value="10,0" />
-    </Style>
-    <Style x:Key="AdminRefreshButton" TargetType="Button" BasedOn="{StaticResource AdminGhostButton}">
-        <Setter Property="MinimumWidthRequest" Value="100" />
-        <Setter Property="Margin"           Value="8,0,0,0" />
-    </Style>
-    <Style x:Key="AdminStatusDot" TargetType="Ellipse">
-        <Setter Property="WidthRequest"     Value="10" />
-        <Setter Property="HeightRequest"    Value="10" />
-        <Setter Property="VerticalOptions"  Value="Center" />
-        <Setter Property="HorizontalOptions" Value="Center" />
-    </Style>
-    <Style x:Key="AdminStatusDot.Online" TargetType="Ellipse" BasedOn="{StaticResource AdminStatusDot}">
-        <Setter Property="Fill"             Value="{StaticResource AccentGreen}" />
-    </Style>
-    <Style x:Key="AdminStatusDot.Offline" TargetType="Ellipse" BasedOn="{StaticResource AdminStatusDot}">
-        <Setter Property="Fill"             Value="{StaticResource SellRed}" />
-    </Style>
-    <Style x:Key="AdminCardDivider" TargetType="Border">
-        <Setter Property="HeightRequest"    Value="1" />
-        <Setter Property="BackgroundColor"  Value="{StaticResource ChartGrid}" />
-        <Setter Property="Stroke"           Value="Transparent" />
-        <Setter Property="StrokeThickness"  Value="0" />
-    </Style>
-    <Style x:Key="AdminCardSubtitle" TargetType="Label" BasedOn="{StaticResource AdminCardTitle}">
-        <Setter Property="FontSize"         Value="13" />
-    </Style>
-    <Style x:Key="AdminInsetPanel" TargetType="Border">
-        <Setter Property="BackgroundColor"  Value="{StaticResource ChartBg}" />
-        <Setter Property="Stroke"           Value="{StaticResource ChartGrid}" />
-        <Setter Property="StrokeThickness"  Value="1" />
-        <Setter Property="StrokeShape"      Value="RoundRectangle 6" />
-        <Setter Property="Padding"          Value="8" />
-    </Style>
-    <Style x:Key="AdminMutedNote" TargetType="Label">
-        <Setter Property="TextColor"        Value="{StaticResource Gray200}" />
-        <Setter Property="FontSize"         Value="11" />
-        <Setter Property="LineBreakMode"    Value="WordWrap" />
-    </Style>
-    <Style x:Key="AdminActivityIndicator" TargetType="ActivityIndicator">
-        <Setter Property="Color"            Value="{StaticResource AccentGreen}" />
-        <Setter Property="WidthRequest"     Value="40" />
-        <Setter Property="HeightRequest"    Value="40" />
+        <Setter Property="BackgroundColor"     Value="{DynamicResource CardSurface}" />
+        <Setter Property="Stroke"              Value="{DynamicResource Divider}" />
+        <Setter Property="StrokeThickness"     Value="1" />
+        <Setter Property="StrokeShape"         Value="RoundRectangle 10" />
+        <Setter Property="Padding"             Value="12" />
+        <Setter Property="Margin"              Value="12,6" />
     </Style>
 
-    <!-- Admin Table -->
-    <Style x:Key="TableHeaderLabel"             TargetType="Label">
-        <Setter Property="TextColor"            Value="Black"  />
-        <Setter Property="FontAttributes"       Value="Bold"   />
-        <Setter Property="HorizontalOptions"    Value="Center" />
-        <Setter Property="FontSize"             Value="Small" />
+    <Style x:Key="AdminCardTitle" TargetType="Label">
+        <Setter Property="TextColor"           Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontFamily"          Value="OpenSansSemibold" />
+        <Setter Property="FontSize"            Value="16" />
+        <Setter Property="VerticalOptions"     Value="Center" />
     </Style>
-    <Style x:Key="TableRowLabel"                TargetType="Label">
-        <Setter Property="TextColor"            Value="White"  />
-        <Setter Property="FontAttributes"       Value="None"   />
-        <Setter Property="HorizontalOptions"    Value="Center" />
-        <Setter Property="VerticalOptions"      Value="Center" />
+
+    <Style x:Key="AdminCardSubtitle" TargetType="Label" BasedOn="{StaticResource AdminCardTitle}">
+        <Setter Property="FontSize"            Value="13" />
     </Style>
-    <Style x:Key="TableRowEntry"                TargetType="Entry">
-        <Setter Property="TextColor"            Value="White"  />
-        <Setter Property="FontAttributes"       Value="None"   />
-        <Setter Property="VerticalOptions"      Value="Fill" />
-        <Setter Property="HorizontalOptions"    Value="Fill" />
-        <Setter Property="HorizontalTextAlignment"   Value="Center" />
-        <Setter Property="Background"   Value="{StaticResource DarkGreen}" />
+
+    <Style x:Key="AdminMetricLabel" TargetType="Label">
+        <Setter Property="TextColor"           Value="{DynamicResource TextMuted}" />
+        <Setter Property="FontSize"            Value="12" />
+        <Setter Property="VerticalOptions"     Value="Center" />
     </Style>
-    <Style x:Key="TableEditLabel"            TargetType="Label">
-        <Setter Property="TextColor"         Value="{StaticResource DarkGreen}"  />
-        <Setter Property="FontAttributes"    Value="None"   />
-        <Setter Property="HorizontalOptions" Value="Center" />
-        <Setter Property="VerticalOptions"   Value="Center" />
-        <Setter Property="FontAttributes"    Value="Bold" />
+
+    <Style x:Key="AdminMetricValue" TargetType="Label">
+        <Setter Property="TextColor"           Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontFamily"          Value="OpenSansSemibold" />
+        <Setter Property="FontSize"            Value="14" />
+        <Setter Property="VerticalOptions"     Value="Center" />
     </Style>
-    <Style x:Key="TableVerticalSeparator"       TargetType="BoxView">
-        <Setter Property="BackgroundColor"      Value="Gray" />
-        <Setter Property="WidthRequest"         Value="3"    />
-        <Setter Property="HorizontalOptions"    Value="Start"/>
+
+    <Style x:Key="AdminEntry" TargetType="Entry">
+        <Setter Property="TextColor"           Value="{DynamicResource TextPrimary}" />
+        <Setter Property="PlaceholderColor"    Value="{DynamicResource TextMuted}" />
+        <Setter Property="BackgroundColor"     Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="HeightRequest"       Value="32" />
+        <Setter Property="FontSize"            Value="13" />
     </Style>
-    <Style x:Key="TableHorizontalSeparator"  TargetType="BoxView" >
-        <Setter Property="BackgroundColor"   Value="Gray" />
-        <Setter Property="HeightRequest"     Value="1"    />
-        <Setter Property="HorizontalOptions" Value="Fill"/>
-        <Setter Property="VerticalOptions"   Value="End"/>
-        <Setter Property="Grid.ColumnSpan"   Value="10"/>
+
+    <Style x:Key="AdminPrimaryButton" TargetType="Button">
+        <Setter Property="BackgroundColor"     Value="{DynamicResource BuyGreen}" />
+        <Setter Property="TextColor"           Value="{DynamicResource White}" />
+        <Setter Property="FontFamily"          Value="OpenSansSemibold" />
+        <Setter Property="FontSize"            Value="13" />
+        <Setter Property="CornerRadius"        Value="6" />
+        <Setter Property="HeightRequest"       Value="32" />
+        <Setter Property="MinimumWidthRequest" Value="80" />
+        <Setter Property="Padding"             Value="10,0" />
     </Style>
-    <Style x:Key="TableRowGrid"             TargetType="Grid">
-        <Setter Property="BackgroundColor"  Value="Transparent" />
-        <Setter Property="RowDefinitions"   Value="Auto"    />
-        <Setter Property="Padding"          Value="0"/>
-        <Setter Property="Margin"           Value="0"/>
+
+    <Style x:Key="AdminDangerButton" TargetType="Button" BasedOn="{StaticResource AdminPrimaryButton}">
+        <Setter Property="BackgroundColor"     Value="{DynamicResource SellRed}" />
+        <Setter Property="TextColor"           Value="{DynamicResource White}" />
     </Style>
-    <Style x:Key="TableHeaderGrid"          TargetType="Grid">
-        <Setter Property="BackgroundColor"  Value="DarkGray" />
-        <Setter Property="RowDefinitions"   Value="Auto"    />
-        <Setter Property="Padding"          Value="4"/>
-        <Setter Property="Margin"           Value="10,10,10,-10"/>
+
+    <Style x:Key="AdminGhostButton" TargetType="Button">
+        <Setter Property="BackgroundColor"     Value="Transparent" />
+        <Setter Property="TextColor"           Value="{DynamicResource Primary}" />
+        <Setter Property="FontFamily"          Value="OpenSansSemibold" />
+        <Setter Property="FontSize"            Value="13" />
+        <Setter Property="CornerRadius"        Value="6" />
+        <Setter Property="HeightRequest"       Value="32" />
+        <Setter Property="MinimumWidthRequest" Value="80" />
+        <Setter Property="BorderColor"         Value="{DynamicResource Primary}" />
+        <Setter Property="BorderWidth"         Value="1" />
+        <Setter Property="Padding"             Value="10,0" />
     </Style>
-    <Style x:Key="PageNumberStackLayout"        TargetType="HorizontalStackLayout">
-        <Setter Property="HorizontalOptions"    Value="Center" />
-        <Setter Property="Spacing"              Value="10"    />
-        <Setter Property="Margin"               Value="0,0,0,10"/>
+
+    <Style x:Key="AdminRefreshButton" TargetType="Button" BasedOn="{StaticResource AdminGhostButton}">
+        <Setter Property="MinimumWidthRequest" Value="100" />
+        <Setter Property="Margin"              Value="8,0,0,0" />
     </Style>
-    <Style x:Key="PageNumberButton"         TargetType="Button">
-        <Setter Property="WidthRequest"     Value="40" />
-        <Setter Property="HeightRequest"    Value="30" />
-        <Setter Property="CornerRadius"     Value="15" />
-        <Setter Property="Padding"          Value="5,0"/>
-        <Setter Property="FontAttributes"   Value="Bold" />
-        <Setter Property="TextColor"        Value="White" />
-        <Setter Property="BackgroundColor"  Value="Grey" />
+
+    <Style x:Key="AdminStatusDot" TargetType="Ellipse">
+        <Setter Property="WidthRequest"        Value="10" />
+        <Setter Property="HeightRequest"       Value="10" />
+        <Setter Property="VerticalOptions"     Value="Center" />
+        <Setter Property="HorizontalOptions"   Value="Center" />
     </Style>
-    <Style x:Key="TableSortingButton"       TargetType="Button" >
-        <Setter Property="CornerRadius"     Value="30" />
-        <Setter Property="WidthRequest"     Value="20" />
-        <Setter Property="HeightRequest"    Value="20" />
-        <Setter Property="BackgroundColor"  Value="White" />
+
+    <Style x:Key="AdminStatusDot.Online" TargetType="Ellipse" BasedOn="{StaticResource AdminStatusDot}">
+        <Setter Property="Fill"                Value="{DynamicResource BuyGreen}" />
     </Style>
-    <Style x:Key="SortingStackLayout"           TargetType="HorizontalStackLayout" >
-        <Setter Property="Spacing"              Value="10" />
-        <Setter Property="HorizontalOptions"    Value="Center" />
+
+    <Style x:Key="AdminStatusDot.Offline" TargetType="Ellipse" BasedOn="{StaticResource AdminStatusDot}">
+        <Setter Property="Fill"                Value="{DynamicResource SellRed}" />
     </Style>
+
+    <Style x:Key="AdminInsetPanel" TargetType="Border">
+        <Setter Property="BackgroundColor"     Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="Stroke"              Value="{DynamicResource Divider}" />
+        <Setter Property="StrokeThickness"     Value="1" />
+        <Setter Property="StrokeShape"         Value="RoundRectangle 6" />
+        <Setter Property="Padding"             Value="8" />
+    </Style>
+
+    <Style x:Key="AdminMutedNote" TargetType="Label">
+        <Setter Property="TextColor"           Value="{DynamicResource TextMuted}" />
+        <Setter Property="FontSize"            Value="11" />
+        <Setter Property="LineBreakMode"       Value="WordWrap" />
+    </Style>
+
+    <!-- ============================================================
+         ADMIN TABLES - header, rows, separators, pagination
+         ============================================================ -->
+
+    <Style x:Key="TableHeaderLabel" TargetType="Label">
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+        <Setter Property="HorizontalOptions"     Value="Center" />
+        <Setter Property="FontSize"              Value="Small" />
+    </Style>
+
+    <Style x:Key="TableRowLabel" TargetType="Label">
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="HorizontalOptions"     Value="Center" />
+        <Setter Property="VerticalOptions"       Value="Center" />
+    </Style>
+
+    <Style x:Key="TableRowEntry" TargetType="Entry">
+        <Setter Property="TextColor"               Value="{DynamicResource TextPrimary}" />
+        <Setter Property="VerticalOptions"         Value="Fill" />
+        <Setter Property="HorizontalOptions"       Value="Fill" />
+        <Setter Property="HorizontalTextAlignment" Value="Center" />
+        <Setter Property="Background"              Value="{DynamicResource CardSurfaceMuted}" />
+    </Style>
+
+    <Style x:Key="TableEditLabel" TargetType="Label">
+        <Setter Property="TextColor"             Value="{DynamicResource BuyGreen}" />
+        <Setter Property="HorizontalOptions"     Value="Center" />
+        <Setter Property="VerticalOptions"       Value="Center" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+    </Style>
+
+    <Style x:Key="TableVerticalSeparator" TargetType="BoxView">
+        <Setter Property="BackgroundColor"       Value="{DynamicResource Divider}" />
+        <Setter Property="WidthRequest"          Value="1" />
+        <Setter Property="HorizontalOptions"     Value="Start" />
+    </Style>
+
+    <Style x:Key="TableHorizontalSeparator" TargetType="BoxView">
+        <Setter Property="BackgroundColor"       Value="{DynamicResource Divider}" />
+        <Setter Property="HeightRequest"         Value="1" />
+        <Setter Property="HorizontalOptions"     Value="Fill" />
+        <Setter Property="VerticalOptions"       Value="End" />
+        <Setter Property="Grid.ColumnSpan"       Value="10" />
+    </Style>
+
+    <Style x:Key="TableRowGrid" TargetType="Grid">
+        <Setter Property="BackgroundColor"       Value="Transparent" />
+        <Setter Property="RowDefinitions"        Value="Auto" />
+        <Setter Property="Padding"               Value="0" />
+        <Setter Property="Margin"                Value="0" />
+    </Style>
+
+    <Style x:Key="TableHeaderGrid" TargetType="Grid">
+        <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="RowDefinitions"        Value="Auto" />
+        <Setter Property="Padding"               Value="4" />
+        <Setter Property="Margin"                Value="10,10,10,-10" />
+    </Style>
+
+    <Style x:Key="PageNumberStackLayout" TargetType="HorizontalStackLayout">
+        <Setter Property="HorizontalOptions"     Value="Center" />
+        <Setter Property="Spacing"               Value="10" />
+        <Setter Property="Margin"                Value="0,0,0,10" />
+    </Style>
+
+    <Style x:Key="PageNumberButton" TargetType="Button">
+        <Setter Property="WidthRequest"          Value="40" />
+        <Setter Property="HeightRequest"         Value="30" />
+        <Setter Property="CornerRadius"          Value="15" />
+        <Setter Property="Padding"               Value="5,0" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+        <Setter Property="TextColor"             Value="{DynamicResource TextSecondary}" />
+        <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurfaceMuted}" />
+    </Style>
+
+    <Style x:Key="TableSortingButton" TargetType="Button">
+        <Setter Property="CornerRadius"          Value="30" />
+        <Setter Property="WidthRequest"          Value="20" />
+        <Setter Property="HeightRequest"         Value="20" />
+        <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurface}" />
+    </Style>
+
+    <Style x:Key="SortingStackLayout" TargetType="HorizontalStackLayout">
+        <Setter Property="Spacing"               Value="10" />
+        <Setter Property="HorizontalOptions"     Value="Center" />
+    </Style>
+
+    <!-- ============================================================
+         NEW DESIGN SYSTEM STYLES
+         ============================================================ -->
+
+    <!-- Semantic column header label (11 px, muted, tracked) -->
+    <Style x:Key="TableHeaderLabelStyle" TargetType="Label">
+        <Setter Property="FontFamily"              Value="OpenSansSemibold" />
+        <Setter Property="FontSize"                Value="11" />
+        <Setter Property="TextColor"               Value="{DynamicResource TextMuted}" />
+        <Setter Property="HorizontalTextAlignment" Value="Center" />
+        <Setter Property="VerticalTextAlignment"   Value="Center" />
+        <Setter Property="CharacterSpacing"        Value="0.3" />
+    </Style>
+
+    <!-- Semantic header row grid -->
+    <Style x:Key="TableHeaderGridStyle" TargetType="Grid">
+        <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="Padding"               Value="8,6" />
+        <Setter Property="ColumnSpacing"         Value="4" />
+    </Style>
+
+    <!-- Loading overlay positioned absolutely over the table area -->
+    <Style x:Key="AdminLoadingOverlay" TargetType="Border">
+        <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurface}" />
+        <Setter Property="Opacity"               Value="0.85" />
+        <Setter Property="Stroke"                Value="Transparent" />
+        <Setter Property="StrokeThickness"       Value="0" />
+        <Setter Property="HorizontalOptions"     Value="Fill" />
+        <Setter Property="VerticalOptions"       Value="Fill" />
+    </Style>
+
+    <Style x:Key="AdminLoadingActivity" TargetType="ActivityIndicator">
+        <Setter Property="Color"                 Value="{DynamicResource Primary}" />
+        <Setter Property="WidthRequest"          Value="48" />
+        <Setter Property="HeightRequest"         Value="48" />
+        <Setter Property="HorizontalOptions"     Value="Center" />
+        <Setter Property="VerticalOptions"       Value="Center" />
+    </Style>
+
+    <!-- Bot-stats card (BotDashboardPage) -->
+    <Style x:Key="AdminBotStatCard" TargetType="Border">
+        <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurface}" />
+        <Setter Property="Stroke"                Value="{DynamicResource Divider}" />
+        <Setter Property="StrokeThickness"       Value="1" />
+        <Setter Property="StrokeShape"           Value="RoundRectangle 8" />
+        <Setter Property="Padding"               Value="14,10" />
+    </Style>
+
+    <Style x:Key="AdminBotStatLabel" TargetType="Label">
+        <Setter Property="TextColor"             Value="{DynamicResource TextMuted}" />
+        <Setter Property="FontSize"              Value="11" />
+    </Style>
+
+    <Style x:Key="AdminBotStatValue" TargetType="Label">
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+        <Setter Property="FontSize"              Value="18" />
+    </Style>
+
 </ResourceDictionary>

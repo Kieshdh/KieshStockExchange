@@ -1,76 +1,82 @@
 <?xml version="1.0" encoding="utf-8" ?>
+<!-- OrderBookStyles.xaml - DOM ladder and shared trade-table styles.
+     (OpenOrders, OrderHistory, TransactionHistory, Positions tables)
+     All colors come from the active theme dictionary. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
-    <!-- Order Book — DOM ladder styles -->
-    <Style x:Key="OrderBookContainer" TargetType="Grid">
-        <Setter Property="BackgroundColor" Value="{StaticResource ChartPanel}" />
-        <Setter Property="RowSpacing"      Value="0" />
-        <Setter Property="Padding"         Value="0" />
-    </Style>
+
+    <!-- ============================================================
+         ORDER BOOK - DOM LADDER
+         ============================================================ -->
+
     <Style x:Key="OrderBookHeaderLabel" TargetType="Label">
-        <Setter Property="TextColor"               Value="{StaticResource ChartAxis}" />
+        <Setter Property="TextColor"               Value="{DynamicResource TextMuted}" />
+        <Setter Property="FontFamily"              Value="OpenSansSemibold" />
         <Setter Property="FontSize"                Value="11" />
         <Setter Property="HorizontalTextAlignment" Value="End" />
         <Setter Property="VerticalTextAlignment"   Value="Center" />
     </Style>
+
     <Style x:Key="OrderBookAskPriceLabel" TargetType="Label">
-        <Setter Property="TextColor"               Value="{StaticResource SellRed}" />
-        <Setter Property="FontAttributes"          Value="Bold" />
+        <Setter Property="TextColor"               Value="{DynamicResource SellRed}" />
+        <Setter Property="FontFamily"              Value="OpenSansSemibold" />
         <Setter Property="FontSize"                Value="12" />
         <Setter Property="HorizontalOptions"       Value="Start" />
         <Setter Property="HorizontalTextAlignment" Value="Start" />
         <Setter Property="VerticalTextAlignment"   Value="Center" />
     </Style>
+
     <Style x:Key="OrderBookBidPriceLabel" TargetType="Label">
-        <Setter Property="TextColor"               Value="{StaticResource BuyGreen}" />
-        <Setter Property="FontAttributes"          Value="Bold" />
+        <Setter Property="TextColor"               Value="{DynamicResource BuyGreen}" />
+        <Setter Property="FontFamily"              Value="OpenSansSemibold" />
         <Setter Property="FontSize"                Value="12" />
         <Setter Property="HorizontalOptions"       Value="Start" />
         <Setter Property="HorizontalTextAlignment" Value="Start" />
         <Setter Property="VerticalTextAlignment"   Value="Center" />
     </Style>
+
     <Style x:Key="OrderBookQuantityLabel" TargetType="Label">
-        <Setter Property="TextColor"               Value="{StaticResource Gray400}" />
+        <Setter Property="TextColor"               Value="{DynamicResource TextMuted}" />
         <Setter Property="FontSize"                Value="12" />
         <Setter Property="HorizontalOptions"       Value="End" />
         <Setter Property="HorizontalTextAlignment" Value="End" />
         <Setter Property="VerticalTextAlignment"   Value="Center" />
     </Style>
+
     <Style x:Key="OrderBookSpreadRow" TargetType="Grid">
-        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+        <Setter Property="BackgroundColor" Value="{DynamicResource CardSurfaceMuted}" />
         <Setter Property="Padding"         Value="6,4" />
         <Setter Property="ColumnSpacing"   Value="6" />
     </Style>
-    <Style x:Key="OrderBookSpreadPriceLabel" TargetType="Label">
-        <Setter Property="FontAttributes"           Value="Bold" />
-        <Setter Property="FontSize"                 Value="14" />
-        <Setter Property="VerticalTextAlignment"    Value="Center" />
-    </Style>
+
     <Style x:Key="OrderBookEmptyMessageLabel" TargetType="Label">
-        <Setter Property="TextColor"            Value="{StaticResource ChartAxis}" />
-        <Setter Property="FontAttributes"       Value="Italic" />
-        <Setter Property="FontSize"             Value="13" />
-        <Setter Property="HorizontalOptions"    Value="Center" />
-        <Setter Property="VerticalOptions"      Value="Center" />
+        <Setter Property="TextColor"         Value="{DynamicResource TextMuted}" />
+        <Setter Property="FontSize"          Value="13" />
+        <Setter Property="HorizontalOptions" Value="Center" />
+        <Setter Property="VerticalOptions"   Value="Center" />
     </Style>
+
     <Style x:Key="OrderBookDepthBar.Sell" TargetType="Border">
-        <Setter Property="BackgroundColor"   Value="{StaticResource SellRed}" />
+        <Setter Property="BackgroundColor"   Value="{DynamicResource SellRed}" />
         <Setter Property="Stroke"            Value="Transparent" />
         <Setter Property="StrokeThickness"   Value="0" />
-        <Setter Property="Opacity"           Value="0.22" />
+        <Setter Property="Opacity"           Value="0.18" />
         <Setter Property="HorizontalOptions" Value="End" />
         <Setter Property="VerticalOptions"   Value="Fill" />
         <Setter Property="InputTransparent"  Value="True" />
     </Style>
+
     <Style x:Key="OrderBookDepthBar.Buy" TargetType="Border">
-        <Setter Property="BackgroundColor"   Value="{StaticResource BuyGreen}" />
+        <Setter Property="BackgroundColor"   Value="{DynamicResource BuyGreen}" />
         <Setter Property="Stroke"            Value="Transparent" />
         <Setter Property="StrokeThickness"   Value="0" />
-        <Setter Property="Opacity"           Value="0.22" />
+        <Setter Property="Opacity"           Value="0.18" />
         <Setter Property="HorizontalOptions" Value="End" />
         <Setter Property="VerticalOptions"   Value="Fill" />
         <Setter Property="InputTransparent"  Value="True" />
     </Style>
+
+    <!-- Best-level row: gets a tinted bg when IsBestLevel == True -->
     <Style x:Key="OrderBookBestLevelRow" TargetType="Border">
         <Setter Property="Stroke"          Value="Transparent" />
         <Setter Property="StrokeThickness" Value="0" />
@@ -79,83 +85,125 @@
         <Setter Property="StrokeShape"     Value="Rectangle" />
         <Style.Triggers>
             <DataTrigger TargetType="Border" Binding="{Binding IsBestLevel}" Value="True">
-                <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                <Setter Property="BackgroundColor" Value="{DynamicResource CardSurfaceMuted}" />
             </DataTrigger>
         </Style.Triggers>
-    </Style>
-    <Style x:Key="TableCheckBox"           TargetType="CheckBox" >
-        <Setter Property="BackgroundColor"      Value="Transparent" />
-        <Setter Property="HorizontalOptions"    Value="End" />
-        <Setter Property="VerticalOptions"      Value="Center" />
     </Style>
 
-    <!-- Shared trade-table styles (used by OpenOrders, OrderHistory,
-         TransactionHistory and Positions tables) -->
-    <Style x:Key="TradeTableContainer"          TargetType="VerticalStackLayout">
-        <Setter Property="Spacing"              Value="8" />
-        <Setter Property="Padding"              Value="12,8" />
+    <!-- ============================================================
+         SHARED TRADE-TABLE STYLES
+         (OpenOrders, OrderHistory, TransactionHistory, Positions)
+         ============================================================ -->
+
+    <Style x:Key="TradeTableContainer" TargetType="VerticalStackLayout">
+        <Setter Property="Spacing"  Value="8" />
+        <Setter Property="Padding"  Value="12,8" />
     </Style>
-    <Style x:Key="TradeTableHeaderGrid"         TargetType="Grid">
-        <Setter Property="Padding"              Value="8,6" />
-        <Setter Property="ColumnSpacing"        Value="4" />
-        <Setter Property="BackgroundColor"      Value="{StaticResource Gray950}" />
+
+    <Style x:Key="TradeTableHeaderGrid" TargetType="Grid">
+        <Setter Property="Padding"         Value="8,6" />
+        <Setter Property="ColumnSpacing"   Value="4" />
+        <Setter Property="BackgroundColor" Value="{DynamicResource CardSurfaceMuted}" />
     </Style>
-    <Style x:Key="TradeTableHeaderLabel"        TargetType="Label">
-        <Setter Property="TextColor"                Value="{StaticResource Gray100}" />
-        <Setter Property="FontAttributes"           Value="Bold" />
-        <Setter Property="FontSize"                 Value="Small" />
-        <Setter Property="HorizontalTextAlignment"  Value="Center" />
-        <Setter Property="VerticalTextAlignment"    Value="Center" />
+
+    <Style x:Key="TradeTableHeaderLabel" TargetType="Label">
+        <Setter Property="TextColor"               Value="{DynamicResource TextSecondary}" />
+        <Setter Property="FontFamily"              Value="OpenSansSemibold" />
+        <Setter Property="FontSize"                Value="11" />
+        <Setter Property="HorizontalTextAlignment" Value="Center" />
+        <Setter Property="VerticalTextAlignment"   Value="Center" />
     </Style>
-    <Style x:Key="TradeTableRowGrid"            TargetType="Grid">
-        <Setter Property="Padding"              Value="8,6" />
-        <Setter Property="ColumnSpacing"        Value="4" />
-        <Setter Property="BackgroundColor"      Value="{StaticResource TableRowBackground}" />
+
+    <Style x:Key="TradeTableRowGrid" TargetType="Grid">
+        <Setter Property="Padding"         Value="8,6" />
+        <Setter Property="ColumnSpacing"   Value="4" />
+        <Setter Property="BackgroundColor" Value="{DynamicResource CardSurface}" />
     </Style>
-    <Style x:Key="TradeTableRowLabel"           TargetType="Label">
-        <Setter Property="TextColor"                Value="White" />
-        <Setter Property="FontSize"                 Value="Small" />
-        <Setter Property="HorizontalTextAlignment"  Value="Center" />
-        <Setter Property="VerticalTextAlignment"    Value="Center" />
+
+    <Style x:Key="TradeTableRowLabel" TargetType="Label">
+        <Setter Property="TextColor"               Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontSize"                Value="Small" />
+        <Setter Property="HorizontalTextAlignment" Value="Center" />
+        <Setter Property="VerticalTextAlignment"   Value="Center" />
     </Style>
-    <Style x:Key="TradeTableSymbolLabel"        TargetType="Label"
+
+    <Style x:Key="TradeTableSymbolLabel" TargetType="Label"
            BasedOn="{StaticResource TradeTableRowLabel}">
-        <Setter Property="FontAttributes"           Value="Bold" />
-        <Setter Property="HorizontalTextAlignment"  Value="Start" />
+        <Setter Property="FontFamily"              Value="OpenSansSemibold" />
+        <Setter Property="HorizontalTextAlignment" Value="Start" />
     </Style>
-    <Style x:Key="TradeTableSideLabel"          TargetType="Label"
+
+    <Style x:Key="TradeTableSideLabel" TargetType="Label"
            BasedOn="{StaticResource TradeTableRowLabel}">
-        <Setter Property="FontAttributes"           Value="Bold" />
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
         <Style.Triggers>
             <DataTrigger TargetType="Label" Binding="{Binding IsBuyOrder}"  Value="True">
-                <Setter Property="TextColor" Value="{StaticResource BuyGreen}" />
+                <Setter Property="TextColor" Value="{DynamicResource BuyGreen}" />
             </DataTrigger>
             <DataTrigger TargetType="Label" Binding="{Binding IsSellOrder}" Value="True">
-                <Setter Property="TextColor" Value="{StaticResource SellRed}" />
+                <Setter Property="TextColor" Value="{DynamicResource SellRed}" />
             </DataTrigger>
         </Style.Triggers>
     </Style>
-    <Style x:Key="TradeTableButton"             TargetType="Button">
-        <Setter Property="BackgroundColor"      Value="Transparent" />
-        <Setter Property="TextColor"            Value="{StaticResource SellRed}" />
-        <Setter Property="FontAttributes"       Value="Bold" />
-        <Setter Property="FontSize"             Value="14" />
-        <Setter Property="Padding"              Value="0" />
-        <Setter Property="WidthRequest"         Value="28" />
-        <Setter Property="HeightRequest"        Value="28" />
-        <Setter Property="CornerRadius"         Value="14" />
-        <Setter Property="BorderWidth"          Value="0" />
+
+    <!-- Small icon-button for cancel / remove actions in a table row -->
+    <Style x:Key="TradeTableButton" TargetType="Button">
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor"       Value="{DynamicResource SellRed}" />
+        <Setter Property="FontFamily"      Value="OpenSansSemibold" />
+        <Setter Property="FontSize"        Value="14" />
+        <Setter Property="Padding"         Value="0" />
+        <Setter Property="WidthRequest"    Value="28" />
+        <Setter Property="HeightRequest"   Value="28" />
+        <Setter Property="CornerRadius"    Value="14" />
+        <Setter Property="BorderWidth"     Value="0" />
     </Style>
-    <Style x:Key="TableActionButton"            TargetType="Button">
-        <Setter Property="BackgroundColor"      Value="Transparent" />
-        <Setter Property="TextColor"            Value="{StaticResource AccentGreen}" />
-        <Setter Property="FontAttributes"       Value="Bold" />
-        <Setter Property="FontSize"             Value="12" />
-        <Setter Property="Padding"              Value="8,2" />
-        <Setter Property="MinimumWidthRequest"  Value="60" />
-        <Setter Property="HeightRequest"        Value="28" />
-        <Setter Property="CornerRadius"         Value="14" />
-        <Setter Property="BorderColor"          Value="{StaticResource AccentGreen}" />
-        <Setter Property="BorderWidth"          Value="1" />
+
+    <!-- Outlined action button inside table rows (e.g. "Cancel", "View") -->
+    <Style x:Key="TableActionButton" TargetType="Button">
+        <Setter Property="BackgroundColor"     Value="Transparent" />
+        <Setter Property="TextColor"           Value="{DynamicResource Primary}" />
+        <Setter Property="FontFamily"          Value="OpenSansSemibold" />
+        <Setter Property="FontSize"            Value="12" />
+        <Setter Property="Padding"             Value="8,2" />
+        <Setter Property="MinimumWidthRequest" Value="60" />
+        <Setter Property="HeightRequest"       Value="28" />
+        <Setter Property="CornerRadius"        Value="14" />
+        <Setter Property="BorderColor"         Value="{DynamicResource Primary}" />
+        <Setter Property="BorderWidth"         Value="1" />
     </Style>
+
+    <!-- ============================================================
+         NEW DESIGN SYSTEM STYLES
+         ============================================================ -->
+
+    <!-- Framed order-book container (Border instead of bare Grid) -->
+    <Style x:Key="OrderBookFrame" TargetType="Border">
+        <Setter Property="BackgroundColor"   Value="{DynamicResource CardSurface}" />
+        <Setter Property="Stroke"            Value="{DynamicResource Divider}" />
+        <Setter Property="StrokeThickness"   Value="1" />
+        <Setter Property="StrokeShape"       Value="RoundRectangle 8" />
+        <Setter Property="Padding"           Value="0" />
+    </Style>
+
+    <!-- Column header row grid inside the order book -->
+    <Style x:Key="OrderBookHeaderGrid" TargetType="Grid">
+        <Setter Property="BackgroundColor"   Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="Padding"           Value="8,5" />
+        <Setter Property="ColumnSpacing"     Value="4" />
+    </Style>
+
+    <!-- "Spread" caption label -->
+    <Style x:Key="OrderBookSpreadKeyLabel" TargetType="Label">
+        <Setter Property="FontSize"          Value="10" />
+        <Setter Property="TextColor"         Value="{DynamicResource TextMuted}" />
+    </Style>
+
+    <!-- Spread value (the numeric gap) -->
+    <Style x:Key="OrderBookSpreadValueLabel" TargetType="Label">
+        <Setter Property="FontFamily"        Value="OpenSansSemibold" />
+        <Setter Property="FontSize"          Value="12" />
+        <Setter Property="TextColor"         Value="{DynamicResource TextPrimary}" />
+    </Style>
+
 </ResourceDictionary>
