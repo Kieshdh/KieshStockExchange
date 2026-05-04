@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Theme: Deep Navy Pro — saturated navy, gold accent, premium broker
+     Drop-in ResourceDictionary. Merge as the FIRST entry of
+     App.xaml's MergedDictionaries. -->
+<ResourceDictionary
+    x:Class="KieshStockExchange.Resources.Styles.Themes.DeepNavyPro"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
+
+    <Color x:Key="PageBackground">#08152A</Color>
+    <Color x:Key="CardSurface">#0F2240</Color>
+    <Color x:Key="CardSurfaceMuted">#16315A</Color>
+    <Color x:Key="RowHover">#143058</Color>
+    <Color x:Key="RowSelected">#1E4A7E</Color>
+    <Color x:Key="TableRowBackground">#0F2240</Color>
+    <Color x:Key="TextPrimary">#F0F4FA</Color>
+    <Color x:Key="TextSecondary">#99B0CC</Color>
+    <Color x:Key="TextMuted">#5E7392</Color>
+    <Color x:Key="TextDisabled">#2E4263</Color>
+    <Color x:Key="TextOnPrimary">#08152A</Color>
+    <Color x:Key="Divider">#1A335A</Color>
+    <Color x:Key="Primary">#D4AF37</Color>
+    <Color x:Key="PrimaryHover">#E5C26E</Color>
+    <Color x:Key="PrimaryPressed">#A88A26</Color>
+    <Color x:Key="BuyGreen">#2FBF71</Color>
+    <Color x:Key="BuyGreenSoft">#0E2C1F</Color>
+    <Color x:Key="SellRed">#E2495C</Color>
+    <Color x:Key="SellRedSoft">#311520</Color>
+    <Color x:Key="Warning">#F2A93B</Color>
+    <Color x:Key="Info">#4DA3FF</Color>
+    <Color x:Key="Disabled">#2E4263</Color>
+    <Color x:Key="SelectedTabBg">#16315A</Color>
+    <Color x:Key="SelectedTabFg">#F0F4FA</Color>
+    <Color x:Key="UnselectedTabFg">#99B0CC</Color>
+    <Color x:Key="SegmentedPillBackground">#16315A</Color>
+    <Color x:Key="SegmentedPillStroke">#1F4276</Color>
+    <Color x:Key="DarkGreen">#2FBF71</Color>
+    <Color x:Key="DarkNavy">#08152A</Color>
+    <Color x:Key="AccentGreen">#2FBF71</Color>
+    <Color x:Key="SkyBlue">#4DA3FF</Color>
+    <Color x:Key="MutedGrey">#5E7392</Color>
+    <Color x:Key="SoftWhite">#F0F4FA</Color>
+    <Color x:Key="MidnightBlue">#08152A</Color>
+    <Color x:Key="OffBlack">#08152A</Color>
+    <Color x:Key="Secondary">#16315A</Color>
+    <Color x:Key="PrimaryDark">#D4AF37</Color>
+    <Color x:Key="PrimaryDarkText">#08152A</Color>
+    <Color x:Key="SecondaryDarkText">#99B0CC</Color>
+    <Color x:Key="Tertiary">#A88A26</Color>
+    <Color x:Key="Magenta">#D4AF37</Color>
+    <Color x:Key="Gray100">#F0F4FA</Color>
+    <Color x:Key="Gray200">#99B0CC</Color>
+    <Color x:Key="Gray300">#5E7392</Color>
+    <Color x:Key="Gray400">#46587A</Color>
+    <Color x:Key="Gray500">#2E4263</Color>
+    <Color x:Key="Gray600">#1F4276</Color>
+    <Color x:Key="Gray900">#0F2240</Color>
+    <Color x:Key="Gray950">#08152A</Color>
+    <Color x:Key="White">#F0F4FA</Color>
+    <Color x:Key="Black">#08152A</Color>
+    <Color x:Key="LightGrey">#5E7392</Color>
+    <Color x:Key="DarkGrey">#2E4263</Color>
+
+    <Color x:Key="ChartBg">#08152A</Color>
+    <Color x:Key="ChartPanel">#0F2240</Color>
+    <Color x:Key="ChartGrid">#1A335A</Color>
+    <Color x:Key="ChartAxis">#5E7392</Color>
+    <Color x:Key="ChartBull">#2FBF71</Color>
+    <Color x:Key="ChartBear">#E2495C</Color>
+    <Color x:Key="ChartCrosshair">#99B0CC</Color>
+
+    <SolidColorBrush x:Key="PageBackgroundBrush"    Color="{StaticResource PageBackground}"/>
+    <SolidColorBrush x:Key="CardSurfaceBrush"       Color="{StaticResource CardSurface}"/>
+    <SolidColorBrush x:Key="CardSurfaceMutedBrush"  Color="{StaticResource CardSurfaceMuted}"/>
+    <SolidColorBrush x:Key="DividerBrush"           Color="{StaticResource Divider}"/>
+    <SolidColorBrush x:Key="PrimaryBrush"           Color="{StaticResource Primary}"/>
+    <SolidColorBrush x:Key="BuyPriceBrush"          Color="{StaticResource BuyGreen}"/>
+    <SolidColorBrush x:Key="SellPriceBrush"         Color="{StaticResource SellRed}"/>
+    <SolidColorBrush x:Key="TextPrimaryBrush"       Color="{StaticResource TextPrimary}"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush"     Color="{StaticResource TextSecondary}"/>
+    <SolidColorBrush x:Key="TextMutedBrush"         Color="{StaticResource TextMuted}"/>
+    <SolidColorBrush x:Key="WhiteBrush"             Color="{StaticResource White}"/>
+    <SolidColorBrush x:Key="BlackBrush"             Color="{StaticResource Black}"/>
+    <SolidColorBrush x:Key="DarkGreenBrush"         Color="{StaticResource DarkGreen}"/>
+    <SolidColorBrush x:Key="DarkNavyBrush"          Color="{StaticResource DarkNavy}"/>
+    <SolidColorBrush x:Key="AccentGreenBrush"       Color="{StaticResource AccentGreen}"/>
+    <SolidColorBrush x:Key="SkyBlueBrush"           Color="{StaticResource SkyBlue}"/>
+    <SolidColorBrush x:Key="MutedGreyBrush"         Color="{StaticResource MutedGrey}"/>
+    <SolidColorBrush x:Key="SoftWhiteBrush"         Color="{StaticResource SoftWhite}"/>
+    <SolidColorBrush x:Key="SecondaryBrush"         Color="{StaticResource Secondary}"/>
+    <SolidColorBrush x:Key="Gray100Brush"           Color="{StaticResource Gray100}"/>
+    <SolidColorBrush x:Key="Gray200Brush"           Color="{StaticResource Gray200}"/>
+    <SolidColorBrush x:Key="Gray300Brush"           Color="{StaticResource Gray300}"/>
+    <SolidColorBrush x:Key="Gray400Brush"           Color="{StaticResource Gray400}"/>
+    <SolidColorBrush x:Key="Gray500Brush"           Color="{StaticResource Gray500}"/>
+    <SolidColorBrush x:Key="Gray600Brush"           Color="{StaticResource Gray600}"/>
+    <SolidColorBrush x:Key="Gray900Brush"           Color="{StaticResource Gray900}"/>
+    <SolidColorBrush x:Key="Gray950Brush"           Color="{StaticResource Gray950}"/>
+    <SolidColorBrush x:Key="LightGreyBrush"         Color="{StaticResource LightGrey}"/>
+    <SolidColorBrush x:Key="DarkGreyBrush"          Color="{StaticResource DarkGrey}"/>
+    <SolidColorBrush x:Key="ChartBgBrush"           Color="{StaticResource ChartBg}"/>
+    <SolidColorBrush x:Key="ChartPanelBrush"        Color="{StaticResource ChartPanel}"/>
+    <SolidColorBrush x:Key="ChartGridBrush"         Color="{StaticResource ChartGrid}"/>
+    <SolidColorBrush x:Key="ChartAxisBrush"         Color="{StaticResource ChartAxis}"/>
+    <SolidColorBrush x:Key="ChartBullBrush"         Color="{StaticResource ChartBull}"/>
+    <SolidColorBrush x:Key="ChartBearBrush"         Color="{StaticResource ChartBear}"/>
+    <SolidColorBrush x:Key="ChartCrosshairBrush"    Color="{StaticResource ChartCrosshair}"/>
+
+</ResourceDictionary>
