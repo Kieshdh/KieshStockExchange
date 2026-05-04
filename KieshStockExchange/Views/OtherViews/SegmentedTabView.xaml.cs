@@ -100,6 +100,55 @@ public partial class SegmentedTabView : ContentView
 
     #endregion
 
+    #region Container styling (pill / rail variants)
+    // Overrides the hardcoded SegmentedPillContainerStyle on the HeaderPill
+    // Border so callers can switch to a transparent "rail" container without
+    // touching the XAML or this view's defaults.
+    public static readonly BindableProperty ContainerStyleProperty =
+        BindableProperty.Create(nameof(ContainerStyle), typeof(Style), typeof(SegmentedTabView), default(Style),
+            propertyChanged: OnContainerStyleChanged);
+
+    public Style? ContainerStyle
+    {
+        get => (Style?)GetValue(ContainerStyleProperty);
+        set => SetValue(ContainerStyleProperty, value);
+    }
+
+    static void OnContainerStyleChanged(BindableObject b, object o, object n)
+    {
+        var v = (SegmentedTabView)b;
+        if (v.HeaderPill is null) return;
+        if (n is Style style)
+            v.HeaderPill.Style = style;
+    }
+
+    // When true, each tab's button is wrapped in a Grid with a 2-px BoxView
+    // underneath that paints Primary on the active tab, Transparent otherwise.
+    // Reproduces the design's "underline rail" look (border-bottom: 2px solid).
+    public static readonly BindableProperty ShowUnderlineProperty =
+        BindableProperty.Create(nameof(ShowUnderline), typeof(bool), typeof(SegmentedTabView), false,
+            propertyChanged: (b, o, n) => ((SegmentedTabView)b).BuildHeaders());
+
+    public bool ShowUnderline
+    {
+        get => (bool)GetValue(ShowUnderlineProperty);
+        set => SetValue(ShowUnderlineProperty, value);
+    }
+
+    // Floor for each tab button's WidthRequest. Default 80 produces a
+    // comfortable pill; drop to 50 for compact 2-tab pills like Buy/Sell where
+    // the labels are short and the panel is narrow.
+    public static readonly BindableProperty MinTabWidthProperty =
+        BindableProperty.Create(nameof(MinTabWidth), typeof(double), typeof(SegmentedTabView), 80.0,
+            propertyChanged: (b, o, n) => ((SegmentedTabView)b).BuildHeaders());
+
+    public double MinTabWidth
+    {
+        get => (double)GetValue(MinTabWidthProperty);
+        set => SetValue(MinTabWidthProperty, value);
+    }
+    #endregion
+
     #region Right slot content
     public static readonly BindableProperty HeaderRightContentProperty =
     BindableProperty.Create(nameof(HeaderRightContent), typeof(View), typeof(SegmentedTabView),
@@ -183,15 +232,32 @@ public partial class SegmentedTabView : ContentView
     #region Header and Content management
     void BuildHeaders()
     {
+        // Detach Clicked handlers regardless of whether buttons are direct
+        // children or wrapped in a rail Grid.
         foreach (var child in HeaderStrip.Children)
+        {
             if (child is Button oldBtn)
                 oldBtn.Clicked -= OnHeaderButtonClicked;
+            else if (child is Grid grid)
+                foreach (var gc in grid.Children)
+                    if (gc is Button gBtn) gBtn.Clicked -= OnHeaderButtonClicked;
+        }
 
         HeaderStrip.Children.Clear();
 
+        // Equal-width buttons within the same segmented control: pick a width
+        // sized to the longest label so every button in this collection
+        // measures identically.
+        int maxChars = Tabs.Count > 0 ? Tabs.Max(t => t.Header?.Length ?? 0) : 0;
+        double tabWidth = Math.Max(MinTabWidth, maxChars * 8 + 32);
+
         for (int i = 0; i < Tabs.Count; i++)
         {
-            var btn = new Button { Text = Tabs[i].Header };
+            var btn = new Button
+            {
+                Text = Tabs[i].Header,
+                WidthRequest = tabWidth,
+            };
 
             // Apply the unselected style initially (falls back safely if not provided)
             if (UnselectedButtonStyle is not null)
@@ -227,7 +293,35 @@ public partial class SegmentedTabView : ContentView
             btn.BindingContext = i;
             btn.Clicked += OnHeaderButtonClicked;
 
-            HeaderStrip.Children.Add(btn);
+            if (ShowUnderline)
+            {
+                // Rail variant: stack the button on top of a 2-px BoxView so
+                // the active tab gets a primary-coloured underline.
+                var underline = new BoxView
+                {
+                    HeightRequest      = 2,
+                    BackgroundColor    = Colors.Transparent,
+                    HorizontalOptions  = LayoutOptions.Fill,
+                    VerticalOptions    = LayoutOptions.End,
+                };
+                var stack = new Grid
+                {
+                    RowDefinitions =
+                    {
+                        new RowDefinition(GridLength.Auto),
+                        new RowDefinition(GridLength.Auto),
+                    },
+                };
+                Grid.SetRow(btn, 0);
+                Grid.SetRow(underline, 1);
+                stack.Children.Add(btn);
+                stack.Children.Add(underline);
+                HeaderStrip.Children.Add(stack);
+            }
+            else
+            {
+                HeaderStrip.Children.Add(btn);
+            }
         }
 
         UpdateHeaderVisuals();
@@ -235,15 +329,55 @@ public partial class SegmentedTabView : ContentView
 
     void UpdateHeaderVisuals()
     {
+        // For rail mode, look up the active theme's Primary colour once per
+        // pass and paint the underline of the selected tab with it.
+        Color? primary = null;
+        if (ShowUnderline
+            && Application.Current?.Resources.TryGetValue("Primary", out var raw) == true
+            && raw is Color c)
+        {
+            primary = c;
+        }
+
         for (int i = 0; i < HeaderStrip.Children.Count; i++)
         {
-            if (HeaderStrip.Children[i] is Button b)
-            {
-                bool isSelected = i == SelectedIndex;
+            Button? btn = null;
+            BoxView? underline = null;
 
-                if (isSelected)
-                    b.Style = SelectedButtonStyle;
-                else b.Style = UnselectedButtonStyle;
+            if (HeaderStrip.Children[i] is Grid g)
+            {
+                foreach (var ch in g.Children)
+                {
+                    if (ch is Button gb) btn = gb;
+                    else if (ch is BoxView bv) underline = bv;
+                }
+            }
+            else if (HeaderStrip.Children[i] is Button direct)
+            {
+                btn = direct;
+            }
+
+            if (btn is null) continue;
+
+            bool isSelected = i == SelectedIndex;
+
+            if (isSelected)
+            {
+                // Per-tab SelectedButtonStyle wins over the view-level default,
+                // so callers can colour individual tabs (e.g. Buy=green, Sell=red).
+                var perTab = (i < Tabs.Count) ? Tabs[i].SelectedButtonStyle : null;
+                btn.Style = perTab ?? SelectedButtonStyle;
+            }
+            else
+            {
+                btn.Style = UnselectedButtonStyle;
+            }
+
+            if (underline is not null)
+            {
+                underline.BackgroundColor = isSelected
+                    ? (primary ?? Colors.Transparent)
+                    : Colors.Transparent;
             }
         }
     }
@@ -315,6 +449,21 @@ public class SegmentedTabItem : BindableObject
     {
         get => (View)GetValue(ContentProperty);
         set => SetValue(ContentProperty, value);
+    }
+    #endregion
+
+    #region SelectedButtonStyle (per-tab override)
+    // Lets a single tab override the view-level SelectedButtonStyle so e.g. a
+    // Buy/Sell segment can color the active tab green when Buy is selected and
+    // red when Sell is selected. When null, SegmentedTabView falls back to its
+    // own SelectedButtonStyle.
+    public static readonly BindableProperty SelectedButtonStyleProperty =
+        BindableProperty.Create(nameof(SelectedButtonStyle), typeof(Style), typeof(SegmentedTabItem), default(Style));
+
+    public Style? SelectedButtonStyle
+    {
+        get => (Style?)GetValue(SelectedButtonStyleProperty);
+        set => SetValue(SelectedButtonStyleProperty, value);
     }
     #endregion
 }
