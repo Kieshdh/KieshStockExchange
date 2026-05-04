@@ -12,6 +12,7 @@ using KieshStockExchange.ViewModels.PortfolioViewModels;
 using KieshStockExchange.ViewModels.TradeViewModels;
 using KieshStockExchange.ViewModels.UserViewModels;
 using KieshStockExchange.ViewModels.MarketViewModels;
+using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Views.AccountPageViews;
 using KieshStockExchange.Views.AdminPageViews;
 using KieshStockExchange.Views.MarketPageViews;
@@ -106,6 +107,8 @@ public static class MauiProgram
         builder.Services.AddTransient<ChartViewModel>();
         builder.Services.AddTransient<OrderBookViewModel>();
         builder.Services.AddTransient<OrderHistoryViewModel>();
+        // - Other
+        builder.Services.AddTransient<TopNavBarViewModel>();
 
 #if DEBUG
         builder.Logging.AddDebug();
