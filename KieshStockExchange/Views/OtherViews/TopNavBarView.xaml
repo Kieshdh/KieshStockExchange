@@ -2,49 +2,70 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.OtherViews.TopNavBarView">
-    <Grid HeightRequest="100">
-        <!-- Decorative Path Background -->
-        <Path Style="{StaticResource MainPath}" />
 
-        <Grid BackgroundColor="Transparent" 
-              Padding="10" Margin="0,0,0,0"
-              ColumnDefinitions="Auto, Auto, *, Auto, Auto, Auto, Auto, Auto"
-              ColumnSpacing="10">
+    <Grid Style="{StaticResource TopNavBarStyle}"
+          ColumnDefinitions="Auto,*,Auto">
 
-            <!-- Page Logo -->
-            <Image Style="{StaticResource LogoImage}" Grid.Column="0"/>
-            
-            <!-- Page Title -->
-            <Label Grid.Column="1" Text="{Binding Title}"
-                   Style="{StaticResource NavBarTitleLabel}"/>
+        <!-- Brand cluster -->
+        <HorizontalStackLayout Grid.Column="0"
+                               Spacing="10"
+                               VerticalOptions="Center">
+            <Image Source="kse_logo.png"
+                   HeightRequest="22"
+                   WidthRequest="22"
+                   VerticalOptions="Center" />
+            <Label Text="Kiesh Stock Exchange"
+                   Style="{StaticResource BrandLabel}" />
+        </HorizontalStackLayout>
 
-            <!-- -->
-           
-
-            <!-- Trending Button -->
-            <Button Grid.Column="3" Text="Trending"
-                    Command="{Binding NavigateTrendingCommand}"
-                    Style="{StaticResource NavBarButton}" />
-
-            <!-- Trade Button -->
-            <Button Grid.Column="4" Text="Trade"
+        <!-- Centered nav links -->
+        <HorizontalStackLayout Grid.Column="1"
+                               Spacing="4"
+                               HorizontalOptions="Center"
+                               VerticalOptions="Center">
+            <Button x:Name="MarketLink"
+                    Text="Market"
+                    Command="{Binding NavigateMarketCommand}"
+                    Style="{StaticResource NavLinkButton}" />
+            <Button x:Name="TradeLink"
+                    Text="Trade"
                     Command="{Binding NavigateTradeCommand}"
-                    Style="{StaticResource NavBarButton}" />
-            
-            <!-- Portfolio Button -->
-            <Button Grid.Column="5" Text="Portfolio"
+                    Style="{StaticResource NavLinkButton}" />
+            <Button x:Name="PortfolioLink"
+                    Text="Portfolio"
                     Command="{Binding NavigatePortfolioCommand}"
-                    Style="{StaticResource NavBarButton}" />
-
-            <!-- Account Button -->
-            <Button Grid.Column="6" Text="Account"
+                    Style="{StaticResource NavLinkButton}" />
+            <Button x:Name="AccountLink"
+                    Text="Account"
                     Command="{Binding NavigateAccountCommand}"
-                    Style="{StaticResource NavBarButton}" />
-
-            <!-- Admin Button -->
-            <Button Grid.Column="7" Text="Admin"
+                    Style="{StaticResource NavLinkButton}" />
+            <Button x:Name="AdminLink"
+                    Text="Admin"
                     Command="{Binding NavigateAdminCommand}"
-                    Style="{StaticResource NavBarButton}" />
-        </Grid>
+                    Style="{StaticResource NavLinkButton}" />
+            <Button x:Name="BotsLink"
+                    Text="Bots"
+                    Command="{Binding NavigateBotsCommand}"
+                    Style="{StaticResource NavLinkButton}" />
+        </HorizontalStackLayout>
+
+        <!-- Right cluster: Funds chip -->
+        <Border Grid.Column="2"
+                Style="{StaticResource FundsChipBorder}"
+                VerticalOptions="Center">
+            <HorizontalStackLayout Spacing="6"
+                                   VerticalOptions="Center">
+                <Label Text="Funds"
+                       Style="{StaticResource FundsChipKeyLabel}"
+                       VerticalTextAlignment="Center" />
+                <Label Text="{Binding FundsDisplay}"
+                       Style="{StaticResource FundsChipValueLabel}"
+                       VerticalTextAlignment="Center" />
+            </HorizontalStackLayout>
+        </Border>
+
+        <!-- 1 px divider at the bottom of the nav bar -->
+        <BoxView Style="{StaticResource TopNavBarBottomBorder}"
+                 Grid.ColumnSpan="3" />
     </Grid>
 </ContentView>

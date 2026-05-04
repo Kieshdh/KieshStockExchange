@@ -1,44 +1,53 @@
-using System.Windows.Input;
-
 namespace KieshStockExchange.Views.OtherViews;
 
 public partial class TopNavBarView : ContentView
 {
-
-	// Title property
-    public static readonly BindableProperty TitleProperty =
-        BindableProperty.Create(nameof(Title), typeof(string), typeof(TopNavBarView), default(string));
-
-    public string Title
-    {
-        get => (string)GetValue(TitleProperty);
-        set => SetValue(TitleProperty, value);
-    }
-
-    // Navigation commands
-    public ICommand NavigateAccountCommand { get; }
-    public ICommand NavigatePortfolioCommand { get; }
-    public ICommand NavigateTrendingCommand { get; }
-    public ICommand NavigateTradeCommand { get; }
-    public ICommand NavigateAdminCommand { get; }
-
+    #region Constructor
     public TopNavBarView()
     {
         InitializeComponent();
-
-        // Initilize Navigation
-        NavigateAccountCommand = new Command(async () => 
-            await Shell.Current.GoToAsync("///AccountPage"));
-        NavigatePortfolioCommand = new Command(async () => 
-            await Shell.Current.GoToAsync("///PortfolioPage"));
-        NavigateTrendingCommand = new Command(async () => 
-            await Shell.Current.GoToAsync("///StocksPage"));
-        NavigateTradeCommand = new Command(async () => 
-            await Shell.Current.GoToAsync("///TradePage"));
-        NavigateAdminCommand = new Command(async () =>
-            await Shell.Current.GoToAsync("///AdminPage"));
-
-        BindingContext = this;
+        WireActiveState();
+        Unloaded += OnUnloaded;
     }
+    #endregion
+
+    #region Active Link Highlight
+    private void WireActiveState()
+    {
+        if (Shell.Current != null)
+            Shell.Current.Navigated += OnShellNavigated;
+        UpdateActiveLink();
+    }
+
+    private void OnShellNavigated(object? sender, ShellNavigatedEventArgs e) => UpdateActiveLink();
+
+    private void UpdateActiveLink()
+    {
+        var loc = Shell.Current?.CurrentState?.Location?.OriginalString ?? string.Empty;
+        SetLinkActive(MarketLink,    loc.Contains("MarketPage"));
+        SetLinkActive(TradeLink,     loc.Contains("TradePage"));
+        SetLinkActive(PortfolioLink, loc.Contains("PortfolioPage"));
+        SetLinkActive(AccountLink,   loc.Contains("AccountPage"));
+        SetLinkActive(AdminLink,     loc.Contains("AdminPage"));
+        SetLinkActive(BotsLink,      loc.Contains("BotDashboardPage"));
+    }
+
+    private static void SetLinkActive(Button btn, bool isActive)
+    {
+        var key = isActive ? "NavLinkButtonActive" : "NavLinkButton";
+        if (Application.Current?.Resources.TryGetValue(key, out var resource) == true
+            && resource is Style style)
+        {
+            btn.Style = style;
+        }
+    }
+    #endregion
+
+    #region Lifecycle
+    private void OnUnloaded(object? sender, EventArgs e)
+    {
+        if (Shell.Current != null)
+            Shell.Current.Navigated -= OnShellNavigated;
+    }
+    #endregion
 }
-    
