@@ -1,19 +1,264 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="KieshStockExchange.Views.MarketPageViews.MarketPage"
-             xmlns:local="clr-namespace:KieshStockExchange.ViewModels.MarketViewModels"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.MarketViewModels"
+             xmlns:lq="clr-namespace:KieshStockExchange.Services.MarketDataServices"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
-             Title="Stocks">
-    <ScrollView>
-        <Grid Style="{StaticResource MainGrid}">
+             x:Class="KieshStockExchange.Views.MarketPageViews.MarketPage"
+             Title="Market">
 
-            <!-- Navigation bar at the Top -->
-            <navbar:TopNavBarView Title="Stock" Grid.Row="0"/>
+    <Grid Style="{StaticResource MainGrid}"
+          RowDefinitions="Auto,Auto,*"
+          RowSpacing="8"
+          Padding="0,0,0,8">
 
-            <!-- Main section -->
+        <!-- Top nav -->
+        <navbar:TopNavBarView Grid.Row="0"
+                              BindingContext="{Binding TopNavBarVm}" />
 
-
+        <!-- Page heading -->
+        <Grid Grid.Row="1"
+              Style="{StaticResource PageHeadingGrid}">
+            <Label Grid.Column="0"
+                   Text="Market"
+                   Style="{StaticResource PageHeadingTitle}" />
+            <Label Grid.Column="1"
+                   Text="Live overview of all listed instruments"
+                   Style="{StaticResource PageHeadingSub}" />
         </Grid>
-    </ScrollView>
+
+        <!-- Body: All Stocks (left, 2fr) + Top Movers (right, 1fr) -->
+        <Grid Grid.Row="2"
+              ColumnDefinitions="2*,*"
+              ColumnSpacing="12"
+              Padding="24,0,24,0">
+
+            <!-- ============== LEFT: All Stocks ============== -->
+            <Border Grid.Column="0"
+                    Style="{StaticResource DashboardCardStyle}"
+                    Padding="0">
+                <Grid RowDefinitions="Auto,Auto,*">
+
+                    <!-- Card head: title + search + refresh -->
+                    <Grid Grid.Row="0"
+                          ColumnDefinitions="*,Auto,Auto"
+                          ColumnSpacing="8"
+                          Padding="16,14,16,12">
+                        <Label Grid.Column="0"
+                               Text="All Stocks"
+                               Style="{StaticResource SectionHeaderLabelStyle}"
+                               VerticalTextAlignment="Center" />
+                        <Entry Grid.Column="1"
+                               Text="{Binding SearchText}"
+                               Placeholder="Search symbol..."
+                               Style="{StaticResource FormEntryStyle}"
+                               WidthRequest="180" />
+                        <Button Grid.Column="2"
+                                Text="Refresh"
+                                Command="{Binding RefreshCommand}"
+                                Style="{StaticResource SecondaryActionButtonStyle}"
+                                HeightRequest="36"
+                                WidthRequest="84"
+                                FontSize="12" />
+                    </Grid>
+
+                    <!-- Column headers -->
+                    <Grid Grid.Row="1"
+                          Style="{StaticResource TableHeaderGridStyle}"
+                          ColumnDefinitions="*,2*,*,*,*,Auto"
+                          ColumnSpacing="8"
+                          Padding="16,8">
+                        <Label Grid.Column="0"
+                               Text="SYMBOL"
+                               Style="{StaticResource TableHeaderLabelStyle}"
+                               HorizontalTextAlignment="Start" />
+                        <Label Grid.Column="1"
+                               Text="NAME"
+                               Style="{StaticResource TableHeaderLabelStyle}"
+                               HorizontalTextAlignment="Start" />
+                        <Label Grid.Column="2"
+                               Text="LAST"
+                               Style="{StaticResource TableHeaderLabelStyle}"
+                               HorizontalTextAlignment="End" />
+                        <Label Grid.Column="3"
+                               Text="CHANGE"
+                               Style="{StaticResource TableHeaderLabelStyle}"
+                               HorizontalTextAlignment="End" />
+                        <Label Grid.Column="4"
+                               Text="VOLUME"
+                               Style="{StaticResource TableHeaderLabelStyle}"
+                               HorizontalTextAlignment="End" />
+                        <Label Grid.Column="5"
+                               Text=""
+                               Style="{StaticResource TableHeaderLabelStyle}"
+                               WidthRequest="64" />
+                    </Grid>
+
+                    <!-- Rows -->
+                    <RefreshView Grid.Row="2"
+                                 Command="{Binding RefreshCommand}"
+                                 IsRefreshing="{Binding IsBusy}">
+                        <CollectionView ItemsSource="{Binding FilteredStocks}"
+                                        SelectionMode="None">
+                            <CollectionView.EmptyView>
+                                <StackLayout Padding="16">
+                                    <Label Text="No stocks to show."
+                                           Style="{StaticResource MutedLabelStyle}"
+                                           HorizontalOptions="Center" />
+                                </StackLayout>
+                            </CollectionView.EmptyView>
+
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="vm:MarketRow">
+                                    <Grid ColumnDefinitions="*,2*,*,*,*,Auto"
+                                          ColumnSpacing="8"
+                                          Padding="16,8">
+                                        <Label Grid.Column="0"
+                                               Text="{Binding Symbol}"
+                                               Style="{StaticResource TradeTableSymbolLabel}"
+                                               HorizontalTextAlignment="Start"
+                                               VerticalTextAlignment="Center" />
+                                        <Label Grid.Column="1"
+                                               Text="{Binding CompanyName}"
+                                               Style="{StaticResource TradeTableRowLabel}"
+                                               HorizontalTextAlignment="Start"
+                                               VerticalTextAlignment="Center" />
+                                        <Label Grid.Column="2"
+                                               Text="{Binding LastPriceDisplay}"
+                                               Style="{StaticResource TradeTableRowLabel}"
+                                               HorizontalTextAlignment="End"
+                                               VerticalTextAlignment="Center" />
+
+                                        <!-- Daily change: green when bullish, red when bearish, default otherwise -->
+                                        <Label Grid.Column="3"
+                                               Text="{Binding ChangePctDisplay}"
+                                               HorizontalTextAlignment="End"
+                                               VerticalTextAlignment="Center">
+                                            <Label.Style>
+                                                <Style TargetType="Label" BasedOn="{StaticResource TradeTableRowLabel}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger TargetType="Label" Binding="{Binding IsBullish}" Value="True">
+                                                            <Setter Property="TextColor" Value="{DynamicResource BuyGreen}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger TargetType="Label" Binding="{Binding IsBearish}" Value="True">
+                                                            <Setter Property="TextColor" Value="{DynamicResource SellRed}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Label.Style>
+                                        </Label>
+
+                                        <!-- Daily dollar volume (sum of price*shares for the session) -->
+                                        <Label Grid.Column="4"
+                                               Text="{Binding DollarVolumeDisplay}"
+                                               Style="{StaticResource TradeTableRowLabel}"
+                                               HorizontalTextAlignment="End"
+                                               VerticalTextAlignment="Center" />
+
+                                        <Button Grid.Column="5"
+                                                Text="Trade"
+                                                Style="{StaticResource TableActionButton}"
+                                                HorizontalOptions="End"
+                                                Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}},
+                                                          Path=BindingContext.TradeCommand}"
+                                                CommandParameter="{Binding .}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </RefreshView>
+                </Grid>
+            </Border>
+
+            <!-- ============== RIGHT: Top Gainers + Top Losers ============== -->
+            <VerticalStackLayout Grid.Column="1"
+                                 Spacing="12"
+                                 VerticalOptions="Start">
+
+                <!-- Top Gainers card -->
+                <Border Style="{StaticResource DashboardCardStyle}"
+                        Padding="0">
+                    <VerticalStackLayout>
+                        <Label Text="Top Gainers"
+                               Style="{StaticResource SectionHeaderLabelStyle}"
+                               Padding="16,14,16,8" />
+                        <CollectionView ItemsSource="{Binding Trending.TopGainers}"
+                                        SelectionMode="None">
+                            <CollectionView.EmptyView>
+                                <Label Text="No movers yet."
+                                       Style="{StaticResource MutedLabelStyle}"
+                                       Padding="16,8" />
+                            </CollectionView.EmptyView>
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="lq:LiveQuote">
+                                    <Grid ColumnDefinitions="Auto,*,Auto"
+                                          Padding="16,8"
+                                          ColumnSpacing="8">
+                                        <Label Grid.Column="0"
+                                               Text="{Binding Symbol}"
+                                               Style="{StaticResource TradeTableSymbolLabel}"
+                                               HorizontalTextAlignment="Start"
+                                               VerticalTextAlignment="Center" />
+                                        <Label Grid.Column="1"
+                                               Text="{Binding LastPriceDisplay}"
+                                               Style="{StaticResource TradeTableRowLabel}"
+                                               HorizontalTextAlignment="End"
+                                               VerticalTextAlignment="Center" />
+                                        <Label Grid.Column="2"
+                                               Text="{Binding ChangePctDisplay}"
+                                               Style="{StaticResource PositiveValueLabelStyle}"
+                                               HorizontalTextAlignment="End"
+                                               VerticalTextAlignment="Center"
+                                               MinimumWidthRequest="64" />
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- Top Losers card -->
+                <Border Style="{StaticResource DashboardCardStyle}"
+                        Padding="0">
+                    <VerticalStackLayout>
+                        <Label Text="Top Losers"
+                               Style="{StaticResource SectionHeaderLabelStyle}"
+                               Padding="16,14,16,8" />
+                        <CollectionView ItemsSource="{Binding Trending.TopLosers}"
+                                        SelectionMode="None">
+                            <CollectionView.EmptyView>
+                                <Label Text="No movers yet."
+                                       Style="{StaticResource MutedLabelStyle}"
+                                       Padding="16,8" />
+                            </CollectionView.EmptyView>
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="lq:LiveQuote">
+                                    <Grid ColumnDefinitions="Auto,*,Auto"
+                                          Padding="16,8"
+                                          ColumnSpacing="8">
+                                        <Label Grid.Column="0"
+                                               Text="{Binding Symbol}"
+                                               Style="{StaticResource TradeTableSymbolLabel}"
+                                               HorizontalTextAlignment="Start"
+                                               VerticalTextAlignment="Center" />
+                                        <Label Grid.Column="1"
+                                               Text="{Binding LastPriceDisplay}"
+                                               Style="{StaticResource TradeTableRowLabel}"
+                                               HorizontalTextAlignment="End"
+                                               VerticalTextAlignment="Center" />
+                                        <Label Grid.Column="2"
+                                               Text="{Binding ChangePctDisplay}"
+                                               Style="{StaticResource NegativeValueLabelStyle}"
+                                               HorizontalTextAlignment="End"
+                                               VerticalTextAlignment="Center"
+                                               MinimumWidthRequest="64" />
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </VerticalStackLayout>
+                </Border>
+            </VerticalStackLayout>
+        </Grid>
+    </Grid>
 </ContentPage>
