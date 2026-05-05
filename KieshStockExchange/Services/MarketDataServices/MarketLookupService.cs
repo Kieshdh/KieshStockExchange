@@ -1,7 +1,9 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
@@ -55,7 +57,7 @@ public sealed class MarketLookupService : IMarketLookupService
         var sp = await _db.GetLatestStockPriceByStockId(stockId, currency, ct).ConfigureAwait(false);
         if (sp is not null && sp.Price > 0m) return sp.Price;
 
-        // USD fallback (single hop — no infinite recursion because the inner call
+        // USD fallback (single hop Ã¢â‚¬â€ no infinite recursion because the inner call
         // takes the same path with currency==USD).
         if (currency != CurrencyType.USD)
         {

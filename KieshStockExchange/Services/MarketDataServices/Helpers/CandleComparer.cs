@@ -1,9 +1,10 @@
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Helpers;
 
 /// <summary>
-/// Equality on the candle's identity tuple — stock, currency, bucket size and open time.
+/// Equality on the candle's identity tuple â€” stock, currency, bucket size and open time.
 /// Use this when deduplicating candles regardless of OHLC/volume drift between sources.
 /// </summary>
 public sealed class CandleKeyComparer : IEqualityComparer<Candle>
@@ -20,7 +21,7 @@ public sealed class CandleKeyComparer : IEqualityComparer<Candle>
 }
 
 /// <summary>
-/// Equality on the candle's full payload — identity tuple plus OHLC, volume, trade count
+/// Equality on the candle's full payload â€” identity tuple plus OHLC, volume, trade count
 /// and transaction-id range. Use this to detect whether a candle's contents actually
 /// changed between two snapshots.
 /// </summary>

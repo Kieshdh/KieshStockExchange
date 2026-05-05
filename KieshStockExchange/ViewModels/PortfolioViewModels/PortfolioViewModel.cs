@@ -1,8 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
-using KieshStockExchange.Services.MarketDataServices;
-using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
@@ -17,14 +17,14 @@ public partial class PortfolioViewModel : BaseViewModel
     public PortfolioTransactionViewModel TransactionVm  { get; }
     public TopNavBarViewModel            TopNavBarVm    { get; }
 
-    [ObservableProperty] private string _totalEquityDisplay       = "—";
-    [ObservableProperty] private string _totalEquityChangeDisplay = "—";
-    [ObservableProperty] private string _cashDisplay              = "—";
-    [ObservableProperty] private string _positionCountDisplay     = "—";
-    [ObservableProperty] private string _todayPlDisplay           = "—";
-    [ObservableProperty] private string _todayPlSubDisplay        = "—";
-    [ObservableProperty] private string _allTimePlDisplay         = "—";
-    [ObservableProperty] private string _allTimePlSubDisplay      = "—";
+    [ObservableProperty] private string _totalEquityDisplay       = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _totalEquityChangeDisplay = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _cashDisplay              = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _positionCountDisplay     = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _todayPlDisplay           = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _todayPlSubDisplay        = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _allTimePlDisplay         = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _allTimePlSubDisplay      = "Ã¢â‚¬â€";
 
     private readonly IUserPortfolioService       _portfolio;
     private readonly IMarketDataService          _market;
@@ -95,13 +95,13 @@ public partial class PortfolioViewModel : BaseViewModel
         var count       = positions.Count;
 
         TotalEquityDisplay       = $"$ {totalEquity.ToString("N2", CultureInfo.InvariantCulture)}";
-        TotalEquityChangeDisplay = "—";
+        TotalEquityChangeDisplay = "Ã¢â‚¬â€";
         CashDisplay              = $"$ {cash.ToString("N2", CultureInfo.InvariantCulture)}";
         PositionCountDisplay     = count == 1 ? "1 position" : $"{count} positions";
 
-        TodayPlDisplay      = "—";
-        TodayPlSubDisplay   = "—";
-        AllTimePlDisplay    = "—";
-        AllTimePlSubDisplay = "—";
+        TodayPlDisplay      = "Ã¢â‚¬â€";
+        TodayPlSubDisplay   = "Ã¢â‚¬â€";
+        AllTimePlDisplay    = "Ã¢â‚¬â€";
+        AllTimePlSubDisplay = "Ã¢â‚¬â€";
     }
 }

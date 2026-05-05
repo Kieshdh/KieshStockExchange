@@ -1,28 +1,15 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 
 namespace KieshStockExchange.Services.MarketDataServices;
-
-public interface ITrendingService : INotifyPropertyChanged
-{
-    /// <summary> Sorted lists of top movers. </summary>
-    IReadOnlyList<LiveQuote> TopGainers { get; }
-    /// <summary> Sorted lists of top losers. </summary>
-    IReadOnlyList<LiveQuote> TopLosers { get; }
-    /// <summary> Sorted list of most active (by volume). </summary>
-    IReadOnlyList<LiveQuote> MostActive { get; }
-
-    /// <summary>
-    /// Forces recomputation of the TopGainers, TopLosers, and MostActive lists.
-    /// </summary>
-    Task RecomputeMoversAsync();
-}
 
 public sealed partial class TrendingService : ObservableObject, ITrendingService, IDisposable
 {

@@ -1,10 +1,12 @@
-﻿using ExcelDataReader;
+using ExcelDataReader;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Data;
 using System.Globalization;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 namespace KieshStockExchange.Services.BackgroundServices;
 
@@ -194,7 +196,7 @@ public class ExcelImportService : IExcelImportService
         }
 
         // Reset the existing users table and insert the new users. Also cascade-reset
-        // Orders and Transactions in the same root tx — those reference UserIds whose
+        // Orders and Transactions in the same root tx - those reference UserIds whose
         // ownership semantics may have shifted in the new xlsx. Leaving them behind is
         // what produces stale orders against fresh positions.
         await _db.RunInTransactionAsync(async ct =>

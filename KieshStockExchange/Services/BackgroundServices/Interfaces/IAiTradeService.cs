@@ -1,7 +1,7 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.BackgroundServices;
+namespace KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 /// <summary>
 /// Background service that uses configured <see cref="AIUser"/> bots
@@ -32,6 +32,24 @@ public interface IAiTradeService
 
     /// <summary>Optional cap on the number of online bots; null means no cap.</summary>
     int? ActiveBotCap { get; }
+
+    /// <summary>User-configured hard ceiling on online bots; null means no ceiling.</summary>
+    int? MaxBotCap { get; }
+
+    /// <summary>EWMA-smoothed tick-work duration in milliseconds. 0 until first tick.</summary>
+    double TickWorkMsEwma { get; }
+
+    /// <summary>Raw duration of the most recent tick's work in microseconds.</summary>
+    long LastTickWorkMicros { get; }
+
+    /// <summary>When true, the internal scaler adjusts <see cref="ActiveBotCap"/> based on tick-work load.</summary>
+    bool AutoScale { get; set; }
+
+    /// <summary>Floor on the active bot count when the scaler scales down.</summary>
+    int MinBotCap { get; set; }
+
+    /// <summary>Most recent EWMA / TradeInterval ratio observed by the scaler. 0 before any sample.</summary>
+    double LastLoadFraction { get; }
 
     /// <summary>Number of trading-loop iterations completed in this session.</summary>
     long TickCount { get; }
@@ -64,6 +82,10 @@ public interface IAiTradeService
 
     /// <summary>Sets a runtime cap on the number of online bots; null removes the cap.</summary>
     void SetActiveBotCap(int? cap);
+
+    /// <summary>Sets the user-configured hard ceiling; null removes the ceiling.
+    /// If the new max is lower than the current ActiveBotCap, the active cap is clamped down.</summary>
+    void SetMaxBotCap(int? cap);
 
     /// <summary>Returns a snapshot of all loaded bot UserIds.</summary>
     IReadOnlyCollection<int> GetAiUserIds();

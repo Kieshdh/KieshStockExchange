@@ -1,8 +1,9 @@
-﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using SQLite;
 using System;
 using System.Threading;
+using KieshStockExchange.Services.DataServices.Interfaces;
 
 namespace KieshStockExchange.Services.DataServices;
 

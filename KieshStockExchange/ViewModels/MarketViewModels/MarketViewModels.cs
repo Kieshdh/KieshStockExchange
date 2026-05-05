@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
@@ -61,7 +62,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         IsBusy = true;
         try
         {
-            // Idempotent — already-subscribed books just bump the ref count.
+            // Idempotent Ã¢â‚¬â€ already-subscribed books just bump the ref count.
             await _market.SubscribeAllAsync(CurrencyType.USD, forUi: true).ConfigureAwait(false);
 
             // Force an immediate poll then start the 5-second cadence so the

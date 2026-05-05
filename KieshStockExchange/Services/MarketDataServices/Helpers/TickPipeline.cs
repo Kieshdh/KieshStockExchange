@@ -2,6 +2,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
 using System.Threading.Channels;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
@@ -73,7 +74,7 @@ internal sealed class TickPipeline
             return Task.CompletedTask;
         }
 
-        // Route through the channel — the reader handles candle feed and UI dispatch.
+        // Route through the channel â€” the reader handles candle feed and UI dispatch.
         // Engine threads return immediately.
         _channel.Writer.TryWrite(new[] { tick });
         return Task.CompletedTask;
@@ -118,7 +119,7 @@ internal sealed class TickPipeline
     {
         var quote = await _registry.GetOrAddAsync(stockId, currency, ct).ConfigureAwait(false);
 
-        // Already populated — quote.LastUpdated is set by ApplyTick / ApplySnapshot.
+        // Already populated â€” quote.LastUpdated is set by ApplyTick / ApplySnapshot.
         if (quote.LastUpdated > DateTime.MinValue)
             return;
 
@@ -158,7 +159,7 @@ internal sealed class TickPipeline
     {
         // ReadAllAsync without a cancellation token exits cleanly when the writer is
         // completed (which StopAsync does first). Avoiding the token here keeps the
-        // debugger's first-chance OCE window quiet on shutdown without delaying exit —
+        // debugger's first-chance OCE window quiet on shutdown without delaying exit â€”
         // the channel typically holds a tiny backlog at the 250ms drain cadence.
         try
         {
@@ -177,7 +178,7 @@ internal sealed class TickPipeline
     private async Task ProcessBatchAsync(IReadOnlyList<Transaction> ticks, CancellationToken ct)
     {
         // Single-tick fast path. Engine OnTick is the dominant case in the steady
-        // state — skipping the grouping Dictionary and per-book List avoids two
+        // state â€” skipping the grouping Dictionary and per-book List avoids two
         // allocations per tick.
         if (ticks.Count == 1)
         {
@@ -245,7 +246,7 @@ internal sealed class TickPipeline
 
     private async Task ProcessOneAsync(Transaction t, CancellationToken ct)
     {
-        // Always feed the candle aggregator regardless of subscribers — the candle
+        // Always feed the candle aggregator regardless of subscribers â€” the candle
         // service is independent of live-quote subscriptions.
         _candle.OnTransactionTick(t);
 

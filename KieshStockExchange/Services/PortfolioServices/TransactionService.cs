@@ -1,7 +1,10 @@
-﻿using KieshStockExchange.Models;
+using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.UserServices;
+using KieshStockExchange.Services.UserServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 namespace KieshStockExchange.Services.PortfolioServices;
 

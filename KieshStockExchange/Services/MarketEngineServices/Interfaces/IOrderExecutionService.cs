@@ -1,6 +1,6 @@
 ﻿using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.MarketEngineServices;
+namespace KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 public interface IOrderExecutionService
 {

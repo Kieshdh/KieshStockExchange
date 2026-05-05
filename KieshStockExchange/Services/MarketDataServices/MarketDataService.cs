@@ -1,7 +1,9 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.Implementations;
@@ -15,21 +17,26 @@ namespace KieshStockExchange.Services.Implementations;
 /// </summary>
 public sealed class MarketDataService : IMarketDataService, IAsyncDisposable
 {
+    #region Private fields
     private readonly QuoteRegistry _registry;
     private readonly SubscriptionTracker _subs;
     private readonly TickPipeline _pipeline;
 
-    private readonly ILogger<MarketDataService> _logger;
-    private readonly ICandleService _candle;
-    private readonly IMarketLookupService _lookup;
     private readonly CancellationTokenSource _lifetimeCts = new();
+    #endregion
 
+    #region Public properties and events
     public IReadOnlyDictionary<(int stockId, CurrencyType currency), LiveQuote> Quotes => _registry.Quotes;
 
     public IReadOnlyCollection<(int, CurrencyType)> Subscribed => _subs.Subscribed;
 
     public event EventHandler<LiveQuote>? QuoteUpdated;
+    #endregion
 
+    #region Services and constructor
+    private readonly ILogger<MarketDataService> _logger;
+    private readonly ICandleService _candle;
+    private readonly IMarketLookupService _lookup;
     public MarketDataService( IDispatcher dispatcher, ILogger<MarketDataService> logger,
         ILoggerFactory loggerFactory, ICandleService candle, IMarketLookupService lookup)
     {
@@ -52,9 +59,12 @@ public sealed class MarketDataService : IMarketDataService, IAsyncDisposable
         _registry.Start(_lifetimeCts.Token);
         _pipeline.Start();
     }
+    #endregion
 
+    #region Quote updates
     private void OnRegistryQuoteUpdated(object? sender, LiveQuote q)
         => QuoteUpdated?.Invoke(this, q);
+    #endregion
 
     #region Session
     public Task ApplySessionSnapshotAsync(SessionSnapshot snap)
@@ -176,7 +186,7 @@ public sealed class MarketDataService : IMarketDataService, IAsyncDisposable
     #region Convenience lookups
     public async Task<decimal> GetLastPriceAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
-        // Snapshot read against the live registry — never inserts an empty LiveQuote
+        // Snapshot read against the live registry â€” never inserts an empty LiveQuote
         // for lookup-only callers (admin VMs, snapshot service, decision service).
         if (_registry.Quotes.TryGetValue((stockId, currency), out var quote) && quote.LastPrice > 0m)
             return quote.LastPrice;

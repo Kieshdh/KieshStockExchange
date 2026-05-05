@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
@@ -119,7 +120,7 @@ public sealed partial class LiveQuote : ObservableObject
     #endregion
 
     #region Display Formatting
-    // Cached formatter inputs — skip CurrencyHelper.Format calls when nothing changed.
+    // Cached formatter inputs â€” skip CurrencyHelper.Format calls when nothing changed.
     private decimal _fmtLastPrice = decimal.MinValue;
     private decimal _fmtOpen = decimal.MinValue;
     private decimal _fmtHigh = decimal.MinValue;
@@ -170,11 +171,11 @@ public sealed partial class LiveQuote : ObservableObject
     #endregion
 
     #region Display helpers (for XAML data triggers)
-    /// <summary>True when the day-change is positive — used by Market/Trending
+    /// <summary>True when the day-change is positive â€” used by Market/Trending
     /// rows to colour the Change cell green via DataTrigger.</summary>
     public bool IsBullish => ChangePct > 0m;
 
-    /// <summary>True when the day-change is negative — colours the Change
+    /// <summary>True when the day-change is negative â€” colours the Change
     /// cell red.</summary>
     public bool IsBearish => ChangePct < 0m;
     #endregion

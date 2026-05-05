@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.PortfolioServices;
+namespace KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 public interface IPortfolioService
 {

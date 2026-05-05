@@ -3,7 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using System.Diagnostics;
 using KieshStockExchange.ViewModels.OtherViewModels;
-using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -43,7 +43,7 @@ public partial class AdminViewModel : BaseViewModel
     public async Task InitializeAsync()
     {
         IsBusy = true;
-        LoadingText = "Loading admin data…";
+        LoadingText = "Loading admin dataÃ¢â‚¬Â¦";
         try
         {
             await UsersVm.EnsureInitializedAsync();

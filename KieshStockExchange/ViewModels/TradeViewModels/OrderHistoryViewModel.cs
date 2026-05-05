@@ -1,11 +1,11 @@
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.DataServices;
-using KieshStockExchange.Services.MarketDataServices;
-using KieshStockExchange.Services.MarketEngineServices;
-using KieshStockExchange.Services.OtherServices;
-using KieshStockExchange.Services.UserServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.UserServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;

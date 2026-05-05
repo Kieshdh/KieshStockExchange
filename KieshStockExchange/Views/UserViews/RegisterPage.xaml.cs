@@ -1,4 +1,4 @@
-using KieshStockExchange.Services.UserServices;
+using KieshStockExchange.Services.UserServices.Interfaces;
 
 namespace KieshStockExchange.Views.UserViews;
 

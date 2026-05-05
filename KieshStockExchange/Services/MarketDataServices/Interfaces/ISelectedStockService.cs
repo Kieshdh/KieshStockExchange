@@ -1,9 +1,10 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
-namespace KieshStockExchange.Services.MarketDataServices;
+namespace KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 /// <summary>
 /// Shared, observable context for the currently selected stock and its live price.

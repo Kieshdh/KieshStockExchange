@@ -1,4 +1,4 @@
-using KieshStockExchange.Services.OtherServices;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.ViewModels.AccountViewModels;
 
 namespace KieshStockExchange.Views.AccountPageViews;

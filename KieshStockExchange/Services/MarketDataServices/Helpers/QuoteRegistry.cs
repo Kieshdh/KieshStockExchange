@@ -3,6 +3,7 @@ using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
@@ -123,7 +124,7 @@ internal sealed class QuoteRegistry
     /// <summary>
     /// Single background loop that fires <see cref="QuoteUpdated"/> for every dirty
     /// book on each tick of <see cref="TickerInterval"/>. Replaces per-book debounce
-    /// timers — zero UI-thread timers, zero per-book Dispatch calls. Subscribers
+    /// timers â€” zero UI-thread timers, zero per-book Dispatch calls. Subscribers
     /// self-marshal to the UI thread when they need to.
     /// </summary>
     private async Task DrainLoopAsync(CancellationToken ct)
@@ -132,7 +133,7 @@ internal sealed class QuoteRegistry
         {
             // Dispose-on-cancel pattern: register a callback that disposes the timer when ct
             // fires. WaitForNextTickAsync (no-token overload) returns false on disposal
-            // instead of throwing OCE — keeps the debugger's first-chance window quiet.
+            // instead of throwing OCE â€” keeps the debugger's first-chance window quiet.
             using var timer = new PeriodicTimer(TickerInterval);
             using var cancelReg = ct.Register(static state => ((PeriodicTimer)state!).Dispose(), timer);
 
@@ -141,7 +142,7 @@ internal sealed class QuoteRegistry
                 if (ct.IsCancellationRequested) break;
                 if (_dirty.IsEmpty) continue;
 
-                // Iterate the entries directly — ConcurrentDictionary's enumerator does
+                // Iterate the entries directly â€” ConcurrentDictionary's enumerator does
                 // not snapshot, unlike .Keys. Concurrent dirty marks landing during the
                 // loop will be picked up on the next tick.
                 foreach (var kv in _dirty)

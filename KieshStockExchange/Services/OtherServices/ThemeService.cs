@@ -1,23 +1,9 @@
 using KieshStockExchange.Resources.Styles.Themes;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Storage;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 
 namespace KieshStockExchange.Services.OtherServices;
-
-public enum ThemeKind { Light, Dark }
-
-public sealed record ThemeOption(string Key, string DisplayName, ThemeKind Kind);
-
-public interface IThemeService
-{
-    IReadOnlyList<ThemeOption> AvailableThemes { get; }
-    string CurrentThemeKey { get; }
-    string SavedThemeKey { get; }
-    void ApplyTheme(string themeKey);
-    void ApplySavedTheme();
-    void ApplyRandomTheme();
-    event EventHandler<string>? ThemeChanged;
-}
 
 /// <summary>
 /// Switches the active theme by replacing slot 0 of

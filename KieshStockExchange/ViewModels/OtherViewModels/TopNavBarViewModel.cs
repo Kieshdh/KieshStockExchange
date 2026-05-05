@@ -1,7 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KieshStockExchange.Services.BackgroundServices;
-using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using System.Globalization;
 
 namespace KieshStockExchange.ViewModels.OtherViewModels;
@@ -15,7 +15,7 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
     #endregion
 
     #region Observable Properties
-    [ObservableProperty] private string _fundsDisplay = "$ —";
+    [ObservableProperty] private string _fundsDisplay = "$ Ã¢â‚¬â€";
     #endregion
 
     #region Constructor
@@ -37,7 +37,7 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
     {
         var fund = _portfolio.GetBaseFund();
         FundsDisplay = fund == null
-            ? "$ —"
+            ? "$ Ã¢â‚¬â€"
             : $"$ {fund.AvailableBalance.ToString("N2", CultureInfo.InvariantCulture)}";
     }
     #endregion

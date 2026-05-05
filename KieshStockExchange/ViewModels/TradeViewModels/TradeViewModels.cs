@@ -1,8 +1,8 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.MarketDataServices;
-using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;

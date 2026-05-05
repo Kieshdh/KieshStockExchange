@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.DataServices;
+namespace KieshStockExchange.Services.DataServices.Interfaces;
 
 public interface IDataBaseService
 {

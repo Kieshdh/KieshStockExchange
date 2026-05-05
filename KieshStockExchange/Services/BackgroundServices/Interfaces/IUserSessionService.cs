@@ -1,8 +1,9 @@
-﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
-namespace KieshStockExchange.Services.BackgroundServices;
+namespace KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 public interface IUserSessionService
 {

@@ -2,7 +2,7 @@
 using KieshStockExchange.Models;
 using System;
 
-namespace KieshStockExchange.Services.PortfolioServices;
+namespace KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 public interface IUserPortfolioService
 {

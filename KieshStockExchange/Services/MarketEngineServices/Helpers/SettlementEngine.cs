@@ -1,8 +1,11 @@
 using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
@@ -15,13 +18,13 @@ public sealed record RejectedFill(Transaction Trade, int MakerOrderId, string Re
 
 public interface ISettlementEngine
 {
-    /// <summary> Balance check and order persist — no reservation writes </summary>
+    /// <summary> Balance check and order persist Ã¢â‚¬â€ no reservation writes </summary>
     Task<OrderResult?> SettleOrderAsync(Order incoming, CancellationToken ct = default);
 
     /// <summary>
     /// Persist all trades and transfer assets in a single batched DB transaction.
     /// Returns the optional fatal error (DB write fails, missing fund/position rows) and a
-    /// list of fills the seller couldn't honor. Rejected fills never touch the cache or DB —
+    /// list of fills the seller couldn't honor. Rejected fills never touch the cache or DB Ã¢â‚¬â€
     /// the caller is expected to cancel the offending maker order and roll back the
     /// matcher's per-fill effect on the book.
     /// </summary>
@@ -90,7 +93,7 @@ public sealed class SettlementEngine : ISettlementEngine
         // happens at most once per user; warm calls are O(1).
         await _accounts.EnsureLoadedAsync(incoming.UserId, ct).ConfigureAwait(false);
 
-        // Read-only balance check from cache — no DB hit on warm path. Reserve at place
+        // Read-only balance check from cache Ã¢â‚¬â€ no DB hit on warm path. Reserve at place
         // time so subsequent same-account orders see the reduced AvailableBalance /
         // AvailableQuantity (multi-order over-promise rejected here, not at settlement).
         Position? sellPos = null;
@@ -124,7 +127,7 @@ public sealed class SettlementEngine : ISettlementEngine
             try { sellPos.ReserveStock(incoming.Quantity); }
             catch (ArgumentException)
             {
-                // Lost a race against another reserver — treat as insufficient.
+                // Lost a race against another reserver Ã¢â‚¬â€ treat as insufficient.
                 return OrderResultFactory.InsufficientStocks($"Insufficient shares for sell order (user {incoming.UserId}).");
             }
         }
@@ -136,7 +139,7 @@ public sealed class SettlementEngine : ISettlementEngine
         }
         catch (Exception ex)
         {
-            // Persist failed — release the reservation we just took so the cache stays consistent.
+            // Persist failed Ã¢â‚¬â€ release the reservation we just took so the cache stays consistent.
             if (sellPos is not null)
             {
                 try { sellPos.UnreserveStock(incoming.Quantity); }
@@ -260,7 +263,7 @@ public sealed class SettlementEngine : ISettlementEngine
                 // SELL order is the maker. For a sell taker, the BUY order is the maker.
                 // Matching always pairs a taker with a maker on the opposite side, so the
                 // seller's order id is on the SellOrderId field for taker=buy and on
-                // SellOrderId for taker=sell-self too — t.SellOrderId is always the seller's.
+                // SellOrderId for taker=sell-self too Ã¢â‚¬â€ t.SellOrderId is always the seller's.
                 rejected.Add(new RejectedFill(
                     t,
                     t.SellOrderId,
@@ -273,7 +276,7 @@ public sealed class SettlementEngine : ISettlementEngine
             accepted.Add(t);
         }
 
-        // No accepted fills — nothing to apply, no DB writes. Return rejected list so the
+        // No accepted fills Ã¢â‚¬â€ nothing to apply, no DB writes. Return rejected list so the
         // caller can still cancel the offending makers.
         if (accepted.Count == 0)
             return (null, rejected);
@@ -325,7 +328,7 @@ public sealed class SettlementEngine : ISettlementEngine
             }
             catch (ArgumentException ex)
             {
-                // Reservation drift — should be caught at place time, but fail the batch
+                // Reservation drift Ã¢â‚¬â€ should be caught at place time, but fail the batch
                 // safely if we ever land here so the caller can roll the tx back.
                 return (OrderResultFactory.OperationFailed(
                     $"Reservation drift on buyer {t.BuyerId}: {ex.Message}"),
@@ -333,7 +336,7 @@ public sealed class SettlementEngine : ISettlementEngine
             }
             buyerFund.UpdatedAt = TimeHelper.NowUtc();
 
-            // Seller receives — straight credit to TotalBalance, no reservation involved.
+            // Seller receives Ã¢â‚¬â€ straight credit to TotalBalance, no reservation involved.
             var sellerKey = (t.SellerId, ccy);
             if (!fundMap.TryGetValue(sellerKey, out var sellerFund))
             {
@@ -348,7 +351,7 @@ public sealed class SettlementEngine : ISettlementEngine
             sellerFund.TotalBalance += notional;
             sellerFund.UpdatedAt = TimeHelper.NowUtc();
 
-            // Buyer position — may reuse a position created earlier in the same root tx.
+            // Buyer position Ã¢â‚¬â€ may reuse a position created earlier in the same root tx.
             var buyerPosKey = (t.BuyerId, t.StockId);
             if (!posMap.TryGetValue(buyerPosKey, out var buyerPos))
             {
@@ -358,7 +361,7 @@ public sealed class SettlementEngine : ISettlementEngine
                     buyerPos = new Position { UserId = t.BuyerId, StockId = t.StockId };
                     pendingNewPositions[buyerPosKey] = buyerPos;
                     newPositionsThisCall.Add(buyerPos);
-                    // No snapshot for brand-new positions — caller drops the entry on rollback.
+                    // No snapshot for brand-new positions Ã¢â‚¬â€ caller drops the entry on rollback.
                 }
                 else if (buyerPos!.PositionId != 0 && !posSnapshots.ContainsKey(buyerPosKey))
                 {
@@ -369,7 +372,7 @@ public sealed class SettlementEngine : ISettlementEngine
             buyerPos.Quantity += t.Quantity;
             buyerPos.UpdatedAt = TimeHelper.NowUtc();
 
-            // Seller position — pre-validated above to have sufficient Quantity; lookup chain
+            // Seller position Ã¢â‚¬â€ pre-validated above to have sufficient Quantity; lookup chain
             // is identical to the validate-pass.
             var sellerPosKey = (t.SellerId, t.StockId);
             if (!posMap.TryGetValue(sellerPosKey, out var sellerPos))
@@ -436,7 +439,7 @@ public sealed class SettlementEngine : ISettlementEngine
             }
         }
 
-        // DB writes happen on the caller's ambient root tx — no BeginTransactionAsync here.
+        // DB writes happen on the caller's ambient root tx Ã¢â‚¬â€ no BeginTransactionAsync here.
         // Persist accepted trades only; rejected ones never happened.
         await _db.InsertAllAsync(accepted, ct).ConfigureAwait(false);
         await _db.UpdateAllAsync(ordersById.Values, ct).ConfigureAwait(false);
@@ -452,7 +455,7 @@ public sealed class SettlementEngine : ISettlementEngine
 
     /// <summary>
     /// Restore the cache instances mutated by <see cref="SettleTradesNoTxAsync"/> back to
-    /// the values captured in the snapshot dictionaries. Idempotent — safe to call after a
+    /// the values captured in the snapshot dictionaries. Idempotent Ã¢â‚¬â€ safe to call after a
     /// successful settle (snapshots are simply re-applied with the same values, no-op).
     /// </summary>
     public void RestoreCacheSnapshots(
@@ -509,7 +512,7 @@ public sealed class SettlementEngine : ISettlementEngine
         // Release the unfilled reservation. For sells: the open RemainingQuantity that was
         // reserved at place time. For buys: the unfilled portion of the upper-bound
         // reservation (RemainingBuyReservation handles limit/slip/TrueMarketBuy).
-        // Use the in-memory `order` — it carries the up-to-date AmountFilled set by matching.
+        // Use the in-memory `order` Ã¢â‚¬â€ it carries the up-to-date AmountFilled set by matching.
         ReleaseSellReservation(order, order.RemainingQuantity);
         ReleaseBuyReservation(order);
     }
@@ -520,7 +523,7 @@ public sealed class SettlementEngine : ISettlementEngine
         var pos = _accounts.GetPosition(order.UserId, order.StockId);
         if (pos is null) return;
         try { pos.UnreserveStock(qty); }
-        catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+        catch (ArgumentException) { /* hydration mismatch Ã¢â‚¬â€ swallow defensively */ }
     }
 
     private void ReleaseBuyReservation(Order order)
@@ -531,7 +534,7 @@ public sealed class SettlementEngine : ISettlementEngine
         var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
         if (fund is null) return;
         try { fund.UnreserveFunds(amount); }
-        catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+        catch (ArgumentException) { /* hydration mismatch Ã¢â‚¬â€ swallow defensively */ }
     }
 
     public async Task ApplyOrderChangeAsync(Order order, int? newQuantity, decimal? newPrice, CancellationToken ct = default)
@@ -539,7 +542,7 @@ public sealed class SettlementEngine : ISettlementEngine
         ct.ThrowIfCancellationRequested();
 
         // Compute reservation delta up front so we can apply it after the tx commits.
-        // Sell-only: delta in reservation == delta in Quantity (RemainingQuantity = Quantity − AmountFilled
+        // Sell-only: delta in reservation == delta in Quantity (RemainingQuantity = Quantity Ã¢Ë†â€™ AmountFilled
         // shifts identically with Quantity since AmountFilled is unchanged here).
         int reservationDelta = 0;
         Position? sellPos = null;
@@ -584,7 +587,7 @@ public sealed class SettlementEngine : ISettlementEngine
             throw;
         }
 
-        // Apply reservation change only after the tx commits — otherwise we'd have to roll
+        // Apply reservation change only after the tx commits Ã¢â‚¬â€ otherwise we'd have to roll
         // it back on throw, and the throw path above already restores via tx rollback.
         if (sellPos is not null && reservationDelta != 0)
         {
@@ -593,7 +596,7 @@ public sealed class SettlementEngine : ISettlementEngine
                 if (reservationDelta > 0) sellPos.ReserveStock(reservationDelta);
                 else sellPos.UnreserveStock(-reservationDelta);
             }
-            catch (ArgumentException) { /* defensive — pre-checked above */ }
+            catch (ArgumentException) { /* defensive Ã¢â‚¬â€ pre-checked above */ }
         }
     }
     #endregion
@@ -620,7 +623,7 @@ public sealed class SettlementEngine : ISettlementEngine
 
     /// <summary>
     /// Up-front reservation amount for a freshly-placed buy order. For limit and slippage
-    /// orders this is per-unit × Quantity; for TrueMarketBuy it's the full BuyBudget.
+    /// orders this is per-unit Ãƒâ€” Quantity; for TrueMarketBuy it's the full BuyBudget.
     /// </summary>
     internal static decimal InitialBuyReservation(Order o)
     {
@@ -631,7 +634,7 @@ public sealed class SettlementEngine : ISettlementEngine
 
     /// <summary>
     /// Reservation still held against the unfilled portion of a buy order. For limit /
-    /// slippage orders that's per-unit × RemainingQuantity. For TrueMarketBuy it's the
+    /// slippage orders that's per-unit Ãƒâ€” RemainingQuantity. For TrueMarketBuy it's the
     /// remaining <see cref="Order.BuyBudget"/> (which the apply-pass decrements per fill).
     /// </summary>
     internal static decimal RemainingBuyReservation(Order o)

@@ -1,7 +1,7 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.MarketDataServices;
+namespace KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 /// <summary>
 /// Pure read-side lookup surface for market data: stock catalog reads, last/at-time

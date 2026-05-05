@@ -1,5 +1,6 @@
 using KieshStockExchange.Services.MarketDataServices;
-using KieshStockExchange.Services.OtherServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.ViewModels.TradeViewModels;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -47,7 +48,7 @@ public partial class ChartView : ContentView
     }
 
     // Pull the palette from Colors.xaml so the drawable doesn't carry its own hex values.
-    // Done once in the constructor — these resources are static across the app.
+    // Done once in the constructor Ã¢â‚¬â€ these resources are static across the app.
     private void ApplyChartPalette()
     {
         if (TryGetColor("ChartBg",            out var bg))       _drawable.Bg            = bg;

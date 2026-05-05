@@ -1,4 +1,5 @@
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 

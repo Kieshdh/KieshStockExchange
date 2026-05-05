@@ -1,12 +1,13 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
-using KieshStockExchange.Services.OtherServices;
-using KieshStockExchange.Services.PortfolioServices;
-using KieshStockExchange.Services.UserServices;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
+using KieshStockExchange.Services.UserServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
@@ -217,7 +218,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                 }
                 else
                 {
-                    _logger.LogInformation("Placing {Side} MARKET± order for {Quantity} of {Symbol} (slippage {Slippage:P2}).",
+                    _logger.LogInformation("Placing {Side} MARKETÃ‚Â± order for {Quantity} of {Symbol} (slippage {Slippage:P2}).",
                         IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, SlippagePrc);
 
                     result = IsBuySelected

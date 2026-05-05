@@ -1,7 +1,7 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.PortfolioServices;
+namespace KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 /// <summary>
 /// In-memory cache of <see cref="Fund"/> and <see cref="Position"/> rows for the active users.

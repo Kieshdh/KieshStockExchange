@@ -2,12 +2,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using System.Diagnostics;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-// TotalValue removed — requires FX conversion that the DB cannot order by
+// TotalValue removed Ã¢â‚¬â€ requires FX conversion that the DB cannot order by
 public enum FundSortColumn { None, UserId, Usd, Reserved, Eur, Gbp, Jpy, Chf, Aud }
 public enum FundSortDir { Asc, Desc }
 

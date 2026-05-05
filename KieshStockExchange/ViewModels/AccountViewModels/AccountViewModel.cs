@@ -1,6 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using KieshStockExchange.Services.BackgroundServices;
-using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using System.Globalization;
 
@@ -18,7 +18,7 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
     [ObservableProperty] private string _fullName = string.Empty;
     [ObservableProperty] private string _userId = string.Empty;
     [ObservableProperty] private string _baseCurrency = string.Empty;
-    [ObservableProperty] private string _fundsDisplay = "$ —";
+    [ObservableProperty] private string _fundsDisplay = "$ Ã¢â‚¬â€";
 
     public AccountViewModel(IUserSessionService session, IUserPortfolioService portfolio,
         TopNavBarViewModel topNavBarVm)
@@ -53,7 +53,7 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
         var snap = _session.Snapshot;
         UserName     = snap.UserName;
         FullName     = snap.FullName;
-        UserId       = snap.UserId > 0 ? snap.UserId.ToString() : "—";
+        UserId       = snap.UserId > 0 ? snap.UserId.ToString() : "Ã¢â‚¬â€";
         BaseCurrency = snap.BaseCurrency.ToString();
     }
 
@@ -61,7 +61,7 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
     {
         var fund = _portfolio.GetBaseFund();
         FundsDisplay = fund == null
-            ? "$ —"
+            ? "$ Ã¢â‚¬â€"
             : $"$ {fund.AvailableBalance.ToString("N2", CultureInfo.InvariantCulture)}";
     }
 

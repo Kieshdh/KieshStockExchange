@@ -1,7 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
-using KieshStockExchange.Services.MarketDataServices;
-using KieshStockExchange.Services.OtherServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;

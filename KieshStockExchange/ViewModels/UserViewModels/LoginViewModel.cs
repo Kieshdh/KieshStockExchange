@@ -1,12 +1,12 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.UserServices;
-using KieshStockExchange.Services.BackgroundServices;
-using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.UserServices.Interfaces;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.ViewModels.UserViewModels;
 

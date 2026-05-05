@@ -1,7 +1,8 @@
-﻿using KieshStockExchange.Models;
+using KieshStockExchange.Models;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 

@@ -1,7 +1,9 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
@@ -24,7 +26,7 @@ public sealed class OrderBookCache : IOrderBookCache
 {
     #region Dictionaries
     // Order book for each stock (keyed by stock ID and CurrencyType)
-    // In-memory order books: price‐time priority
+    // In-memory order books: priceâ€time priority
     // Buy: highest price first; Sell: lowest price first
     private readonly ConcurrentDictionary<(int, CurrencyType), OrderBook> _books = new();
 

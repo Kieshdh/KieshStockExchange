@@ -2,8 +2,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
-using KieshStockExchange.Services.DataServices;
-using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -20,7 +20,7 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
     protected override async Task<(IReadOnlyList<StockTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        // Small table — load all stocks, prices come from the in-memory registry (O(1) each)
+        // Small table Ã¢â‚¬â€ load all stocks, prices come from the in-memory registry (O(1) each)
         var stocks = (await _market.GetAllStocksAsync(ct)).OrderBy(s => s.StockId).ToList();
         var rows = new List<StockTableObject>(stocks.Count);
         foreach (var stock in stocks)

@@ -2,8 +2,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.MarketDataServices;
-using KieshStockExchange.Services.OtherServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 
@@ -29,7 +29,7 @@ public partial class ChartViewModel : StockAwareViewModel
 
     private (int StockId, CurrencyType Currency, CandleResolution Res)? Key;
 
-    // Internal candle buffer — kept in ascending OpenTime order by every mutation path
+    // Internal candle buffer Ã¢â‚¬â€ kept in ascending OpenTime order by every mutation path
     // (history load appends sorted, UpsertCandle replaces-in-place or appends, LoadOlderAsync
     // inserts older buckets at the front). Anyone reading should respect that invariant.
     private readonly List<Candle> _candleBuffer = new();
@@ -292,7 +292,7 @@ public partial class ChartViewModel : StockAwareViewModel
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
                 // older is already sorted ascending; only take buckets strictly older than the
-                // current first bucket — no dedup HashSet needed since they cannot overlap.
+                // current first bucket Ã¢â‚¬â€ no dedup HashSet needed since they cannot overlap.
                 int insertAt = 0;
                 foreach (var c in older)
                 {
@@ -314,12 +314,12 @@ public partial class ChartViewModel : StockAwareViewModel
     private void UpsertCandle(List<Candle> list, Candle c)
     {
         // Live snapshots and closed candles almost always target the latest bucket
-        // (and the next-newest at most). Scan from the tail — O(1) in the common case.
+        // (and the next-newest at most). Scan from the tail Ã¢â‚¬â€ O(1) in the common case.
         var idx = -1;
         for (int i = list.Count - 1; i >= 0; i--)
         {
             if (_keyComparer.Equals(list[i], c)) { idx = i; break; }
-            // If we've walked past the candle's bucket we can stop early — list is time-ordered.
+            // If we've walked past the candle's bucket we can stop early Ã¢â‚¬â€ list is time-ordered.
             if (list[i].OpenTime < c.OpenTime) break;
         }
 
@@ -342,7 +342,7 @@ public partial class ChartViewModel : StockAwareViewModel
 
     public IReadOnlyList<Candle> GetVisibleCandles()
     {
-        // Buffer is maintained in ascending OpenTime order — no sort/copy needed,
+        // Buffer is maintained in ascending OpenTime order Ã¢â‚¬â€ no sort/copy needed,
         // we hand back a thin range view over the same backing array.
         int total = _candleBuffer.Count;
         if (total == 0) return Array.Empty<Candle>();
@@ -367,7 +367,7 @@ public partial class ChartViewModel : StockAwareViewModel
 
     /// <summary>
     /// Coalesces redraw notifications. Many ticks within a frame collapse into a single paint.
-    /// Safe to call from any thread — the marshalling and Interlocked guard prevent re-entry.
+    /// Safe to call from any thread Ã¢â‚¬â€ the marshalling and Interlocked guard prevent re-entry.
     /// </summary>
     private void RequestRedraw()
     {

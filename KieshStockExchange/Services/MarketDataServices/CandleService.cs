@@ -1,12 +1,15 @@
-﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.OtherServices;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
@@ -62,7 +65,7 @@ public sealed class CandleService : ICandleService, IDisposable
 
         var newCount = _subRefCount.AddOrUpdate(key, 1, (_, c) => c + 1);
         GetOrAddAggregator(stockId, currency, resolution);
-        // _streams is created lazily by StreamClosedCandles — bot-driven candle subs
+        // _streams is created lazily by StreamClosedCandles â€” bot-driven candle subs
         // that never open a chart pay zero per-tick channel-write cost.
         RebuildAggsByBook(stockId, currency);
         if (newCount == 1) RebuildSubscribedSnapshot();
@@ -153,7 +156,7 @@ public sealed class CandleService : ICandleService, IDisposable
             agg.OnTick(tick);
 
             // Push live snapshot to the chart stream (no DB). TryGetLiveSnapshot allocates,
-            // so guard it behind the channel existence check — bot-only books skip the alloc.
+            // so guard it behind the channel existence check â€” bot-only books skip the alloc.
             var key = (agg.StockId, agg.Currency, agg.Resolution);
             if (_streams.TryGetValue(key, out var stream))
             {
@@ -243,7 +246,7 @@ public sealed class CandleService : ICandleService, IDisposable
 
         if (!fillGaps) return list;
 
-        // No real candles → no fabricated pre-history.
+        // No real candles â†’ no fabricated pre-history.
         if (list.Count == 0) return list;
 
         // Fill gaps from the first real candle onward. Anything before that stays empty
@@ -410,7 +413,7 @@ public sealed class CandleService : ICandleService, IDisposable
                 if (!c.IsValid())
                     throw new InvalidOperationException($"Invalid candle {c.Summary}");
 
-            // Persist to DB — single tx, batched ON CONFLICT upsert.
+            // Persist to DB â€” single tx, batched ON CONFLICT upsert.
             await _db.RunInTransactionAsync(txCt =>
                 _db.UpsertCandlesAsync(candles, txCt), ct).ConfigureAwait(false);
 
@@ -451,7 +454,7 @@ public sealed class CandleService : ICandleService, IDisposable
                 // Phase 2: persist everything in a single DB transaction (batched across keys).
                 if (perKeyClosed.Count > 0)
                 {
-                    // Flatten valid candles across all keys into one batch — one tx, one
+                    // Flatten valid candles across all keys into one batch â€” one tx, one
                     // ON CONFLICT upsert per candle, no per-candle SELECT.
                     var batch = new List<Candle>();
                     foreach (var (_, closed) in perKeyClosed)

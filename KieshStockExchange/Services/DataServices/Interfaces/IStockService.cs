@@ -1,6 +1,6 @@
 ﻿using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.DataServices;
+namespace KieshStockExchange.Services.DataServices.Interfaces;
 
 /// <summary>
 /// In-memory catalog of Stocks.

@@ -2,7 +2,7 @@
 using KieshStockExchange.Models;
 using System.Collections.Concurrent;
 
-namespace KieshStockExchange.Services.MarketDataServices;
+namespace KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 public interface ICandleService
 {

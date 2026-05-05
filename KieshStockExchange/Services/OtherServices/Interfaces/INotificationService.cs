@@ -1,7 +1,8 @@
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
-namespace KieshStockExchange.Services.OtherServices;
+namespace KieshStockExchange.Services.OtherServices.Interfaces;
 
 public interface INotificationService
 {

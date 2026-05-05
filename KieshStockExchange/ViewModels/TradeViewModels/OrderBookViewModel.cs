@@ -1,9 +1,10 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
-using KieshStockExchange.Services.OtherServices;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.ApplicationModel;
 using System.Collections.ObjectModel;
@@ -18,7 +19,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
 
     // Handler for book changes, plus the exact book reference we subscribed to.
     // We can't detach via Selected.CurrentOrderBook because that pointer already
-    // moves to the new book before our PropertyChanged handler runs — detaching
+    // moves to the new book before our PropertyChanged handler runs â€” detaching
     // off the live property would no-op against the wrong book and leak the
     // subscription on the old one, leading to cross-stock UI contamination.
     private EventHandler? _bookHandler;
@@ -44,7 +45,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
         }
     }
 
-    // Bindable alias for the View — same backing storage as Depth.
+    // Bindable alias for the View â€” same backing storage as Depth.
     public int MaxVisibleLevels
     {
         get => Depth;
@@ -52,8 +53,8 @@ public partial class OrderBookViewModel : StockAwareViewModel
     }
 
     // Visible slice closest to the spread:
-    //   sells are ordered high→low, so the asks adjacent to the mid are the *tail*.
-    //   buys are ordered high→low, so the best bids are the head.
+    //   sells are ordered highâ†’low, so the asks adjacent to the mid are the *tail*.
+    //   buys are ordered highâ†’low, so the best bids are the head.
     public IEnumerable<LevelRow> VisibleSellLevels
         => SellLevels.Skip(Math.Max(0, SellLevels.Count - Depth));
     public IEnumerable<LevelRow> VisibleBuyLevels
@@ -67,13 +68,13 @@ public partial class OrderBookViewModel : StockAwareViewModel
     [ObservableProperty] private decimal? _spreadPercent;
 
     public string BestAskDisplay => BestAsk.HasValue
-        ? CurrencyHelper.Format(BestAsk.Value, Selected.Currency) : "—";
+        ? CurrencyHelper.Format(BestAsk.Value, Selected.Currency) : "â€”";
     public string BestBidDisplay => BestBid.HasValue
-        ? CurrencyHelper.Format(BestBid.Value, Selected.Currency) : "—";
+        ? CurrencyHelper.Format(BestBid.Value, Selected.Currency) : "â€”";
     public string SpreadDisplay => Spread.HasValue
-        ? CurrencyHelper.Format(Spread.Value, Selected.Currency) : "—";
+        ? CurrencyHelper.Format(Spread.Value, Selected.Currency) : "â€”";
     public string SpreadPercentDisplay => SpreadPercent.HasValue
-        ? $"{SpreadPercent.Value:0.00}%" : "—";
+        ? $"{SpreadPercent.Value:0.00}%" : "â€”";
     public bool HasSpread => Spread.HasValue;
 
     [ObservableProperty] private bool _isEmpty = true;
@@ -92,7 +93,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
 
     #region Pricing colours
     [ObservableProperty] private string _priceTitle = "Price"; // Price (CurrencyType)
-    [ObservableProperty] private string _priceDirectionArrow = "•"; // "▲" "▼" 
+    [ObservableProperty] private string _priceDirectionArrow = "â€¢"; // "â–²" "â–¼" 
     [ObservableProperty] private Color _priceTextColour;
 
     private Color ColorNeutral = Colors.White;
@@ -127,7 +128,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
         // Reset price-direction state so the first tick on the new stock doesn't
         // colour itself by comparing against the previous stock's last price.
         PreviousPrice = 0m;
-        PriceDirectionArrow = "•";
+        PriceDirectionArrow = "â€¢";
         PriceTextColour = ColorNeutral;
 
         // Reset best/spread state and empty-state defaults; the snapshot rebuild
@@ -144,7 +145,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
         if (Selected.HasSelectedStock)
             PriceTitle = $"Price ({Selected.Currency})";
 
-        // Currency may have changed — refresh formatted displays.
+        // Currency may have changed â€” refresh formatted displays.
         OnPropertyChanged(nameof(BestAskDisplay));
         OnPropertyChanged(nameof(BestBidDisplay));
         OnPropertyChanged(nameof(SpreadDisplay));
@@ -158,7 +159,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
         // Update price arrow
         if (PreviousPrice > 0m)
         {
-            PriceDirectionArrow = price > PreviousPrice ? "▲" : (price < PreviousPrice ? "▼" : "•");
+            PriceDirectionArrow = price > PreviousPrice ? "â–²" : (price < PreviousPrice ? "â–¼" : "â€¢");
             PriceTextColour = price > PreviousPrice ? ColorUp : (price < PreviousPrice ? ColorDown : ColorNeutral);
         }
         PreviousPrice = price;
@@ -182,7 +183,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
         _attachedBook = Book;
         _bookHandler = (sender, _) =>
         {
-            // The Changed event is sender-only now — pull the snapshot on the firing
+            // The Changed event is sender-only now â€” pull the snapshot on the firing
             // thread so the UI thread isn't blocked by the OrderBook lock.
             if (sender is not OrderBook book) return;
             BookSnapshot snap;
@@ -255,7 +256,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
         IsEmpty = SellLevels.Count == 0 && BuyLevels.Count == 0;
         EmptyMessage = !Selected.HasSelectedStock ? "No stock selected" : "Order book is empty";
 
-        // Let the view recompute the “Depth” slices
+        // Let the view recompute the â€œDepthâ€ slices
         OnPropertyChanged(nameof(VisibleSellLevels));
         OnPropertyChanged(nameof(VisibleBuyLevels));
     }

@@ -2,14 +2,14 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.DataServices;
-using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-// Price, StockValue, TotalValue removed — depend on live FX that the DB cannot order by
+// Price, StockValue, TotalValue removed Ã¢â‚¬â€ depend on live FX that the DB cannot order by
 public enum PosSortColumn { None, UserId, Quantity, Reserved }
 public enum PosSortDir { Asc, Desc }
 
@@ -58,7 +58,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
     }
     #endregion
 
-    #region Lazy init — stocks must be loaded before first page query
+    #region Lazy init Ã¢â‚¬â€ stocks must be loaded before first page query
     public override async Task EnsureInitializedAsync()
     {
         await EnsureStocksLoadedAsync();

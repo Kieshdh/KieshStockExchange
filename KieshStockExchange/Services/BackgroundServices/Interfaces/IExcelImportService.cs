@@ -1,4 +1,4 @@
-namespace KieshStockExchange.Services.BackgroundServices;
+namespace KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 /// <summary>
 /// Defines methods to import data from Excel into the local database.

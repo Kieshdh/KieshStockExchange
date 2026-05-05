@@ -2,8 +2,11 @@ using System.Collections.Concurrent;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 namespace KieshStockExchange.Services.PortfolioServices;
 
@@ -43,7 +46,7 @@ public sealed class AccountsCache : IAccountsCache
         await _loadGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // Re-check under the gate — another caller may have loaded these in the meantime.
+            // Re-check under the gate Ã¢â‚¬â€ another caller may have loaded these in the meantime.
             for (int i = missing.Count - 1; i >= 0; i--)
                 if (_loadedUsers.ContainsKey(missing[i])) missing.RemoveAt(i);
             if (missing.Count == 0) return;
@@ -67,7 +70,7 @@ public sealed class AccountsCache : IAccountsCache
             if (ordersToCancel.Count > 0)
                 await _db.UpdateAllAsync(ordersToCancel, ct).ConfigureAwait(false);
 
-            // Mark all requested users as loaded — even if they had no rows, so we don't
+            // Mark all requested users as loaded Ã¢â‚¬â€ even if they had no rows, so we don't
             // re-query the DB for empty results.
             for (int i = 0; i < missing.Count; i++)
                 _loadedUsers[missing[i]] = 0;

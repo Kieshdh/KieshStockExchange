@@ -1,6 +1,6 @@
 using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.PortfolioServices;
+namespace KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 /// <summary> Read-only view over a user's historical transactions and P/L metrics. </summary>
 public interface ITransactionService

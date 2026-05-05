@@ -1,6 +1,6 @@
 ﻿using KieshStockExchange.Helpers;
 
-namespace KieshStockExchange.Services.MarketEngineServices;
+namespace KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 public interface IEngineAdminService
 {

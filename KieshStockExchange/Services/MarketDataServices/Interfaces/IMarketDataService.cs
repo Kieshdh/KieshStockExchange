@@ -1,7 +1,7 @@
 ﻿using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
 
-namespace KieshStockExchange.Services.MarketDataServices;
+namespace KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 public interface IMarketDataService
 {
