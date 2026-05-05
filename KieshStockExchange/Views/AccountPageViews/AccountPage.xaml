@@ -1,19 +1,145 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="KieshStockExchange.Views.AccountPageViews.AccountPage"
-             xmlns:local="clr-namespace:KieshStockExchange.ViewModels.AccountViewModels;"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
-             Title="AccountPage">
-    <ScrollView>
-        <Grid Style="{StaticResource MainGrid}">
+             x:Class="KieshStockExchange.Views.AccountPageViews.AccountPage"
+             Title="Account">
 
-            <!-- Navigation bar at the Top -->
-            <navbar:TopNavBarView Title="Account" Grid.Row="0"/>
+    <Grid Style="{StaticResource MainGrid}"
+          RowDefinitions="Auto,Auto,*"
+          RowSpacing="8"
+          Padding="0,0,0,8">
 
-            <!-- Main section -->
-            
-            
+        <!-- Top nav -->
+        <navbar:TopNavBarView Grid.Row="0"
+                              BindingContext="{Binding TopNavBarVm}" />
+
+        <!-- Page heading -->
+        <Grid Grid.Row="1"
+              Style="{StaticResource PageHeadingGrid}">
+            <Label Grid.Column="0"
+                   Text="Account"
+                   Style="{StaticResource PageHeadingTitle}" />
+            <Label Grid.Column="1"
+                   Text="Profile, funds and appearance settings"
+                   Style="{StaticResource PageHeadingSub}" />
         </Grid>
-    </ScrollView>
+
+        <!-- Body: Profile (left) + Funds + Appearance (right) -->
+        <Grid Grid.Row="2"
+              ColumnDefinitions="*,*"
+              ColumnSpacing="12"
+              Padding="24,0,24,0">
+
+            <!-- LEFT: Profile card -->
+            <Border Grid.Column="0"
+                    Style="{StaticResource DashboardCardStyle}"
+                    Padding="20"
+                    VerticalOptions="Start">
+                <VerticalStackLayout Spacing="16">
+
+                    <Label Text="Profile"
+                           Style="{StaticResource SectionHeaderLabelStyle}" />
+
+                    <!-- Username -->
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Username"
+                               Style="{StaticResource FormLabelStyle}" />
+                        <Entry Text="{Binding UserName}"
+                               IsReadOnly="True"
+                               Style="{StaticResource FormEntryStyle}" />
+                    </VerticalStackLayout>
+
+                    <!-- Full name -->
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Full name"
+                               Style="{StaticResource FormLabelStyle}" />
+                        <Entry Text="{Binding FullName}"
+                               IsReadOnly="True"
+                               Style="{StaticResource FormEntryStyle}" />
+                    </VerticalStackLayout>
+
+                    <!-- User ID -->
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="User ID"
+                               Style="{StaticResource FormLabelStyle}" />
+                        <Entry Text="{Binding UserId}"
+                               IsReadOnly="True"
+                               Style="{StaticResource FormEntryStyle}" />
+                    </VerticalStackLayout>
+
+                    <!-- Action buttons -->
+                    <Grid ColumnDefinitions="*,*"
+                          ColumnSpacing="8"
+                          Margin="0,8,0,0">
+                        <Button Grid.Column="0"
+                                Text="Save profile"
+                                Style="{StaticResource PrimaryActionButtonStyle}"
+                                IsEnabled="False" />
+                        <Button Grid.Column="1"
+                                Text="Change password"
+                                Style="{StaticResource SecondaryActionButtonStyle}"
+                                IsEnabled="False" />
+                    </Grid>
+
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- RIGHT: Funds + Appearance stacked -->
+            <VerticalStackLayout Grid.Column="1"
+                                 Spacing="12"
+                                 VerticalOptions="Start">
+
+                <!-- Available Funds card -->
+                <Border Style="{StaticResource DashboardCardStyle}"
+                        Padding="20">
+                    <VerticalStackLayout Spacing="12">
+
+                        <Label Text="Available Funds"
+                               Style="{StaticResource SectionHeaderLabelStyle}" />
+
+                        <Label Text="{Binding FundsDisplay}"
+                               Style="{StaticResource QuotePriceLabel}"
+                               HorizontalOptions="Start" />
+
+                        <Label Text="{Binding BaseCurrency}"
+                               Style="{StaticResource MutedLabelStyle}" />
+
+                        <Grid ColumnDefinitions="*,*"
+                              ColumnSpacing="8"
+                              Margin="0,4,0,0">
+                            <Button Grid.Column="0"
+                                    Text="Deposit"
+                                    Style="{StaticResource PrimaryActionButtonStyle}"
+                                    IsEnabled="False" />
+                            <Button Grid.Column="1"
+                                    Text="Withdraw"
+                                    Style="{StaticResource SecondaryActionButtonStyle}"
+                                    IsEnabled="False" />
+                        </Grid>
+
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- Appearance card -->
+                <Border Style="{StaticResource DashboardCardStyle}"
+                        Padding="20">
+                    <VerticalStackLayout Spacing="12">
+
+                        <Label Text="Appearance"
+                               Style="{StaticResource SectionHeaderLabelStyle}" />
+
+                        <Label Text="Switch any time. Survives reload."
+                               Style="{StaticResource MutedLabelStyle}" />
+
+                        <Picker x:Name="ThemePicker"
+                                Style="{StaticResource ThemePickerStyle}"
+                                ItemDisplayBinding="{Binding DisplayName}" />
+
+                    </VerticalStackLayout>
+                </Border>
+
+            </VerticalStackLayout>
+        </Grid>
+    </Grid>
 </ContentPage>
