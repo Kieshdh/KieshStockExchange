@@ -80,9 +80,15 @@
 
                     <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource AdminBotStatCard}">
                         <VerticalStackLayout Spacing="4">
-                            <Label Text="Cap" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Text="{Binding ActiveBotCap, TargetNullValue=none, FallbackValue=none}"
-                                   Style="{StaticResource AdminBotStatValue}" />
+                            <Label Text="Active / Max" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Style="{StaticResource AdminBotStatValue}">
+                                <Label.Text>
+                                    <MultiBinding StringFormat="{}{0} / {1}">
+                                        <Binding Path="ActiveBotCap" TargetNullValue="—" FallbackValue="—" />
+                                        <Binding Path="MaxBotCap" TargetNullValue="∞" FallbackValue="∞" />
+                                    </MultiBinding>
+                                </Label.Text>
+                            </Label>
                         </VerticalStackLayout>
                     </Border>
 
@@ -123,22 +129,58 @@
 
                 </Grid>
 
-                <!-- Cap setter -->
+                <!-- Scaler controls -->
                 <Border Style="{StaticResource AdminCardStyle}">
-                    <Grid ColumnDefinitions="Auto,120,Auto,Auto,*" ColumnSpacing="8">
-                        <Label Grid.Column="0" Text="Active bot cap"
-                               Style="{StaticResource AdminMetricLabel}"
-                               VerticalOptions="Center" />
-                        <Entry Grid.Column="1" Style="{StaticResource AdminEntry}"
-                               Keyboard="Numeric" Placeholder="no cap"
-                               Text="{Binding BotCapText, Mode=TwoWay}" />
-                        <Button Grid.Column="2" Text="Apply"
-                                Style="{StaticResource AdminPrimaryButton}"
-                                Command="{Binding ApplyBotCapCommand}" />
-                        <Label Grid.Column="4" Text="Capped at runtime; resets on app restart."
-                               Style="{StaticResource AdminMetricLabel}"
-                               HorizontalOptions="End" VerticalOptions="Center" />
-                    </Grid>
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="Bot scaler" Style="{StaticResource AdminCardSubtitle}" />
+
+                        <Grid ColumnDefinitions="Auto,120,Auto,Auto,Auto,120,Auto,Auto,*" ColumnSpacing="8">
+                            <Label Grid.Column="0" Text="Max cap"
+                                   Style="{StaticResource AdminMetricLabel}"
+                                   VerticalOptions="Center" />
+                            <Entry Grid.Column="1" Style="{StaticResource AdminEntry}"
+                                   Keyboard="Numeric" Placeholder="no cap"
+                                   Text="{Binding MaxBotCapText, Mode=TwoWay}" />
+                            <Button Grid.Column="2" Text="Apply"
+                                    Style="{StaticResource AdminPrimaryButton}"
+                                    Command="{Binding ApplyMaxBotCapCommand}" />
+
+                            <BoxView Grid.Column="3" WidthRequest="1" Margin="8,4"
+                                     Color="{StaticResource Gray400}" />
+
+                            <Label Grid.Column="4" Text="Min cap"
+                                   Style="{StaticResource AdminMetricLabel}"
+                                   VerticalOptions="Center" />
+                            <Entry Grid.Column="5" Style="{StaticResource AdminEntry}"
+                                   Keyboard="Numeric" Placeholder="0"
+                                   Text="{Binding MinBotCapText, Mode=TwoWay}" />
+                            <Button Grid.Column="6" Text="Apply"
+                                    Style="{StaticResource AdminPrimaryButton}"
+                                    Command="{Binding ApplyMinBotCapCommand}" />
+                        </Grid>
+
+                        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto" ColumnSpacing="8">
+                            <Label Grid.Column="0" Text="Auto-scale"
+                                   Style="{StaticResource AdminMetricLabel}"
+                                   VerticalOptions="Center" />
+                            <Switch Grid.Column="1" IsToggled="{Binding ScalerEnabled, Mode=TwoWay}"
+                                    VerticalOptions="Center" />
+                            <Label Grid.Column="2"
+                                   Text="{Binding ScalerEnabled, StringFormat='{0}'}"
+                                   Style="{StaticResource AdminMetricValue}"
+                                   VerticalOptions="Center" />
+
+                            <Label Grid.Column="4" Text="Load"
+                                   Style="{StaticResource AdminMetricLabel}"
+                                   VerticalOptions="Center" />
+                            <Label Grid.Column="5" Text="{Binding LoadFractionText}"
+                                   Style="{StaticResource AdminMetricValue}"
+                                   VerticalOptions="Center" />
+                        </Grid>
+
+                        <Label Text="{Binding TickLatencyText, StringFormat='Tick work EWMA: {0}'}"
+                               Style="{StaticResource AdminMutedNote}" />
+                    </VerticalStackLayout>
                 </Border>
 
                 <!-- 24h stats -->

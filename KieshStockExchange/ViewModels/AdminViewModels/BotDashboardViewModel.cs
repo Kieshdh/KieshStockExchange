@@ -2,8 +2,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.BackgroundServices;
-using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 
@@ -18,11 +18,20 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private long _tickCount;
     [ObservableProperty] private long _tradesPlaced;
     [ObservableProperty] private long _failures;
-    [ObservableProperty] private string _lastTradeText = "—";
-    [ObservableProperty] private string _uptimeText = "—";
+    [ObservableProperty] private string _lastTradeText = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _uptimeText = "Ã¢â‚¬â€";
     [ObservableProperty] private string _statusText = "Stopped";
-    [ObservableProperty] private string _botCapText = string.Empty;
     [ObservableProperty] private int? _activeBotCap;
+    [ObservableProperty] private int? _maxBotCap;
+    [ObservableProperty] private string _maxBotCapText = string.Empty;
+    [ObservableProperty] private int _minBotCap;
+    [ObservableProperty] private string _minBotCapText = string.Empty;
+    [ObservableProperty] private bool _scalerEnabled;
+    [ObservableProperty] private double _tickWorkMsEwma;
+    [ObservableProperty] private long _lastTickWorkMicros;
+    [ObservableProperty] private double _loadFraction;
+    [ObservableProperty] private string _loadFractionText = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _tickLatencyText = "Ã¢â‚¬â€";
     [ObservableProperty] private string _recentFailuresText = string.Empty;
     #endregion
 
@@ -30,7 +39,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private int _last24hTrades;
     [ObservableProperty] private decimal _last24hVolume;
     [ObservableProperty] private int _last24hActiveBots;
-    [ObservableProperty] private string _last24hVolumeText = "—";
+    [ObservableProperty] private string _last24hVolumeText = "Ã¢â‚¬â€";
     #endregion
 
     #region Services and timer
@@ -47,9 +56,9 @@ public partial class BotDashboardViewModel : BaseViewModel
     private static readonly TimeSpan Stats24hInterval = TimeSpan.FromSeconds(30);
     #endregion
 
-    public BotDashboardViewModel(IAiTradeService trade, IUserSessionService session,
-        IDataBaseService db, ILogger<BotDashboardViewModel> logger,
-        TopNavBarViewModel topNavBarVm)
+    public BotDashboardViewModel(IAiTradeService trade,
+        IUserSessionService session, IDataBaseService db,
+        ILogger<BotDashboardViewModel> logger, TopNavBarViewModel topNavBarVm)
     {
         _trade = trade ?? throw new ArgumentNullException(nameof(trade));
         _session = session ?? throw new ArgumentNullException(nameof(session));
@@ -58,6 +67,11 @@ public partial class BotDashboardViewModel : BaseViewModel
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
         Title = "AI Bot Dashboard";
+
+        // Seed editable fields from current trade-service state so the UI is consistent on first show.
+        _maxBotCapText = _trade.MaxBotCap?.ToString() ?? string.Empty;
+        _minBotCapText = _trade.MinBotCap.ToString();
+
         Refresh();
     }
 
@@ -108,15 +122,30 @@ public partial class BotDashboardViewModel : BaseViewModel
         TradesPlaced = _trade.TradesPlacedThisSession;
         Failures = _trade.FailuresThisSession;
         ActiveBotCap = _trade.ActiveBotCap;
+        MaxBotCap = _trade.MaxBotCap;
+        MinBotCap = _trade.MinBotCap;
+        ScalerEnabled = _trade.AutoScale;
         StatusText = IsRunning ? "Running" : "Stopped";
+
+        var ewmaMs = _trade.TickWorkMsEwma;
+        var lastUs = _trade.LastTickWorkMicros;
+        TickWorkMsEwma = ewmaMs;
+        LastTickWorkMicros = lastUs;
+        TickLatencyText = ewmaMs > 0
+            ? $"{ewmaMs:F1} ms (last {lastUs / 1000.0:F1} ms)"
+            : "Ã¢â‚¬â€";
+
+        var intervalMs = _trade.TradeInterval.TotalMilliseconds;
+        LoadFraction = intervalMs > 0 ? ewmaMs / intervalMs : 0;
+        LoadFractionText = ewmaMs > 0 ? $"{LoadFraction:P0}" : "Ã¢â‚¬â€";
 
         LastTradeText = _trade.LastTradeAtUtc is { } last
             ? FormatRelative(TimeHelper.NowUtc() - last)
-            : "—";
+            : "Ã¢â‚¬â€";
 
         UptimeText = _trade.LoopStartedAtUtc is { } started
             ? FormatDuration(TimeHelper.NowUtc() - started)
-            : "—";
+            : "Ã¢â‚¬â€";
 
         var failures = _trade.RecentFailures;
         RecentFailuresText = failures.Count == 0
@@ -217,28 +246,47 @@ public partial class BotDashboardViewModel : BaseViewModel
     }
 
     [RelayCommand]
-    private void ApplyBotCap()
+    private void ApplyMaxBotCap()
     {
         int? cap;
-        if (string.IsNullOrWhiteSpace(BotCapText))
+        if (string.IsNullOrWhiteSpace(MaxBotCapText))
             cap = null;
-        else if (int.TryParse(BotCapText.Trim(), out var n) && n >= 0)
+        else if (int.TryParse(MaxBotCapText.Trim(), out var n) && n >= 0)
             cap = n;
         else
         {
-            _logger.LogInformation("Invalid bot cap input: {Text}", BotCapText);
+            _logger.LogInformation("Invalid max bot cap input: {Text}", MaxBotCapText);
             return;
         }
 
-        _trade.SetActiveBotCap(cap);
+        _trade.SetMaxBotCap(cap);
         Refresh();
+    }
+
+    [RelayCommand]
+    private void ApplyMinBotCap()
+    {
+        if (!int.TryParse(MinBotCapText?.Trim(), out var n) || n < 0)
+        {
+            _logger.LogInformation("Invalid min bot cap input: {Text}", MinBotCapText);
+            return;
+        }
+
+        _trade.MinBotCap = n;
+        Refresh();
+    }
+
+    // Source-generated partial: keeps the trade service in sync with the UI Switch.
+    partial void OnScalerEnabledChanged(bool value)
+    {
+        if (_trade.AutoScale != value) _trade.AutoScale = value;
     }
     #endregion
 
     #region Formatting helpers
     private static string FormatDuration(TimeSpan span)
     {
-        if (span.TotalSeconds < 0) return "—";
+        if (span.TotalSeconds < 0) return "Ã¢â‚¬â€";
         if (span.TotalDays >= 1) return $"{(int)span.TotalDays}d {span.Hours:D2}:{span.Minutes:D2}:{span.Seconds:D2}";
         return $"{(int)span.TotalHours:D2}:{span.Minutes:D2}:{span.Seconds:D2}";
     }

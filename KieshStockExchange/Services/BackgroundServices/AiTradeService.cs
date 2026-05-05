@@ -1,10 +1,17 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.BackgroundServices.Helpers;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 namespace KieshStockExchange.Services.BackgroundServices;
 
@@ -34,9 +41,36 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
     public int? ActiveBotCap { get; private set; } = 50;
 
+    /// <summary>User-configured hard ceiling on online bots; the scaler may move
+    /// <see cref="ActiveBotCap"/> within [MinBotCap, MaxBotCap]. Null means no ceiling.</summary>
+    public int? MaxBotCap { get; private set; } = 20000;
+
     public long TickCount => Interlocked.Read(ref _tickCount);
     public long TradesPlacedThisSession => Interlocked.Read(ref _tradesPlacedThisSession);
     public long FailuresThisSession => Interlocked.Read(ref _failuresThisSession);
+
+    /// <summary>EWMA-smoothed tick-work duration in milliseconds. 0 until first tick.</summary>
+    public double TickWorkMsEwma => Volatile.Read(ref _tickWorkMsEwma);
+
+    /// <summary>Raw duration of the most recent tick's work in microseconds.</summary>
+    public long LastTickWorkMicros => Interlocked.Read(ref _lastTickWorkMicros);
+
+    /// <summary>When true, the internal scaler adjusts <see cref="ActiveBotCap"/> based on tick-work load.</summary>
+    public bool AutoScale
+    {
+        get => _scaler.Enabled;
+        set => _scaler.Enabled = value;
+    }
+
+    /// <summary>Floor on the active bot count when the scaler scales down.</summary>
+    public int MinBotCap
+    {
+        get => _scaler.MinBotCap;
+        set => _scaler.MinBotCap = Math.Max(0, value);
+    }
+
+    /// <summary>Most recent EWMA / TradeInterval ratio observed by the scaler. 0 before any sample.</summary>
+    public double LastLoadFraction => _scaler.LastLoadFraction;
 
     public DateTime? LastTradeAtUtc { get; private set; }
     public DateTime? LoopStartedAtUtc { get; private set; }
@@ -78,15 +112,22 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private decimal _volumeTotal = 0m;
     private readonly object _volumeLock = new();
 
-    // Last values snapshotted at the previous stats log; deltas = current − snapshot.
+    // Last values snapshotted at the previous stats log; deltas = current Ã¢Ë†â€™ snapshot.
     private long _buySnapshot, _sellSnapshot, _limitSnapshot, _slipSnapshot, _trueSnapshot, _cancelledSnapshot;
     private decimal _volumeSnapshot = 0m;
+
+    // Tick-latency tracking for the dynamic bot scaler.
+    // EWMA reacts in ~5 ticks at ÃŽÂ±=0.2; raw last sample is published for the dashboard.
+    private const double EwmaAlpha = 0.2;
+    private double _tickWorkMsEwma = 0.0;
+    private long _lastTickWorkMicros = 0;
     #endregion
 
     #region Internal Helpers
     private readonly AiBotContext         _ctx;
     private readonly AiBotStateService    _state;
     private readonly AiBotDecisionService _decisions;
+    private readonly BotScalerService     _scaler;
     #endregion
 
     #region Services and Constructor
@@ -114,6 +155,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _ctx       = new AiBotContext();
         _state     = new AiBotStateService(db, loggerFactory.CreateLogger<AiBotStateService>());
         _decisions = new AiBotDecisionService(market, loggerFactory.CreateLogger<AiBotDecisionService>());
+        _scaler    = new BotScalerService(loggerFactory.CreateLogger<BotScalerService>());
 
         _market.QuoteUpdated += OnQuoteUpdated;
     }
@@ -134,6 +176,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     public void SetActiveBotCap(int? cap)
     {
         if (cap.HasValue && cap.Value < 0) cap = 0;
+
+        // Clamp to MaxBotCap so manual edits and scaler decisions can't exceed the ceiling.
+        if (MaxBotCap.HasValue)
+            cap = cap.HasValue ? Math.Min(cap.Value, MaxBotCap.Value) : MaxBotCap.Value;
+
         ActiveBotCap = cap;
 
         // Apply the cap immediately and force an asset reload on the next loop tick so
@@ -141,6 +188,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _state.ApplyActiveBotCap(_ctx, cap);
         _nextAssetReload = DateTime.MinValue;
         StatsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void SetMaxBotCap(int? cap)
+    {
+        if (cap.HasValue && cap.Value < 0) cap = 0;
+        MaxBotCap = cap;
+
+        // If the new ceiling is below the current online cap, lower ActiveBotCap to match.
+        // Reuses the existing apply path (and emits StatsChanged once).
+        if (cap.HasValue && (!ActiveBotCap.HasValue || ActiveBotCap.Value > cap.Value))
+            SetActiveBotCap(cap);
+        else
+            StatsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public IReadOnlyCollection<int> GetAiUserIds() => _ctx.AiUsersByUserId.Keys.ToArray();
@@ -151,7 +211,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         await _stocks.EnsureLoadedAsync(ct).ConfigureAwait(false);
 
-        // Bots are non-UI subscribers — keep _quotes populated and ref-counted, but tell
+        // Bots are non-UI subscribers Ã¢â‚¬â€ keep _quotes populated and ref-counted, but tell
         // MarketDataService not to dispatch tick work to the UI thread for these books.
         foreach (var currency in CurrenciesToTrade)
             await _market.SubscribeAllAsync(currency, forUi: false, ct).ConfigureAwait(false);
@@ -169,6 +229,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         lock (_volumeLock) _volumeTotal = 0m;
         _buySnapshot = _sellSnapshot = _limitSnapshot = _slipSnapshot = _trueSnapshot = _cancelledSnapshot = 0;
         _volumeSnapshot = 0m;
+        Volatile.Write(ref _tickWorkMsEwma, 0.0);
+        Interlocked.Exchange(ref _lastTickWorkMicros, 0);
         _nextStatsLogTime = TimeHelper.NowUtc() + StatsLogInterval;
         lock (_recentFailures) _recentFailures.Clear();
         LastTradeAtUtc = null;
@@ -216,10 +278,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         while (!ct.IsCancellationRequested)
         {
+            var tickStart = Stopwatch.GetTimestamp();
             var now = TimeHelper.NowUtc();
             await CheckTimers(now, ct).ConfigureAwait(false);
 
-            // Phase 1: collect orders — pure CPU, no DB reads
+            // Phase 1: collect orders Ã¢â‚¬â€ pure CPU, no DB reads
             var pending = new List<(AIUser user, Order order)>();
             foreach (var user in _ctx.AiUsersByAiUserId.Values)
             {
@@ -229,13 +292,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var burstActive = _ctx.BurstEndTimes.TryGetValue(user.AiUserId, out var burstEnd) && now < burstEnd;
                 if (!burstActive && _ctx.Decimal01(user.AiUserId) < 0.002m)
                 {
-                    var secs = 120 + (int)(_ctx.Decimal01(user.AiUserId) * 360); // 2–8 min
+                    var secs = 120 + (int)(_ctx.Decimal01(user.AiUserId) * 360); // 2Ã¢â‚¬â€œ8 min
                     _ctx.BurstEndTimes[user.AiUserId] = now + TimeSpan.FromSeconds(secs);
                     burstActive = true;
                 }
 
                 // Post-trade quiet period: more conservative bots wait longer between trades
-                var quietSecs = 60.0 - 50.0 * (double)user.AggressivenessPrc; // 10–60 s
+                var quietSecs = 60.0 - 50.0 * (double)user.AggressivenessPrc; // 10Ã¢â‚¬â€œ60 s
                 if (user.LastTradeTime > DateTime.MinValue &&
                     (now - user.LastTradeTime).TotalSeconds < quietSecs) continue;
 
@@ -278,7 +341,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         .ToList();
                 }
 
-                // Phase 3: update in-memory caches from fills — no DB reads
+                // Phase 3: update in-memory caches from fills Ã¢â‚¬â€ no DB reads
                 for (int i = 0; i < pending.Count; i++)
                 {
                     var (user, order) = pending[i];
@@ -286,11 +349,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
                     if (!result.PlacedSuccessfully)
                     {
-                        _logger.LogWarning("Batch order AIUser {Id} stock {Stock}: {Status} — {Error}",
+                        _logger.LogWarning("Batch order AIUser {Id} stock {Stock}: {Status} Ã¢â‚¬â€ {Error}",
                             user.AiUserId, order.StockId, result.Status, result.ErrorMessage);
                         user.RecordError();
                         Interlocked.Increment(ref _failuresThisSession);
-                        RecordFailure($"AIUser {user.AiUserId} stock {order.StockId}: {result.Status} — {result.ErrorMessage}");
+                        RecordFailure($"AIUser {user.AiUserId} stock {order.StockId}: {result.Status} Ã¢â‚¬â€ {result.ErrorMessage}");
                         continue;
                     }
                     if (_logger.IsEnabled(LogLevel.Debug))
@@ -319,11 +382,31 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 }
             }
 
+            RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
             Interlocked.Increment(ref _tickCount);
-            StatsChanged?.Invoke(this, EventArgs.Empty);
+
+            // Let the scaler decide whether to adjust the cap based on the fresh EWMA.
+            // It returns null when no change is warranted; SetActiveBotCap fires StatsChanged
+            // itself, so we only emit the unchanged-stats event when the scaler stays put.
+            var scalerTarget = _scaler.OnTick(this);
+            if (scalerTarget.HasValue) SetActiveBotCap(scalerTarget.Value);
+            else                       StatsChanged?.Invoke(this, EventArgs.Empty);
+
             try { await Task.Delay(TradeInterval, ct).ConfigureAwait(false); }
             catch (TaskCanceledException) { /* breaking loop */ }
         }
+    }
+
+    private void RecordTickLatency(TimeSpan elapsed)
+    {
+        var ms = elapsed.TotalMilliseconds;
+        Interlocked.Exchange(ref _lastTickWorkMicros, (long)(ms * 1000.0));
+
+        // Loop runs single-threaded, so a non-interlocked read-modify-write is safe.
+        // Volatile.Write publishes the new value to the dashboard's reader thread.
+        var prev = _tickWorkMsEwma;
+        var next = prev <= 0.0 ? ms : EwmaAlpha * ms + (1.0 - EwmaAlpha) * prev;
+        Volatile.Write(ref _tickWorkMsEwma, next);
     }
 
     private void RecordFailure(string message)
@@ -411,9 +494,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             var limitOrders = userOrders.Values.Where(o => o.IsOpenLimitOrder).ToList();
             if (limitOrders.Count == 0) continue;
 
-            // Criterion 1: stale age — cancel regardless of capacity.
+            // Criterion 1: stale age Ã¢â‚¬â€ cancel regardless of capacity.
             // Anchor age to max(CreatedAt, LoopStartedAtUtc) so orders that already
-            // existed when the bot loop started get a fresh grace window — otherwise
+            // existed when the bot loop started get a fresh grace window Ã¢â‚¬â€ otherwise
             // every order from the previous session would be wiped on first prune.
             var sessionStart = LoopStartedAtUtc ?? DateTime.MinValue;
             foreach (var o in limitOrders)
@@ -423,7 +506,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     toCancel.Add((user.UserId, o));
             }
 
-            // Criterion 2: capacity — only when at ≥80% of MaxOpenOrders
+            // Criterion 2: capacity Ã¢â‚¬â€ only when at Ã¢â€°Â¥80% of MaxOpenOrders
             if (userOrders.Count < (int)Math.Ceiling(user.MaxOpenOrders * 0.8)) continue;
 
             var alreadyQueued     = new HashSet<int>(toCancel.Select(x => x.order.OrderId));
@@ -511,7 +594,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         _ctx.StockPrices[key] = quote.LastPrice;
 
-        // EWMA smoothing (α=0.15): reacts over ~6 ticks, dampens spike noise
+        // EWMA smoothing (ÃŽÂ±=0.15): reacts over ~6 ticks, dampens spike noise
         var smoothed = _ctx.SmoothedPrices.TryGetValue(key, out var s) ? s : quote.LastPrice;
         _ctx.SmoothedPrices[key] = 0.85m * smoothed + 0.15m * quote.LastPrice;
     }

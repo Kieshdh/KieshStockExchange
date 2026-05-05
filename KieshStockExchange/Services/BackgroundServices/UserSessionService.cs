@@ -1,7 +1,9 @@
-﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.BackgroundServices;
@@ -52,7 +54,8 @@ public class UserSessionService : IUserSessionService
     private readonly ICandleService _candle;
 
     public UserSessionService(IAiTradeService trade, IPriceSnapshotService priceSnapshots,
-        IExcelImportService excel, ILogger<UserSessionService> logger, IMarketDataService marketData, ICandleService candle)
+        IExcelImportService excel, ILogger<UserSessionService> logger, IMarketDataService marketData,
+        ICandleService candle)
     {
         _trade = trade ?? throw new ArgumentNullException(nameof(trade));
         _price = priceSnapshots ?? throw new ArgumentNullException(nameof(priceSnapshots));
