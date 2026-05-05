@@ -8,7 +8,7 @@ from ExcelLayout import *
 # Where to store the Excel
 BASE_DIR = Path(__file__).resolve().parent
 EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange" / "Resources" / "Raw" / "AIUserData.xlsx"
-NUM_PEOPLE = 100 
+NUM_PEOPLE = 20000 
 
 
 def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_PEOPLE) -> None:
