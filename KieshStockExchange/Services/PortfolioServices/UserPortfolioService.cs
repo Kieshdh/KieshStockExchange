@@ -352,9 +352,11 @@ public class UserPortfolioService : IUserPortfolioService
 
     private async Task NormalizeFundsAsync(int userId, CancellationToken ct = default)
     {
-        await _db.RunInTransactionAsync(async tx =>
+        // RunInTransactionAsync passes a CancellationToken to the lambda; the ambient
+        // SQLite transaction is carried via AsyncLocal, so DB calls only need the token.
+        await _db.RunInTransactionAsync(async _ =>
         {
-            var funds = await _db.GetFundsByUserId(userId, tx).ConfigureAwait(false);
+            var funds = await _db.GetFundsByUserId(userId, ct).ConfigureAwait(false);
             var groups = funds
                 .GroupBy(f => f.CurrencyType)
                 .Where(g => g.Count() > 1 || g.Any(f =>
@@ -385,19 +387,19 @@ public class UserPortfolioService : IUserPortfolioService
                 primary.ReservedBalance = reserved;
                 primary.UpdatedAt = DateTime.UtcNow;
 
-                await _db.UpsertFund(primary, tx).ConfigureAwait(false);
+                await _db.UpsertFund(primary, ct).ConfigureAwait(false);
 
                 foreach (var dup in duplicates)
-                    await _db.DeleteFund(dup, tx).ConfigureAwait(false);
+                    await _db.DeleteFund(dup, ct).ConfigureAwait(false);
             }
         }, ct);
     }
 
     private async Task NormalizePositionsAsync(int userId, CancellationToken ct = default)
     {
-        await _db.RunInTransactionAsync(async tx =>
+        await _db.RunInTransactionAsync(async _ =>
         {
-            var positions = await _db.GetPositionsByUserId(userId, tx).ConfigureAwait(false);
+            var positions = await _db.GetPositionsByUserId(userId, ct).ConfigureAwait(false);
             var groups = positions
                 .GroupBy(p => p.StockId)
                 .Where(g => g.Count() > 1 || g.Any(p =>
@@ -428,9 +430,9 @@ public class UserPortfolioService : IUserPortfolioService
                 primary.ReservedQuantity = reserved;
                 primary.UpdatedAt = DateTime.UtcNow;
 
-                await _db.UpsertPosition(primary, tx).ConfigureAwait(false);
+                await _db.UpsertPosition(primary, ct).ConfigureAwait(false);
                 foreach (var dup in duplicates)
-                    await _db.DeletePosition(dup, tx).ConfigureAwait(false);
+                    await _db.DeletePosition(dup, ct).ConfigureAwait(false);
             }
         }, ct);
     }
