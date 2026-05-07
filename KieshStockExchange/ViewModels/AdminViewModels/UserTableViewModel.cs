@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
@@ -17,7 +18,8 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
         _ = ApplyViewChange();
     }
 
-    public UserTableViewModel(IDataBaseService dbService) : base(dbService)
+    public UserTableViewModel(IDataBaseService dbService, ILogger<UserTableViewModel> logger)
+        : base(dbService, logger)
     {
         Title = "Users";
         SortKey = "CreatedAt";

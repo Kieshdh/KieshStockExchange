@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
@@ -23,7 +24,8 @@ public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
         _ = ApplyViewChange();
     }
 
-    public FundTableViewModel(IDataBaseService db) : base(db)
+    public FundTableViewModel(IDataBaseService db, ILogger<FundTableViewModel> logger)
+        : base(db, logger)
     {
         Title = "Funds";
         SortKey = "UserId";

@@ -4,6 +4,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 
@@ -49,7 +50,8 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
     #region Services and Constructor
     private readonly IMarketDataService _market;
 
-    public PositionTableViewModel(IDataBaseService dbService, IMarketDataService market) : base(dbService)
+    public PositionTableViewModel(IDataBaseService dbService, IMarketDataService market,
+        ILogger<PositionTableViewModel> logger) : base(dbService, logger)
     {
         Title = "Positions";
         SortKey = "UserId";

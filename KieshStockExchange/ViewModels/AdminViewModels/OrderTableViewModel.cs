@@ -3,7 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
-using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -24,7 +24,8 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
     // Users are looked up per page from the page's distinct user IDs
     private readonly IDataBaseService _dbRef;
 
-    public OrderTableViewModel(IDataBaseService dbService) : base(dbService)
+    public OrderTableViewModel(IDataBaseService dbService, ILogger<OrderTableViewModel> logger)
+        : base(dbService, logger)
     {
         Title = "Orders";
         SortKey = "CreatedAt";

@@ -4,6 +4,7 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -11,7 +12,8 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
 {
     private readonly IMarketDataService _market;
 
-    public StockTableViewModel(IDataBaseService dbService, IMarketDataService market) : base(dbService)
+    public StockTableViewModel(IDataBaseService dbService, IMarketDataService market,
+        ILogger<StockTableViewModel> logger) : base(dbService, logger)
     {
         Title = "Stocks";
         _market = market ?? throw new ArgumentNullException(nameof(market));

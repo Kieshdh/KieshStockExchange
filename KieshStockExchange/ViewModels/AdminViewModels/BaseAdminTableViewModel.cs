@@ -2,8 +2,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
-using System.Diagnostics;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -52,14 +53,16 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
 
     #region Services, Commands and Constructor
     protected readonly IDataBaseService _db;
+    protected readonly ILogger _logger;
     private CancellationTokenSource _loadCts = new();
     private bool _initialized;
 
     public ICommand GoToPageCommand { get; }
 
-    protected BaseTableViewModel(IDataBaseService dbService)
+    protected BaseTableViewModel(IDataBaseService dbService, ILogger? logger = null)
     {
         _db = dbService;
+        _logger = logger ?? NullLogger.Instance;
         GoToPageCommand = new Command<int>(page =>
         {
             PageNumber = page - 1;
@@ -101,7 +104,8 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
         catch (OperationCanceledException) { /* superseded by a newer request */ }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[{GetType().Name}] LoadPage failed: {ex.Message}");
+            _logger.LogError(ex, "{TableType}: LoadPage failed (page {Page}, size {Size}, filter {Filter}).",
+                GetType().Name, PageNumber, PageSize, CurrentFilter ?? "(none)");
             IsBusy = false;
         }
     }

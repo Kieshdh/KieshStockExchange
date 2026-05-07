@@ -2,7 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
-using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -19,7 +19,8 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
     private Dictionary<int, Stock> _stocksById = new();
     private readonly IDataBaseService _dbRef;
 
-    public TransactionTableViewModel(IDataBaseService dbService) : base(dbService)
+    public TransactionTableViewModel(IDataBaseService dbService,
+        ILogger<TransactionTableViewModel> logger) : base(dbService, logger)
     {
         Title = "Transactions";
         SortKey = "Timestamp";
