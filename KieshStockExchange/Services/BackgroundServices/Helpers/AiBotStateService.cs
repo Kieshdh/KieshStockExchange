@@ -127,7 +127,7 @@ internal sealed class AiBotStateService
         var alreadyBursting = ctx.BurstEndTimes.TryGetValue(aiUserId, out var end) && fillTime < end;
         if (!alreadyBursting && ctx.Decimal01(aiUserId) < 0.30m)
         {
-            var secs = 60 + (int)(ctx.Decimal01(aiUserId) * 180); // 1Ã¢â‚¬â€œ4 min
+            var secs = 60 + (int)(ctx.Decimal01(aiUserId) * 180); // 1–4 min
             ctx.BurstEndTimes[aiUserId] = fillTime + TimeSpan.FromSeconds(secs);
         }
     }

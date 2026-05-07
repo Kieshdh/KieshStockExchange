@@ -46,7 +46,7 @@ public sealed class OrderBook
     public readonly CurrencyType Currency;
 
     /// <summary>
-    /// Raised when the book's content has changed. Sender-only â€” subscribers that need a
+    /// Raised when the book's content has changed. Sender-only — subscribers that need a
     /// snapshot should call <see cref="Snapshot"/> themselves, optionally debounced. This
     /// keeps the hot path (match + upsert) from allocating a new snapshot per mutation.
     /// </summary>
@@ -79,7 +79,7 @@ public sealed class OrderBook
             // If this OrderId already lives in the book, we have an entry to update or remove.
             if (_index.TryGetValue(incoming.OrderId, out var idx))
             {
-                // If itâ€™s no longer an Open Limit order, drop it from the book.
+                // If it’s no longer an Open Limit order, drop it from the book.
                 if (!incoming.IsOpen || !incoming.IsLimitOrder)
                 {
                     var existing = idx.Node.Value;
@@ -162,7 +162,7 @@ public sealed class OrderBook
             // Now mutate the maker's fill state.
             maker.Fill(qty);
 
-            // If fully filled, unlink + index-remove. No further qty debit here â€” the
+            // If fully filled, unlink + index-remove. No further qty debit here — the
             // remaining qty on the order is now zero by construction.
             if (maker.IsClosed && _index.TryGetValue(maker.OrderId, out var idx))
             {
@@ -223,7 +223,7 @@ public sealed class OrderBook
     /// gate once, skips per-order index lookups, and marks dirty once at the end.
     /// </summary>
     /// <remarks>
-    /// Only safe to call while no other code can observe this book â€” typically from
+    /// Only safe to call while no other code can observe this book — typically from
     /// <c>OrderBookCache.EnsureLoadedAsync</c> while the load gate is held.
     /// </remarks>
     public void BulkLoad(IReadOnlyList<Order> openLimits)
@@ -264,7 +264,7 @@ public sealed class OrderBook
     #region Other Methods
     /// <summary>
     /// Cheap, immutable snapshot of price levels for UI binding. Reads pre-aggregated
-    /// per-level totals â€” no LINQ Sum per call.
+    /// per-level totals — no LINQ Sum per call.
     /// </summary>
     public BookSnapshot Snapshot()
     {
@@ -417,7 +417,7 @@ public sealed class OrderBook
                 }
             }
             // Rebuilding the index from books necessarily means the qty/self aggregates
-            // could be out of sync too â€” recompute them from the canonical list state.
+            // could be out of sync too — recompute them from the canonical list state.
             RecomputeAggregates();
         }
         MarkDirty();
@@ -672,7 +672,7 @@ public sealed class OrderBook
 
             // Slow path: skip self-orders (same userId) while still respecting best-price
             // then FIFO. Worst-case O(N), but only reached when the user is on this side.
-            foreach (var kv in side) // already bestâ†’worst due to SortedDictionary comparer
+            foreach (var kv in side) // already best→worst due to SortedDictionary comparer
             {
                 for (var node = kv.Value.First; node != null; node = node.Next)
                 {
@@ -769,7 +769,7 @@ public sealed class OrderBook
             var newBook = order.IsBuyOrder ? _buyBook : _sellBook;
             GetOrCreateLevel(newBook, order.Price).AddLast(idx.Node);
         }
-        // else: no qty/side/price change â†’ nothing to do.
+        // else: no qty/side/price change → nothing to do.
     }
 
     // Mark the book dirty. The actual Changed event is deferred to FlushChanged so a

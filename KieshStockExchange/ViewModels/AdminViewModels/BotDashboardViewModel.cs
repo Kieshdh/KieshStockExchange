@@ -18,8 +18,8 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private long _tickCount;
     [ObservableProperty] private long _tradesPlaced;
     [ObservableProperty] private long _failures;
-    [ObservableProperty] private string _lastTradeText = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _uptimeText = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _lastTradeText = "—";
+    [ObservableProperty] private string _uptimeText = "—";
     [ObservableProperty] private string _statusText = "Stopped";
     [ObservableProperty] private int? _activeBotCap;
     [ObservableProperty] private int? _maxBotCap;
@@ -30,8 +30,8 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private double _tickWorkMsEwma;
     [ObservableProperty] private long _lastTickWorkMicros;
     [ObservableProperty] private double _loadFraction;
-    [ObservableProperty] private string _loadFractionText = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _tickLatencyText = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _loadFractionText = "—";
+    [ObservableProperty] private string _tickLatencyText = "—";
     [ObservableProperty] private string _recentFailuresText = string.Empty;
     #endregion
 
@@ -39,7 +39,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private int _last24hTrades;
     [ObservableProperty] private decimal _last24hVolume;
     [ObservableProperty] private int _last24hActiveBots;
-    [ObservableProperty] private string _last24hVolumeText = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _last24hVolumeText = "—";
     #endregion
 
     #region Services and timer
@@ -133,19 +133,19 @@ public partial class BotDashboardViewModel : BaseViewModel
         LastTickWorkMicros = lastUs;
         TickLatencyText = ewmaMs > 0
             ? $"{ewmaMs:F1} ms (last {lastUs / 1000.0:F1} ms)"
-            : "Ã¢â‚¬â€";
+            : "—";
 
         var intervalMs = _trade.TradeInterval.TotalMilliseconds;
         LoadFraction = intervalMs > 0 ? ewmaMs / intervalMs : 0;
-        LoadFractionText = ewmaMs > 0 ? $"{LoadFraction:P0}" : "Ã¢â‚¬â€";
+        LoadFractionText = ewmaMs > 0 ? $"{LoadFraction:P0}" : "—";
 
         LastTradeText = _trade.LastTradeAtUtc is { } last
             ? FormatRelative(TimeHelper.NowUtc() - last)
-            : "Ã¢â‚¬â€";
+            : "—";
 
         UptimeText = _trade.LoopStartedAtUtc is { } started
             ? FormatDuration(TimeHelper.NowUtc() - started)
-            : "Ã¢â‚¬â€";
+            : "—";
 
         var failures = _trade.RecentFailures;
         RecentFailuresText = failures.Count == 0
@@ -286,7 +286,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     #region Formatting helpers
     private static string FormatDuration(TimeSpan span)
     {
-        if (span.TotalSeconds < 0) return "Ã¢â‚¬â€";
+        if (span.TotalSeconds < 0) return "—";
         if (span.TotalDays >= 1) return $"{(int)span.TotalDays}d {span.Hours:D2}:{span.Minutes:D2}:{span.Seconds:D2}";
         return $"{(int)span.TotalHours:D2}:{span.Minutes:D2}:{span.Seconds:D2}";
     }

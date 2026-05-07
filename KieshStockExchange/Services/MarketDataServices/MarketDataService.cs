@@ -186,7 +186,7 @@ public sealed class MarketDataService : IMarketDataService, IAsyncDisposable
     #region Convenience lookups
     public async Task<decimal> GetLastPriceAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
-        // Snapshot read against the live registry â€” never inserts an empty LiveQuote
+        // Snapshot read against the live registry — never inserts an empty LiveQuote
         // for lookup-only callers (admin VMs, snapshot service, decision service).
         if (_registry.Quotes.TryGetValue((stockId, currency), out var quote) && quote.LastPrice > 0m)
             return quote.LastPrice;

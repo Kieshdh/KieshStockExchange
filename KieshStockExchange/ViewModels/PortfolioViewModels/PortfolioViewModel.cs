@@ -17,14 +17,14 @@ public partial class PortfolioViewModel : BaseViewModel
     public PortfolioTransactionViewModel TransactionVm  { get; }
     public TopNavBarViewModel            TopNavBarVm    { get; }
 
-    [ObservableProperty] private string _totalEquityDisplay       = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _totalEquityChangeDisplay = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _cashDisplay              = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _positionCountDisplay     = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _todayPlDisplay           = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _todayPlSubDisplay        = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _allTimePlDisplay         = "Ã¢â‚¬â€";
-    [ObservableProperty] private string _allTimePlSubDisplay      = "Ã¢â‚¬â€";
+    [ObservableProperty] private string _totalEquityDisplay       = "—";
+    [ObservableProperty] private string _totalEquityChangeDisplay = "—";
+    [ObservableProperty] private string _cashDisplay              = "—";
+    [ObservableProperty] private string _positionCountDisplay     = "—";
+    [ObservableProperty] private string _todayPlDisplay           = "—";
+    [ObservableProperty] private string _todayPlSubDisplay        = "—";
+    [ObservableProperty] private string _allTimePlDisplay         = "—";
+    [ObservableProperty] private string _allTimePlSubDisplay      = "—";
 
     private readonly IUserPortfolioService       _portfolio;
     private readonly IMarketDataService          _market;
@@ -95,13 +95,13 @@ public partial class PortfolioViewModel : BaseViewModel
         var count       = positions.Count;
 
         TotalEquityDisplay       = $"$ {totalEquity.ToString("N2", CultureInfo.InvariantCulture)}";
-        TotalEquityChangeDisplay = "Ã¢â‚¬â€";
+        TotalEquityChangeDisplay = "—";
         CashDisplay              = $"$ {cash.ToString("N2", CultureInfo.InvariantCulture)}";
         PositionCountDisplay     = count == 1 ? "1 position" : $"{count} positions";
 
-        TodayPlDisplay      = "Ã¢â‚¬â€";
-        TodayPlSubDisplay   = "Ã¢â‚¬â€";
-        AllTimePlDisplay    = "Ã¢â‚¬â€";
-        AllTimePlSubDisplay = "Ã¢â‚¬â€";
+        TodayPlDisplay      = "—";
+        TodayPlSubDisplay   = "—";
+        AllTimePlDisplay    = "—";
+        AllTimePlSubDisplay = "—";
     }
 }

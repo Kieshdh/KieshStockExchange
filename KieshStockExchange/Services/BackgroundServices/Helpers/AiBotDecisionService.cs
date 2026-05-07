@@ -8,7 +8,7 @@ using KieshStockExchange.Services.BackgroundServices.Interfaces;
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
 /// <summary>
-/// Stateless order computation Ã¢â‚¬â€ given a context and a user, produces an Order or null.
+/// Stateless order computation — given a context and a user, produces an Order or null.
 /// </summary>
 internal sealed class AiBotDecisionService
 {
@@ -90,7 +90,7 @@ internal sealed class AiBotDecisionService
 
         // 2. Strategy-aware momentum bias (uses EWMA smoothed prices)
         var momentum       = ctx.ComputeWatchlistMomentum(user, currency);
-        var momentumSignal = ClampSigned(momentum * 20m, 1m); // Ã‚Â±5% move Ã¢â€ â€™ Ã‚Â±1
+        var momentumSignal = ClampSigned(momentum * 20m, 1m); // ±5% move → ±1
 
         switch (user.Strategy)
         {
@@ -145,7 +145,7 @@ internal sealed class AiBotDecisionService
                 var committed = ComputeCommittedSellShares(ctx, user.UserId, id);
                 if (pos.Quantity - committed > 0) candidates.Add(id);
             }
-            // Return 0 when bot has nothing to sell Ã¢â‚¬â€ avoids a wasted price lookup and DB call
+            // Return 0 when bot has nothing to sell — avoids a wasted price lookup and DB call
             return candidates.Count > 0 ? candidates[rng.Next(candidates.Count)] : 0;
         }
 

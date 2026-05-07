@@ -57,6 +57,11 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
             await OnStockChangedAsync(stockId, currency, ct);
         }
         catch (OperationCanceledException) { } // Ignored on cancellation
+        catch (Exception ex)
+        {
+            // Swallow to keep the SynchronizationContext from tearing down the app.
+            System.Diagnostics.Debug.WriteLine($"FireStockChanged failed: {ex}");
+        }
     }
 
     private async void FirePriceChanged()
@@ -71,6 +76,10 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
             await OnPriceUpdatedAsync(stockId, currency, price, updatedAt, ct);
         }
         catch (OperationCanceledException) { } // Ignored on cancellation
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"FirePriceChanged failed: {ex}");
+        }
     }
     #endregion
 

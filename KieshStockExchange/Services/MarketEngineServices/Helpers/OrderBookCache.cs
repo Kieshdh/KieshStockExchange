@@ -26,7 +26,7 @@ public sealed class OrderBookCache : IOrderBookCache
 {
     #region Dictionaries
     // Order book for each stock (keyed by stock ID and CurrencyType)
-    // In-memory order books: priceâ€time priority
+    // In-memory order books: price–time priority
     // Buy: highest price first; Sell: lowest price first
     private readonly ConcurrentDictionary<(int, CurrencyType), OrderBook> _books = new();
 

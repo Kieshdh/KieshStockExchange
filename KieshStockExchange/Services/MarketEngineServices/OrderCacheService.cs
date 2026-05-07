@@ -8,7 +8,7 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 
 /// <summary>
 /// Per-user snapshot of order rows, partitioned into open and closed lists for direct
-/// UI binding. Refreshed explicitly by the caller Ã¢â‚¬â€ there is no DB polling here.
+/// UI binding. Refreshed explicitly by the caller — there is no DB polling here.
 /// </summary>
 public sealed class OrderCacheService : IOrderCacheService
 {

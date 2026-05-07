@@ -15,7 +15,7 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
     #endregion
 
     #region Observable Properties
-    [ObservableProperty] private string _fundsDisplay = "$ Ã¢â‚¬â€";
+    [ObservableProperty] private string _fundsDisplay = "$ —";
     #endregion
 
     #region Constructor
@@ -37,7 +37,7 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
     {
         var fund = _portfolio.GetBaseFund();
         FundsDisplay = fund == null
-            ? "$ Ã¢â‚¬â€"
+            ? "$ —"
             : $"$ {fund.AvailableBalance.ToString("N2", CultureInfo.InvariantCulture)}";
     }
     #endregion

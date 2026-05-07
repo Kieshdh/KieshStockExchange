@@ -17,7 +17,7 @@ namespace KieshStockExchange.Services.MarketEngineServices.Tests;
 /// <see cref="IDataBaseService"/> that lets us force a tx failure on demand,
 /// then asserts that the in-memory cache is restored to its pre-mutation state.
 ///
-/// Not part of any test runner Ã¢â‚¬â€ invoke from anywhere with:
+/// Not part of any test runner — invoke from anywhere with:
 /// <code>
 /// var report = await SettlementRollbackSelfTest.RunAllAsync();
 /// foreach (var line in report.Lines) Console.WriteLine(line);
@@ -139,7 +139,7 @@ public static class SettlementRollbackSelfTest
     {
         var (db, cache, engine) = BuildEngine(factory);
 
-        // Buyer has no position row yet Ã¢â‚¬â€ settlement would create one.
+        // Buyer has no position row yet — settlement would create one.
         db.SeedFund(userId: 1, ccy: CurrencyType.USD, balance: 1000m);
         db.SeedFund(userId: 2, ccy: CurrencyType.USD, balance: 0m);
         db.SeedPosition(userId: 2, stockId: 100, qty: 50);
@@ -258,23 +258,23 @@ public static class SettlementRollbackSelfTest
 
     private static void AssertNull(object? actual, string message)
     {
-        if (actual is not null) throw new InvalidOperationException($"{message} Ã¢â‚¬â€ expected null, got {actual}");
+        if (actual is not null) throw new InvalidOperationException($"{message} — expected null, got {actual}");
     }
 
     private static void AssertNotNull(object? actual, string message)
     {
-        if (actual is null) throw new InvalidOperationException($"{message} Ã¢â‚¬â€ expected non-null, got null");
+        if (actual is null) throw new InvalidOperationException($"{message} — expected non-null, got null");
     }
 
     private static void AssertEqual<T>(T expected, T? actual, string message)
     {
         if (!Equals(expected, actual))
-            throw new InvalidOperationException($"{message} Ã¢â‚¬â€ expected {expected}, got {actual}");
+            throw new InvalidOperationException($"{message} — expected {expected}, got {actual}");
     }
 }
 
 // =========================================================================
-// Fake IDataBaseService Ã¢â‚¬â€ only implements what SettlementEngine + AccountsCache use.
+// Fake IDataBaseService — only implements what SettlementEngine + AccountsCache use.
 // Everything else throws so we'd notice if the surface widens.
 // =========================================================================
 

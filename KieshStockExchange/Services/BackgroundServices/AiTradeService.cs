@@ -112,12 +112,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private decimal _volumeTotal = 0m;
     private readonly object _volumeLock = new();
 
-    // Last values snapshotted at the previous stats log; deltas = current Ã¢Ë†â€™ snapshot.
+    // Last values snapshotted at the previous stats log; deltas = current − snapshot.
     private long _buySnapshot, _sellSnapshot, _limitSnapshot, _slipSnapshot, _trueSnapshot, _cancelledSnapshot;
     private decimal _volumeSnapshot = 0m;
 
     // Tick-latency tracking for the dynamic bot scaler.
-    // EWMA reacts in ~5 ticks at ÃŽÂ±=0.2; raw last sample is published for the dashboard.
+    // EWMA reacts in ~5 ticks at α=0.2; raw last sample is published for the dashboard.
     private const double EwmaAlpha = 0.2;
     private double _tickWorkMsEwma = 0.0;
     private long _lastTickWorkMicros = 0;
@@ -211,7 +211,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         await _stocks.EnsureLoadedAsync(ct).ConfigureAwait(false);
 
-        // Bots are non-UI subscribers Ã¢â‚¬â€ keep _quotes populated and ref-counted, but tell
+        // Bots are non-UI subscribers — keep _quotes populated and ref-counted, but tell
         // MarketDataService not to dispatch tick work to the UI thread for these books.
         foreach (var currency in CurrenciesToTrade)
             await _market.SubscribeAllAsync(currency, forUi: false, ct).ConfigureAwait(false);
@@ -282,7 +282,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             var now = TimeHelper.NowUtc();
             await CheckTimers(now, ct).ConfigureAwait(false);
 
-            // Phase 1: collect orders Ã¢â‚¬â€ pure CPU, no DB reads
+            // Phase 1: collect orders — pure CPU, no DB reads
             var pending = new List<(AIUser user, Order order)>();
             foreach (var user in _ctx.AiUsersByAiUserId.Values)
             {
@@ -292,13 +292,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var burstActive = _ctx.BurstEndTimes.TryGetValue(user.AiUserId, out var burstEnd) && now < burstEnd;
                 if (!burstActive && _ctx.Decimal01(user.AiUserId) < 0.002m)
                 {
-                    var secs = 120 + (int)(_ctx.Decimal01(user.AiUserId) * 360); // 2Ã¢â‚¬â€œ8 min
+                    var secs = 120 + (int)(_ctx.Decimal01(user.AiUserId) * 360); // 2–8 min
                     _ctx.BurstEndTimes[user.AiUserId] = now + TimeSpan.FromSeconds(secs);
                     burstActive = true;
                 }
 
                 // Post-trade quiet period: more conservative bots wait longer between trades
-                var quietSecs = 60.0 - 50.0 * (double)user.AggressivenessPrc; // 10Ã¢â‚¬â€œ60 s
+                var quietSecs = 60.0 - 50.0 * (double)user.AggressivenessPrc; // 10–60 s
                 if (user.LastTradeTime > DateTime.MinValue &&
                     (now - user.LastTradeTime).TotalSeconds < quietSecs) continue;
 
@@ -341,7 +341,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         .ToList();
                 }
 
-                // Phase 3: update in-memory caches from fills Ã¢â‚¬â€ no DB reads
+                // Phase 3: update in-memory caches from fills — no DB reads
                 for (int i = 0; i < pending.Count; i++)
                 {
                     var (user, order) = pending[i];
@@ -349,11 +349,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
                     if (!result.PlacedSuccessfully)
                     {
-                        _logger.LogWarning("Batch order AIUser {Id} stock {Stock}: {Status} Ã¢â‚¬â€ {Error}",
+                        _logger.LogWarning("Batch order AIUser {Id} stock {Stock}: {Status} — {Error}",
                             user.AiUserId, order.StockId, result.Status, result.ErrorMessage);
                         user.RecordError();
                         Interlocked.Increment(ref _failuresThisSession);
-                        RecordFailure($"AIUser {user.AiUserId} stock {order.StockId}: {result.Status} Ã¢â‚¬â€ {result.ErrorMessage}");
+                        RecordFailure($"AIUser {user.AiUserId} stock {order.StockId}: {result.Status} — {result.ErrorMessage}");
                         continue;
                     }
                     if (_logger.IsEnabled(LogLevel.Debug))
@@ -494,9 +494,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             var limitOrders = userOrders.Values.Where(o => o.IsOpenLimitOrder).ToList();
             if (limitOrders.Count == 0) continue;
 
-            // Criterion 1: stale age Ã¢â‚¬â€ cancel regardless of capacity.
+            // Criterion 1: stale age — cancel regardless of capacity.
             // Anchor age to max(CreatedAt, LoopStartedAtUtc) so orders that already
-            // existed when the bot loop started get a fresh grace window Ã¢â‚¬â€ otherwise
+            // existed when the bot loop started get a fresh grace window — otherwise
             // every order from the previous session would be wiped on first prune.
             var sessionStart = LoopStartedAtUtc ?? DateTime.MinValue;
             foreach (var o in limitOrders)
@@ -506,7 +506,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     toCancel.Add((user.UserId, o));
             }
 
-            // Criterion 2: capacity Ã¢â‚¬â€ only when at Ã¢â€°Â¥80% of MaxOpenOrders
+            // Criterion 2: capacity — only when at ≥80% of MaxOpenOrders
             if (userOrders.Count < (int)Math.Ceiling(user.MaxOpenOrders * 0.8)) continue;
 
             var alreadyQueued     = new HashSet<int>(toCancel.Select(x => x.order.OrderId));
@@ -594,7 +594,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         _ctx.StockPrices[key] = quote.LastPrice;
 
-        // EWMA smoothing (ÃŽÂ±=0.15): reacts over ~6 ticks, dampens spike noise
+        // EWMA smoothing (α=0.15): reacts over ~6 ticks, dampens spike noise
         var smoothed = _ctx.SmoothedPrices.TryGetValue(key, out var s) ? s : quote.LastPrice;
         _ctx.SmoothedPrices[key] = 0.85m * smoothed + 0.15m * quote.LastPrice;
     }

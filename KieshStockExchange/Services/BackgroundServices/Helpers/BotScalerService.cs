@@ -6,7 +6,7 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
 /// <summary>
 /// Clamped-proportional bot-count controller. Driven directly by AiTradeService
-/// after each tick â€” no event subscription, no re-entrancy lock needed.
+/// after each tick — no event subscription, no re-entrancy lock needed.
 /// Holds its own tunables; AiTradeService re-exposes only what the dashboard binds.
 /// </summary>
 internal sealed class BotScalerService
@@ -110,7 +110,7 @@ internal sealed class BotScalerService
         LastTarget = target;
 
         _logger.LogInformation(
-            "Scaler: ActiveBotCap {Old}â†’{New} (load {Pct:P0} â†’ target {Tgt:P0}, ewma {Ewma:F1}ms)",
+            "Scaler: ActiveBotCap {Old}→{New} (load {Pct:P0} → target {Tgt:P0}, ewma {Ewma:F1}ms)",
             current, target.Value, loadFrac, TargetLoadFraction, ewma);
 
         return target;

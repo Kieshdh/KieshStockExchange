@@ -67,7 +67,7 @@ public sealed class NotificationService : INotificationService
         try
         {
             title = string.IsNullOrWhiteSpace(title) ? "Notice" : title.Trim();
-            message = string.IsNullOrWhiteSpace(message) ? "â€”" : message.Trim();
+            message = string.IsNullOrWhiteSpace(message) ? "—" : message.Trim();
 
             _logger.LogInformation("Push: {Title} - {Message}", title, message);
 
@@ -128,23 +128,23 @@ public sealed class NotificationService : INotificationService
             case OrderStatus.PlacedOnBook: // Resting limit, nothing filled yet
                 return ($"{symbol}: Order #{o.OrderId} placed on book",
                     $"{type} {qty} {symbol} @ {o.PriceDisplay}\n" +
-                    $"Order #{o.OrderId} is resting. Weâ€™ll notify you on fills.");
+                    $"Order #{o.OrderId} is resting. We’ll notify you on fills.");
 
-            default: // â€˜Successâ€™ status from market path
+            default: // ‘Success’ status from market path
                 return ($"{symbol}: Order update", r.SuccessMessage);
         }
     }
 
     private async Task<(string title, string message)> BuildFromFillAsync(Order o, Transaction tx, CancellationToken ct)
     {
-        // tx.Price is the makerâ€™s price; show exact fill and the new remaining.
+        // tx.Price is the maker’s price; show exact fill and the new remaining.
         var symbol = await TryGetSymbolAsync(o.StockId, ct).ConfigureAwait(false);
         var side = o.IsBuyOrder ? "Buy" : "Sell";
 
         return o.IsOpen
             ? ($"{symbol}: Partial fill", // Still open
                 $"{side} {tx.Quantity} {symbol} @ {tx.PriceDisplay}\n" +
-                $"Filled: {o.AmountFilled}/{o.Quantity} â€¢ Remaining: {o.RemainingQuantity}.")
+                $"Filled: {o.AmountFilled}/{o.Quantity} • Remaining: {o.RemainingQuantity}.")
             : ($"{symbol}: Order filled", // Closed = fully filled
                 $"{side} {tx.Quantity} {symbol} @ {tx.PriceDisplay}\n" +
                 $"Order #{o.OrderId} is now complete.");

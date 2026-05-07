@@ -21,14 +21,14 @@ internal sealed class AiBotContext
     internal readonly Dictionary<int, Dictionary<CurrencyType, Fund>>    Funds      = new();
     internal readonly Dictionary<int, Dictionary<int, Order>>            OpenOrders = new();
 
-    // Raw last price from market quotes â€” set on every tick
+    // Raw last price from market quotes — set on every tick
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> StockPrices    = new();
-    // Previous raw price snapshot â€” for tick-to-tick delta computation
+    // Previous raw price snapshot — for tick-to-tick delta computation
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> PreviousPrices = new();
-    // EWMA-smoothed price (Î±=0.15) â€” reacts over ~6 ticks to filter spike noise
+    // EWMA-smoothed price (Î±=0.15) — reacts over ~6 ticks to filter spike noise
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> SmoothedPrices = new();
 
-    // AiUserId â†’ burst-session end time
+    // AiUserId → burst-session end time
     internal readonly Dictionary<int, DateTime> BurstEndTimes  = new();
     // TransactionIds already counted today (reset daily)
     internal readonly HashSet<int>              ProcessedTxIds = new();

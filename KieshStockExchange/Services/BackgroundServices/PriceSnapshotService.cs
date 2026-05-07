@@ -133,7 +133,7 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
                 var price = await _market.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
                 if (price <= 0m) continue; // nothing to snapshot
 
-                // Only write if we donâ€™t already have a snapshot in this hour
+                // Only write if we don’t already have a snapshot in this hour
                 var existing = await _db.GetStockPricesByStockIdAndTimeRange(
                     stockId, currency, bucketStart, bucketEnd, ct).ConfigureAwait(false);
 

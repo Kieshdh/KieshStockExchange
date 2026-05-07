@@ -218,7 +218,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                 }
                 else
                 {
-                    _logger.LogInformation("Placing {Side} MARKETÃ‚Â± order for {Quantity} of {Symbol} (slippage {Slippage:P2}).",
+                    _logger.LogInformation("Placing {Side} MARKET± order for {Quantity} of {Symbol} (slippage {Slippage:P2}).",
                         IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, SlippagePrc);
 
                     result = IsBuySelected
@@ -296,8 +296,12 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         _assetsTimer.Tick += _assetsTickHandler;
         _assetsTimer.Start();
 
-        // Initial update
-        _ = UpdateAssetsAsync().ContinueWith(_ => RecomputeUi());
+        // Initial update — RecomputeUi() must run on the UI thread because it sets ObservableProperties.
+        _ = Task.Run(async () =>
+        {
+            await UpdateAssetsAsync();
+            _dispatcher.Dispatch(RecomputeUi);
+        });
     }
 
     private void StopAssetsAutoRefresh()

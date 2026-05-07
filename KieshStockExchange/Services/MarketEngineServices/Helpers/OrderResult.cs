@@ -31,7 +31,7 @@ public enum OrderStatus
 public class OrderResult
 {
     #region Status and Fills
-    /// <summary> Reason the order did â€” or did not â€” go through. </summary>
+    /// <summary> Reason the order did — or did not — go through. </summary>
     public OrderStatus Status { get; set; }
 
     /// <summary>
@@ -81,7 +81,7 @@ public class OrderResult
     public string ErrorMessage { get; set; } = string.Empty;
 
     /// <summary>
-    /// True when the order was placed successfully â€” fully filled, partially filled,
+    /// True when the order was placed successfully — fully filled, partially filled,
     /// or resting on the order book.
     /// </summary>
     public bool PlacedSuccessfully =>

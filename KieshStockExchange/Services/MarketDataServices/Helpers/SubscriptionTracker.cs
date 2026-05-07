@@ -10,7 +10,7 @@ namespace KieshStockExchange.Services.MarketDataServices;
 /// Pure in-memory ref-count bookkeeping for live-quote subscriptions. Tracks total
 /// subscribers (UI + bot) and UI-only subscribers per (stockId, currency) book, plus
 /// the current candle resolution and a cached snapshot of subscribed keys. No I/O,
-/// no async, no logger â€” the tick path can call <see cref="HasUiSubscribers"/> /
+/// no async, no logger — the tick path can call <see cref="HasUiSubscribers"/> /
 /// <see cref="HasAnySubscribers"/> on the hot path without dragging dependencies in.
 /// </summary>
 internal sealed class SubscriptionTracker

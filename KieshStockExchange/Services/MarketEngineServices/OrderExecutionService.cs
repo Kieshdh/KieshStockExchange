@@ -61,7 +61,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         {
             var result = _matching.Match(incoming, book, ct);
 
-            // Build ordersById from in-memory objects Ã¢â‚¬â€ no DB reload needed
+            // Build ordersById from in-memory objects — no DB reload needed
             var ordersById = BuildOrdersById(incoming, result);
 
             var (settleErr, rejected) = await _settlement.SettleTradesAsync(result.Fills, ordersById, ct).ConfigureAwait(false);
@@ -72,7 +72,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
 
             // Cancel makers that couldn't honor their fills + roll back their per-fill effect.
-            // The single-order path's apply-pass tx has already committed Ã¢â‚¬â€ so we issue a
+            // The single-order path's apply-pass tx has already committed — so we issue a
             // separate UpdateAllAsync for the cancelled makers. (In the batch path, this
             // happens inside the still-open root tx instead.)
             if (rejected.Count > 0)
@@ -210,7 +210,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         ct.ThrowIfCancellationRequested();
         if (orders.Count == 0) return Array.Empty<OrderResult>();
 
-        // Phase 1: structural validation Ã¢â‚¬â€ no DB calls
+        // Phase 1: structural validation — no DB calls
         var results = new OrderResult[orders.Count];
         var validOrders = new List<(int index, Order order)>(orders.Count);
 
@@ -232,7 +232,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         var pendingNewPositions = new Dictionary<(int, int), Position>();
 
         // Phase 1.5: pre-flight position check for sell orders. Reads the in-memory account
-        // cache rather than the DB Ã¢â‚¬â€ IAccountsCache is the same instance settlement mutates,
+        // cache rather than the DB — IAccountsCache is the same instance settlement mutates,
         // so it's the live source of truth, not stale like the bot's local context cache was.
         HashSet<int>? sellerIds = null;
         List<(int index, Order order)>? sellOrders = null;
@@ -295,7 +295,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 validOrders.RemoveRange(write, validOrders.Count - write);
                 if (validOrders.Count == 0)
                 {
-                    // No survivors Ã¢â‚¬â€ undo the reservations we just took for the rejects'
+                    // No survivors — undo the reservations we just took for the rejects'
                     // peers (already-accepted sells from this batch). Easiest way is the
                     // snapshot restore path the rest of the failure flow uses.
                     _settlement.RestoreCacheSnapshots(
@@ -373,7 +373,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         }
 
         // Phases 2 + 3 share one root SQLite transaction. Inserting the orders, matching,
-        // and settling per-book all run inside it Ã¢â‚¬â€ one BEGIN, one COMMIT, regardless of
+        // and settling per-book all run inside it — one BEGIN, one COMMIT, regardless of
         // how many books the batch touches. On any failure we roll back the tx, undo the
         // in-memory book mutations, and restore cache snapshots.
         var orderList = new List<Order>(validOrders.Count);
@@ -394,7 +394,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         }
 
         // groupOutcomes records every match and book upsert so books can be put back to their
-        // pre-batch state on rollback. fund/pos/budget snapshots were declared earlier Ã¢â‚¬â€ Phase
+        // pre-batch state on rollback. fund/pos/budget snapshots were declared earlier — Phase
         // 1.5 already populated posSnapshots with the seller positions it reserved against.
         var groupOutcomes = new List<GroupOutcome>(groups.Count);
         var allFills = new List<Transaction>();
@@ -408,7 +408,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
             await _db.InsertAllAsync(orderList, ct).ConfigureAwait(false);
 
             // Phase 3: per-book matching + settlement, all under the ambient tx.
-            // Sequential Ã¢â‚¬â€ book locks are independent SemaphoreSlims, but the SQLite writer
+            // Sequential — book locks are independent SemaphoreSlims, but the SQLite writer
             // is shared so fan-out wins nothing on the DB side. Fail-fast on first error.
             foreach (var kv in groups)
             {
@@ -449,7 +449,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
                         if (rejected.Count > 0)
                         {
-                            // Aggregate across all takers in this group Ã¢â‚¬â€ the same maker
+                            // Aggregate across all takers in this group — the same maker
                             // can appear in multiple MatchResults if partially filled by
                             // taker A then fully filled by taker B.
                             var pairs = new (Order, MatchResult)[outcome.Records.Count];
@@ -633,7 +633,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         }
 
         // One root tx around the in-memory book updates and the DB write. Each book lock is
-        // taken sequentially Ã¢â‚¬â€ they're independent SemaphoreSlims, but the underlying SQLite
+        // taken sequentially — they're independent SemaphoreSlims, but the underlying SQLite
         // connection serializes anyway, so parallel acquire would buy nothing.
         await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -700,7 +700,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
             return results;
         }
 
-        // Tx committed Ã¢â‚¬â€ release the reservations held by cancelled orders. Done
+        // Tx committed — release the reservations held by cancelled orders. Done
         // post-commit so the failure path doesn't have to undo reservation releases.
         for (int i = 0; i < toCancel.Count; i++)
         {
@@ -712,7 +712,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 var pos = _accounts.GetPosition(o.UserId, o.StockId);
                 if (pos is null) continue;
                 try { pos.UnreserveStock(unreserve); }
-                catch (ArgumentException) { /* hydration mismatch Ã¢â‚¬â€ swallow defensively */ }
+                catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
             }
             else if (o.IsBuyOrder)
             {
@@ -721,7 +721,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 var fund = _accounts.GetFund(o.UserId, o.CurrencyType);
                 if (fund is null) continue;
                 try { fund.UnreserveFunds(unreserve); }
-                catch (ArgumentException) { /* hydration mismatch Ã¢â‚¬â€ swallow defensively */ }
+                catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
             }
         }
 

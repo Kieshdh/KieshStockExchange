@@ -7,7 +7,7 @@ using System.Diagnostics;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-// TotalValue removed Ã¢â‚¬â€ requires FX conversion that the DB cannot order by
+// TotalValue removed — requires FX conversion that the DB cannot order by
 public enum FundSortColumn { None, UserId, Usd, Reserved, Eur, Gbp, Jpy, Chf, Aud }
 public enum FundSortDir { Asc, Desc }
 

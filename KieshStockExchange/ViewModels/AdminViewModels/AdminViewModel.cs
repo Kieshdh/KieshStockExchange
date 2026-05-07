@@ -43,7 +43,7 @@ public partial class AdminViewModel : BaseViewModel
     public async Task InitializeAsync()
     {
         IsBusy = true;
-        LoadingText = "Loading admin dataÃ¢â‚¬Â¦";
+        LoadingText = "Loading admin data…";
         try
         {
             await UsersVm.EnsureInitializedAsync();

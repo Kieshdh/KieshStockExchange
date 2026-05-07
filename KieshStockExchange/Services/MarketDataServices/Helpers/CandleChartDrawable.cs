@@ -15,7 +15,7 @@ public sealed class CandleChartDrawable : IDrawable
     // Current live price; when set, drawn as a horizontal price line and tag in the right gutter.
     public decimal? CurrentPrice { get; set; }
 
-    // Palette â€” populated by ChartView at construction time. Defaults are intentionally stark so a
+    // Palette — populated by ChartView at construction time. Defaults are intentionally stark so a
     // missing resource is obvious rather than silently themed.
     public Color Bg = Colors.Black;
     public Color Axis = Colors.Gray;
@@ -28,7 +28,7 @@ public sealed class CandleChartDrawable : IDrawable
     public float AxisFont = 10f;
     public float PriceTagFont = 10f;
 
-    // Layout paddings â€” leave gutters for the Y labels (right) and time labels (bottom).
+    // Layout paddings — leave gutters for the Y labels (right) and time labels (bottom).
     const float RightAxisW = 64f;   // reserve space for Y labels
     const float BottomAxisH = 24f;  // reserve space for time labels
     const float TopPad = 6f;
@@ -194,7 +194,7 @@ public sealed class CandleChartDrawable : IDrawable
             canvas.StrokeSize = 1f;
             canvas.DrawLine(cx, yHigh, cx, yLow);
 
-            // Body â€” clamp height to 1px minimum so doji candles are still visible.
+            // Body — clamp height to 1px minimum so doji candles are still visible.
             float top = Math.Min(yOpen, yClose);
             float h = Math.Max(1f, Math.Abs(yClose - yOpen));
             canvas.FillColor = bodyColor;
@@ -248,7 +248,7 @@ public sealed class CandleChartDrawable : IDrawable
         var niceMax = Math.Ceiling(max / step) * step;
         return (niceMin, niceMax, step);
 
-        // Rounds x to a "nice" number (1, 2, 5, 10 â€¦) â€” classic Wilkinson algorithm.
+        // Rounds x to a "nice" number (1, 2, 5, 10 …) — classic Wilkinson algorithm.
         static double NiceNum(double x, bool round)
         {
             var exp = Math.Floor(Math.Log10(x));

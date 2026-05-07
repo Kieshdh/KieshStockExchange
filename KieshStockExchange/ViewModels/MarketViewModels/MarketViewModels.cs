@@ -62,7 +62,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         IsBusy = true;
         try
         {
-            // Idempotent Ã¢â‚¬â€ already-subscribed books just bump the ref count.
+            // Idempotent — already-subscribed books just bump the ref count.
             await _market.SubscribeAllAsync(CurrencyType.USD, forUi: true).ConfigureAwait(false);
 
             // Force an immediate poll then start the 5-second cadence so the

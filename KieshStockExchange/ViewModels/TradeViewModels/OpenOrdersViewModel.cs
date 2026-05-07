@@ -121,7 +121,7 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
                     accept: "OK", cancel: "Back",
                     keyboard: Keyboard.Numeric);
                 if (!int.TryParse(qtyStr, out var q) || q < order.AmountFilled)
-                    throw new ArgumentException("Quantity must be ÃƒÂ¢Ã¢â‚¬Â°Ã‚Â¥ filled amount.");
+                    throw new ArgumentException("Quantity must be ≥ filled amount.");
                 if (q == order.Quantity && newPrice is null) return;
                 newQty = q;
             }

@@ -20,7 +20,7 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
     protected override async Task<(IReadOnlyList<StockTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        // Small table Ã¢â‚¬â€ load all stocks, prices come from the in-memory registry (O(1) each)
+        // Small table — load all stocks, prices come from the in-memory registry (O(1) each)
         var stocks = (await _market.GetAllStocksAsync(ct)).OrderBy(s => s.StockId).ToList();
         var rows = new List<StockTableObject>(stocks.Count);
         foreach (var stock in stocks)
