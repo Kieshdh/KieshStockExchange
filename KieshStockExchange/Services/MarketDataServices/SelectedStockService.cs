@@ -159,26 +159,34 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     private async Task UpdateFromLiveAsync(LiveQuote? q, CancellationToken ct = default)
     {
-        decimal last = 0m;
-        DateTime updated;
-        
-        if (q is null)
+        try
         {
-            // Fall back to an explicit read (ensures we have a number even if history was empty)
-            if (StockId is int id)
-                last = await _market.GetLastPriceAsync(id, Currency, ct);
-            updated = TimeHelper.NowUtc();
-        } else {
-            last = q.LastPrice;
-            updated = q.LastUpdated;
-        }
+            decimal last = 0m;
+            DateTime updated;
 
-        // Push UI updates on main thread for binding safety
-        MainThread.BeginInvokeOnMainThread(() =>
+            if (q is null)
+            {
+                // Fall back to an explicit read (ensures we have a number even if history was empty)
+                if (StockId is int id)
+                    last = await _market.GetLastPriceAsync(id, Currency, ct);
+                updated = TimeHelper.NowUtc();
+            } else {
+                last = q.LastPrice;
+                updated = q.LastUpdated;
+            }
+
+            // Push UI updates on main thread for binding safety
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                CurrentPrice = last;
+                PriceUpdatedAt = updated;
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
         {
-            CurrentPrice = last;
-            PriceUpdatedAt = updated;
-        });
+            _logger.LogWarning(ex, "UpdateFromLiveAsync failed for {StockId}/{Currency}", StockId, Currency);
+        }
     }
 
     private void OnQuoteUpdated(object? _, LiveQuote q)
