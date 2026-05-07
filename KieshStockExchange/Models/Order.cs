@@ -154,8 +154,8 @@ public class Order : IValidatable
         Status == Statuses.Open || Status == Statuses.Filled || Status == Statuses.Cancelled;
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
-    private bool IsValidAmount() => (IsFilled && AmountFilled == Quantity) || 
-        (IsOpen && RemainingQuantity > 0) || (IsCancelled && AmountFilled != Quantity);
+    private bool IsValidAmount() => (IsFilled && AmountFilled == Quantity) ||
+        (IsOpen && RemainingQuantity > 0) || (IsCancelled && AmountFilled >= 0 && AmountFilled < Quantity);
 
     private bool IsValidPrice() => (IsLimitOrder && SlippagePercent is null && Price > 0m) || 
         (IsTrueMarketOrder && SlippagePercent is null && Price == 0m) || (IsSlippageOrder && SlippagePercent.HasValue && Price > 0m);
