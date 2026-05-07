@@ -67,50 +67,45 @@ public sealed class MarketDataService : IMarketDataService, IAsyncDisposable
     #endregion
 
     #region Session
-    public Task ApplySessionSnapshotAsync(SessionSnapshot snap)
+    /// <summary>
+    /// Switches the candle subscription resolution to match a new session snapshot.
+    /// Per-pair subscribe/unsubscribe failures are caught and logged so a single bad
+    /// pair doesn't abort the whole switch, but the returned task only completes once
+    /// every pair has been visited — callers can await it knowing the new resolution
+    /// is fully wired up.
+    /// </summary>
+    public async Task ApplySessionSnapshotAsync(SessionSnapshot snap)
     {
-        _ = Task.Run(async () =>
+        var newRes = snap.DefaultCandleResolution;
+        var oldRes = _subs.CurrentResolution;
+        if (newRes == oldRes) return;
+
+        _subs.CurrentResolution = newRes;
+
+        foreach (var (stockId, currency) in _subs.SnapshotSubscribed())
         {
             try
             {
-                var newRes = snap.DefaultCandleResolution;
-                var oldRes = _subs.CurrentResolution;
-                if (newRes == oldRes) return;
-
-                _subs.CurrentResolution = newRes;
-
-                foreach (var (stockId, currency) in _subs.SnapshotSubscribed())
-                {
-                    try
-                    {
-                        await _candle.UnsubscribeAsync(stockId, currency, oldRes).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex,
-                            "Error unsubscribing candles for {StockId} {Currency} at {Resolution}",
-                            stockId, currency, oldRes);
-                    }
-
-                    if (_subs.HasAnySubscribers((stockId, currency)))
-                    {
-                        try { _candle.Subscribe(stockId, currency, newRes); }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex,
-                                "Error subscribing candles for {StockId} {Currency} at {Resolution}",
-                                stockId, currency, newRes);
-                        }
-                    }
-                }
+                await _candle.UnsubscribeAsync(stockId, currency, oldRes).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error applying session snapshot changes.");
+                _logger.LogError(ex,
+                    "Error unsubscribing candles for {StockId} {Currency} at {Resolution}",
+                    stockId, currency, oldRes);
             }
-        });
 
-        return Task.CompletedTask;
+            if (_subs.HasAnySubscribers((stockId, currency)))
+            {
+                try { _candle.Subscribe(stockId, currency, newRes); }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Error subscribing candles for {StockId} {Currency} at {Resolution}",
+                        stockId, currency, newRes);
+                }
+            }
+        }
     }
     #endregion
 
