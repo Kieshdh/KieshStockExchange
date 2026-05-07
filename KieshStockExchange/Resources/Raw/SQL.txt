@@ -37,14 +37,15 @@ CREATE TABLE Orders (
     Quantity        INTEGER NOT NULL,
     AmountFilled    INTEGER NOT NULL DEFAULT 0,
     Price           REAL NOT NULL,
-    SlippagePercent REAL, 
+    SlippagePercent REAL,
+    BuyBudget       REAL,                       -- only set for TrueMarketBuy orders
     Currency        TEXT NOT NULL DEFAULT 'USD',
     Status          TEXT DEFAULT 'Open',
     CreatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (UserId)  REFERENCES Users(UserId),
     FOREIGN KEY (StockId) REFERENCES Stocks(StockId),
-    CHECK(OrderType IN ('TrueMarketBuy', 'TrueMarketSell', 
+    CHECK(OrderType IN ('TrueMarketBuy', 'TrueMarketSell',
         'SlippageMarketBuy', 'SlippageMarketSell', 'LimitBuy', 'LimitSell')),
     CHECK(Status IN ('Open','Filled','Cancelled')) ,
     Check(SlippagePercent IS NULL OR (SlippagePercent >= 0 AND SlippagePercent <= 100))
@@ -78,7 +79,8 @@ CREATE TABLE Positions (
     UpdatedAt           DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (UserId)  REFERENCES Users(UserId),
     FOREIGN KEY (StockId) REFERENCES Stocks(StockId),
-    UNIQUE(UserId, StockId)
+    UNIQUE(UserId, StockId),
+    CHECK(Quantity >= 0 AND ReservedQuantity >= 0 AND ReservedQuantity <= Quantity)
 );
 
 CREATE TABLE Funds (
@@ -90,8 +92,12 @@ CREATE TABLE Funds (
     CreatedAt           DATETIME DEFAULT CURRENT_TIMESTAMP,
     UpdatedAt           DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (UserId) REFERENCES Users(UserId),
-    UNIQUE(UserId, Currency)
+    UNIQUE(UserId, Currency),
+    CHECK(TotalBalance >= 0 AND ReservedBalance >= 0 AND ReservedBalance <= TotalBalance)
 );
+
+-- Note: SQLite-net-pcl creates tables without CHECK constraints, so the same invariants
+-- are enforced at runtime via BEFORE INSERT/UPDATE triggers (see LocalDBService.CreateInvariantTriggers).
 
 CREATE TABLE Candles (
     CandleId            INTEGER PRIMARY KEY AUTOINCREMENT,
