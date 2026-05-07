@@ -26,7 +26,8 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
 
     public UserPositionsViewModel(ILogger<UserPositionsViewModel> logger, IAuthService auth,
         IUserPortfolioService portfolio, IStockService stocks, IMarketDataService market,
-        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
+        ISelectedStockService selected, INotificationService notification)
+        : base(selected, notification, logger)
     {
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));

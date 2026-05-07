@@ -20,7 +20,8 @@ public partial class OrderHistoryViewModel : TradeTableViewModelBase<ClosedOrder
 
     public OrderHistoryViewModel(ILogger<OrderHistoryViewModel> logger,
         IOrderCacheService cache, IStockService stocks, IAuthService auth,
-        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
+        ISelectedStockService selected, INotificationService notification)
+        : base(selected, notification, logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _cache  = cache  ?? throw new ArgumentNullException(nameof(cache));

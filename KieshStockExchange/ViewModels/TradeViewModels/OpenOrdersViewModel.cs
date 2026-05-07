@@ -21,7 +21,8 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
 
     public OpenOrdersViewModel(ILogger<OpenOrdersViewModel> logger,
         IOrderCacheService cache, IOrderEntryService orders, IStockService stocks, IAuthService auth,
-        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
+        ISelectedStockService selected, INotificationService notification)
+        : base(selected, notification, logger)
     {
         _cache  = cache  ?? throw new ArgumentNullException(nameof(cache));
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));

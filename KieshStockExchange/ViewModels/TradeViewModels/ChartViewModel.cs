@@ -78,7 +78,8 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly SemaphoreSlim _restartGate = new(1, 1);
 
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
-        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
+        ISelectedStockService selected, INotificationService notification)
+        : base(selected, notification, logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
@@ -192,10 +193,27 @@ public partial class ChartViewModel : StockAwareViewModel
             var ct = inner.Token;
 
             IsBusy = true;
+            var startupFailed = false;
             try { await StartStreamingCandles(ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { _logger.LogError(ex, "Starting candle stream failed."); }
-            finally { IsBusy = false; }
+            catch (Exception ex)
+            {
+                startupFailed = true;
+                _logger.LogError(ex, "Starting candle stream failed.");
+            }
+            finally
+            {
+                IsBusy = false;
+                // If startup faulted, the inner CTS is no longer driving any loop —
+                // dispose it now and clear the field so we don't leak it until the
+                // next restart that happens to overwrite _streamCts.
+                if (startupFailed && ReferenceEquals(_streamCts, inner))
+                {
+                    try { inner.Cancel(); } catch { }
+                    inner.Dispose();
+                    _streamCts = null;
+                }
+            }
         }
         finally
         {

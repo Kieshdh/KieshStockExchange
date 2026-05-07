@@ -20,7 +20,8 @@ public partial class TransactionHistoryViewModel : TradeTableViewModelBase<Trans
 
     public TransactionHistoryViewModel(ILogger<TransactionHistoryViewModel> logger,
         IStockService stocks, ITransactionService tx, IAuthService auth,
-        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
+        ISelectedStockService selected, INotificationService notification)
+        : base(selected, notification, logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tx     = tx     ?? throw new ArgumentNullException(nameof(tx));

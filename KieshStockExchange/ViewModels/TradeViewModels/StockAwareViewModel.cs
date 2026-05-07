@@ -2,6 +2,8 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.ComponentModel;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
@@ -18,13 +20,16 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
     // Services
     protected readonly ISelectedStockService _selected;
     protected readonly INotificationService _notification;
+    protected readonly ILogger _logger;
     public ISelectedStockService Selected => _selected;
     public INotificationService Notification => _notification;
 
-    protected StockAwareViewModel(ISelectedStockService selected, INotificationService notification)
+    protected StockAwareViewModel(ISelectedStockService selected, INotificationService notification,
+        ILogger? logger = null)
     {
         _selected = selected ?? throw new ArgumentNullException(nameof(selected));
         _notification = notification ?? throw new ArgumentNullException(nameof(notification));
+        _logger = logger ?? NullLogger.Instance;
         Handler = OnSelectedChanged;
         _selected.PropertyChanged += Handler;
     }
@@ -60,7 +65,7 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
         catch (Exception ex)
         {
             // Swallow to keep the SynchronizationContext from tearing down the app.
-            System.Diagnostics.Debug.WriteLine($"FireStockChanged failed: {ex}");
+            _logger.LogError(ex, "{ViewModel}: OnStockChangedAsync failed.", GetType().Name);
         }
     }
 
@@ -78,7 +83,7 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
         catch (OperationCanceledException) { } // Ignored on cancellation
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"FirePriceChanged failed: {ex}");
+            _logger.LogError(ex, "{ViewModel}: OnPriceUpdatedAsync failed.", GetType().Name);
         }
     }
     #endregion

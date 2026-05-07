@@ -108,7 +108,8 @@ public partial class OrderBookViewModel : StockAwareViewModel
     private readonly ILogger<OrderBookViewModel> _logger;
 
     public OrderBookViewModel(ILogger<OrderBookViewModel> logger,
-        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
+        ISelectedStockService selected, INotificationService notification)
+        : base(selected, notification, logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 

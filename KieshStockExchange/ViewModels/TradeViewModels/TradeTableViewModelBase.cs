@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
@@ -12,8 +13,9 @@ public abstract partial class TradeTableViewModelBase<TRow> : StockAwareViewMode
 
     protected bool ShowAll { get; private set; } = true;
 
-    protected TradeTableViewModelBase(ISelectedStockService selected, INotificationService notification)
-        : base(selected, notification) { }
+    protected TradeTableViewModelBase(ISelectedStockService selected, INotificationService notification,
+        ILogger? logger = null)
+        : base(selected, notification, logger) { }
 
     public void SetShowAll(bool show)
     {

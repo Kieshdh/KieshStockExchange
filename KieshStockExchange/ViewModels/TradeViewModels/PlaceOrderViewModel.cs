@@ -93,7 +93,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
 
     public PlaceOrderViewModel(ILogger<PlaceOrderViewModel> logger,
         IOrderEntryService orders, IUserPortfolioService portfolio, IAuthService auth, IDispatcher disp,
-        ISelectedStockService selected, INotificationService notification) : base(selected, notification)
+        ISelectedStockService selected, INotificationService notification)
+        : base(selected, notification, logger)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
@@ -249,9 +250,23 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error placing order for {Symbol}", Selected.Symbol);
+            // The success/failure notification path runs only when the call returned a result.
+            // If the call itself threw, surface a user-visible alert too — otherwise the
+            // tap looks like nothing happened.
+            try
+            {
+                await _notification.PushNotificationAsync(
+                    "Order failed",
+                    "An unexpected error stopped your order. Please try again.",
+                    CancellationToken.None);
+            }
+            catch (Exception inner)
+            {
+                _logger.LogError(inner, "Also failed to push order-failure notification.");
+            }
         }
-        finally 
-        { 
+        finally
+        {
             IsBusy = false;
             await UpdateAssetsAsync(); // Refresh assets
             RecomputeUi();
