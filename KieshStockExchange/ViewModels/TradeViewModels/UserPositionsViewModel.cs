@@ -43,7 +43,17 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
         if (disposing)
         {
             foreach (var key in _subscriptions)
-                _ = _market.Unsubscribe(key.StockId, key.Currency);
+            {
+                var k = key;
+                _ = Task.Run(async () =>
+                {
+                    try { await _market.Unsubscribe(k.StockId, k.Currency); }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Unsubscribe failed for {StockId}/{Currency}.", k.StockId, k.Currency);
+                    }
+                });
+            }
             foreach (var row in CurrentView)
                 row.Dispose();
             _portfolio.SnapshotChanged -= OnPositionsChanged;
@@ -120,8 +130,23 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
         var key = (pos.StockId, currency);
         if (_subscriptions.Add(key))
         {
-            _ = _market.SubscribeAsync(pos.StockId, currency);
-            _ = _market.BuildFromHistoryAsync(pos.StockId, currency);
+            var stockId = pos.StockId;
+            _ = Task.Run(async () =>
+            {
+                try { await _market.SubscribeAsync(stockId, currency); }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "SubscribeAsync failed for {StockId}/{Currency}.", stockId, currency);
+                }
+            });
+            _ = Task.Run(async () =>
+            {
+                try { await _market.BuildFromHistoryAsync(stockId, currency); }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "BuildFromHistoryAsync failed for {StockId}/{Currency}.", stockId, currency);
+                }
+            });
         }
 
         _market.Quotes.TryGetValue((pos.StockId, currency), out var live);
