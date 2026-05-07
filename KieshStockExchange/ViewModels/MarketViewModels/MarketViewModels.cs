@@ -14,8 +14,22 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     #region Observable state
     public ObservableCollection<MarketRow> AllStocks { get; } = new();
     public ObservableCollection<MarketRow> FilteredStocks { get; } = new();
+    /// <summary>The current visible page over <see cref="FilteredStocks"/>.</summary>
+    public ObservableCollection<MarketRow> PagedStocks { get; } = new();
 
     [ObservableProperty] private string _searchText = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanGoPrev))]
+    [NotifyPropertyChangedFor(nameof(CanGoNext))]
+    [NotifyPropertyChangedFor(nameof(PageDisplay))]
+    private int _pageNumber; // 0-based
+
+    public int PageSize { get; set; } = 20;
+    public int TotalPages => Math.Max(1, (int)Math.Ceiling(FilteredStocks.Count / (double)PageSize));
+    public bool CanGoPrev => PageNumber > 0;
+    public bool CanGoNext => PageNumber < TotalPages - 1;
+    public string PageDisplay => $"{PageNumber + 1} / {TotalPages}";
 
     public ITrendingService Trending { get; }
     public TopNavBarViewModel TopNavBarVm { get; }
@@ -158,12 +172,20 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         // Only rebuild FilteredStocks when the underlying set actually changed
         // (or when the search text changes - that path is in OnSearchTextChanged).
         if (structureChanged)
+        {
             ApplyFilter();
+            RebuildPagedStocks();
+        }
     }
     #endregion
 
     #region Filtering
-    partial void OnSearchTextChanged(string value) => ApplyFilter();
+    partial void OnSearchTextChanged(string value)
+    {
+        ApplyFilter();
+        PageNumber = 0; // reset to first page on filter change
+        RebuildPagedStocks();
+    }
 
     private void ApplyFilter()
     {
@@ -183,6 +205,47 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
                 FilteredStocks.Add(row);
             }
         }
+    }
+    #endregion
+
+    #region Pagination
+    [RelayCommand(CanExecute = nameof(CanGoPrev))]
+    private void PrevPage()
+    {
+        if (!CanGoPrev) return;
+        PageNumber--;
+        RebuildPagedStocks();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanGoNext))]
+    private void NextPage()
+    {
+        if (!CanGoNext) return;
+        PageNumber++;
+        RebuildPagedStocks();
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="PagedStocks"/> with the slice of <see cref="FilteredStocks"/>
+    /// for the current page. Clamps <see cref="PageNumber"/> if the filter shrank the set.
+    /// </summary>
+    private void RebuildPagedStocks()
+    {
+        var totalPages = TotalPages;
+        if (PageNumber >= totalPages) PageNumber = totalPages - 1;
+        if (PageNumber < 0) PageNumber = 0;
+
+        PagedStocks.Clear();
+        var start = PageNumber * PageSize;
+        var end = Math.Min(start + PageSize, FilteredStocks.Count);
+        for (int i = start; i < end; i++) PagedStocks.Add(FilteredStocks[i]);
+
+        OnPropertyChanged(nameof(TotalPages));
+        OnPropertyChanged(nameof(CanGoPrev));
+        OnPropertyChanged(nameof(CanGoNext));
+        OnPropertyChanged(nameof(PageDisplay));
+        PrevPageCommand.NotifyCanExecuteChanged();
+        NextPageCommand.NotifyCanExecuteChanged();
     }
     #endregion
 
