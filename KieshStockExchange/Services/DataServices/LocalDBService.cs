@@ -1256,6 +1256,12 @@ public class LocalDBService: IDataBaseService, IDisposable
             await _db.ExecuteAsync(
                 "CREATE UNIQUE INDEX IF NOT EXISTS IX_Candle_Key ON Candles(StockId, Currency, BucketSeconds, OpenTime);");
 
+            // SQLite-net-pcl doesn't emit CHECK constraints, so the Fund/Position invariants
+            // (TotalBalance >= ReservedBalance, Quantity >= ReservedQuantity, no negatives)
+            // are only enforced at the C# model layer. Triggers give a DB-level safety net
+            // that catches anything bypassing the model (raw SQL, future tooling, etc.).
+            await CreateInvariantTriggers();
+
             _initialized = true;
         }
         finally { _initGate.Release(); }
@@ -1276,6 +1282,37 @@ public class LocalDBService: IDataBaseService, IDisposable
         }, ct);
 
     public void Dispose() { _db.GetConnection().Dispose(); }
+
+    private async Task CreateInvariantTriggers()
+    {
+        // Funds: TotalBalance >= ReservedBalance, neither negative.
+        await _db.ExecuteAsync(@"
+            CREATE TRIGGER IF NOT EXISTS trg_funds_invariant_insert
+            BEFORE INSERT ON Funds
+            WHEN NEW.TotalBalance < 0 OR NEW.ReservedBalance < 0
+                 OR NEW.ReservedBalance > NEW.TotalBalance
+            BEGIN SELECT RAISE(ABORT, 'Fund invariant violated'); END;");
+        await _db.ExecuteAsync(@"
+            CREATE TRIGGER IF NOT EXISTS trg_funds_invariant_update
+            BEFORE UPDATE ON Funds
+            WHEN NEW.TotalBalance < 0 OR NEW.ReservedBalance < 0
+                 OR NEW.ReservedBalance > NEW.TotalBalance
+            BEGIN SELECT RAISE(ABORT, 'Fund invariant violated'); END;");
+
+        // Positions: Quantity >= ReservedQuantity, neither negative.
+        await _db.ExecuteAsync(@"
+            CREATE TRIGGER IF NOT EXISTS trg_positions_invariant_insert
+            BEFORE INSERT ON Positions
+            WHEN NEW.Quantity < 0 OR NEW.ReservedQuantity < 0
+                 OR NEW.ReservedQuantity > NEW.Quantity
+            BEGIN SELECT RAISE(ABORT, 'Position invariant violated'); END;");
+        await _db.ExecuteAsync(@"
+            CREATE TRIGGER IF NOT EXISTS trg_positions_invariant_update
+            BEFORE UPDATE ON Positions
+            WHEN NEW.Quantity < 0 OR NEW.ReservedQuantity < 0
+                 OR NEW.ReservedQuantity > NEW.Quantity
+            BEGIN SELECT RAISE(ABORT, 'Position invariant violated'); END;");
+    }
 
     private async Task Pragma()
     {
