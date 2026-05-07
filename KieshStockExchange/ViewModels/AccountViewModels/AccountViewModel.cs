@@ -1,7 +1,12 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
+using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
+using KieshStockExchange.Views.AccountPageViews;
+using Microsoft.Extensions.DependencyInjection;
 using System.Globalization;
 
 namespace KieshStockExchange.ViewModels.AccountViewModels;
@@ -10,22 +15,39 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
 {
     private readonly IUserSessionService _session;
     private readonly IUserPortfolioService _portfolio;
+    private readonly IAuthService _auth;
+    private readonly IProfileService _profile;
+    private readonly IServiceProvider _services;
     private bool _disposed;
+    private bool _suppressCurrencyUpdate;
 
     public TopNavBarViewModel TopNavBarVm { get; }
 
     [ObservableProperty] private string _userName = string.Empty;
     [ObservableProperty] private string _fullName = string.Empty;
-    [ObservableProperty] private string _userId = string.Empty;
+    [ObservableProperty] private string _email = string.Empty;
+    [ObservableProperty] private string _birthDateDisplay = "—";
+    [ObservableProperty] private string _memberSinceDisplay = "—";
     [ObservableProperty] private string _baseCurrency = string.Empty;
     [ObservableProperty] private string _fundsDisplay = "$ —";
+    [ObservableProperty] private CurrencyType _selectedBaseCurrency;
 
-    public AccountViewModel(IUserSessionService session, IUserPortfolioService portfolio,
+    public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } = CurrencyHelper.SupportedCurrencies;
+
+    public AccountViewModel(
+        IUserSessionService session,
+        IUserPortfolioService portfolio,
+        IAuthService auth,
+        IProfileService profile,
+        IServiceProvider services,
         TopNavBarViewModel topNavBarVm)
     {
         Title = "Account";
         _session    = session     ?? throw new ArgumentNullException(nameof(session));
         _portfolio  = portfolio   ?? throw new ArgumentNullException(nameof(portfolio));
+        _auth       = auth        ?? throw new ArgumentNullException(nameof(auth));
+        _profile    = profile     ?? throw new ArgumentNullException(nameof(profile));
+        _services   = services    ?? throw new ArgumentNullException(nameof(services));
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
         _session.SnapshotChanged   += OnSessionChanged;
@@ -53,8 +75,16 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
         var snap = _session.Snapshot;
         UserName     = snap.UserName;
         FullName     = snap.FullName;
-        UserId       = snap.UserId > 0 ? snap.UserId.ToString() : "—";
         BaseCurrency = snap.BaseCurrency.ToString();
+
+        var user = _auth.CurrentUser;
+        Email              = user?.Email ?? "—";
+        BirthDateDisplay   = user?.BirthDateDisplay ?? "—";
+        MemberSinceDisplay = user?.CreatedAtDisplay ?? "—";
+
+        _suppressCurrencyUpdate = true;
+        SelectedBaseCurrency = snap.BaseCurrency;
+        _suppressCurrencyUpdate = false;
     }
 
     private void RefreshFunds()
@@ -63,6 +93,43 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
         FundsDisplay = fund == null
             ? "$ —"
             : $"$ {fund.AvailableBalance.ToString("N2", CultureInfo.InvariantCulture)}";
+    }
+
+    partial void OnSelectedBaseCurrencyChanged(CurrencyType value)
+    {
+        if (_suppressCurrencyUpdate) return;
+        _ = _profile.UpdateBaseCurrencyAsync(value);
+    }
+
+    [RelayCommand]
+    private async Task Logout()
+    {
+        // Confirm before tearing down the session — single mis-tap on a destructive action.
+        var confirmed = await MainThread.InvokeOnMainThreadAsync(() =>
+            Shell.Current.DisplayAlert("Log out",
+                "Are you sure you want to log out?", "Log out", "Cancel"));
+        if (!confirmed) return;
+
+        await _auth.LogoutAsync().ConfigureAwait(false);
+        _session.ClearSession();
+        await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.GoToAsync("///LoginPage"));
+    }
+
+    [RelayCommand] private void ChangeEmail()    => OpenInWindow<ChangeEmailPage>("Change Email");
+    [RelayCommand] private void ChangePassword() => OpenInWindow<ChangePasswordPage>("Change Password");
+    [RelayCommand] private void ChangeUsername() => OpenInWindow<ChangeUsernamePage>("Change Username");
+
+    private void OpenInWindow<TPage>(string title) where TPage : ContentPage
+    {
+        var page = _services.GetRequiredService<TPage>();
+        var window = new Window(page)
+        {
+            Title  = title,
+            Width  = 480,
+            Height = 520
+        };
+        window.Destroying += (_, __) => MainThread.BeginInvokeOnMainThread(RefreshAll);
+        Application.Current?.OpenWindow(window);
     }
 
     public void Dispose()

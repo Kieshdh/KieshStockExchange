@@ -21,76 +21,109 @@
                    Text="Account"
                    Style="{StaticResource PageHeadingTitle}" />
             <Label Grid.Column="1"
-                   Text="Profile, funds and appearance settings"
+                   Text="Profile, security and preferences"
                    Style="{StaticResource PageHeadingSub}" />
         </Grid>
 
-        <!-- Body: Profile (left) + Funds + Appearance (right) -->
+        <!-- Body: two columns -->
         <Grid Grid.Row="2"
               ColumnDefinitions="*,*"
               ColumnSpacing="12"
               Padding="24,0,24,0">
 
-            <!-- LEFT: Profile card -->
-            <Border Grid.Column="0"
-                    Style="{StaticResource DashboardCardStyle}"
-                    Padding="20"
-                    VerticalOptions="Start">
-                <VerticalStackLayout Spacing="16">
+            <!-- LEFT column: Identity + Security -->
+            <VerticalStackLayout Grid.Column="0"
+                                 Spacing="12"
+                                 VerticalOptions="Start">
 
-                    <Label Text="Profile"
-                           Style="{StaticResource SectionHeaderLabelStyle}" />
+                <!-- Identity card -->
+                <Border Style="{StaticResource DashboardCardStyle}"
+                        Padding="20">
+                    <VerticalStackLayout Spacing="14">
 
-                    <!-- Username -->
-                    <VerticalStackLayout Spacing="4">
-                        <Label Text="Username"
-                               Style="{StaticResource FormLabelStyle}" />
-                        <Entry Text="{Binding UserName}"
-                               IsReadOnly="True"
-                               Style="{StaticResource FormEntryStyle}" />
+                        <Label Text="Identity"
+                               Style="{StaticResource SectionHeaderLabelStyle}" />
+
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Username"
+                                   Style="{StaticResource FormLabelStyle}" />
+                            <Entry Text="{Binding UserName}"
+                                   IsReadOnly="True"
+                                   Style="{StaticResource FormEntryStyle}" />
+                        </VerticalStackLayout>
+
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Full name"
+                                   Style="{StaticResource FormLabelStyle}" />
+                            <Entry Text="{Binding FullName}"
+                                   IsReadOnly="True"
+                                   Style="{StaticResource FormEntryStyle}" />
+                        </VerticalStackLayout>
+
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Email"
+                                   Style="{StaticResource FormLabelStyle}" />
+                            <Entry Text="{Binding Email}"
+                                   IsReadOnly="True"
+                                   Style="{StaticResource FormEntryStyle}" />
+                        </VerticalStackLayout>
+
+                        <Grid ColumnDefinitions="*,*"
+                              ColumnSpacing="24">
+                            <VerticalStackLayout Grid.Column="0"
+                                                 Spacing="4">
+                                <Label Text="Date of birth"
+                                       Style="{StaticResource FormLabelStyle}" />
+                                <Label Text="{Binding BirthDateDisplay}"
+                                       Style="{StaticResource MutedLabelStyle}" />
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Grid.Column="1"
+                                                 Spacing="4">
+                                <Label Text="Member since"
+                                       Style="{StaticResource FormLabelStyle}" />
+                                <Label Text="{Binding MemberSinceDisplay}"
+                                       Style="{StaticResource MutedLabelStyle}" />
+                            </VerticalStackLayout>
+                        </Grid>
+
                     </VerticalStackLayout>
+                </Border>
 
-                    <!-- Full name -->
-                    <VerticalStackLayout Spacing="4">
-                        <Label Text="Full name"
-                               Style="{StaticResource FormLabelStyle}" />
-                        <Entry Text="{Binding FullName}"
-                               IsReadOnly="True"
-                               Style="{StaticResource FormEntryStyle}" />
-                    </VerticalStackLayout>
+                <!-- Security card -->
+                <Border Style="{StaticResource DashboardCardStyle}"
+                        Padding="20">
+                    <VerticalStackLayout Spacing="10">
 
-                    <!-- User ID -->
-                    <VerticalStackLayout Spacing="4">
-                        <Label Text="User ID"
-                               Style="{StaticResource FormLabelStyle}" />
-                        <Entry Text="{Binding UserId}"
-                               IsReadOnly="True"
-                               Style="{StaticResource FormEntryStyle}" />
-                    </VerticalStackLayout>
+                        <Label Text="Security"
+                               Style="{StaticResource SectionHeaderLabelStyle}" />
 
-                    <!-- Action buttons -->
-                    <Grid ColumnDefinitions="*,*"
-                          ColumnSpacing="8"
-                          Margin="0,8,0,0">
-                        <Button Grid.Column="0"
-                                Text="Save profile"
+                        <Button Text="Change username"
                                 Style="{StaticResource PrimaryActionButtonStyle}"
-                                IsEnabled="False" />
-                        <Button Grid.Column="1"
-                                Text="Change password"
+                                Command="{Binding ChangeUsernameCommand}" />
+
+                        <Button Text="Change email"
+                                Style="{StaticResource PrimaryActionButtonStyle}"
+                                Command="{Binding ChangeEmailCommand}" />
+
+                        <Button Text="Change password"
+                                Style="{StaticResource PrimaryActionButtonStyle}"
+                                Command="{Binding ChangePasswordCommand}" />
+
+                        <Button Text="Log out"
                                 Style="{StaticResource SecondaryActionButtonStyle}"
-                                IsEnabled="False" />
-                    </Grid>
+                                Command="{Binding LogoutCommand}" />
 
-                </VerticalStackLayout>
-            </Border>
+                    </VerticalStackLayout>
+                </Border>
 
-            <!-- RIGHT: Funds + Appearance stacked -->
+            </VerticalStackLayout>
+
+            <!-- RIGHT column: Funds + Preferences -->
             <VerticalStackLayout Grid.Column="1"
                                  Spacing="12"
                                  VerticalOptions="Start">
 
-                <!-- Available Funds card -->
+                <!-- Funds card -->
                 <Border Style="{StaticResource DashboardCardStyle}"
                         Padding="20">
                     <VerticalStackLayout Spacing="12">
@@ -121,20 +154,29 @@
                     </VerticalStackLayout>
                 </Border>
 
-                <!-- Appearance card -->
+                <!-- Preferences card -->
                 <Border Style="{StaticResource DashboardCardStyle}"
                         Padding="20">
                     <VerticalStackLayout Spacing="12">
 
-                        <Label Text="Appearance"
+                        <Label Text="Preferences"
                                Style="{StaticResource SectionHeaderLabelStyle}" />
 
-                        <Label Text="Switch any time. Survives reload."
-                               Style="{StaticResource MutedLabelStyle}" />
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Theme"
+                                   Style="{StaticResource FormLabelStyle}" />
+                            <Picker x:Name="ThemePicker"
+                                    Style="{StaticResource ThemePickerStyle}"
+                                    ItemDisplayBinding="{Binding DisplayName}" />
+                        </VerticalStackLayout>
 
-                        <Picker x:Name="ThemePicker"
-                                Style="{StaticResource ThemePickerStyle}"
-                                ItemDisplayBinding="{Binding DisplayName}" />
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Base currency"
+                                   Style="{StaticResource FormLabelStyle}" />
+                            <Picker Style="{StaticResource ThemePickerStyle}"
+                                    ItemsSource="{Binding AvailableCurrencies}"
+                                    SelectedItem="{Binding SelectedBaseCurrency, Mode=TwoWay}" />
+                        </VerticalStackLayout>
 
                     </VerticalStackLayout>
                 </Border>

@@ -49,6 +49,9 @@ public static class MauiProgram
         // Pages
         builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<AccountPage>();
+        builder.Services.AddTransient<ChangePasswordPage>();
+        builder.Services.AddTransient<ChangeEmailPage>();
+        builder.Services.AddTransient<ChangeUsernamePage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<AdminPage>();
         builder.Services.AddTransient<BotDashboardPage>();
@@ -74,6 +77,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
         builder.Services.AddSingleton<IThemeService, ThemeService>();
+        builder.Services.AddSingleton<IProfileService, ProfileService>();
         // Market engine
         builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
         builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();
@@ -89,6 +93,9 @@ public static class MauiProgram
         builder.Services.AddTransient<RegisterViewModel>();
         builder.Services.AddTransient<LoginViewModel>();
         builder.Services.AddTransient<AccountViewModel>();
+        builder.Services.AddTransient<ChangePasswordViewModel>();
+        builder.Services.AddTransient<ChangeEmailViewModel>();
+        builder.Services.AddTransient<ChangeUsernameViewModel>();
         // - Admin
         builder.Services.AddTransient<UserTableViewModel>();
         builder.Services.AddTransient<StockTableViewModel>();
