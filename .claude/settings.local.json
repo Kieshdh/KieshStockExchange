@@ -46,7 +46,27 @@
       "Bash(/tmp/final_report.sh)",
       "Bash(chmod +x /tmp/generate_report.sh)",
       "Bash(/tmp/generate_report.sh)",
-      "Bash(sort -k2)"
+      "Bash(sort -k2)",
+      "Bash(Select-String -Pattern \"\\(Bot|Service\\)\")",
+      "Bash(Get-ChildItem -Recurse -Filter \"AiTradeService.cs\" -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Name KieshStockExchange -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,StartTime,MainWindowTitle | Format-List\")",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Name KieshStockExchange -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 1; Get-Process -Name KieshStockExchange -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count\")",
+      "Bash(git mv *)",
+      "Bash(git rm *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\" -Recurse -Name -Include \"*.cs\", \"*.xaml\")",
+      "Bash(powershell -NoProfile -Command ' *)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File fix-mojibake.ps1)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File fix-mojibake-stragglers.ps1)",
+      "WebSearch",
+      "PowerShell(Get-Command *)",
+      "WebFetch(domain:api.github.com)",
+      "PowerShell(Get-Content *)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:claude.ai)",
+      "PowerShell(Get-ChildItem *)",
+      "Read(//c/Users/kjden/.claude/**)",
+      "Read(//c/Users/kjden/.claude/plugins/**)"
     ]
   },
   "outputStyle": "default"
