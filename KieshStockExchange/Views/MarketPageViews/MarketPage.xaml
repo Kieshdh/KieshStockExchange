@@ -37,7 +37,7 @@
             <Border Grid.Column="0"
                     Style="{StaticResource DashboardCardStyle}"
                     Padding="0">
-                <Grid RowDefinitions="Auto,Auto,*">
+                <Grid RowDefinitions="Auto,Auto,*,Auto">
 
                     <!-- Card head: title + search + refresh -->
                     <Grid Grid.Row="0"
@@ -98,7 +98,7 @@
                     <RefreshView Grid.Row="2"
                                  Command="{Binding RefreshCommand}"
                                  IsRefreshing="{Binding IsBusy}">
-                        <CollectionView ItemsSource="{Binding FilteredStocks}"
+                        <CollectionView ItemsSource="{Binding PagedStocks}"
                                         SelectionMode="None">
                             <CollectionView.EmptyView>
                                 <StackLayout Padding="16">
@@ -167,6 +167,32 @@
                             </CollectionView.ItemTemplate>
                         </CollectionView>
                     </RefreshView>
+
+                    <!-- Pager: prev / "page X / N" / next. Hidden when only one page exists. -->
+                    <Grid Grid.Row="3"
+                          ColumnDefinitions="Auto,*,Auto"
+                          Padding="16,8"
+                          ColumnSpacing="8">
+                        <Button Grid.Column="0"
+                                Text="Prev"
+                                Command="{Binding PrevPageCommand}"
+                                Style="{StaticResource SecondaryActionButtonStyle}"
+                                HeightRequest="32"
+                                WidthRequest="72"
+                                FontSize="12" />
+                        <Label Grid.Column="1"
+                               Text="{Binding PageDisplay}"
+                               Style="{StaticResource MutedLabelStyle}"
+                               HorizontalTextAlignment="Center"
+                               VerticalTextAlignment="Center" />
+                        <Button Grid.Column="2"
+                                Text="Next"
+                                Command="{Binding NextPageCommand}"
+                                Style="{StaticResource SecondaryActionButtonStyle}"
+                                HeightRequest="32"
+                                WidthRequest="72"
+                                FontSize="12" />
+                    </Grid>
                 </Grid>
             </Border>
 
