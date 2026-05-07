@@ -14,4 +14,5 @@ public interface IAuthService
     bool IsAdmin { get; }
     User? CurrentUser { get; }
     int CurrentUserId { get; }
+    void UpdateCurrentUser(User user);
 }

@@ -93,5 +93,7 @@ public sealed class AuthService : IAuthService
         _logger.LogInformation("User logged out.");
         return Task.CompletedTask;
     }
+
+    public void UpdateCurrentUser(User user) => CurrentUser = user;
     #endregion
 }
