@@ -57,6 +57,12 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // Matching & settlement under book lock
         List<Transaction> trades = new();
 
+        // Why the book lock is held across the DB settlement call (not released between
+        // Match and SettleTrades): MatchingEngine.Match mutates the book in-memory.
+        // RollbackMatch on settlement failure assumes the book hasn't moved since the
+        // match. Releasing the lock between the two steps would let a concurrent order
+        // edit the same levels, breaking rollback. The DB writer is serial anyway, so
+        // releasing earlier wouldn't help throughput.
         await _books.WithBookLockAsync(incoming.StockId, incoming.CurrencyType, ct, async book =>
         {
             var result = _matching.Match(incoming, book, ct);
@@ -702,26 +708,35 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         // Tx committed — release the reservations held by cancelled orders. Done
         // post-commit so the failure path doesn't have to undo reservation releases.
+        // Each iteration is wrapped so one bad row (hydration mismatch, unexpected null,
+        // etc.) doesn't skip the rest of the batch and leave the cache over-reserved.
         for (int i = 0; i < toCancel.Count; i++)
         {
             var o = toCancel[i];
-            if (o.IsSellOrder)
+            try
             {
-                var unreserve = o.Quantity - o.AmountFilled;
-                if (unreserve <= 0) continue;
-                var pos = _accounts.GetPosition(o.UserId, o.StockId);
-                if (pos is null) continue;
-                try { pos.UnreserveStock(unreserve); }
-                catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+                if (o.IsSellOrder)
+                {
+                    var unreserve = o.Quantity - o.AmountFilled;
+                    if (unreserve <= 0) continue;
+                    var pos = _accounts.GetPosition(o.UserId, o.StockId);
+                    if (pos is null) continue;
+                    pos.UnreserveStock(unreserve);
+                }
+                else if (o.IsBuyOrder)
+                {
+                    var unreserve = SettlementEngine.RemainingBuyReservation(o);
+                    if (unreserve <= 0m) continue;
+                    var fund = _accounts.GetFund(o.UserId, o.CurrencyType);
+                    if (fund is null) continue;
+                    fund.UnreserveFunds(unreserve);
+                }
             }
-            else if (o.IsBuyOrder)
+            catch (Exception ex)
             {
-                var unreserve = SettlementEngine.RemainingBuyReservation(o);
-                if (unreserve <= 0m) continue;
-                var fund = _accounts.GetFund(o.UserId, o.CurrencyType);
-                if (fund is null) continue;
-                try { fund.UnreserveFunds(unreserve); }
-                catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+                _logger.LogWarning(ex,
+                    "CancelOrdersBatchAsync: failed to release reservation for order #{OrderId} (user {UserId}); continuing.",
+                    o.OrderId, o.UserId);
             }
         }
 
