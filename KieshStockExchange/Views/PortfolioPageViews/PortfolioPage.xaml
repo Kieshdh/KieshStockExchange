@@ -93,9 +93,8 @@
         </Grid>
 
         <!-- Tabbed table area -->
-        <Border Grid.Row="3"
-                Style="{StaticResource TradeContentOutline}"
-                Margin="24,0,24,0"
+        <Grid Grid.Row="3" Margin="24,0,24,0">
+        <Border Style="{StaticResource TradeContentOutline}"
                 Padding="0">
             <other:SegmentedTabView
                     HeaderContainerHorizontalOptions="Start"
@@ -137,6 +136,16 @@
                 </other:SegmentedTabView.Tabs>
             </other:SegmentedTabView>
         </Border>
+
+        <!-- Loading overlay: a small spinner anchored top-right while a refresh is in flight -->
+        <ActivityIndicator IsVisible="{Binding IsBusy}"
+                           IsRunning="{Binding IsBusy}"
+                           HorizontalOptions="End"
+                           VerticalOptions="Start"
+                           Margin="0,12,16,0"
+                           WidthRequest="20"
+                           HeightRequest="20" />
+        </Grid>
 
     </Grid>
 </ContentPage>
