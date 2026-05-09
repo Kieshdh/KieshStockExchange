@@ -1,30 +1,37 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
-using KieshStockExchange.Models;
-using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
-using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
 public sealed partial class TrendingService : ObservableObject, ITrendingService, IDisposable
 {
     #region Movers Lists
-    private readonly ObservableCollection<LiveQuote> _topGainers = new();
-    private readonly ObservableCollection<LiveQuote> _topLosers = new();
-    private readonly ObservableCollection<LiveQuote> _mostActive = new();
+    // Bound observable collections — keyed by Symbol via _rowsBySymbol so the
+    // CollectionView can keep its row visuals across recomputes and only sees
+    // Move / Insert / Remove events (never Replace or Reset).
+    private readonly ObservableCollection<MoverRow> _topGainers = new();
+    private readonly ObservableCollection<MoverRow> _topLosers = new();
+    private readonly ObservableCollection<MoverRow> _mostActive = new();
 
-    private readonly ReadOnlyObservableCollection<LiveQuote> _topGainersView;
-    private readonly ReadOnlyObservableCollection<LiveQuote> _topLosersView;
-    private readonly ReadOnlyObservableCollection<LiveQuote> _mostActiveView;
+    private readonly ReadOnlyObservableCollection<MoverRow> _topGainersView;
+    private readonly ReadOnlyObservableCollection<MoverRow> _topLosersView;
+    private readonly ReadOnlyObservableCollection<MoverRow> _mostActiveView;
 
-    public IReadOnlyList<LiveQuote> TopGainers => _topGainersView;
-    public IReadOnlyList<LiveQuote> TopLosers => _topLosersView;
-    public IReadOnlyList<LiveQuote> MostActive => _mostActiveView;
+    public IReadOnlyList<MoverRow> TopGainers => _topGainersView;
+    public IReadOnlyList<MoverRow> TopLosers => _topLosersView;
+    public IReadOnlyList<MoverRow> MostActive => _mostActiveView;
+
+    // Per-list symbol → row map. Used to reuse the same MoverRow instance
+    // across recomputes when the same symbol is still in the list, which keeps
+    // its CollectionView visual stable (no flicker).
+    private readonly Dictionary<string, MoverRow> _gainerRowsBySymbol  = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, MoverRow> _loserRowsBySymbol   = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, MoverRow> _activeRowsBySymbol  = new(StringComparer.Ordinal);
     #endregion
 
     #region Fields and Constructor
@@ -51,9 +58,9 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
         _market = market ?? throw new ArgumentNullException(nameof(market));
 
         // Read-only wrappers for external consumption
-        _topGainersView = new ReadOnlyObservableCollection<LiveQuote>(_topGainers);
-        _topLosersView = new ReadOnlyObservableCollection<LiveQuote>(_topLosers);
-        _mostActiveView = new ReadOnlyObservableCollection<LiveQuote>(_mostActive);
+        _topGainersView = new ReadOnlyObservableCollection<MoverRow>(_topGainers);
+        _topLosersView = new ReadOnlyObservableCollection<MoverRow>(_topLosers);
+        _mostActiveView = new ReadOnlyObservableCollection<MoverRow>(_mostActive);
 
         // Top movers refresh every 5s — that's enough for a sidebar.
         // Intentionally NOT subscribing to QuoteUpdated (would cause UI-thread storms on
@@ -85,13 +92,67 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
         _dispatcher.Dispatch(() =>
         {
-            Replace(_topGainers, gainers);
-            Replace(_topLosers, losers);
-            Replace(_mostActive, actives);
+            SyncList(_topGainers, gainers, _gainerRowsBySymbol);
+            SyncList(_topLosers, losers, _loserRowsBySymbol);
+            SyncList(_mostActive, actives, _activeRowsBySymbol);
         });
 
         return Task.CompletedTask;
+    }
 
+    /// <summary>
+    /// Project the ranked LiveQuote list into <paramref name="target"/>:
+    ///   - Reuse a MoverRow instance if its symbol is still present (calling
+    ///     UpdateFrom so the row's bound cells refresh in place).
+    ///   - Move existing rows into their new ranking position.
+    ///   - Insert new entrants and remove dropouts as individual events.
+    /// CollectionView reorders visuals on Move and creates/destroys visuals on
+    /// Insert/Remove. No Replace or Clear+Add anywhere — every visible slot
+    /// always shows the data of the symbol it claims to.
+    /// </summary>
+    private static void SyncList(ObservableCollection<MoverRow> target,
+        IList<LiveQuote> src, Dictionary<string, MoverRow> rowsBySymbol)
+    {
+        // Build the desired-order MoverRow list, reusing existing instances by
+        // symbol so unchanged entries keep the same reference (and CollectionView
+        // keeps the same visual row).
+        var desired = new List<MoverRow>(src.Count);
+        var presentSymbols = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var q in src)
+        {
+            presentSymbols.Add(q.Symbol);
+            if (rowsBySymbol.TryGetValue(q.Symbol, out var row))
+            {
+                row.UpdateFrom(q);
+            }
+            else
+            {
+                row = new MoverRow(q);
+                rowsBySymbol[q.Symbol] = row;
+            }
+            desired.Add(row);
+        }
+
+        // Drop rows whose symbol fell out of the top-N.
+        var stale = rowsBySymbol.Keys.Where(s => !presentSymbols.Contains(s)).ToList();
+        foreach (var s in stale) rowsBySymbol.Remove(s);
+
+        // Sync target to desired in place. For each position i, ensure
+        // target[i] == desired[i] using only Move / Insert / Add / Remove.
+        for (int i = 0; i < desired.Count; i++)
+        {
+            if (i >= target.Count) { target.Add(desired[i]); continue; }
+            if (ReferenceEquals(target[i], desired[i])) continue;
+
+            int existing = -1;
+            for (int j = i + 1; j < target.Count; j++)
+            {
+                if (ReferenceEquals(target[j], desired[i])) { existing = j; break; }
+            }
+            if (existing >= 0) target.Move(existing, i);
+            else target.Insert(i, desired[i]);
+        }
+        while (target.Count > desired.Count) target.RemoveAt(target.Count - 1);
     }
 
     public void Dispose()
@@ -99,28 +160,6 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
         _cts.Cancel();
         _cts.Dispose();
         _timer.Dispose();
-    }
-
-    /// <summary>
-    /// Mirror <paramref name="src"/> into <paramref name="target"/> in place. The
-    /// original Clear-and-Add raised a Reset event every tick which made the
-    /// bound CollectionView tear down and rebuild every row (visible flicker).
-    /// We use Replace events at each index instead: when ranking shifts, the row
-    /// at that visual slot rebinds its labels to the new LiveQuote. CollectionView
-    /// keeps the row visual but updates its bindings — no flicker, and the values
-    /// always match the current top-N ordering.
-    /// </summary>
-    private static void Replace(ObservableCollection<LiveQuote> target, IList<LiveQuote> src)
-    {
-        for (int i = 0; i < src.Count; i++)
-        {
-            if (i < target.Count)
-            {
-                if (!ReferenceEquals(target[i], src[i])) target[i] = src[i];
-            }
-            else target.Add(src[i]);
-        }
-        while (target.Count > src.Count) target.RemoveAt(target.Count - 1);
     }
     #endregion
 }
