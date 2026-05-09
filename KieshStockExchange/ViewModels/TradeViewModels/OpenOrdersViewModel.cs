@@ -84,18 +84,23 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
 
     // Open the Modify Order popup window (Binance-style). The VM does the work
     // on Confirm; we just construct the page here and pass it the target order.
+    // OpenWindow is deferred to the next UI tick so the click event that fired
+    // this command fully releases before focus shifts; without that defer the
+    // pointer capture from the originating click can still be active when the
+    // new window opens, causing the cursor to freeze on the popup.
     [RelayCommand] private void Modify(Order order)
     {
         if (order is null) return;
-        var page = _services.GetRequiredService<ModifyOrderPage>();
-        page.Initialize(order);
-        var window = new Window(page) { Title = "Modify order", Width = 460, Height = 420 };
-        // Refresh on close so a successful modify shows up in this list immediately
-        // even if the popup's RefreshAsync raced ahead of the OrdersChanged hop.
-        // UpdateFromCache has optional params, so wrap in a parameterless lambda
-        // for BeginInvokeOnMainThread's Action overload.
-        window.Destroying += (_, __) => MainThread.BeginInvokeOnMainThread(() => UpdateFromCache());
-        Application.Current?.OpenWindow(window);
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            var page = _services.GetRequiredService<ModifyOrderPage>();
+            page.Initialize(order);
+            var window = new Window(page) { Title = "Modify order", Width = 460, Height = 420 };
+            // Refresh on close so a successful modify shows up in this list immediately
+            // even if the popup's RefreshAsync raced ahead of the OrdersChanged hop.
+            window.Destroying += (_, __) => MainThread.BeginInvokeOnMainThread(() => UpdateFromCache());
+            Application.Current?.OpenWindow(window);
+        });
     }
     #endregion
 
