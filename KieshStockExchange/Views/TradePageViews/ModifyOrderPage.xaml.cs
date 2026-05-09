@@ -21,7 +21,7 @@ public partial class ModifyOrderPage : ContentPage
     }
 
     /// <summary>Caller passes the order to edit before the page is pushed.</summary>
-    public void Initialize(Order order) => _vm.Initialize(order);
+    public void Initialize(Order order, decimal? prefillPrice = null) => _vm.Initialize(order, prefillPrice);
 
     protected override void OnAppearing()
     {

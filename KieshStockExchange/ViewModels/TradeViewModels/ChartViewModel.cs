@@ -11,6 +11,8 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
+using KieshStockExchange.Views.TradePageViews;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
@@ -163,13 +165,14 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly IMarketDataService _market;
     private readonly IOrderCacheService _orderCache;
     private readonly IAuthService _auth;
+    private readonly IServiceProvider _services;
 
     private CancellationTokenSource? _streamCts;
     private bool _loadingOlder;
     private readonly SemaphoreSlim _restartGate = new(1, 1);
 
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
-        IOrderCacheService orderCache, IAuthService auth,
+        IOrderCacheService orderCache, IAuthService auth, IServiceProvider services,
         ISelectedStockService selected, INotificationService notification)
         : base(selected, notification, logger)
     {
@@ -178,6 +181,7 @@ public partial class ChartViewModel : StockAwareViewModel
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
+        _services = services ?? throw new ArgumentNullException(nameof(services));
 
         // Repaint whenever the user adds, removes, toggles, or edits an MA.
         MaSeries.CollectionChanged += OnMaSeriesCollectionChanged;
@@ -367,6 +371,30 @@ public partial class ChartViewModel : StockAwareViewModel
             Markers[i] = Markers[i] with { Price = newPrice };
             RequestRedraw();
             return;
+        }
+    }
+
+    /// <summary>
+    /// Called by ChartView on drag release. Resolves the order from the cache and
+    /// opens the Modify Order modal pre-filled with the dragged-to price.
+    /// </summary>
+    public async Task BeginModifyOrderAtAsync(int orderId, decimal newPrice)
+    {
+        if (newPrice <= 0m) return;
+        if (ModifyOrderPage.IsOpen) return;
+
+        var order = _orderCache.OpenOrders.FirstOrDefault(o => o.OrderId == orderId);
+        if (order is null || order.IsMarketOrder) return;
+
+        try
+        {
+            var page = _services.GetRequiredService<ModifyOrderPage>();
+            page.Initialize(order, prefillPrice: newPrice);
+            await Shell.Current.Navigation.PushModalAsync(page).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open Modify Order popup from chart drag for #{OrderId}.", orderId);
         }
     }
     #endregion

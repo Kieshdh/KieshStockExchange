@@ -56,20 +56,20 @@ public partial class ModifyOrderViewModel : BaseViewModel
     /// Initialise the form for the given order. Prefills the price + quantity
     /// fields with the existing values so the user only edits what changes.
     /// </summary>
-    public void Initialize(Order order)
+    public void Initialize(Order order, decimal? prefillPrice = null)
     {
         TargetOrder = order ?? throw new ArgumentNullException(nameof(order));
 
-        // Header text identifies what the user is editing without making them
-        // re-read the table row.
         Summary = $"#{order.OrderId}  {order.SideDisplay} {order.Quantity} @ {order.PriceDisplay}";
 
-        // Market orders have no meaningful limit price — disable the field and
-        // signpost why instead of leaving the user to wonder.
         CanEditPrice = !order.IsMarketOrder;
         PriceLabel = order.IsMarketOrder ? "Price (market — not editable)" : "Limit price";
 
-        PriceString    = order.IsMarketOrder ? "—" : order.Price.ToString("0.######");
+        var seedPrice = !order.IsMarketOrder && prefillPrice is decimal p && p > 0m
+            ? p
+            : order.Price;
+
+        PriceString    = order.IsMarketOrder ? "—" : seedPrice.ToString("0.######");
         QuantityString = order.Quantity.ToString();
         ErrorMessage   = string.Empty;
     }

@@ -19,11 +19,15 @@ public partial class ChartView : ContentView
     // Active platform-pointer drag (Windows-side). Cross-platform so the
     // (cross-platform) PanGestureRecognizer can suppress its updates while a
     // marker / Y-axis / free-pan drag is in flight.
-    private enum DragMode { None, Marker, YAxis, FreePan }
+    private enum DragMode { None, Marker, OpenOrder, YAxis, FreePan }
     private DragMode _dragMode = DragMode.None;
 
     // Marker-drag state — set when _dragMode == Marker.
     private Guid? _draggingMarkerId;
+
+    // Open-order-drag state — set when _dragMode == OpenOrder.
+    private int? _draggingOrderId;
+    private decimal _draggingOrderStartPrice;
 
     // Y-axis-drag state — captured at press, kept constant for the whole drag
     // so the math anchors to where the user clicked (matching TradingView).
@@ -310,7 +314,23 @@ public partial class ChartView : ContentView
             return;
         }
 
-        // Priority 2: Y-axis gutter — scales the price range around the click.
+        // Priority 2: open-order line — drag changes the limit price; on release
+        // the Modify Order modal opens pre-filled with the new price.
+        var orderHit = _drawable.HitOpenOrderLine(p);
+        if (orderHit is OpenOrderLine ol)
+        {
+            _dragMode = DragMode.OpenOrder;
+            _draggingOrderId = ol.OrderId;
+            _draggingOrderStartPrice = ol.Price;
+            _drawable.DraggingOrderId = ol.OrderId;
+            _drawable.DraggingOrderPrice = ol.Price;
+            (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        // Priority 3: Y-axis gutter — scales the price range around the click.
         if (_drawable.IsInYAxisGutter(p))
         {
             if (_drawable.LastYMax <= _drawable.LastYMin) return;
@@ -337,7 +357,7 @@ public partial class ChartView : ContentView
             return;
         }
 
-        // Priority 3: chart body (price + volume area) — free pan that locks
+        // Priority 4: chart body (price + volume area) — free pan that locks
         // the data point under the cursor at drag-start to the cursor.
         if (_drawable.IsInChartArea(p))
         {
@@ -384,6 +404,15 @@ public partial class ChartView : ContentView
                     _vm.UpdateMarkerPrice(mid, newPrice);
                 break;
 
+            case DragMode.OpenOrder:
+                if (_draggingOrderId is int oid &&
+                    _drawable.PixelToPrice(p.Y) is decimal orderPrice && orderPrice > 0m)
+                {
+                    _drawable.DraggingOrderPrice = orderPrice;
+                    Chart.Invalidate();
+                }
+                break;
+
             case DragMode.YAxis:
             {
                 // TradingView convention: drag DOWN (dy > 0) = bigger candles
@@ -427,6 +456,27 @@ public partial class ChartView : ContentView
     private void OnPlatformPointerReleased(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         if (_dragMode == DragMode.None) return;
+
+        if (_dragMode == DragMode.OpenOrder)
+        {
+            var oid = _draggingOrderId;
+            var finalPrice = _drawable.DraggingOrderPrice;
+            var startPrice = _draggingOrderStartPrice;
+
+            _draggingOrderId = null;
+            _drawable.DraggingOrderId = null;
+            _drawable.DraggingOrderPrice = null;
+            Chart.Invalidate();
+
+            _dragMode = DragMode.None;
+            (sender as Microsoft.UI.Xaml.Controls.Control)?.ReleasePointerCapture(e.Pointer);
+            e.Handled = true;
+
+            // Only open the modal when the price actually moved — a bare tap should not pop a dialog.
+            if (oid is int id && finalPrice is decimal np && np != startPrice && _vm != null)
+                _ = _vm.BeginModifyOrderAtAsync(id, np);
+            return;
+        }
 
         if (_dragMode == DragMode.Marker)
         {

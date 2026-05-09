@@ -39,6 +39,12 @@ public sealed class CandleChartDrawable : IDrawable
     public IReadOnlyList<PriceMarker> Markers { get; set; } = Array.Empty<PriceMarker>();
     public Guid? DraggingMarkerId { get; set; }
 
+    // Set by ChartView while the user drags an open-order line. The line whose
+    // OrderId matches DraggingOrderId is drawn at DraggingOrderPrice instead of
+    // its stored price so the user sees the level follow the cursor live.
+    public int? DraggingOrderId { get; set; }
+    public decimal? DraggingOrderPrice { get; set; }
+
     // The user's open limit orders for the visible stock+currency, rendered as
     // dashed horizontal lines tagged with the side and quantity. Drawn before
     // the live-price line so the live tag stays the most prominent.
@@ -259,15 +265,17 @@ public sealed class CandleChartDrawable : IDrawable
     {
         if (OpenOrderLines.Count == 0) return;
         canvas.SaveState();
-        canvas.StrokeSize = 1f;
         for (int i = 0; i < OpenOrderLines.Count; i++)
         {
             var line = OpenOrderLines[i];
-            float y = Y((double)line.Price);
+            bool dragging = DraggingOrderId == line.OrderId;
+            decimal price = dragging && DraggingOrderPrice is decimal dp ? dp : line.Price;
+            float y = Y((double)price);
             if (y < plot.Top || y > plot.Bottom) continue;
 
             var color = line.IsBuy ? OpenOrderBuyColor : OpenOrderSellColor;
             canvas.StrokeColor = color;
+            canvas.StrokeSize = dragging ? 2f : 1f;
             canvas.StrokeDashPattern = new float[] { 4f, 4f };
             canvas.DrawLine(plot.Left, y, plot.Right, y);
             canvas.StrokeDashPattern = null;
@@ -278,7 +286,7 @@ public sealed class CandleChartDrawable : IDrawable
             canvas.FillRectangle(tagRect);
             canvas.FontColor = Colors.White;
             canvas.FontSize = PriceTagFont;
-            canvas.DrawString(CurrencyHelper.Format(line.Price, cur),
+            canvas.DrawString(CurrencyHelper.Format(price, cur),
                 new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
                 HorizontalAlignment.Left, VerticalAlignment.Center);
 
@@ -350,6 +358,29 @@ public sealed class CandleChartDrawable : IDrawable
             if (!inLine) continue;
 
             return (m, closeHit);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Returns the open-order line hit by the pointer (within 4 px of the line).
+    /// Covers the full width from the plot left edge to the right-gutter tag.
+    /// </summary>
+    public OpenOrderLine? HitOpenOrderLine(PointF pInControl)
+    {
+        if (OpenOrderLines.Count == 0) return null;
+        if (_lastPlot.Width <= 0 || _lastYMax <= _lastYMin) return null;
+
+        for (int i = 0; i < OpenOrderLines.Count; i++)
+        {
+            var line = OpenOrderLines[i];
+            float y = (float)(_lastPlot.Bottom
+                              - ((double)line.Price - _lastYMin) / (_lastYMax - _lastYMin)
+                                * _lastPlot.Height);
+            if (Math.Abs(pInControl.Y - y) > 4f) continue;
+            if (pInControl.X < _lastPlot.Left
+                || pInControl.X > _lastPlot.Right + RightAxisW) continue;
+            return line;
         }
         return null;
     }
