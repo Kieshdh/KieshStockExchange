@@ -87,16 +87,19 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     #region Services and Constructor
     private readonly IUserPortfolioService _portfolio;
     private readonly IOrderEntryService _orders;
+    private readonly IOrderCacheService _cache;
     private readonly IAuthService _auth;
     private readonly ILogger<PlaceOrderViewModel> _logger;
     private readonly IDispatcher _dispatcher;
 
     public PlaceOrderViewModel(ILogger<PlaceOrderViewModel> logger,
-        IOrderEntryService orders, IUserPortfolioService portfolio, IAuthService auth, IDispatcher disp,
+        IOrderEntryService orders, IOrderCacheService cache,
+        IUserPortfolioService portfolio, IAuthService auth, IDispatcher disp,
         ISelectedStockService selected, INotificationService notification)
         : base(selected, notification, logger)
     {
         _orders = orders ?? throw new ArgumentNullException(nameof(orders));
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -269,6 +272,11 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         {
             IsBusy = false;
             await UpdateAssetsAsync(); // Refresh assets
+            // Refresh the order cache so OpenOrdersView and the chart's pending-
+            // order overlays pick up the new (or just-filled) order immediately
+            // instead of waiting for the next user-driven refresh.
+            try { await _cache.RefreshAsync(_auth.CurrentUserId); }
+            catch (Exception ex) { _logger.LogError(ex, "Error refreshing order cache after order placement."); }
             RecomputeUi();
         }
     }
