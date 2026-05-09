@@ -103,26 +103,22 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
     /// <summary>
     /// Mirror <paramref name="src"/> into <paramref name="target"/> in place. The
-    /// previous Clear-and-Add raised a Reset event every tick which made the bound
-    /// CollectionView tear down and rebuild every row — visible as a flicker on
-    /// the Top Gainers / Top Losers / Most Active lists. Now we only Move, Insert
-    /// or Remove individual entries so untouched rows stay steady.
+    /// original Clear-and-Add raised a Reset event every tick which made the
+    /// bound CollectionView tear down and rebuild every row (visible flicker).
+    /// We use Replace events at each index instead: when ranking shifts, the row
+    /// at that visual slot rebinds its labels to the new LiveQuote. CollectionView
+    /// keeps the row visual but updates its bindings — no flicker, and the values
+    /// always match the current top-N ordering.
     /// </summary>
     private static void Replace(ObservableCollection<LiveQuote> target, IList<LiveQuote> src)
     {
         for (int i = 0; i < src.Count; i++)
         {
-            var item = src[i];
-            if (i >= target.Count) { target.Add(item); continue; }
-            if (ReferenceEquals(target[i], item)) continue;
-
-            int existing = -1;
-            for (int j = i + 1; j < target.Count; j++)
+            if (i < target.Count)
             {
-                if (ReferenceEquals(target[j], item)) { existing = j; break; }
+                if (!ReferenceEquals(target[i], src[i])) target[i] = src[i];
             }
-            if (existing >= 0) target.Move(existing, i);
-            else target.Insert(i, item);
+            else target.Add(src[i]);
         }
         while (target.Count > src.Count) target.RemoveAt(target.Count - 1);
     }
