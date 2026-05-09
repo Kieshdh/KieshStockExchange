@@ -81,22 +81,27 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
         finally { IsBusy = false; }
     }
 
-    // Open the Modify Order popup window (Binance-style). Deferred to the next
-    // UI tick so the click event that fired this command fully releases before
-    // focus shifts to the new window — without the defer the pointer capture
-    // from the originating click can still be active and freeze the cursor.
+    // Open the Modify Order popup as a Shell modal page (Binance-style). Modal
+    // navigation keeps the popup on top within the same window so it can't
+    // slip behind chart hover. ModifyOrderPage.IsOpen prevents a double-tap
+    // from stacking two modals.
     [RelayCommand]
-    private void Modify(Order order)
+    private async Task Modify(Order order)
     {
         if (order is null) return;
-        MainThread.BeginInvokeOnMainThread(() =>
+        if (ModifyOrderPage.IsOpen) return;
+        try
         {
             var page = _services.GetRequiredService<ModifyOrderPage>();
             page.Initialize(order);
-            var window = new Window(page) { Title = "Modify order", Width = 460, Height = 420 };
-            window.Destroying += (_, __) => MainThread.BeginInvokeOnMainThread(RebuildView);
-            Application.Current?.OpenWindow(window);
-        });
+            page.Disappearing += (_, __) =>
+                MainThread.BeginInvokeOnMainThread(RebuildView);
+            await Shell.Current.Navigation.PushModalAsync(page).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open Modify Order popup for #{OrderId}.", order.OrderId);
+        }
     }
 
     private void RebuildView()

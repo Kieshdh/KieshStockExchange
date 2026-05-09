@@ -82,25 +82,28 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
         finally { IsBusy = false; }
     }
 
-    // Open the Modify Order popup window (Binance-style). The VM does the work
-    // on Confirm; we just construct the page here and pass it the target order.
-    // OpenWindow is deferred to the next UI tick so the click event that fired
-    // this command fully releases before focus shifts; without that defer the
-    // pointer capture from the originating click can still be active when the
-    // new window opens, causing the cursor to freeze on the popup.
-    [RelayCommand] private void Modify(Order order)
+    // Open the Modify Order popup as a Shell modal page (Binance-style). Modal
+    // navigation keeps the popup on top of the Trade page within the same
+    // window — hovering the chart can no longer steal focus and shove the
+    // popup behind the main UI. ModifyOrderPage.IsOpen guards against double-
+    // tap pushing two stacked modals.
+    [RelayCommand] private async Task Modify(Order order)
     {
         if (order is null) return;
-        MainThread.BeginInvokeOnMainThread(() =>
+        if (ModifyOrderPage.IsOpen) return;
+        try
         {
             var page = _services.GetRequiredService<ModifyOrderPage>();
             page.Initialize(order);
-            var window = new Window(page) { Title = "Modify order", Width = 460, Height = 420 };
-            // Refresh on close so a successful modify shows up in this list immediately
-            // even if the popup's RefreshAsync raced ahead of the OrdersChanged hop.
-            window.Destroying += (_, __) => MainThread.BeginInvokeOnMainThread(() => UpdateFromCache());
-            Application.Current?.OpenWindow(window);
-        });
+            // Refresh open-orders rows after the modal is dismissed.
+            page.Disappearing += (_, __) =>
+                MainThread.BeginInvokeOnMainThread(() => UpdateFromCache());
+            await Shell.Current.Navigation.PushModalAsync(page).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open Modify Order popup for #{OrderId}.", order.OrderId);
+        }
     }
     #endregion
 

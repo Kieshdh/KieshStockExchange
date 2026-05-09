@@ -258,9 +258,19 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - `OpenOrderLine` value type lives in `ChartTypes.cs`; `ChartViewModel` syncs
   the collection from `IOrderCacheService.OrdersChanged`; the drawable's
   `DrawOpenOrderLines` runs before the live-price line.
-- Possible follow-ups (deferred): tap-to-edit (open the Modify popup directly
-  from the line), drag-to-reprice the limit order, hover tooltip showing total
-  notional value.
+
+### 4.11 Drag-to-modify open orders on chart
+- Binance and TradingView both let you grab an open-order line on the chart,
+  drag it to a new price, and confirm. We already render the lines (4.10) and
+  already have the marker-drag pattern in `CandleChartDrawable.HitMarker` /
+  `_dragMode` in `ChartView.xaml.cs`.
+- Implementation sketch:
+  - Extend the chart drawable with `HitOpenOrderLine(PointF)` returning the
+    `OpenOrderLine` under the pointer.
+  - Add a new `DragMode.OpenOrder` to ChartView's pointer handler. On drag
+    move update a transient overlay price; on release, open the existing
+    Modify popup pre-filled with the new price (skip the qty step).
+  - Reject drag on market orders.
 
 ### 4.5 Responsive layout for window resizing
 - Layouts feel cramped on small windows and empty on large ones.
