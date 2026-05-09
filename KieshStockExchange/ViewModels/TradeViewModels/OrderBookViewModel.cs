@@ -25,9 +25,18 @@ public partial class OrderBookViewModel : StockAwareViewModel
     private EventHandler? _bookHandler;
     private OrderBook? _attachedBook;
 
-    // All order levels
+    // All order levels (full depth — used for cumulative-quantity calculations).
     public ObservableCollection<LevelRow> SellLevels { get; } = new();
     public ObservableCollection<LevelRow> BuyLevels { get; } = new();
+
+    // Visible slice closest to the spread, kept as live ObservableCollections so
+    // the bound CollectionView updates in place rather than rebuilding every tick
+    // (binding to a Skip/Take IEnumerable raises a fresh source on each notify
+    // and forces the CollectionView to tear down all rows — visible flicker).
+    //   sells are ordered high→low, so the asks adjacent to the mid are the tail.
+    //   buys  are ordered high→low, so the best bids are the head.
+    public ObservableCollection<LevelRow> VisibleSellLevels { get; } = new();
+    public ObservableCollection<LevelRow> VisibleBuyLevels { get; } = new();
 
     // The depth of how many levels to show
     private int _depth = 10;
@@ -40,8 +49,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
             if (_depth == value) return;
             _depth = value;
             OnPropertyChanged(nameof(MaxVisibleLevels));
-            OnPropertyChanged(nameof(VisibleSellLevels));
-            OnPropertyChanged(nameof(VisibleBuyLevels));
+            SyncVisibleLevels();
         }
     }
 
@@ -51,14 +59,6 @@ public partial class OrderBookViewModel : StockAwareViewModel
         get => Depth;
         set => Depth = value;
     }
-
-    // Visible slice closest to the spread:
-    //   sells are ordered high→low, so the asks adjacent to the mid are the *tail*.
-    //   buys are ordered high→low, so the best bids are the head.
-    public IEnumerable<LevelRow> VisibleSellLevels
-        => SellLevels.Skip(Math.Max(0, SellLevels.Count - Depth));
-    public IEnumerable<LevelRow> VisibleBuyLevels
-        => BuyLevels.Take(Depth);
     #endregion
 
     #region Best levels, spread, empty-state
@@ -257,9 +257,43 @@ public partial class OrderBookViewModel : StockAwareViewModel
         IsEmpty = SellLevels.Count == 0 && BuyLevels.Count == 0;
         EmptyMessage = !Selected.HasSelectedStock ? "No stock selected" : "Order book is empty";
 
-        // Let the view recompute the “Depth” slices
-        OnPropertyChanged(nameof(VisibleSellLevels));
-        OnPropertyChanged(nameof(VisibleBuyLevels));
+        // Re-sync the depth-limited visible collections in place so bound rows
+        // refresh their cells rather than the CollectionView rebuilding every row.
+        SyncVisibleLevels();
+    }
+
+    /// <summary>
+    /// Mirror the depth-limited slice of SellLevels/BuyLevels into VisibleSellLevels
+    /// /VisibleBuyLevels by reference. Reuses existing rows where the same instance
+    /// already sits at the same index so the bound CollectionView fires only the
+    /// fine-grained change events (Add / Remove / Move / Replace) needed.
+    /// </summary>
+    private void SyncVisibleLevels()
+    {
+        // Sells: visible slice is the tail of SellLevels (lowest asks, closest to mid).
+        int sellStart = Math.Max(0, SellLevels.Count - Depth);
+        SyncSlice(VisibleSellLevels, SellLevels, sellStart, SellLevels.Count);
+
+        // Buys: visible slice is the head of BuyLevels (highest bids).
+        int buyEnd = Math.Min(BuyLevels.Count, Depth);
+        SyncSlice(VisibleBuyLevels, BuyLevels, 0, buyEnd);
+    }
+
+    private static void SyncSlice(ObservableCollection<LevelRow> target,
+        IList<LevelRow> source, int start, int endExclusive)
+    {
+        int count = Math.Max(0, endExclusive - start);
+        for (int i = 0; i < count; i++)
+        {
+            var src = source[start + i];
+            if (i < target.Count)
+            {
+                if (!ReferenceEquals(target[i], src))
+                    target[i] = src;
+            }
+            else target.Add(src);
+        }
+        while (target.Count > count) target.RemoveAt(target.Count - 1);
     }
 
     private void ApplySideSnapshot(ObservableCollection<LevelRow> target,
