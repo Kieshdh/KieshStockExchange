@@ -25,14 +25,11 @@ public partial class OrderBookViewModel : StockAwareViewModel
     private EventHandler? _bookHandler;
     private OrderBook? _attachedBook;
 
-    // All order levels (full depth — used for cumulative-quantity calculations).
-    public ObservableCollection<LevelRow> SellLevels { get; } = new();
-    public ObservableCollection<LevelRow> BuyLevels { get; } = new();
-
-    // Visible slice closest to the spread, kept as live ObservableCollections so
-    // the bound CollectionView updates in place rather than rebuilding every tick
-    // (binding to a Skip/Take IEnumerable raises a fresh source on each notify
-    // and forces the CollectionView to tear down all rows — visible flicker).
+    // Bound order-level collections, capped at the user's selected depth. We
+    // intentionally do NOT keep a parallel "full-depth" collection: applying a
+    // book snapshot directly into the depth-trimmed list lets each row keep its
+    // identity tick-to-tick (cells update via observable properties), and the
+    // bound CollectionView never sees Replace events that would flash the row.
     //   sells are ordered high→low, so the asks adjacent to the mid are the tail.
     //   buys  are ordered high→low, so the best bids are the head.
     public ObservableCollection<LevelRow> VisibleSellLevels { get; } = new();
@@ -49,7 +46,9 @@ public partial class OrderBookViewModel : StockAwareViewModel
             if (_depth == value) return;
             _depth = value;
             OnPropertyChanged(nameof(MaxVisibleLevels));
-            SyncVisibleLevels();
+            // Re-apply the most recent snapshot at the new depth so trim/extend
+            // happens immediately rather than on the next book Changed event.
+            if (Book is not null) UpdateOrBuildFromSnapshot(Book.Snapshot());
         }
     }
 
@@ -229,13 +228,13 @@ public partial class OrderBookViewModel : StockAwareViewModel
         var currency = Selected.Currency;
 
         // Target view order:
-        //  - Sells: high -> low
-        //  - Buys : high -> low
+        //  - Sells: high -> low (best asks = closest to mid = TAIL of list)
+        //  - Buys : high -> low (best bids = HEAD)
         var orderedSells = snap.Sells.OrderByDescending(l => l.Price).ToList();
         var orderedBuys = snap.Buys.OrderByDescending(l => l.Price).ToList();
 
-        ApplySideSnapshot(SellLevels, orderedSells, currency, LevelSide.Sell, accumulateForward: false);
-        ApplySideSnapshot(BuyLevels, orderedBuys, currency, LevelSide.Buy, accumulateForward: true);
+        ApplySideSnapshot(VisibleSellLevels, orderedSells, currency, LevelSide.Sell, accumulateForward: false);
+        ApplySideSnapshot(VisibleBuyLevels, orderedBuys, currency, LevelSide.Buy, accumulateForward: true);
 
         // Best ask = lowest sell = last of desc list. Best bid = highest buy = first of desc list.
         BestAsk = orderedSells.Count > 0 ? orderedSells[^1].Price : (decimal?)null;
@@ -254,55 +253,24 @@ public partial class OrderBookViewModel : StockAwareViewModel
             SpreadPercent = null;
         }
 
-        IsEmpty = SellLevels.Count == 0 && BuyLevels.Count == 0;
+        IsEmpty = VisibleSellLevels.Count == 0 && VisibleBuyLevels.Count == 0;
         EmptyMessage = !Selected.HasSelectedStock ? "No stock selected" : "Order book is empty";
-
-        // Re-sync the depth-limited visible collections in place so bound rows
-        // refresh their cells rather than the CollectionView rebuilding every row.
-        SyncVisibleLevels();
     }
 
     /// <summary>
-    /// Mirror the depth-limited slice of SellLevels/BuyLevels into VisibleSellLevels
-    /// /VisibleBuyLevels by reference. Reuses existing rows where the same instance
-    /// already sits at the same index so the bound CollectionView fires only the
-    /// fine-grained change events (Add / Remove / Move / Replace) needed.
+    /// Project a price-side snapshot into the depth-trimmed bound collection.
+    /// Cumulative quantities are computed across the FULL source so the
+    /// closest-to-mid row's cumulative still reflects total side liquidity
+    /// even though only the visible slice ends up bound.
     /// </summary>
-    private void SyncVisibleLevels()
-    {
-        // Sells: visible slice is the tail of SellLevels (lowest asks, closest to mid).
-        int sellStart = Math.Max(0, SellLevels.Count - Depth);
-        SyncSlice(VisibleSellLevels, SellLevels, sellStart, SellLevels.Count);
-
-        // Buys: visible slice is the head of BuyLevels (highest bids).
-        int buyEnd = Math.Min(BuyLevels.Count, Depth);
-        SyncSlice(VisibleBuyLevels, BuyLevels, 0, buyEnd);
-    }
-
-    private static void SyncSlice(ObservableCollection<LevelRow> target,
-        IList<LevelRow> source, int start, int endExclusive)
-    {
-        int count = Math.Max(0, endExclusive - start);
-        for (int i = 0; i < count; i++)
-        {
-            var src = source[start + i];
-            if (i < target.Count)
-            {
-                if (!ReferenceEquals(target[i], src))
-                    target[i] = src;
-            }
-            else target.Add(src);
-        }
-        while (target.Count > count) target.RemoveAt(target.Count - 1);
-    }
-
     private void ApplySideSnapshot(ObservableCollection<LevelRow> target,
         List<PriceLevel> source, CurrencyType currency, LevelSide side, bool accumulateForward)
     {
-        // Get the cumulative quantities
+        // Cumulative quantities across the full source. Direction depends on side
+        // (buys grow head→tail, sells grow tail→head) so the row closest to mid
+        // always sees the largest cumulative.
         var cumulatives = new int[source.Count];
         int cumulative = 0;
-
         if (accumulateForward)
         {
             for (int i = 0; i < source.Count; i++)
@@ -319,29 +287,42 @@ public partial class OrderBookViewModel : StockAwareViewModel
                 cumulatives[i] = cumulative;
             }
         }
+        int maxCum = cumulative;
 
-        // Best level (closest to mid) lives at the head when accumulating forward
-        // (buys: highest price first), and at the tail when accumulating backward
-        // (sells: lowest price last).
-        int bestIdx = source.Count == 0 ? -1 : (accumulateForward ? 0 : source.Count - 1);
-        int maxCum = cumulative; // final accumulated total = max for this side
-
-        // Update or add rows
-        for (int i = 0; i < source.Count; i++)
+        // Visible slice. Buys take the head (best bids first); sells take the
+        // tail (best asks last) so the slice is already adjacent to the spread.
+        int sliceStart, sliceEnd;
+        if (accumulateForward)
         {
-            var level = source[i];
-            double depthRatio = maxCum > 0 ? (double)cumulatives[i] / maxCum : 0d;
-            bool isBest = i == bestIdx;
+            sliceStart = 0;
+            sliceEnd = Math.Min(Depth, source.Count);
+        }
+        else
+        {
+            sliceStart = Math.Max(0, source.Count - Depth);
+            sliceEnd = source.Count;
+        }
+        int sliceLen = Math.Max(0, sliceEnd - sliceStart);
+
+        // Best level inside the visible slice — head of slice for forward
+        // accumulation (buys), tail for backward (sells).
+        int bestVisible = sliceLen == 0 ? -1 : (accumulateForward ? 0 : sliceLen - 1);
+
+        for (int i = 0; i < sliceLen; i++)
+        {
+            int srcIdx = sliceStart + i;
+            var level = source[srcIdx];
+            double depthRatio = maxCum > 0 ? (double)cumulatives[srcIdx] / maxCum : 0d;
+            bool isBest = i == bestVisible;
 
             if (i < target.Count)
-                target[i].Update(level.Price, level.Quantity, cumulatives[i], depthRatio, isBest);
+                target[i].Update(level.Price, level.Quantity, cumulatives[srcIdx], depthRatio, isBest);
             else
-                target.Add(new LevelRow(level.Price, level.Quantity, cumulatives[i],
+                target.Add(new LevelRow(level.Price, level.Quantity, cumulatives[srcIdx],
                                         depthRatio, isBest, currency, side));
         }
 
-        // Remove excess
-        while (target.Count > source.Count)
+        while (target.Count > sliceLen)
             target.RemoveAt(target.Count - 1);
     }
     #endregion
