@@ -76,6 +76,70 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
         finally { IsBusy = false; }
     }
 
+    // Mirrors OpenOrdersViewModel.ModifyAsync so the Portfolio page exposes the
+    // same edit affordance the Trade page does. Validation is intentionally light
+    // (positive price, qty ≥ filled, market orders can't change price); the engine
+    // performs the canonical OrderValidator check inside ModifyOrderAsync.
+    [RelayCommand]
+    private async Task ModifyAsync(Order order)
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        try
+        {
+            var choice = await Shell.Current.DisplayActionSheet(
+                "Modify order", "Cancel", null, "Price", "Quantity", "Price & Quantity");
+            if (choice is null || choice == "Cancel") return;
+
+            int? newQty = null;
+            decimal? newPrice = null;
+
+            if (choice.Contains("Price") && order.IsMarketOrder)
+            {
+                await Shell.Current.DisplayAlert("Modify not allowed",
+                    "Cannot modify price of a market order.", "OK");
+                return;
+            }
+
+            if (choice.Contains("Price"))
+            {
+                var priceStr = await Shell.Current.DisplayPromptAsync(
+                    "New limit price", $"Current: {order.PriceDisplay}",
+                    accept: "OK", cancel: "Back",
+                    keyboard: Keyboard.Numeric);
+                if (string.IsNullOrWhiteSpace(priceStr)) return;
+
+                var parsed = CurrencyHelper.Parse(priceStr, order.CurrencyType);
+                if (!parsed.HasValue || parsed.Value <= 0m)
+                    throw new ArgumentException("Invalid price.");
+                newPrice = parsed.Value;
+            }
+
+            if (choice.Contains("Quantity"))
+            {
+                var qtyStr = await Shell.Current.DisplayPromptAsync(
+                    "New quantity", $"Current: {order.Quantity}",
+                    accept: "OK", cancel: "Back",
+                    keyboard: Keyboard.Numeric);
+                if (!int.TryParse(qtyStr, out var q) || q < order.AmountFilled)
+                    throw new ArgumentException("Quantity must be ≥ filled amount.");
+                if (q == order.Quantity && newPrice is null) return;
+                newQty = q;
+            }
+
+            var result = await _orders.ModifyOrderAsync(_auth.CurrentUserId, order.OrderId, newQty, newPrice);
+            _logger.LogInformation("Modify order #{OrderId}: {Status}", order.OrderId, result.Status);
+            await _cache.RefreshAsync(_auth.CurrentUserId);
+            RebuildView();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Modify order failed for #{OrderId}", order.OrderId);
+            await Shell.Current.DisplayAlert("Modify failed", ex.Message, "OK");
+        }
+        finally { IsBusy = false; }
+    }
+
     private void RebuildView()
     {
         var rows = _cache.OpenOrders

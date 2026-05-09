@@ -76,11 +76,21 @@
                                 </Label>
                             </Border>
 
-                            <Button Grid.Column="8" Text="✕"
-                                    IsVisible="{Binding Order.IsOpen}"
-                                    Style="{StaticResource TradeTableButton}"
-                                    Command="{Binding Source={x:Reference PortfolioOpenOrdersRoot}, Path=BindingContext.CancelCommand}"
-                                    CommandParameter="{Binding Order}" />
+                            <!-- Modify + Cancel actions, both visible only on still-open orders. -->
+                            <HorizontalStackLayout Grid.Column="8"
+                                                   IsVisible="{Binding Order.IsOpen}"
+                                                   Spacing="4"
+                                                   HorizontalOptions="Center"
+                                                   VerticalOptions="Center">
+                                <Button Text="✎"
+                                        Style="{StaticResource TradeTableButton}"
+                                        Command="{Binding Source={x:Reference PortfolioOpenOrdersRoot}, Path=BindingContext.ModifyCommand}"
+                                        CommandParameter="{Binding Order}" />
+                                <Button Text="✕"
+                                        Style="{StaticResource TradeTableButton}"
+                                        Command="{Binding Source={x:Reference PortfolioOpenOrdersRoot}, Path=BindingContext.CancelCommand}"
+                                        CommandParameter="{Binding Order}" />
+                            </HorizontalStackLayout>
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>

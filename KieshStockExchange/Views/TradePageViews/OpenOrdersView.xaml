@@ -79,13 +79,24 @@
                                 </Label>
                             </Border>
 
-                            <!-- Cancel action -->
-                            <Button Grid.Column="8" Text="✕"
-                                    IsVisible="{Binding Order.IsOpen}"
-                                    Style="{StaticResource TradeTableButton}"
-                                    Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}},
-                                              Path=BindingContext.OpenOrdersVm.CancelCommand}"
-                                    CommandParameter="{Binding Order}" />
+                            <!-- Modify + Cancel actions. Both visible only on still-open
+                                 orders; for filled or cancelled rows the column stays empty. -->
+                            <HorizontalStackLayout Grid.Column="8"
+                                                   IsVisible="{Binding Order.IsOpen}"
+                                                   Spacing="4"
+                                                   HorizontalOptions="Center"
+                                                   VerticalOptions="Center">
+                                <Button Text="✎"
+                                        Style="{StaticResource TradeTableButton}"
+                                        Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}},
+                                                  Path=BindingContext.OpenOrdersVm.ModifyCommand}"
+                                        CommandParameter="{Binding Order}" />
+                                <Button Text="✕"
+                                        Style="{StaticResource TradeTableButton}"
+                                        Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}},
+                                                  Path=BindingContext.OpenOrdersVm.CancelCommand}"
+                                        CommandParameter="{Binding Order}" />
+                            </HorizontalStackLayout>
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
