@@ -16,6 +16,7 @@ namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 public partial class PortfolioHoldingsViewModel : BaseViewModel
 {
     private readonly HashSet<(int StockId, CurrencyType Currency)> _subscriptions = new();
+    private readonly Dictionary<int, PositionRow> _rowsByStockId = new();
 
     private readonly IUserPortfolioService _portfolio;
     private readonly IMarketDataService    _market;
@@ -70,22 +71,56 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
         await Shell.Current.GoToAsync("///TradePage");
     }
 
+    // Sync CurrentView in place rather than swapping the ObservableCollection
+    // reference. Replacing the collection causes the bound CollectionView to
+    // tear down and rebuild every row, producing a brief blank frame on every
+    // SnapshotChanged event. Now we mutate row state, add new positions, and
+    // remove closed-out positions individually so untouched rows do not flicker.
     private void RebuildView()
     {
         var positions = _portfolio.GetPositions().Where(p => p.Quantity > 0).ToList();
-        var rows = new List<PositionRow>(positions.Count);
+        var present = new HashSet<int>(positions.Count);
+        foreach (var p in positions) if (p.StockId > 0) present.Add(p.StockId);
 
+        // Remove rows whose positions disappeared (closed out / quantity → 0).
+        var stale = _rowsByStockId.Keys.Where(id => !present.Contains(id)).ToList();
+        foreach (var id in stale)
+        {
+            if (_rowsByStockId.Remove(id, out var row))
+            {
+                CurrentView.Remove(row);
+                row.Dispose();
+            }
+        }
+
+        // Add or refresh rows for each present position. Insert new rows in
+        // sorted position (TotalValue desc) so the initial order is correct;
+        // existing rows are not reordered on value drift to avoid pointless
+        // moves. The user can hit Refresh for a hard re-sort if needed.
         foreach (var pos in positions)
         {
             if (pos.StockId <= 0) continue;
-            rows.Add(CreatePositionRow(pos, CurrencyType.USD));
+
+            if (_rowsByStockId.TryGetValue(pos.StockId, out var existing))
+            {
+                if (_market.Quotes.TryGetValue((pos.StockId, CurrencyType.USD), out var live)
+                    && !ReferenceEquals(existing.Live, live))
+                {
+                    existing.Live = live;
+                }
+                existing.RefreshPositionFields();
+            }
+            else
+            {
+                var row = CreatePositionRow(pos, CurrencyType.USD);
+                _rowsByStockId[pos.StockId] = row;
+
+                int idx = 0;
+                while (idx < CurrentView.Count && CurrentView[idx].TotalValue >= row.TotalValue)
+                    idx++;
+                CurrentView.Insert(idx, row);
+            }
         }
-
-        rows.Sort((a, b) => b.TotalValue.CompareTo(a.TotalValue));
-
-        var old = CurrentView;
-        CurrentView = new ObservableCollection<PositionRow>(rows);
-        foreach (var r in old) r.Dispose();
     }
 
     private PositionRow CreatePositionRow(Position pos, CurrencyType currency)

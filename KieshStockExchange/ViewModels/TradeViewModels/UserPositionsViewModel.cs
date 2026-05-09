@@ -193,6 +193,21 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
     public string Total => CurrencyHelper.Format(TotalValue, Currency);
     #endregion
 
+    /// <summary>
+    /// Re-fire change notifications for getters derived from <see cref="Pos"/>.
+    /// Call after the portfolio service has mutated the cached Position's Quantity
+    /// or ReservedQuantity so bindings (Qty, Reserved, Available, Total) refresh
+    /// in place rather than the row being torn down and re-created.
+    /// </summary>
+    public void RefreshPositionFields()
+    {
+        if (_disposed) return;
+        OnPropertyChanged(nameof(Qty));
+        OnPropertyChanged(nameof(Reserved));
+        OnPropertyChanged(nameof(Available));
+        OnPropertyChanged(nameof(Total));
+    }
+
     #region Live Quote Change Handler and Disposal
     partial void OnLiveChanged(LiveQuote? oldQuote, LiveQuote? newQuote)
     {
