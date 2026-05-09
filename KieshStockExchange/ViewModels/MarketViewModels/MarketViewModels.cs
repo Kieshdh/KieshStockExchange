@@ -79,6 +79,11 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             // Idempotent — already-subscribed books just bump the ref count.
             await _market.SubscribeAllAsync(CurrencyType.USD, forUi: true).ConfigureAwait(false);
 
+            // Prime the trending lists immediately. Without this the user sees
+            // an empty Top Gainers / Top Losers / Most Active panel for up to
+            // 5s while waiting for TrendingService's periodic timer.
+            await Trending.RecomputeMoversAsync().ConfigureAwait(false);
+
             // Force an immediate poll then start the 5-second cadence so the
             // table rows refresh on a budget instead of on every tick.
             await MainThread.InvokeOnMainThreadAsync(() =>
