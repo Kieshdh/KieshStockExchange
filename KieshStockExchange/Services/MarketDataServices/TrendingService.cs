@@ -101,11 +101,30 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
         _timer.Dispose();
     }
 
+    /// <summary>
+    /// Mirror <paramref name="src"/> into <paramref name="target"/> in place. The
+    /// previous Clear-and-Add raised a Reset event every tick which made the bound
+    /// CollectionView tear down and rebuild every row — visible as a flicker on
+    /// the Top Gainers / Top Losers / Most Active lists. Now we only Move, Insert
+    /// or Remove individual entries so untouched rows stay steady.
+    /// </summary>
     private static void Replace(ObservableCollection<LiveQuote> target, IList<LiveQuote> src)
     {
-        target.Clear();
-        foreach (var x in src) 
-            target.Add(x);
+        for (int i = 0; i < src.Count; i++)
+        {
+            var item = src[i];
+            if (i >= target.Count) { target.Add(item); continue; }
+            if (ReferenceEquals(target[i], item)) continue;
+
+            int existing = -1;
+            for (int j = i + 1; j < target.Count; j++)
+            {
+                if (ReferenceEquals(target[j], item)) { existing = j; break; }
+            }
+            if (existing >= 0) target.Move(existing, i);
+            else target.Insert(i, item);
+        }
+        while (target.Count > src.Count) target.RemoveAt(target.Count - 1);
     }
     #endregion
 }
