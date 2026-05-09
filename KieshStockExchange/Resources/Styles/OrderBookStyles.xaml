@@ -146,6 +146,22 @@
         </Style.Triggers>
     </Style>
 
+    <!-- FundTransaction Kind column. Same green/red language as Side, but keyed
+         on IsDeposit / IsWithdrawal so the binding works on FundTransaction
+         directly (no IsBuyOrder/IsSellOrder available there). -->
+    <Style x:Key="TradeTableKindLabel" TargetType="Label"
+           BasedOn="{StaticResource TradeTableRowLabel}">
+        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Style.Triggers>
+            <DataTrigger TargetType="Label" Binding="{Binding IsDeposit}"    Value="True">
+                <Setter Property="TextColor" Value="{DynamicResource BuyGreen}" />
+            </DataTrigger>
+            <DataTrigger TargetType="Label" Binding="{Binding IsWithdrawal}" Value="True">
+                <Setter Property="TextColor" Value="{DynamicResource SellRed}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
     <!-- Small icon-button for cancel / remove actions in a table row -->
     <Style x:Key="TradeTableButton" TargetType="Button">
         <Setter Property="BackgroundColor" Value="Transparent" />

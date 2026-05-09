@@ -49,7 +49,7 @@
                                 <Grid ColumnDefinitions="2*,*,*,3*"
                                       Style="{StaticResource TradeTableRowGrid}">
                                     <Label Grid.Column="0" Text="{Binding CreatedAtDisplay}"     Style="{StaticResource TradeTableRowLabel}" />
-                                    <Label Grid.Column="1" Text="{Binding Kind}"                 Style="{StaticResource TradeTableSideLabel}" />
+                                    <Label Grid.Column="1" Text="{Binding Kind}"                 Style="{StaticResource TradeTableKindLabel}" />
                                     <Label Grid.Column="2" Text="{Binding SignedAmountDisplay}"  Style="{StaticResource TradeTableRowLabel}" />
                                     <Label Grid.Column="3" Text="{Binding Note}"                 Style="{StaticResource TradeTableRowLabel}" />
                                 </Grid>
