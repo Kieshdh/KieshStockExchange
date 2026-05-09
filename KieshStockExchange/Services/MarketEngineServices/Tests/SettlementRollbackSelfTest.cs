@@ -378,6 +378,7 @@ internal sealed class FakeDb : IDataBaseService
     public Task<(List<User> Items, int Total)> GetUsersPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<User?> GetUserById(int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<User?> GetUserByUsername(string username, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<List<User>> GetUsersByIds(IReadOnlyList<int> userIds, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<bool> UserExists(int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task CreateUser(User user, CancellationToken ct = default) => throw new NotImplementedException();
     public Task UpdateUser(User user, CancellationToken ct = default) => throw new NotImplementedException();
@@ -449,6 +450,12 @@ internal sealed class FakeDb : IDataBaseService
     public Task UpdateFund(Fund fund, CancellationToken ct = default) => throw new NotImplementedException();
     public Task DeleteFund(Fund fund, CancellationToken ct = default) => throw new NotImplementedException();
     public Task UpsertFund(Fund fund, CancellationToken ct = default) => throw new NotImplementedException();
+
+    public Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default) => throw new NotImplementedException();
+
+    public Task<UserPreferences?> GetUserPreferencesByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default) => throw new NotImplementedException();
 
     public Task<List<Candle>> GetCandlesAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Candle?> GetCandleById(int candleId, CancellationToken ct = default) => throw new NotImplementedException();

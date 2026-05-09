@@ -31,8 +31,9 @@
             <Button Text="All" Command="{Binding SetAllTimeCommand}"    Style="{StaticResource TableSortingButton}"/>
         </HorizontalStackLayout>
 
-        <!-- CollectionView -->
-        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="2">
+        <!-- CollectionView with a centred loading spinner overlay while a page loads -->
+        <Grid Grid.Row="2">
+        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:TransactionTableObject">
                     <Grid ColumnDefinitions="50, 3*, 2*, *, *, 3*, 2*, 3*, 3"
@@ -61,6 +62,13 @@
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>
+            <ActivityIndicator IsVisible="{Binding IsBusy}"
+                               IsRunning="{Binding IsBusy}"
+                               HorizontalOptions="Center"
+                               VerticalOptions="Center"
+                               WidthRequest="40"
+                               HeightRequest="40" />
+        </Grid>
 
         <!-- Pager -->
         <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}" Grid.Row="3"

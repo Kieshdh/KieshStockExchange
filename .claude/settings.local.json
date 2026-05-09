@@ -66,7 +66,8 @@
       "WebFetch(domain:claude.ai)",
       "PowerShell(Get-ChildItem *)",
       "Read(//c/Users/kjden/.claude/**)",
-      "Read(//c/Users/kjden/.claude/plugins/**)"
+      "Read(//c/Users/kjden/.claude/plugins/**)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\\\\KieshStockExchange\\\\Views\" -Name -Recurse | Where-Object { $_ -match \"\\(Trade|Chart\\)\" })"
     ]
   },
   "outputStyle": "default"

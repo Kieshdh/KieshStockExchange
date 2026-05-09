@@ -16,8 +16,13 @@ public partial class ChangeEmailPage : ContentPage
 
     private void OnCloseRequested(object? sender, EventArgs e)
     {
-        var win = this.Window;
-        if (win != null)
-            Application.Current?.CloseWindow(win);
+        // CloseWindow is a WinUI call that requires the UI thread; the VM may fire this
+        // event from a background continuation (ConfigureAwait(false) on the DB call).
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            var win = this.Window;
+            if (win != null)
+                Application.Current?.CloseWindow(win);
+        });
     }
 }

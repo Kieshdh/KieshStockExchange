@@ -14,4 +14,15 @@
     <Color x:Key="ChartPriceLineUp">#26A69A</Color>
     <Color x:Key="ChartPriceLineDown">#EF5350</Color>
 
+    <!-- Moving-average overlay palette. Five distinct hues so the user can stack
+         several MAs without colour collisions. Themes can override individually. -->
+    <Color x:Key="ChartMaColor1">#3B82F6</Color>  <!-- blue -->
+    <Color x:Key="ChartMaColor2">#F59E0B</Color>  <!-- amber -->
+    <Color x:Key="ChartMaColor3">#A855F7</Color>  <!-- purple -->
+    <Color x:Key="ChartMaColor4">#06B6D4</Color>  <!-- cyan -->
+    <Color x:Key="ChartMaColor5">#FACC15</Color>  <!-- yellow -->
+
+    <!-- Price-marker line accent. Drawn for user-placed horizontal markers. -->
+    <Color x:Key="ChartMarker">#EAB308</Color>
+
 </ResourceDictionary>

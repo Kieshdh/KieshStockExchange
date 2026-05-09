@@ -19,7 +19,8 @@
                    Style="{StaticResource TableHeaderLabel}" />
         </Grid>
 
-        <!-- CollectionView for displaying Stock data -->
+        <!-- CollectionView with a centred loading spinner overlay while a page loads -->
+        <Grid>
         <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:StockTableObject">
@@ -53,6 +54,13 @@
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>
+            <ActivityIndicator IsVisible="{Binding IsBusy}"
+                               IsRunning="{Binding IsBusy}"
+                               HorizontalOptions="Center"
+                               VerticalOptions="Center"
+                               WidthRequest="40"
+                               HeightRequest="40" />
+        </Grid>
 
         <!-- Table Page Navigation -->
         <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}"

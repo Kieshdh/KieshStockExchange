@@ -54,6 +54,3 @@ public interface IMarketDataService
     Task<IReadOnlyList<Stock>> GetAllStocksAsync(CancellationToken ct = default);
     #endregion
 }
-
-/// <summary> Type-safe enum for ring buffer duration settings. </summary>
-public enum RingBufferDuration { OneMinute, FiveMinutes, FifteenMinutes, OneHour }

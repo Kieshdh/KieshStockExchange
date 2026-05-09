@@ -40,7 +40,6 @@ public class UserSessionService : IUserSessionService
 
     public CurrencyType BaseCurrency => _snapshot.BaseCurrency;
     public CandleResolution DefaultCandleResolution => _snapshot.DefaultCandleResolution;
-    public RingBufferDuration DefaultRingDuration => _snapshot.DefaultRingDuration;
     public int? CurrentStockId => _snapshot.CurrentStockId;
     public bool AiBotsRunning => _aiBotsRunning;
     #endregion
@@ -68,7 +67,7 @@ public class UserSessionService : IUserSessionService
 
     #region State management
     public void SetAuthenticatedUser(User user, bool keepLoggedIn, CurrencyType? baseCurrency = null,
-        CandleResolution? defaultResolution = null, RingBufferDuration? ringDuration = null)
+        CandleResolution? defaultResolution = null)
     {
         // Start from the existing snapshot and overwrite certain fields.
         var newSnapshot = _snapshot with
@@ -80,8 +79,7 @@ public class UserSessionService : IUserSessionService
             IsAdmin = user.IsAdmin,
             KeepLoggedIn = keepLoggedIn,
             BaseCurrency = baseCurrency ?? _snapshot.BaseCurrency,
-            DefaultCandleResolution = defaultResolution ?? _snapshot.DefaultCandleResolution,
-            DefaultRingDuration = ringDuration ?? _snapshot.DefaultRingDuration
+            DefaultCandleResolution = defaultResolution ?? _snapshot.DefaultCandleResolution
         };
 
         SetSnapshot(newSnapshot);
@@ -97,9 +95,6 @@ public class UserSessionService : IUserSessionService
 
     public void SetDefaultCandleResolution(CandleResolution resolution)
         => SetSnapshot(_snapshot with { DefaultCandleResolution = resolution });
-
-    public void SetDefaultRingDuration(RingBufferDuration duration)
-        => SetSnapshot(_snapshot with { DefaultRingDuration = duration });
 
     public void SetCurrentStockId(int? stockId)
         => SetSnapshot(_snapshot with { CurrentStockId = stockId });

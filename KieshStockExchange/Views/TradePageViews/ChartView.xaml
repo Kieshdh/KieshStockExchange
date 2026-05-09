@@ -2,7 +2,9 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:models="clr-namespace:KieshStockExchange.Models"
-             x:Class="KieshStockExchange.Views.TradePageViews.ChartView">
+             xmlns:helpers="clr-namespace:KieshStockExchange.Services.MarketDataServices.Helpers"
+             x:Class="KieshStockExchange.Views.TradePageViews.ChartView"
+             x:Name="ChartRoot">
 
     <Border BackgroundColor="{DynamicResource ChartBg}"
             Stroke="{DynamicResource Divider}"
@@ -15,7 +17,7 @@
 
         <!-- Toolbar -->
         <Grid Grid.Row="0" Style="{StaticResource ChartToolbar}"
-              ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+              ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
             <!-- Resolution segments -->
             <HorizontalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
@@ -115,18 +117,46 @@
             <!-- Spacer -->
             <BoxView Grid.Column="1" Color="Transparent" />
 
+            <!-- Add price marker at current price -->
+            <Button Grid.Column="2" Text="+ Marker"
+                    Style="{StaticResource ChartLiveButton.Off}"
+                    Command="{Binding AddMarkerAtCurrentCommand}" />
+            <!-- Y-axis auto-fit toggle -->
+            <Button Grid.Column="3" Text="Autofit"
+                    Style="{StaticResource ChartLiveButton.Off}"
+                    Clicked="OnYAutoFitClicked">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding IsYAutoFit}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <!-- MA settings toggle -->
+            <Button Grid.Column="4" Text="MA"
+                    Style="{StaticResource ChartLiveButton.Off}"
+                    Command="{Binding ToggleMaSettingsCommand}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding IsMaSettingsOpen}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
             <!-- Zoom out -->
-            <Button Grid.Column="2" Text="−"
+            <Button Grid.Column="5" Text="−"
                     Style="{StaticResource ChartIconButton}"
                     Command="{Binding ZoomOutCommand}" />
             <!-- Zoom in -->
-            <Button Grid.Column="3" Text="+"
+            <Button Grid.Column="6" Text="+"
                     Style="{StaticResource ChartIconButton}"
                     Command="{Binding ZoomInCommand}" />
             <!-- Separator -->
-            <BoxView Grid.Column="4" Style="{StaticResource ChartToolbarSeparator}" />
+            <BoxView Grid.Column="7" Style="{StaticResource ChartToolbarSeparator}" />
             <!-- Live -->
-            <Button Grid.Column="5" Text="LIVE"
+            <Button Grid.Column="8" Text="LIVE"
                     Style="{StaticResource ChartLiveButton.Off}"
                     Command="{Binding GoLiveCommand}">
                 <Button.Triggers>
@@ -145,6 +175,7 @@
                       Style="{StaticResource ChartSurface}">
             <GraphicsView.GestureRecognizers>
                 <PanGestureRecognizer x:Name="ChartPan" />
+                <PointerGestureRecognizer x:Name="ChartPointer" />
             </GraphicsView.GestureRecognizers>
         </GraphicsView>
 
@@ -159,34 +190,34 @@
 
             <HorizontalStackLayout Spacing="4">
                 <Label Text="O" Style="{StaticResource ChartOhlcKey}" />
-                <Label Text="{Binding LatestCandle.OpenDisplay, FallbackValue=''}"
+                <Label Text="{Binding DisplayedCandle.OpenDisplay, FallbackValue=''}"
                        Style="{StaticResource ChartOhlcValue}" />
             </HorizontalStackLayout>
 
             <HorizontalStackLayout Spacing="4">
                 <Label Text="H" Style="{StaticResource ChartOhlcKey}" />
-                <Label Text="{Binding LatestCandle.HighDisplay, FallbackValue=''}"
+                <Label Text="{Binding DisplayedCandle.HighDisplay, FallbackValue=''}"
                        Style="{StaticResource ChartOhlcValue}" />
             </HorizontalStackLayout>
 
             <HorizontalStackLayout Spacing="4">
                 <Label Text="L" Style="{StaticResource ChartOhlcKey}" />
-                <Label Text="{Binding LatestCandle.LowDisplay, FallbackValue=''}"
+                <Label Text="{Binding DisplayedCandle.LowDisplay, FallbackValue=''}"
                        Style="{StaticResource ChartOhlcValue}" />
             </HorizontalStackLayout>
 
             <HorizontalStackLayout Spacing="4">
                 <Label Text="C" Style="{StaticResource ChartOhlcKey}" />
-                <Label Text="{Binding LatestCandle.CloseDisplay, FallbackValue=''}">
+                <Label Text="{Binding DisplayedCandle.CloseDisplay, FallbackValue=''}">
                     <Label.Style>
                         <Style TargetType="Label" BasedOn="{StaticResource ChartOhlcValue}">
                             <Style.Triggers>
                                 <DataTrigger TargetType="Label"
-                                             Binding="{Binding LatestCandle.IsBullish}" Value="True">
+                                             Binding="{Binding DisplayedCandle.IsBullish}" Value="True">
                                     <Setter Property="TextColor" Value="{DynamicResource ChartBull}" />
                                 </DataTrigger>
                                 <DataTrigger TargetType="Label"
-                                             Binding="{Binding LatestCandle.IsBearish}" Value="True">
+                                             Binding="{Binding DisplayedCandle.IsBearish}" Value="True">
                                     <Setter Property="TextColor" Value="{DynamicResource ChartBear}" />
                                 </DataTrigger>
                             </Style.Triggers>
@@ -197,11 +228,60 @@
 
             <HorizontalStackLayout Spacing="4">
                 <Label Text="VOL" Style="{StaticResource ChartOhlcKey}" />
-                <Label Text="{Binding LatestCandle.Volume, FallbackValue='', StringFormat='{0:N0}'}"
+                <Label Text="{Binding DisplayedCandle.Volume, FallbackValue='', StringFormat='{0:N0}'}"
                        Style="{StaticResource ChartOhlcValue}" />
             </HorizontalStackLayout>
 
         </HorizontalStackLayout>
+
+        <!-- MA settings overlay: anchored top-right of the chart canvas. -->
+        <Border Grid.Row="1"
+                IsVisible="{Binding IsMaSettingsOpen}"
+                BackgroundColor="{DynamicResource ChartPanel}"
+                Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1"
+                StrokeShape="RoundRectangle 8"
+                Padding="10"
+                Margin="0,10,72,0"
+                VerticalOptions="Start"
+                HorizontalOptions="End"
+                MinimumWidthRequest="380">
+            <VerticalStackLayout Spacing="8">
+                <Label Text="Moving averages" Style="{StaticResource ChartOhlcValue}" />
+                <CollectionView ItemsSource="{Binding MaSeries}" SelectionMode="None">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="Auto,60,60,80,80,28"
+                                  ColumnSpacing="8" Padding="0,4"
+                                  HorizontalOptions="Fill">
+                                <Switch Grid.Column="0" IsToggled="{Binding Enabled}" />
+                                <Label Grid.Column="1" Text="{Binding Label}"
+                                       Style="{StaticResource ChartOhlcValue}"
+                                       VerticalOptions="Center" />
+                                <Entry Grid.Column="2" Text="{Binding Period}" Keyboard="Numeric"
+                                       FontSize="12" />
+                                <Picker Grid.Column="3"
+                                        ItemsSource="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.MaKinds}"
+                                        SelectedItem="{Binding Kind}"
+                                        FontSize="12" />
+                                <Picker Grid.Column="4"
+                                        ItemsSource="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.MaColorOptions}"
+                                        ItemDisplayBinding="{Binding Name}"
+                                        SelectedItem="{Binding SelectedColorOption}"
+                                        FontSize="12" />
+                                <Button Grid.Column="5" Text="✕"
+                                        Style="{StaticResource ChartIconButton}"
+                                        Command="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.RemoveMaCommand}"
+                                        CommandParameter="{Binding .}" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+                <Button Text="+ Add MA"
+                        Style="{StaticResource ChartLiveButton.Off}"
+                        Command="{Binding AddMaCommand}" />
+            </VerticalStackLayout>
+        </Border>
     </Grid>
     </Border>
 </ContentView>

@@ -26,7 +26,6 @@ public interface IUserSessionService
 
     CurrencyType BaseCurrency { get; }
     CandleResolution DefaultCandleResolution { get; }
-    RingBufferDuration DefaultRingDuration { get; }
     int? CurrentStockId { get; }
 
     /// <summary>Set the logged-in user and basic preferences.</summary>
@@ -34,15 +33,13 @@ public interface IUserSessionService
         User user,
         bool keepLoggedIn,
         CurrencyType? baseCurrency = null,
-        CandleResolution? defaultResolution = null,
-        RingBufferDuration? ringDuration = null);
+        CandleResolution? defaultResolution = null);
 
     /// <summary>Clear the session back to "anonymous guest".</summary>
     void ClearSession();
 
     void SetBaseCurrency(CurrencyType currency);
     void SetDefaultCandleResolution(CandleResolution resolution);
-    void SetDefaultRingDuration(RingBufferDuration duration);
     void SetCurrentStockId(int? stockId);
 
     // Background services
@@ -66,7 +63,6 @@ public sealed record SessionSnapshot(
     bool KeepLoggedIn,
     CurrencyType BaseCurrency,
     CandleResolution DefaultCandleResolution,
-    RingBufferDuration DefaultRingDuration,
     int? CurrentStockId)
 {
     public static SessionSnapshot CreateDefault() => new(
@@ -77,7 +73,6 @@ public sealed record SessionSnapshot(
         IsAdmin: false,
         KeepLoggedIn: false,
         BaseCurrency: CurrencyType.USD,
-        DefaultCandleResolution: CandleResolution.Default, 
-        DefaultRingDuration: RingBufferDuration.FiveMinutes,
+        DefaultCandleResolution: CandleResolution.Default,
         CurrentStockId: null);
 }

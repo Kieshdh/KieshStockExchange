@@ -21,6 +21,8 @@ public interface IDataBaseService
     Task<(List<User> Items, int Total)> GetUsersPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default);
     Task<User?> GetUserById(int userId, CancellationToken ct = default);
     Task<User?> GetUserByUsername(string username, CancellationToken ct = default);
+    /// <summary>Batch lookup by ID — single query rather than N round-trips.</summary>
+    Task<List<User>> GetUsersByIds(IReadOnlyList<int> userIds, CancellationToken ct = default);
     Task<bool> UserExists(int userId, CancellationToken ct = default);
     Task CreateUser(User user, CancellationToken ct = default);
     Task UpdateUser(User user, CancellationToken ct = default);
@@ -134,6 +136,16 @@ public interface IDataBaseService
     Task DeleteMessage(Message message, CancellationToken ct = default);
     Task<bool> MarkMessageRead(int messageId, DateTime? readAtUtc = null, CancellationToken ct = default);
     Task<int> MarkAllMessagesRead(int userId, DateTime? readAtUtc = null, CancellationToken ct = default);
+    #endregion
+
+    #region FundTransaction operations
+    Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default);
+    Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default);
+    #endregion
+
+    #region UserPreferences operations
+    Task<UserPreferences?> GetUserPreferencesByUserId(int userId, CancellationToken ct = default);
+    Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default);
     #endregion
 
     #region AIUser operations

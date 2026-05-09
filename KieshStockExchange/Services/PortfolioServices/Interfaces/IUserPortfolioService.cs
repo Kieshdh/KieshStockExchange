@@ -84,6 +84,22 @@ public interface IUserPortfolioService
     /// <summary>Release reserved cash and withdraw it in one atomic operation.</summary>
     Task<bool> ReleaseFromReservedFundsAsync(decimal amount, CurrencyType currency,
         int? asUserId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// User-initiated cash deposit. Records a <see cref="FundTransaction"/> audit row
+    /// in the same DB transaction that mutates the <see cref="Fund"/> balance, then
+    /// updates the snapshot. Distinct from <see cref="AddFundsAsync"/> which is used
+    /// by infrastructure (e.g. AI bot seeding) and intentionally NOT audited.
+    /// </summary>
+    Task<bool> DepositAsync(decimal amount, CurrencyType currency, string? note = null,
+        int? asUserId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// User-initiated cash withdrawal. Returns false on insufficient available balance.
+    /// Records a <see cref="FundTransaction"/> audit row alongside the balance change.
+    /// </summary>
+    Task<bool> WithdrawAsync(decimal amount, CurrencyType currency, string? note = null,
+        int? asUserId = null, CancellationToken ct = default);
     #endregion
 
     #region Mutations (Positions)

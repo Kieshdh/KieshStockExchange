@@ -92,8 +92,9 @@
             </HorizontalStackLayout>
         </Grid>
 
-        <!-- CollectionView for displaying user data -->
-        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10" Grid.Row="2">
+        <!-- CollectionView with a centred loading spinner overlay while a page loads -->
+        <Grid Grid.Row="2">
+        <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="vm:FundTableObject">
                     <Grid ColumnDefinitions="60, *, *, *, *, *, *, *, *, 60, 3" 
@@ -169,6 +170,13 @@
                 </DataTemplate>
             </CollectionView.ItemTemplate>
         </CollectionView>
+            <ActivityIndicator IsVisible="{Binding IsBusy}"
+                               IsRunning="{Binding IsBusy}"
+                               HorizontalOptions="Center"
+                               VerticalOptions="Center"
+                               WidthRequest="40"
+                               HeightRequest="40" />
+        </Grid>
 
         <!-- Table Page Navigation -->
         <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}" Grid.Row="3" 

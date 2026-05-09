@@ -177,6 +177,14 @@ public class UserPortfolioService : IUserPortfolioService
     public async Task<bool> ReleaseFromReservedFundsAsync(decimal amount, CurrencyType currency,
         int? asUserId = null, CancellationToken ct = default)
         => await MutateFundAsync(FundMutation.SpendReserved, amount, currency, asUserId, ct);
+
+    public async Task<bool> DepositAsync(decimal amount, CurrencyType currency, string? note = null,
+        int? asUserId = null, CancellationToken ct = default)
+        => await DepositOrWithdrawAsync(FundTransaction.Kinds.Deposit, amount, currency, note, asUserId, ct);
+
+    public async Task<bool> WithdrawAsync(decimal amount, CurrencyType currency, string? note = null,
+        int? asUserId = null, CancellationToken ct = default)
+        => await DepositOrWithdrawAsync(FundTransaction.Kinds.Withdrawal, amount, currency, note, asUserId, ct);
     #endregion
 
     #region Position Mutations
@@ -204,6 +212,96 @@ public class UserPortfolioService : IUserPortfolioService
     #region Internal Mutations
     private enum FundMutation { Add, Withdraw, Reserve, Unreserve, SpendReserved }
     private enum PositionMutation { Add, Remove, Reserve, Unreserve, SpendReserved }
+
+    /// <summary>
+    /// Audited fund mutation: changes the Fund balance and writes a FundTransaction row
+    /// in the same DB transaction. Used only by user-facing Deposit/Withdraw — the
+    /// MutateFundAsync path stays unaudited so bot/infrastructure flows don't pollute
+    /// the audit table.
+    /// </summary>
+    private async Task<bool> DepositOrWithdrawAsync(string kind, decimal amount, CurrencyType currency,
+        string? note, int? asUserId, CancellationToken ct)
+    {
+        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authErr);
+        if (authErr != null) { _logger.LogWarning(authErr); return false; }
+        if (!CanModifyPortfolio(targetUserId))
+        {
+            _logger.LogWarning("No permission to deposit/withdraw for user {UserId}", targetUserId);
+            return false;
+        }
+        if (amount <= 0)
+        {
+            _logger.LogWarning("Amount must be positive. Given: {Amount}", amount);
+            return false;
+        }
+        if (!CurrencyHelper.IsSupported(currency))
+        {
+            _logger.LogWarning("Unsupported currency {Currency}", currency);
+            return false;
+        }
+        if (kind is not (FundTransaction.Kinds.Deposit or FundTransaction.Kinds.Withdrawal))
+        {
+            _logger.LogWarning("Unknown fund-transaction kind {Kind}", kind);
+            return false;
+        }
+
+        var success = false;
+        try
+        {
+            await _db.RunInTransactionAsync(async _ =>
+            {
+                var fund = await _db.GetFundByUserIdAndCurrency(targetUserId, currency, ct).ConfigureAwait(false)
+                    ?? new Fund { UserId = targetUserId, CurrencyType = currency, TotalBalance = 0 };
+
+                if (kind == FundTransaction.Kinds.Deposit)
+                {
+                    fund.AddFunds(amount);
+                }
+                else // Withdrawal
+                {
+                    if (!CurrencyHelper.GreaterOrEqual(fund.AvailableBalance, amount, currency))
+                    {
+                        _logger.LogWarning(
+                            "Insufficient available funds for withdrawal {Amount} {Currency} (user {UserId}, available={Avail}).",
+                            amount, currency, targetUserId, fund.AvailableBalance);
+                        // Throw so the transaction rolls back; we'll return false from the catch.
+                        throw new InsufficientFundsException();
+                    }
+                    fund.WithdrawFunds(amount);
+                }
+
+                await _db.UpsertFund(fund, ct).ConfigureAwait(false);
+
+                var auditRow = new FundTransaction
+                {
+                    UserId = targetUserId,
+                    CurrencyType = currency,
+                    Amount = amount,
+                    Kind = kind,
+                    Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
+                    CreatedAt = TimeHelper.NowUtc()
+                };
+                await _db.CreateFundTransaction(auditRow, ct).ConfigureAwait(false);
+                success = true;
+            }, ct).ConfigureAwait(false);
+        }
+        catch (InsufficientFundsException) { return false; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Deposit/Withdraw failed for user {UserId} ({Kind} {Amount} {Currency}).",
+                targetUserId, kind, amount, currency);
+            return false;
+        }
+
+        if (success)
+        {
+            // Refresh outside the DB transaction so the snapshot reflects the new balance.
+            await RefreshAsync(asUserId, ct).ConfigureAwait(false);
+        }
+        return success;
+    }
+
+    private sealed class InsufficientFundsException : Exception { }
 
     private async Task<bool> MutateFundAsync(FundMutation mutation, decimal amount, CurrencyType currency,
         int? asUserId, CancellationToken ct)

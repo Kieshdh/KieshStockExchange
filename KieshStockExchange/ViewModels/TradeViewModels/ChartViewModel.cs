@@ -1,7 +1,11 @@
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -35,8 +39,23 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly List<Candle> _candleBuffer = new();
     public IReadOnlyList<Candle> CandleItems => _candleBuffer;
 
-    // Last candle in the buffer; bound by ChartView's OHLCV overlay strip.
+    // Last candle in the buffer; bound by ChartView's OHLCV overlay strip when no
+    // candle is being hovered. Use DisplayedCandle for the binding so the strip
+    // automatically falls back to "latest" when the pointer leaves the chart.
     [ObservableProperty] private Candle? _latestCandle;
+
+    // Candle the user is currently pointing at, or null when the pointer is
+    // outside the chart / over empty pre-history space.
+    [ObservableProperty] private Candle? _hoveredCandle;
+
+    /// <summary>
+    /// Candle the OHLCV strip is currently showing — hovered when the pointer
+    /// is over a real candle, latest otherwise.
+    /// </summary>
+    public Candle? DisplayedCandle => HoveredCandle ?? LatestCandle;
+
+    partial void OnHoveredCandleChanged(Candle? value) => OnPropertyChanged(nameof(DisplayedCandle));
+    partial void OnLatestCandleChanged(Candle? value)  => OnPropertyChanged(nameof(DisplayedCandle));
 
     public event Action? RedrawRequested;
 
@@ -58,8 +77,62 @@ public partial class ChartViewModel : StockAwareViewModel
     [ObservableProperty] private double _yPaddingPercent = 0.06;
     [ObservableProperty] private double _xPaddingPercent = 0.02;
 
-    public bool IsLive => OffsetFromLatest == 0;
-    public int MaxOffset => Math.Max(0, CandleItems.Count - Math.Max(1, VisibleCount));
+    // Y-axis behaviour. When IsYAutoFit is true the chart re-fits the Y range to
+    // visible candles every frame. When false, the drawable freezes the current
+    // range (or uses ManualYMin/Max if set). Shift+wheel zooms Y in manual mode.
+    [ObservableProperty] private bool _isYAutoFit = true;
+    [ObservableProperty] private decimal? _manualYMin;
+    [ObservableProperty] private decimal? _manualYMax;
+
+    /// <summary>
+    /// Sets an explicit manual Y range (called by the View when the user enters
+    /// manual mode or scrolls Y in manual mode).
+    /// </summary>
+    public void SetManualYRange(decimal min, decimal max)
+    {
+        if (max <= min) return;
+        ManualYMin = min;
+        ManualYMax = max;
+        RequestRedraw();
+    }
+
+    partial void OnIsYAutoFitChanged(bool value) => RequestRedraw();
+    partial void OnManualYMinChanged(decimal? value) => RequestRedraw();
+    partial void OnManualYMaxChanged(decimal? value) => RequestRedraw();
+
+    // Moving averages — user-configurable. Defaults are the standard MA20/50/200,
+    // all disabled until the user toggles them on in the settings overlay.
+    [ObservableProperty] private bool _isMaSettingsOpen;
+
+    public ObservableCollection<MaConfig> MaSeries { get; } = new()
+    {
+        new MaConfig { Period = 20,  Kind = MaKind.Sma, ColorKey = "ChartMaColor1" },
+        new MaConfig { Period = 50,  Kind = MaKind.Sma, ColorKey = "ChartMaColor2" },
+        new MaConfig { Period = 200, Kind = MaKind.Sma, ColorKey = "ChartMaColor3" },
+    };
+
+    public IReadOnlyList<MaKind> MaKinds { get; } = new[] { MaKind.Sma, MaKind.Ema };
+    public IReadOnlyList<MaColorOption> MaColorOptions => MaColorOption.All;
+    private static readonly string[] _maColorRotation = new[]
+    {
+        "ChartMaColor1", "ChartMaColor2", "ChartMaColor3", "ChartMaColor4", "ChartMaColor5"
+    };
+
+    // Price marker lines drawn across the chart at user-chosen prices.
+    // Visual only — they do not trigger notifications.
+    public ObservableCollection<PriceMarker> Markers { get; } = new();
+
+    // "Live" includes any negative offset (latest candle still in view, with empty
+    // future-space on the right). Going strictly positive means we've panned into
+    // history — that's when the LIVE button lights up as off.
+    public bool IsLive => OffsetFromLatest <= 0;
+
+    // Soft pan bounds — quarter of the visible window of empty space on each side.
+    // Negative offsets push the latest candle leftward into the chart; values past
+    // CandleItems.Count expose blank pre-history space (useful while older history
+    // is still being lazy-loaded).
+    public int MinOffset => -(Math.Max(1, VisibleCount) / 4);
+    public int MaxOffset => CandleItems.Count + (Math.Max(1, VisibleCount) / 4);
 
     const int MaxFactor = 5;
     const int MinVisible = 20;
@@ -85,8 +158,25 @@ public partial class ChartViewModel : StockAwareViewModel
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
         _market = market ?? throw new ArgumentNullException(nameof(market));
 
+        // Repaint whenever the user adds, removes, toggles, or edits an MA.
+        MaSeries.CollectionChanged += OnMaSeriesCollectionChanged;
+        foreach (var cfg in MaSeries) cfg.PropertyChanged += OnMaConfigPropertyChanged;
+
+        Markers.CollectionChanged += (_, __) => RequestRedraw();
+
         InitializeSelection();
     }
+
+    private void OnMaSeriesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.NewItems != null)
+            foreach (MaConfig n in e.NewItems) n.PropertyChanged += OnMaConfigPropertyChanged;
+        if (e.OldItems != null)
+            foreach (MaConfig o in e.OldItems) o.PropertyChanged -= OnMaConfigPropertyChanged;
+        RequestRedraw();
+    }
+
+    private void OnMaConfigPropertyChanged(object? sender, PropertyChangedEventArgs e) => RequestRedraw();
     #endregion
 
     #region Abstract Overrides
@@ -129,10 +219,11 @@ public partial class ChartViewModel : StockAwareViewModel
     private void Pan(int candles)
     {
         if (candles == 0) return;
-        int newOffset = Math.Clamp(OffsetFromLatest + candles, 0, MaxOffset);
+        int newOffset = Math.Clamp(OffsetFromLatest + candles, MinOffset, MaxOffset);
         if (newOffset != OffsetFromLatest) OffsetFromLatest = newOffset;
 
-        // Trigger lazy load when nearing the left edge of our buffer
+        // Trigger lazy load when within one window of the data's left edge — including
+        // when the user has panned past the oldest loaded candle into the synthetic gap.
         if (CandleItems.Count - OffsetFromLatest - VisibleCount < VisibleCount)
             _ = LoadOlderAsync();
     }
@@ -155,6 +246,72 @@ public partial class ChartViewModel : StockAwareViewModel
     private void GoLive()
     {
         if (OffsetFromLatest != 0) OffsetFromLatest = 0;
+    }
+
+    [RelayCommand]
+    private void JumpToOldest()
+    {
+        // Snap so the oldest loaded candle sits at the left edge.
+        OffsetFromLatest = Math.Max(0, CandleItems.Count - VisibleCount);
+        _ = LoadOlderAsync();
+    }
+
+    [RelayCommand]
+    private void ToggleMaSettings() => IsMaSettingsOpen = !IsMaSettingsOpen;
+
+    [RelayCommand]
+    private void AddMa()
+    {
+        var key = _maColorRotation[MaSeries.Count % _maColorRotation.Length];
+        MaSeries.Add(new MaConfig
+        {
+            Period = 30,
+            Kind = MaKind.Sma,
+            ColorKey = key,
+            Enabled = true,
+        });
+    }
+
+    [RelayCommand]
+    private void RemoveMa(MaConfig? cfg)
+    {
+        if (cfg is null) return;
+        MaSeries.Remove(cfg);
+    }
+
+    [RelayCommand]
+    private void AddMarkerAtCurrent()
+    {
+        var price = GetCurrentPrice();
+        if (price is null || price.Value <= 0m) return;
+        Markers.Add(new PriceMarker(Guid.NewGuid(), price.Value));
+    }
+
+    [RelayCommand]
+    private void AddMarkerAt(decimal? price)
+    {
+        if (price is null || price.Value <= 0m) return;
+        Markers.Add(new PriceMarker(Guid.NewGuid(), price.Value));
+    }
+
+    [RelayCommand]
+    private void RemoveMarker(Guid id)
+    {
+        for (int i = Markers.Count - 1; i >= 0; i--)
+            if (Markers[i].Id == id) { Markers.RemoveAt(i); break; }
+    }
+
+    /// <summary>Replaces a marker's price in place (used during drag).</summary>
+    public void UpdateMarkerPrice(Guid id, decimal newPrice)
+    {
+        if (newPrice <= 0m) return;
+        for (int i = 0; i < Markers.Count; i++)
+        {
+            if (Markers[i].Id != id) continue;
+            Markers[i] = Markers[i] with { Price = newPrice };
+            RequestRedraw();
+            return;
+        }
     }
     #endregion
 
@@ -360,15 +517,86 @@ public partial class ChartViewModel : StockAwareViewModel
 
     public IReadOnlyList<Candle> GetVisibleCandles()
     {
-        // Buffer is maintained in ascending OpenTime order — no sort/copy needed,
-        // we hand back a thin range view over the same backing array.
+        // Buffer is maintained in ascending OpenTime order. Slice by viewport time
+        // range so empty pre-history / post-future space at the viewport edges is
+        // naturally represented as a shorter slice.
         int total = _candleBuffer.Count;
         if (total == 0) return Array.Empty<Candle>();
-        int end = Math.Max(0, total - OffsetFromLatest);
-        int take = Math.Max(1, VisibleCount);
-        int start = Math.Max(0, end - take);
+
+        var vp = GetViewport();
+        if (!vp.IsValid)
+        {
+            // Fallback (no resolution / empty buffer): return last VisibleCount candles
+            int end0 = total;
+            int take0 = Math.Max(1, VisibleCount);
+            int start0 = Math.Max(0, end0 - take0);
+            return _candleBuffer.GetRange(start0, end0 - start0);
+        }
+
+        int start = LowerBoundByOpenTime(vp.ViewStart);
+        int end = LowerBoundByOpenTime(vp.ViewEnd);
         if (start >= end) return Array.Empty<Candle>();
         return _candleBuffer.GetRange(start, end - start);
+    }
+
+    /// <summary>
+    /// Visible time-range window, derived from the latest candle's OpenTime, the
+    /// resolution bucket, OffsetFromLatest, and VisibleCount. Independent of how
+    /// many candles are actually loaded, so the drawable can render empty space
+    /// when the viewport extends past either end of the buffer.
+    /// </summary>
+    public ChartViewport GetViewport()
+    {
+        if (SelectedResolution == CandleResolution.None) return ChartViewport.Empty;
+        var bucket = TimeSpan.FromSeconds((int)SelectedResolution);
+        if (bucket <= TimeSpan.Zero) return ChartViewport.Empty;
+
+        var anchor = _candleBuffer.Count > 0
+            ? _candleBuffer[^1].OpenTime
+            : TimeHelper.FloorToBucketUtc(TimeHelper.NowUtc(), bucket);
+
+        // OffsetFromLatest=0 → latest candle's CloseTime sits at the right edge.
+        // Negative offsets push the right edge into the future, exposing blank space.
+        var viewEnd = anchor + bucket - TimeSpan.FromTicks(bucket.Ticks * OffsetFromLatest);
+        var viewStart = viewEnd - TimeSpan.FromTicks(bucket.Ticks * Math.Max(1, VisibleCount));
+        return new ChartViewport(viewStart, viewEnd, bucket);
+    }
+
+    // Returns the index of the first buffer entry with OpenTime >= t. If all entries
+    // are before t, returns _candleBuffer.Count. Used to slice by viewport time range.
+    private int LowerBoundByOpenTime(DateTime t)
+    {
+        int lo = 0, hi = _candleBuffer.Count;
+        while (lo < hi)
+        {
+            int mid = lo + ((hi - lo) >> 1);
+            if (_candleBuffer[mid].OpenTime < t) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    /// <summary>
+    /// Builds the data series for every enabled moving average against the current
+    /// candle buffer. Caller supplies a <paramref name="resolveColor"/> delegate to
+    /// translate a theme key into a concrete <see cref="Color"/> — the view layer
+    /// owns theme dictionaries, the VM stays free of <c>Application.Current</c>.
+    /// </summary>
+    public IReadOnlyList<MovingAverageSeries> BuildEnabledMas(Func<string, Color> resolveColor)
+    {
+        if (MaSeries.Count == 0) return Array.Empty<MovingAverageSeries>();
+
+        var enabled = new List<MovingAverageSeries>();
+        foreach (var cfg in MaSeries)
+        {
+            if (!cfg.Enabled || cfg.Period <= 1) continue;
+            var pts = cfg.Kind == MaKind.Ema
+                ? MovingAverageCalculator.Ema(_candleBuffer, cfg.Period)
+                : MovingAverageCalculator.Sma(_candleBuffer, cfg.Period);
+            if (pts.Count == 0) continue;
+            enabled.Add(new MovingAverageSeries(cfg.Period, cfg.Kind, resolveColor(cfg.ColorKey), pts));
+        }
+        return enabled;
     }
 
     public decimal? GetCurrentPrice()
@@ -415,15 +643,18 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         if (value < MinVisible) { VisibleCount = MinVisible; return; }
         if (value > MaxVisible) { VisibleCount = MaxVisible; return; }
-        // Clamp offset against the new max
-        if (OffsetFromLatest > MaxOffset) OffsetFromLatest = MaxOffset;
+        // Re-clamp offset against the new bounds (Min/MaxOffset both depend on VisibleCount)
+        int clamped = Math.Clamp(OffsetFromLatest, MinOffset, MaxOffset);
+        if (clamped != OffsetFromLatest) OffsetFromLatest = clamped;
+        OnPropertyChanged(nameof(MinOffset));
         OnPropertyChanged(nameof(MaxOffset));
         RequestRedraw();
     }
 
     partial void OnOffsetFromLatestChanged(int value)
     {
-        if (value < 0) { OffsetFromLatest = 0; return; }
+        int clamped = Math.Clamp(value, MinOffset, MaxOffset);
+        if (clamped != value) { OffsetFromLatest = clamped; return; }
         OnPropertyChanged(nameof(IsLive));
         RequestRedraw();
     }

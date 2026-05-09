@@ -6,7 +6,6 @@ using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
-using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.UserViewModels;
@@ -23,15 +22,17 @@ public partial class LoginViewModel : BaseViewModel
     #region Fields & Constructor
     private readonly IAuthService _auth;
     private readonly IUserSessionService _session;
+    private readonly IProfileService _profile;
     private readonly ILogger<LoginViewModel> _logger;
     private readonly Task _initTask;
 
     public LoginViewModel(IAuthService auth, IUserSessionService session,
-        ILogger<LoginViewModel> logger)
+        IProfileService profile, ILogger<LoginViewModel> logger)
     {
         Title = "Login";
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _profile = profile ?? throw new ArgumentNullException(nameof(profile));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         LoginCommand = new AsyncRelayCommand(ExecuteLogin);
 
@@ -83,7 +84,13 @@ public partial class LoginViewModel : BaseViewModel
         {
             // Start the session and start all background tasks
             _session.SetAuthenticatedUser(_auth.CurrentUser!, keepLoggedIn: true, CurrencyType.USD,
-                CandleResolution.Default, RingBufferDuration.FiveMinutes);
+                CandleResolution.Default);
+
+            // Restore persisted user preferences (theme, base currency, candle resolution)
+            // before navigating, so the destination page paints with the user's choices
+            // already applied. Failures are swallowed inside LoadPreferencesAsync.
+            await _profile.LoadPreferencesAsync(_auth.CurrentUserId);
+
             await _session.StartBotsAsync();
             await Shell.Current.GoToAsync("//TradePage");
         }

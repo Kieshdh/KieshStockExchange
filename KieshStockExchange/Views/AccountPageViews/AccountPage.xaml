@@ -144,11 +144,11 @@
                             <Button Grid.Column="0"
                                     Text="Deposit"
                                     Style="{StaticResource PrimaryActionButtonStyle}"
-                                    IsEnabled="False" />
+                                    Command="{Binding OpenDepositWithdrawCommand}" />
                             <Button Grid.Column="1"
                                     Text="Withdraw"
                                     Style="{StaticResource SecondaryActionButtonStyle}"
-                                    IsEnabled="False" />
+                                    Command="{Binding OpenDepositWithdrawCommand}" />
                         </Grid>
 
                     </VerticalStackLayout>

@@ -115,18 +115,23 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
         await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.GoToAsync("///LoginPage"));
     }
 
-    [RelayCommand] private void ChangeEmail()    => OpenInWindow<ChangeEmailPage>("Change Email");
-    [RelayCommand] private void ChangePassword() => OpenInWindow<ChangePasswordPage>("Change Password");
-    [RelayCommand] private void ChangeUsername() => OpenInWindow<ChangeUsernamePage>("Change Username");
+    [RelayCommand] private void ChangeEmail()        => OpenInWindow<ChangeEmailPage>("Change Email");
+    [RelayCommand] private void ChangePassword()     => OpenInWindow<ChangePasswordPage>("Change Password");
+    [RelayCommand] private void ChangeUsername()     => OpenInWindow<ChangeUsernamePage>("Change Username");
+    // The deposit/withdraw form has more rows (currency picker, balance, amount, note,
+    // three buttons) so it needs more vertical room than the simple change-* forms.
+    [RelayCommand] private void OpenDepositWithdraw() =>
+        OpenInWindow<DepositWithdrawPage>("Deposit / Withdraw", width: 520, height: 700);
 
-    private void OpenInWindow<TPage>(string title) where TPage : ContentPage
+    private void OpenInWindow<TPage>(string title, double width = 480, double height = 520)
+        where TPage : ContentPage
     {
         var page = _services.GetRequiredService<TPage>();
         var window = new Window(page)
         {
             Title  = title,
-            Width  = 480,
-            Height = 520
+            Width  = width,
+            Height = height
         };
         window.Destroying += (_, __) => MainThread.BeginInvokeOnMainThread(RefreshAll);
         Application.Current?.OpenWindow(window);

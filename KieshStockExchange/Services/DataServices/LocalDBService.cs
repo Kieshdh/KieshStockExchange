@@ -267,6 +267,25 @@ public class LocalDBService: IDataBaseService, IDisposable
             ct);
     }
 
+    public async Task<List<User>> GetUsersByIds(IReadOnlyList<int> userIds, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (userIds is null || userIds.Count == 0) return new List<User>();
+
+        // Deduplicate so the IN-clause query stays small even if the caller passes a noisy
+        // list (e.g., orders where many rows share the same UserId).
+        var distinct = userIds.Distinct().ToList();
+
+        return await RunDbAsync(async () =>
+        {
+            // SQLite-net translates Contains() into an IN (...) clause, so this is a
+            // single round-trip regardless of how many IDs are in the list.
+            return await _db.Table<User>()
+                .Where(u => distinct.Contains(u.UserId))
+                .ToListAsync();
+        }, ct);
+    }
+
     public async Task<bool> UserExists(int userId, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
@@ -1164,6 +1183,49 @@ public class LocalDBService: IDataBaseService, IDisposable
     }
     #endregion
 
+    #region FundTransaction operations
+    public async Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<FundTransaction>()
+               .Where(t => t.UserId == userId)
+               .OrderByDescending(t => t.CreatedAt)
+               .ToListAsync(),
+            ct);
+    }
+
+    public async Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!tx.IsValid())
+            throw new ArgumentException("FundTransaction entity is not valid", nameof(tx));
+        await RunDbAsync(() => _db.InsertAsync(tx), ct);
+    }
+    #endregion
+
+    #region UserPreferences operations
+    public async Task<UserPreferences?> GetUserPreferencesByUserId(int userId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<UserPreferences>()
+               .Where(p => p.UserId == userId)
+               .FirstOrDefaultAsync(),
+            ct);
+    }
+
+    public async Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!prefs.IsValid())
+            throw new ArgumentException("UserPreferences entity is not valid", nameof(prefs));
+
+        // PK is UserId (no AutoIncrement). InsertOrReplaceAsync handles both cases atomically.
+        await RunDbAsync(() => _db.InsertOrReplaceAsync(prefs), ct);
+    }
+    #endregion
+
     #region AIUser operations
     public async Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default)
     {
@@ -1246,6 +1308,8 @@ public class LocalDBService: IDataBaseService, IDisposable
             await _db.CreateTableAsync<Transaction>();
             await _db.CreateTableAsync<Position>();
             await _db.CreateTableAsync<Fund>();
+            await _db.CreateTableAsync<FundTransaction>();
+            await _db.CreateTableAsync<UserPreferences>();
             await _db.CreateTableAsync<Candle>();
             await _db.CreateTableAsync<Message>();
             await _db.CreateTableAsync<AIUser>();

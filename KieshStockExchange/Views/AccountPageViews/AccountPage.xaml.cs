@@ -1,4 +1,5 @@
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.AccountViewModels;
 
 namespace KieshStockExchange.Views.AccountPageViews;
@@ -7,12 +8,14 @@ public partial class AccountPage : ContentPage
 {
     private readonly AccountViewModel _vm;
     private readonly IThemeService    _theme;
+    private readonly IProfileService  _profile;
 
-    public AccountPage(AccountViewModel vm, IThemeService theme)
+    public AccountPage(AccountViewModel vm, IThemeService theme, IProfileService profile)
     {
         InitializeComponent();
-        _vm    = vm    ?? throw new ArgumentNullException(nameof(vm));
-        _theme = theme ?? throw new ArgumentNullException(nameof(theme));
+        _vm      = vm      ?? throw new ArgumentNullException(nameof(vm));
+        _theme   = theme   ?? throw new ArgumentNullException(nameof(theme));
+        _profile = profile ?? throw new ArgumentNullException(nameof(profile));
         BindingContext = _vm;
 
         ThemePicker.ItemsSource = (System.Collections.IList)_theme.AvailableThemes;
@@ -37,7 +40,11 @@ public partial class AccountPage : ContentPage
     private void OnThemePickerChanged(object? sender, EventArgs e)
     {
         if (ThemePicker.SelectedItem is ThemeOption opt && opt.Key != _theme.CurrentThemeKey)
-            _theme.ApplyTheme(opt.Key);
+        {
+            // UpdateThemeAsync applies via IThemeService and persists to UserPreferences.
+            // Fire-and-forget — we don't want to block the picker callback on a DB write.
+            _ = _profile.UpdateThemeAsync(opt.Key);
+        }
     }
 
     private void OnThemeChangedExternally(object? sender, string newKey)

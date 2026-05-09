@@ -49,10 +49,10 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
 
         if (orders.Count == 0) return (Array.Empty<OrderTableObject>(), total);
 
-        // Per-page user lookup: only the distinct users on this page
+        // Per-page user lookup: single batched IN-clause query (was N round-trips).
         var userIds = orders.Select(o => o.UserId).Distinct().ToList();
-        var users = await Task.WhenAll(userIds.Select(id => _dbRef.GetUserById(id, ct)));
-        var usersById = users.Where(u => u != null).ToDictionary(u => u!.UserId, u => u!);
+        var users = await _dbRef.GetUsersByIds(userIds, ct);
+        var usersById = users.ToDictionary(u => u.UserId, u => u);
 
         var rows = orders.Select(o =>
         {

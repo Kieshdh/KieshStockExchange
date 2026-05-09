@@ -42,10 +42,10 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
 
         if (transactions.Count == 0) return (Array.Empty<TransactionTableObject>(), total);
 
-        // Collect distinct buyer and seller IDs on this page
+        // Collect distinct buyer + seller IDs on this page; one batched IN-clause query.
         var userIds = transactions.SelectMany(t => new[] { t.BuyerId, t.SellerId }).Distinct().ToList();
-        var users = await Task.WhenAll(userIds.Select(id => _dbRef.GetUserById(id, ct)));
-        var usersById = users.Where(u => u != null).ToDictionary(u => u!.UserId, u => u!);
+        var users = await _dbRef.GetUsersByIds(userIds, ct);
+        var usersById = users.ToDictionary(u => u.UserId, u => u);
 
         var rows = transactions.Select(t =>
         {

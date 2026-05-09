@@ -1,6 +1,7 @@
 using System.Globalization;
 using KieshStockExchange.Models;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices;
@@ -11,6 +12,32 @@ public sealed class CandleChartDrawable : IDrawable
     public IReadOnlyList<Candle> Candles { get; set; } = Array.Empty<Candle>();
     public double YPaddingPercent { get; set; } = 0.06;
     public double XPaddingPercent { get; set; } = 0.02;
+
+    // Visible time-range window. When valid, drives X-axis scaling so empty
+    // pre-history / post-future space is rendered cleanly. Falls back to
+    // first/last candle times when not set (legacy behavior).
+    public ChartViewport Viewport { get; set; } = ChartViewport.Empty;
+
+    // Y-axis behaviour. When YAutoFit is true the range is recomputed each
+    // paint from the visible candles (default). When false, the drawable
+    // either uses the explicit ManualYMin/Max range, or — if those are unset —
+    // freezes at the most recent computed range so the chart doesn't jump.
+    public bool YAutoFit { get; set; } = true;
+    public decimal? ManualYMin { get; set; }
+    public decimal? ManualYMax { get; set; }
+
+    // Crosshair overlay driven by ChartView's pointer-move handler. When
+    // Crosshair.Visible is false the crosshair pass is skipped.
+    public CrosshairState Crosshair { get; set; }
+
+    // Moving-average overlays. Each series carries its own color and a
+    // pre-computed list of points against the candle buffer.
+    public IReadOnlyList<MovingAverageSeries> MaSeries { get; set; } = Array.Empty<MovingAverageSeries>();
+
+    // Price marker lines drawn across the chart at user-chosen prices. The
+    // currently-dragged marker (if any) is rendered with extra emphasis.
+    public IReadOnlyList<PriceMarker> Markers { get; set; } = Array.Empty<PriceMarker>();
+    public Guid? DraggingMarkerId { get; set; }
 
     // Current live price; when set, drawn as a horizontal price line and tag in the right gutter.
     public decimal? CurrentPrice { get; set; }
@@ -24,6 +51,15 @@ public sealed class CandleChartDrawable : IDrawable
     public Color Bear = Colors.Red;
     public Color PriceLineUp = Colors.Green;
     public Color PriceLineDown = Colors.Red;
+    public Color CrosshairColor = Colors.LightGray;
+    public Color MarkerColor = Colors.Goldenrod;
+
+    // Volume sub-pane controls. ShowVolume splits a strip off the bottom of the
+    // plot for per-candle volume bars. Tints default to derivations of Bull/Bear
+    // when left transparent.
+    public bool ShowVolume { get; set; } = true;
+    public Color VolumeBullTint = Colors.Transparent;
+    public Color VolumeBearTint = Colors.Transparent;
 
     public float AxisFont = 10f;
     public float PriceTagFont = 10f;
@@ -33,6 +69,9 @@ public sealed class CandleChartDrawable : IDrawable
     const float BottomAxisH = 24f;  // reserve space for time labels
     const float TopPad = 6f;
     const float LeftPad = 6f;
+    const float VolumePaneRatio = 0.18f;  // 18% of total plot height
+    const float VolumePaneGap = 4f;
+    const float VolumePaneMinChartHeight = 80f;  // skip volume pane on tiny charts
     #endregion
 
     #region IDrawable Implementation
@@ -42,70 +81,294 @@ public sealed class CandleChartDrawable : IDrawable
         canvas.FillColor = Bg;
         canvas.FillRectangle(dirtyRect);
 
-        if (Candles.Count < 1)
+        // Plot rectangle inside the axes — computed even when no candles are visible
+        // so the user still sees axes/grid in panned-past-edge regions. When the
+        // volume pane is enabled and there's enough vertical room we split the
+        // plot into a price area (top) and a volume area (bottom).
+        var fullPlot = ComputePlotRect(dirtyRect);
+        RectF plot = fullPlot;
+        RectF volRect = default;
+        if (ShowVolume && fullPlot.Height >= VolumePaneMinChartHeight)
+        {
+            float volH = fullPlot.Height * VolumePaneRatio;
+            plot = new RectF(fullPlot.X, fullPlot.Y,
+                             fullPlot.Width, fullPlot.Height - volH - VolumePaneGap);
+            volRect = new RectF(fullPlot.X, plot.Bottom + VolumePaneGap,
+                                fullPlot.Width, volH);
+        }
+        _lastPlot = plot;
+        _lastVolRect = volRect;
+
+        // Visible time-range. Prefer the explicit viewport when set so that
+        // empty pre-history / post-future space scales correctly. Fall back
+        // to the candle slice extremes for legacy callers.
+        DateTime tMin, tMax;
+        if (Viewport.IsValid)
+        {
+            tMin = Viewport.ViewStart;
+            tMax = Viewport.ViewEnd;
+        }
+        else if (Candles.Count > 0)
+        {
+            tMin = Candles[0].OpenTime;
+            tMax = Candles[^1].CloseTime;
+            if (tMax <= tMin) tMax = tMin.AddSeconds(1);
+            var xPadFallback = TimeSpan.FromTicks((long)((tMax - tMin).Ticks * Math.Max(0, XPaddingPercent)));
+            tMax += xPadFallback;
+        }
+        else
         {
             DrawNoData(canvas, dirtyRect);
             canvas.RestoreState();
             return;
         }
 
-        // Plot rectangle inside the axes
-        var plot = new RectF(dirtyRect.X + LeftPad,
-                             dirtyRect.Y + TopPad,
-                             Math.Max(1f, dirtyRect.Width - RightAxisW - LeftPad),
-                             Math.Max(1f, dirtyRect.Height - BottomAxisH - TopPad));
-
-        // Visible time-range
-        var tMin = Candles.First().OpenTime;
-        var tMax = Candles.Last().CloseTime;
-        if (tMax <= tMin) tMax = tMin.AddSeconds(1);
-
-        // Right-side X padding so the latest candle isn't flush against the axis
-        var xPad = TimeSpan.FromTicks((long)((tMax - tMin).Ticks * Math.Max(0, XPaddingPercent)));
-        tMax += xPad;
         double spanSec = (tMax - tMin).TotalSeconds;
+        if (spanSec <= 0) { canvas.RestoreState(); return; }
 
-        // Visible price-range across the candle window.
-        decimal low = Candles[0].Low;
-        decimal high = Candles[0].High;
-        for (int i = 1; i < Candles.Count; i++)
+        double yMin, yMax;
+        if (YAutoFit)
         {
-            var c = Candles[i];
-            if (c.Low < low) low = c.Low;
-            if (c.High > high) high = c.High;
-        }
-        // Ensure the live price is always inside the visible range
-        if (CurrentPrice is decimal cp)
-        {
-            if (cp < low) low = cp;
-            if (cp > high) high = cp;
-        }
-        if (high <= low) high = low + 1m;
+            // Visible price-range across the candle slice. When the slice is empty
+            // (panned fully into a gap) we fall back to a sensible neutral range.
+            decimal low, high;
+            if (Candles.Count > 0)
+            {
+                low = Candles[0].Low;
+                high = Candles[0].High;
+                for (int i = 1; i < Candles.Count; i++)
+                {
+                    var c = Candles[i];
+                    if (c.Low < low) low = c.Low;
+                    if (c.High > high) high = c.High;
+                }
+            }
+            else if (CurrentPrice is decimal cpFallback)
+            {
+                low = cpFallback;
+                high = cpFallback;
+            }
+            else
+            {
+                low = 0m;
+                high = 1m;
+            }
 
-        // Add top/bottom padding so candles don't hug the plot edges
-        var yPad = (double)(high - low) * Math.Max(0, YPaddingPercent);
-        double yMin = (double)low - yPad;
-        double yMax = (double)high + yPad;
+            // Ensure the live price is always inside the visible range
+            if (CurrentPrice is decimal cp)
+            {
+                if (cp < low) low = cp;
+                if (cp > high) high = cp;
+            }
+            if (high <= low) high = low + 1m;
+
+            // Add top/bottom padding so candles don't hug the plot edges
+            var yPad = (double)(high - low) * Math.Max(0, YPaddingPercent);
+            yMin = (double)low - yPad;
+            yMax = (double)high + yPad;
+        }
+        else if (ManualYMin is decimal mn && ManualYMax is decimal mx && mx > mn)
+        {
+            yMin = (double)mn;
+            yMax = (double)mx;
+        }
+        else
+        {
+            // Manual mode without an explicit range yet — freeze at the most
+            // recent auto-fit values so the chart doesn't jump on toggle.
+            yMin = _lastYMin;
+            yMax = _lastYMax;
+        }
+
         if (yMax <= yMin) yMax = yMin + 1.0;
+        _lastYMin = yMin;
+        _lastYMax = yMax;
+        _lastTMin = tMin;
+        _lastTMax = tMax;
 
         // Coordinate transforms from data-space to plot-space.
         float X(DateTime utc) => plot.Left + (float)(((utc - tMin).TotalSeconds / spanSec) * plot.Width);
         float Y(double price) => plot.Bottom - (float)(((price - yMin) / (yMax - yMin)) * plot.Height);
 
-        var currency = Candles[0].CurrencyType;
+        var currency = Candles.Count > 0 ? Candles[0].CurrencyType : CurrencyType.USD;
 
         DrawYGridAndLabels(canvas, plot, yMin, yMax, currency);
         DrawXGridAndLabels(canvas, plot, tMin, tMax);
         DrawCandles(canvas, plot, X, Y);
-        DrawCurrentPriceLine(canvas, plot, Y, currency);
+        DrawMovingAverages(canvas, plot, tMin, tMax, yMin, yMax, X, Y);
+        DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
+        DrawMarkers(canvas, plot, Y, currency);
 
         // Border around the plot area.
         canvas.StrokeColor = Grid;
         canvas.StrokeSize = 1f;
         canvas.DrawRectangle(plot);
 
+        // Volume sub-pane below the price area when enabled.
+        if (volRect.Height > 0)
+            DrawVolume(canvas, volRect, X);
+
+        // Crosshair sits on top of everything else so it stays visible against candles.
+        DrawCrosshair(canvas, plot, currency, X);
+
         canvas.RestoreState();
     }
+
+    private void DrawMarkers(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)
+    {
+        if (Markers.Count == 0) return;
+        canvas.SaveState();
+        for (int i = 0; i < Markers.Count; i++)
+        {
+            var m = Markers[i];
+            float y = Y((double)m.Price);
+            if (y < plot.Top || y > plot.Bottom) continue;
+
+            bool dragging = DraggingMarkerId == m.Id;
+            canvas.StrokeColor = MarkerColor;
+            canvas.StrokeSize = dragging ? 2f : 1f;
+            canvas.DrawLine(plot.Left, y, plot.Right, y);
+
+            // Tag in the right gutter — last 14 px reserved as the close hit-zone.
+            var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
+            canvas.FillColor = MarkerColor;
+            canvas.FillRectangle(tagRect);
+            canvas.FontColor = Colors.Black;
+            canvas.FontSize = PriceTagFont;
+            canvas.DrawString(CurrencyHelper.Format(m.Price, cur),
+                new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 18, tagRect.Height),
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+            canvas.DrawString("✕",
+                new RectF(tagRect.Right - 14, tagRect.Y, 12, tagRect.Height),
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+        canvas.RestoreState();
+    }
+
+    /// <summary>
+    /// Returns the marker hit by the pointer (within 4 px of the line), and whether
+    /// the close glyph in the right-gutter tag was clicked.
+    /// </summary>
+    public (PriceMarker Marker, bool CloseHit)? HitMarker(PointF pInControl)
+    {
+        if (Markers.Count == 0) return null;
+        if (_lastPlot.Width <= 0 || _lastYMax <= _lastYMin) return null;
+
+        for (int i = 0; i < Markers.Count; i++)
+        {
+            var m = Markers[i];
+            float y = (float)(_lastPlot.Bottom - ((double)m.Price - _lastYMin) / (_lastYMax - _lastYMin) * _lastPlot.Height);
+            if (Math.Abs(pInControl.Y - y) > 4f) continue;
+
+            // The whole tag-strip width counts as the marker; the rightmost ~14 px
+            // is the close hit-zone.
+            float closeLeft = _lastPlot.Right + 1 + (RightAxisW - 16);
+            bool closeHit = pInControl.X >= closeLeft && pInControl.X <= _lastPlot.Right + RightAxisW;
+            bool inLine = pInControl.X >= _lastPlot.Left && pInControl.X <= _lastPlot.Right + RightAxisW;
+            if (!inLine) continue;
+
+            return (m, closeHit);
+        }
+        return null;
+    }
+
+    private void DrawMovingAverages(ICanvas canvas, RectF plot,
+        DateTime tMin, DateTime tMax, double yMin, double yMax,
+        Func<DateTime, float> X, Func<double, float> Y)
+    {
+        if (MaSeries.Count == 0) return;
+
+        // MaPoint.AtTime is OpenTime; shift to candle centre so the line tracks
+        // the middle of each bucket rather than the left edge.
+        var halfBucket = Viewport.IsValid
+            ? TimeSpan.FromTicks(Viewport.Bucket.Ticks / 2)
+            : TimeSpan.Zero;
+
+        canvas.SaveState();
+        canvas.StrokeSize = 1.5f;
+        foreach (var series in MaSeries)
+        {
+            var pts = series.Points;
+            if (pts == null || pts.Count == 0) continue;
+
+            canvas.StrokeColor = series.Color;
+            var path = new PathF();
+            bool started = false;
+            for (int i = 0; i < pts.Count; i++)
+            {
+                var p = pts[i];
+                var t = p.AtTime + halfBucket;
+                if (t < tMin) continue;
+                if (t > tMax) break;
+                if (p.Value < yMin || p.Value > yMax) { started = false; continue; }
+
+                float px = X(t);
+                float py = Y(p.Value);
+                if (!started) { path.MoveTo(px, py); started = true; }
+                else path.LineTo(px, py);
+            }
+            canvas.DrawPath(path);
+        }
+        canvas.RestoreState();
+    }
+
+    private void DrawVolume(ICanvas canvas, RectF volRect, Func<DateTime, float> X)
+    {
+        // Sub-pane border so the section reads as a distinct panel.
+        canvas.StrokeColor = Grid;
+        canvas.StrokeSize = 1f;
+        canvas.DrawRectangle(volRect);
+
+        if (Candles.Count == 0) return;
+
+        long maxVol = 0L;
+        for (int i = 0; i < Candles.Count; i++)
+            if (Candles[i].Volume > maxVol) maxVol = Candles[i].Volume;
+        if (maxVol <= 0) return;
+
+        var bullTint = VolumeBullTint.Alpha > 0 ? VolumeBullTint : Bull.WithAlpha(0.6f);
+        var bearTint = VolumeBearTint.Alpha > 0 ? VolumeBearTint : Bear.WithAlpha(0.6f);
+
+        for (int i = 0; i < Candles.Count; i++)
+        {
+            var c = Candles[i];
+            float xOpen = X(c.OpenTime);
+            float xClose = X(c.CloseTime);
+            float cx = (xOpen + xClose) * 0.5f;
+            float bodyW = Math.Max(1f, Math.Abs(xClose - xOpen) * 0.7f);
+
+            float h = (float)(c.Volume / (double)maxVol * volRect.Height);
+            if (h < 1f) h = c.Volume > 0 ? 1f : 0f;
+
+            canvas.FillColor = c.Close >= c.Open ? bullTint : bearTint;
+            canvas.FillRectangle(cx - bodyW / 2f, volRect.Bottom - h, bodyW, h);
+        }
+    }
+
+    /// <summary>
+    /// Layout helper exposed so view-side code (pointer hit-testing, alert drag)
+    /// can map control-space pixels into the plot area without re-implementing
+    /// the gutter math.
+    /// </summary>
+    public RectF ComputePlotRect(RectF dirtyRect) =>
+        new(dirtyRect.X + LeftPad,
+            dirtyRect.Y + TopPad,
+            Math.Max(1f, dirtyRect.Width - RightAxisW - LeftPad),
+            Math.Max(1f, dirtyRect.Height - BottomAxisH - TopPad));
+
+    // Geometry cached at the end of Draw() so the inverse transforms below stay
+    // consistent with the most recent paint, even between frames.
+    private RectF _lastPlot;
+    private RectF _lastVolRect;
+    private double _lastYMin;
+    private double _lastYMax = 1.0;
+    private DateTime _lastTMin;
+    private DateTime _lastTMax;
+
+    /// <summary>Rectangle reserved for the volume sub-pane in the most recent paint.</summary>
+    public RectF VolumeRect => _lastVolRect;
+    public double LastYMin => _lastYMin;
+    public double LastYMax => _lastYMax;
 
     private void DrawNoData(ICanvas canvas, RectF r)
     {
@@ -202,10 +465,16 @@ public sealed class CandleChartDrawable : IDrawable
         }
     }
 
-    private void DrawCurrentPriceLine(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)
+    private void DrawCurrentPriceLine(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur,
+        DateTime tMin, DateTime tMax)
     {
         if (CurrentPrice is not decimal price) return;
         if (Candles.Count == 0) return;
+
+        // Don't draw when the user has scrolled "now" out of view (either fully into
+        // history past the right edge, or way out into synthetic future-space).
+        var now = TimeHelper.NowUtc();
+        if (now < tMin || now > tMax) return;
 
         float y = Y((double)price);
         // Skip drawing if the price falls outside the visible plot.
@@ -235,6 +504,151 @@ public sealed class CandleChartDrawable : IDrawable
         canvas.DrawString(label,
             new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
             HorizontalAlignment.Left, VerticalAlignment.Center);
+    }
+    #endregion
+
+    #region Hit-testing (public — used by ChartView pointer handlers)
+    /// <summary>
+    /// Maps a Y pixel inside the plot back to a price using the cached Y-range
+    /// from the most recent paint. Returns null if no successful paint has been
+    /// performed yet.
+    /// </summary>
+    public decimal? PixelToPrice(float yInControl)
+    {
+        if (_lastPlot.Height <= 0 || _lastYMax <= _lastYMin) return null;
+        if (yInControl < _lastPlot.Top || yInControl > _lastPlot.Bottom) return null;
+        double frac = (_lastPlot.Bottom - yInControl) / (double)_lastPlot.Height;
+        double price = _lastYMin + frac * (_lastYMax - _lastYMin);
+        return (decimal)price;
+    }
+
+    /// <summary>
+    /// Maps an X pixel inside the plot back to a UTC time using the cached time
+    /// range from the most recent paint.
+    /// </summary>
+    public DateTime PixelToTime(float xInControl)
+    {
+        if (_lastPlot.Width <= 0 || _lastTMax <= _lastTMin) return _lastTMin;
+        double frac = (xInControl - _lastPlot.Left) / (double)_lastPlot.Width;
+        frac = Math.Clamp(frac, 0.0, 1.0);
+        var span = _lastTMax - _lastTMin;
+        return _lastTMin.AddTicks((long)(span.Ticks * frac));
+    }
+
+    /// <summary>
+    /// Returns the index into <see cref="Candles"/> whose bucket contains the X
+    /// pixel, or null if the pointer falls into empty pre-history / future space.
+    /// Accepts pointer positions inside the price pane or the volume sub-pane —
+    /// both share the same time axis.
+    /// </summary>
+    public int? HitCandleIndex(PointF pInControl)
+    {
+        if (Candles.Count == 0) return null;
+        if (pInControl.X < _lastPlot.Left || pInControl.X > _lastPlot.Right) return null;
+        bool inPrice = pInControl.Y >= _lastPlot.Top && pInControl.Y <= _lastPlot.Bottom;
+        bool inVol = _lastVolRect.Height > 0
+                     && pInControl.Y >= _lastVolRect.Top
+                     && pInControl.Y <= _lastVolRect.Bottom;
+        if (!inPrice && !inVol) return null;
+
+        var t = PixelToTime(pInControl.X);
+
+        // Binary search for the candle whose [OpenTime, CloseTime) contains t.
+        int lo = 0, hi = Candles.Count - 1;
+        while (lo <= hi)
+        {
+            int mid = lo + ((hi - lo) >> 1);
+            var c = Candles[mid];
+            if (t < c.OpenTime) hi = mid - 1;
+            else if (t >= c.CloseTime) lo = mid + 1;
+            else return mid;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// True when the control-space pointer falls inside the price area or the
+    /// volume sub-pane. Used by ChartView to decide when to hide the crosshair.
+    /// </summary>
+    public bool IsInChartArea(PointF pInControl)
+    {
+        if (_lastPlot.Contains(pInControl)) return true;
+        return _lastVolRect.Height > 0 && _lastVolRect.Contains(pInControl);
+    }
+
+    /// <summary>
+    /// True when the pointer is over the right-hand Y-axis gutter — the strip
+    /// to the right of the price plot reserved for price labels. Wheel events
+    /// here zoom the Y axis instead of the X axis.
+    /// </summary>
+    public bool IsInYAxisGutter(PointF pInControl)
+    {
+        return pInControl.X > _lastPlot.Right
+            && pInControl.X <= _lastPlot.Right + RightAxisW
+            && pInControl.Y >= _lastPlot.Top
+            && pInControl.Y <= _lastPlot.Bottom;
+    }
+    #endregion
+
+    #region Crosshair drawing
+    private void DrawCrosshair(ICanvas canvas, RectF plot, CurrencyType cur, Func<DateTime, float> X)
+    {
+        if (!Crosshair.Visible) return;
+        if (Crosshair.X < plot.Left || Crosshair.X > plot.Right) return;
+
+        // Pointer can sit in the price area or the volume sub-pane. The vertical
+        // line spans both; the horizontal line is drawn within whichever pane the
+        // pointer is in, and the price tag only appears for the price pane.
+        bool inPrice = Crosshair.Y >= plot.Top && Crosshair.Y <= plot.Bottom;
+        bool inVol = _lastVolRect.Height > 0
+                     && Crosshair.Y >= _lastVolRect.Top
+                     && Crosshair.Y <= _lastVolRect.Bottom;
+        if (!inPrice && !inVol) return;
+
+        // Snap vertical line to the centre of the hovered candle when there is one.
+        float vx = Crosshair.X;
+        if (Crosshair.CandleIndex is int idx && idx >= 0 && idx < Candles.Count)
+        {
+            var c = Candles[idx];
+            vx = (X(c.OpenTime) + X(c.CloseTime)) * 0.5f;
+        }
+
+        // Vertical line spans the full chart, including the volume sub-pane.
+        float vyTop = plot.Top;
+        float vyBottom = _lastVolRect.Height > 0 ? _lastVolRect.Bottom : plot.Bottom;
+
+        canvas.SaveState();
+        canvas.StrokeColor = CrosshairColor;
+        canvas.StrokeSize = 1f;
+        canvas.StrokeDashPattern = new float[] { 3f, 3f };
+        canvas.DrawLine(vx, vyTop, vx, vyBottom);
+        canvas.DrawLine(plot.Left, Crosshair.Y, plot.Right, Crosshair.Y);
+        canvas.StrokeDashPattern = null;
+
+        // Price tag in the right gutter — only when the crosshair Y is in the price pane.
+        if (inPrice && PixelToPrice(Crosshair.Y) is decimal price)
+        {
+            var tagRect = new RectF(plot.Right + 1, Crosshair.Y - 8, RightAxisW - 2, 16);
+            canvas.FillColor = CrosshairColor;
+            canvas.FillRectangle(tagRect);
+            canvas.FontColor = Colors.Black;
+            canvas.FontSize = PriceTagFont;
+            canvas.DrawString(CurrencyHelper.Format(price, cur),
+                new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+
+        // Time tag on the bottom axis at the crosshair X.
+        var t = PixelToTime(vx);
+        var timeText = t.ToLocalTime().ToString("dd MMM HH:mm:ss", CultureInfo.InvariantCulture);
+        var timeRect = new RectF(vx - 50, vyBottom + 2, 100, BottomAxisH - 2);
+        canvas.FillColor = CrosshairColor;
+        canvas.FillRectangle(timeRect);
+        canvas.FontColor = Colors.Black;
+        canvas.FontSize = AxisFont;
+        canvas.DrawString(timeText, timeRect, HorizontalAlignment.Center, VerticalAlignment.Center);
+
+        canvas.RestoreState();
     }
     #endregion
 

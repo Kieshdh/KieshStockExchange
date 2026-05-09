@@ -99,6 +99,29 @@ CREATE TABLE Funds (
 -- Note: SQLite-net-pcl creates tables without CHECK constraints, so the same invariants
 -- are enforced at runtime via BEFORE INSERT/UPDATE triggers (see LocalDBService.CreateInvariantTriggers).
 
+CREATE TABLE FundTransactions (
+    FundTransactionId   INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserId              INTEGER NOT NULL,
+    Currency            TEXT NOT NULL DEFAULT 'USD',
+    Amount              REAL NOT NULL,
+    Kind                TEXT NOT NULL,            -- 'Deposit' or 'Withdrawal'
+    Note                TEXT NULL,
+    CreatedAt           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (UserId) REFERENCES Users(UserId),
+    CHECK(Amount > 0),
+    CHECK(Kind IN ('Deposit','Withdrawal'))
+);
+
+-- One row per user. Holds preferences that should follow the user across logins.
+CREATE TABLE UserPreferences (
+    UserId                          INTEGER PRIMARY KEY,
+    BaseCurrency                    TEXT NOT NULL DEFAULT 'USD',
+    ThemeKey                        TEXT NOT NULL DEFAULT 'ExchangeLight',
+    DefaultCandleResolutionSeconds  INTEGER NOT NULL DEFAULT 300,
+    UpdatedAt                       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (UserId) REFERENCES Users(UserId)
+);
+
 CREATE TABLE Candles (
     CandleId            INTEGER PRIMARY KEY AUTOINCREMENT,
     StockId             INTEGER NOT NULL,

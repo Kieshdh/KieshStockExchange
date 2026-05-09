@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="KieshStockExchange.Views.AccountPageViews.DepositWithdrawPage"
+             Title="Deposit / Withdraw">
+
+    <Grid Style="{StaticResource MainGrid}"
+          Padding="20">
+        <Border Style="{StaticResource DashboardCardStyle}"
+                Padding="22"
+                HorizontalOptions="Fill"
+                VerticalOptions="Start">
+            <VerticalStackLayout Spacing="14">
+
+                <Label Text="Deposit / Withdraw"
+                       Style="{StaticResource SectionHeaderLabelStyle}" />
+
+                <Label Text="Add or remove cash. The currency you pick decides which Fund row is updated."
+                       Style="{StaticResource MutedLabelStyle}" />
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="Currency"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Picker ItemsSource="{Binding AvailableCurrencies}"
+                            SelectedItem="{Binding SelectedCurrency, Mode=TwoWay}"
+                            Style="{StaticResource ThemePickerStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="Available balance"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Label Text="{Binding AvailableBalanceDisplay}"
+                           Style="{StaticResource MutedLabelStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="Amount"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Entry Text="{Binding AmountString}"
+                           Keyboard="Numeric"
+                           Placeholder="0.00"
+                           Style="{StaticResource FormEntryStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="Note (optional)"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Entry Text="{Binding Note}"
+                           Placeholder="Reason or reference"
+                           Style="{StaticResource FormEntryStyle}" />
+                </VerticalStackLayout>
+
+                <Label Text="{Binding ErrorMessage}"
+                       Style="{StaticResource RegistrationErrorLabel}"
+                       IsVisible="{Binding HasError}" />
+
+                <Grid ColumnDefinitions="*,*,*"
+                      ColumnSpacing="8"
+                      Margin="0,8,0,0">
+                    <Button Grid.Column="0"
+                            Text="Deposit"
+                            Style="{StaticResource PrimaryActionButtonStyle}"
+                            Command="{Binding DepositCommand}"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}" />
+                    <Button Grid.Column="1"
+                            Text="Withdraw"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding WithdrawCommand}"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}" />
+                    <Button Grid.Column="2"
+                            Text="Cancel"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding CancelCommand}" />
+                </Grid>
+
+            </VerticalStackLayout>
+        </Border>
+    </Grid>
+</ContentPage>
