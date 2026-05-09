@@ -194,22 +194,28 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
 
     private void ApplyFilter()
     {
-        FilteredStocks.Clear();
+        // Build the desired filtered list as a plain List, then sync it into
+        // FilteredStocks in place. Clear-and-Add raised a Reset event each
+        // time which forced the bound CollectionView to tear down all rows
+        // (visible flash on every refresh).
+        var desired = new List<MarketRow>(AllStocks.Count);
         if (string.IsNullOrWhiteSpace(SearchText))
         {
-            foreach (var row in AllStocks) FilteredStocks.Add(row);
-            return;
+            foreach (var row in AllStocks) desired.Add(row);
         }
-
-        var q = SearchText.Trim();
-        foreach (var row in AllStocks)
+        else
         {
-            if (row.Symbol.Contains(q, StringComparison.OrdinalIgnoreCase)
-                || row.CompanyName.Contains(q, StringComparison.OrdinalIgnoreCase))
+            var q = SearchText.Trim();
+            foreach (var row in AllStocks)
             {
-                FilteredStocks.Add(row);
+                if (row.Symbol.Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || row.CompanyName.Contains(q, StringComparison.OrdinalIgnoreCase))
+                {
+                    desired.Add(row);
+                }
             }
         }
+        SyncRows(FilteredStocks, desired);
     }
     #endregion
 
@@ -233,6 +239,8 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     /// <summary>
     /// Rebuilds <see cref="PagedStocks"/> with the slice of <see cref="FilteredStocks"/>
     /// for the current page. Clamps <see cref="PageNumber"/> if the filter shrank the set.
+    /// Sync is in place to avoid the Clear+Add Reset event that would otherwise
+    /// flash the bound All Stocks table on every refresh.
     /// </summary>
     private void RebuildPagedStocks()
     {
@@ -240,10 +248,11 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         if (PageNumber >= totalPages) PageNumber = totalPages - 1;
         if (PageNumber < 0) PageNumber = 0;
 
-        PagedStocks.Clear();
         var start = PageNumber * PageSize;
         var end = Math.Min(start + PageSize, FilteredStocks.Count);
-        for (int i = start; i < end; i++) PagedStocks.Add(FilteredStocks[i]);
+        var desired = new List<MarketRow>(end - start);
+        for (int i = start; i < end; i++) desired.Add(FilteredStocks[i]);
+        SyncRows(PagedStocks, desired);
 
         OnPropertyChanged(nameof(TotalPages));
         OnPropertyChanged(nameof(CanGoPrev));
@@ -251,6 +260,30 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         OnPropertyChanged(nameof(PageDisplay));
         PrevPageCommand.NotifyCanExecuteChanged();
         NextPageCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Sync <paramref name="target"/> to match <paramref name="desired"/> using
+    /// only Move / Insert / Add / Remove events. CollectionView keeps existing
+    /// row visuals where possible; bindings stay attached to their reused rows
+    /// so values never go stale.
+    /// </summary>
+    private static void SyncRows(ObservableCollection<MarketRow> target, IList<MarketRow> desired)
+    {
+        for (int i = 0; i < desired.Count; i++)
+        {
+            if (i >= target.Count) { target.Add(desired[i]); continue; }
+            if (ReferenceEquals(target[i], desired[i])) continue;
+
+            int existing = -1;
+            for (int j = i + 1; j < target.Count; j++)
+            {
+                if (ReferenceEquals(target[j], desired[i])) { existing = j; break; }
+            }
+            if (existing >= 0) target.Move(existing, i);
+            else target.Insert(i, desired[i]);
+        }
+        while (target.Count > desired.Count) target.RemoveAt(target.Count - 1);
     }
     #endregion
 
