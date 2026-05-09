@@ -54,10 +54,12 @@ public sealed class CandleChartDrawable : IDrawable
     public Color CrosshairColor = Colors.LightGray;
     public Color MarkerColor = Colors.Goldenrod;
 
-    // Volume sub-pane controls. ShowVolume splits a strip off the bottom of the
-    // plot for per-candle volume bars. Tints default to derivations of Bull/Bear
-    // when left transparent.
+    // Volume bar controls. ShowVolume gates rendering. OverlayVolume picks the
+    // TradingView-style overlay where bars sit at low alpha in the bottom strip
+    // of the price plot; setting it to false falls back to a separate sub-pane
+    // below the plot. Tints default to derivations of Bull/Bear when transparent.
     public bool ShowVolume { get; set; } = true;
+    public bool OverlayVolume { get; set; } = true;
     public Color VolumeBullTint = Colors.Transparent;
     public Color VolumeBearTint = Colors.Transparent;
 
@@ -83,18 +85,30 @@ public sealed class CandleChartDrawable : IDrawable
 
         // Plot rectangle inside the axes — computed even when no candles are visible
         // so the user still sees axes/grid in panned-past-edge regions. When the
-        // volume pane is enabled and there's enough vertical room we split the
-        // plot into a price area (top) and a volume area (bottom).
+        // volume pane is enabled and OverlayVolume is false we split the plot into
+        // a price area (top) and a volume area (bottom); when OverlayVolume is true
+        // (TradingView-style) the plot keeps its full height and volume bars are
+        // drawn at low alpha inside the bottom strip of the same rectangle.
         var fullPlot = ComputePlotRect(dirtyRect);
         RectF plot = fullPlot;
         RectF volRect = default;
         if (ShowVolume && fullPlot.Height >= VolumePaneMinChartHeight)
         {
             float volH = fullPlot.Height * VolumePaneRatio;
-            plot = new RectF(fullPlot.X, fullPlot.Y,
-                             fullPlot.Width, fullPlot.Height - volH - VolumePaneGap);
-            volRect = new RectF(fullPlot.X, plot.Bottom + VolumePaneGap,
-                                fullPlot.Width, volH);
+            if (OverlayVolume)
+            {
+                // Bars share the bottom strip of the price plot. plot is unchanged
+                // so candle/MA scaling uses the full chart height.
+                volRect = new RectF(fullPlot.X, fullPlot.Bottom - volH,
+                                    fullPlot.Width, volH);
+            }
+            else
+            {
+                plot = new RectF(fullPlot.X, fullPlot.Y,
+                                 fullPlot.Width, fullPlot.Height - volH - VolumePaneGap);
+                volRect = new RectF(fullPlot.X, plot.Bottom + VolumePaneGap,
+                                    fullPlot.Width, volH);
+            }
         }
         _lastPlot = plot;
         _lastVolRect = volRect;
@@ -194,6 +208,13 @@ public sealed class CandleChartDrawable : IDrawable
 
         DrawYGridAndLabels(canvas, plot, yMin, yMax, currency);
         DrawXGridAndLabels(canvas, plot, tMin, tMax);
+
+        // Overlay-mode volume renders BEFORE candles so the bars sit visually
+        // behind them (TradingView style). Sub-pane mode renders after the
+        // border below so it lives in its own panel.
+        if (volRect.Height > 0 && OverlayVolume)
+            DrawVolume(canvas, volRect, X);
+
         DrawCandles(canvas, plot, X, Y);
         DrawMovingAverages(canvas, plot, tMin, tMax, yMin, yMax, X, Y);
         DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
@@ -204,8 +225,7 @@ public sealed class CandleChartDrawable : IDrawable
         canvas.StrokeSize = 1f;
         canvas.DrawRectangle(plot);
 
-        // Volume sub-pane below the price area when enabled.
-        if (volRect.Height > 0)
+        if (volRect.Height > 0 && !OverlayVolume)
             DrawVolume(canvas, volRect, X);
 
         // Crosshair sits on top of everything else so it stays visible against candles.
@@ -314,10 +334,15 @@ public sealed class CandleChartDrawable : IDrawable
 
     private void DrawVolume(ICanvas canvas, RectF volRect, Func<DateTime, float> X)
     {
-        // Sub-pane border so the section reads as a distinct panel.
-        canvas.StrokeColor = Grid;
-        canvas.StrokeSize = 1f;
-        canvas.DrawRectangle(volRect);
+        // Sub-pane mode draws a border so the panel reads as distinct. Overlay
+        // mode shares the price plot's rectangle so a second border would just
+        // cut a horizontal line across the chart.
+        if (!OverlayVolume)
+        {
+            canvas.StrokeColor = Grid;
+            canvas.StrokeSize = 1f;
+            canvas.DrawRectangle(volRect);
+        }
 
         if (Candles.Count == 0) return;
 
@@ -326,8 +351,10 @@ public sealed class CandleChartDrawable : IDrawable
             if (Candles[i].Volume > maxVol) maxVol = Candles[i].Volume;
         if (maxVol <= 0) return;
 
-        var bullTint = VolumeBullTint.Alpha > 0 ? VolumeBullTint : Bull.WithAlpha(0.6f);
-        var bearTint = VolumeBearTint.Alpha > 0 ? VolumeBearTint : Bear.WithAlpha(0.6f);
+        // Overlay mode lowers alpha further so candles drawn on top stay legible.
+        float overlayAlpha = OverlayVolume ? 0.35f : 0.6f;
+        var bullTint = VolumeBullTint.Alpha > 0 ? VolumeBullTint : Bull.WithAlpha(overlayAlpha);
+        var bearTint = VolumeBearTint.Alpha > 0 ? VolumeBearTint : Bear.WithAlpha(overlayAlpha);
 
         for (int i = 0; i < Candles.Count; i++)
         {
