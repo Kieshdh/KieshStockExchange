@@ -59,6 +59,12 @@ public sealed class CandleChartDrawable : IDrawable
     public Color CrosshairColor = Colors.LightGray;
     public Color MarkerColor = Colors.Goldenrod;
 
+    // Open-order line colours per side. Defaults to Bull/Bear (green/red, the
+    // Binance + TradingView convention) but the ViewModel can override either
+    // slot from a user-facing color picker.
+    public Color OpenOrderBuyColor = Colors.Green;
+    public Color OpenOrderSellColor = Colors.Red;
+
     // Volume bar controls. ShowVolume gates rendering. OverlayVolume picks the
     // TradingView-style overlay where bars sit at low alpha in the bottom strip
     // of the price plot; setting it to false falls back to a separate sub-pane
@@ -241,10 +247,13 @@ public sealed class CandleChartDrawable : IDrawable
     }
 
     /// <summary>
-    /// Draw a dashed horizontal line at each open-order price with a side-coloured
-    /// tag in the right gutter showing "BUY 10" / "SELL 10". Reuses the same
-    /// gutter strip the price markers use; the dashed pattern keeps these lines
-    /// distinct from the solid live-price line.
+    /// Draw a dashed horizontal line at each open-order price.  TradingView /
+    /// Binance convention:
+    ///   - Right-gutter tag shows the price (matching the live-price tag style),
+    ///     filled with the side colour and white-on-coloured text.
+    ///   - On-chart inline label "B 10" / "S 10" sits just inside the right edge
+    ///     of the plot so the user sees side + quantity at a glance without the
+    ///     numbers clashing with the gridline price tags.
     /// </summary>
     private void DrawOpenOrderLines(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)
     {
@@ -257,22 +266,32 @@ public sealed class CandleChartDrawable : IDrawable
             float y = Y((double)line.Price);
             if (y < plot.Top || y > plot.Bottom) continue;
 
-            var color = line.IsBuy ? Bull : Bear;
+            var color = line.IsBuy ? OpenOrderBuyColor : OpenOrderSellColor;
             canvas.StrokeColor = color;
             canvas.StrokeDashPattern = new float[] { 4f, 4f };
             canvas.DrawLine(plot.Left, y, plot.Right, y);
             canvas.StrokeDashPattern = null;
 
-            // Tag in the right gutter: side abbreviation + quantity. Shorter than
-            // the marker tag so it doesn't clash if a marker happens to land near.
+            // Right-gutter tag: price, like a TradingView order line.
             var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
             canvas.FillColor = color;
             canvas.FillRectangle(tagRect);
             canvas.FontColor = Colors.White;
             canvas.FontSize = PriceTagFont;
-            canvas.DrawString($"{(line.IsBuy ? "B" : "S")} {line.Quantity}",
+            canvas.DrawString(CurrencyHelper.Format(line.Price, cur),
                 new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
                 HorizontalAlignment.Left, VerticalAlignment.Center);
+
+            // Inline side+qty label hugged to the right edge of the plot, on top
+            // of the dashed line. Small pill so it stays readable against candles.
+            var labelText = $"{(line.IsBuy ? "B" : "S")} {line.Quantity}";
+            float labelW = Math.Max(28f, labelText.Length * 7f);
+            var labelRect = new RectF(plot.Right - labelW - 4f, y - 8, labelW, 16);
+            canvas.FillColor = color;
+            canvas.FillRectangle(labelRect);
+            canvas.FontColor = Colors.White;
+            canvas.DrawString(labelText, labelRect,
+                HorizontalAlignment.Center, VerticalAlignment.Center);
         }
         canvas.RestoreState();
     }

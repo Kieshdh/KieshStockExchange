@@ -280,6 +280,31 @@
                 <Button Text="+ Add MA"
                         Style="{StaticResource ChartLiveButton.Off}"
                         Command="{Binding AddMaCommand}" />
+
+                <!-- Open-order line colours. Two pickers: one each for the buy
+                     and sell limit lines drawn on the chart. Defaults to the
+                     Bull/Bear theme colours (Binance/TradingView convention). -->
+                <Label Text="Open orders" Style="{StaticResource ChartOhlcValue}" Margin="0,8,0,0" />
+                <Grid ColumnDefinitions="80,*" ColumnSpacing="8" Padding="0,2">
+                    <Label Grid.Column="0" Text="Buy"
+                           Style="{StaticResource ChartOhlcValue}"
+                           VerticalOptions="Center" />
+                    <Picker Grid.Column="1"
+                            ItemsSource="{Binding MaColorOptions}"
+                            ItemDisplayBinding="{Binding Name}"
+                            SelectedItem="{Binding BuyOrderColorOption}"
+                            FontSize="12" />
+                </Grid>
+                <Grid ColumnDefinitions="80,*" ColumnSpacing="8" Padding="0,2">
+                    <Label Grid.Column="0" Text="Sell"
+                           Style="{StaticResource ChartOhlcValue}"
+                           VerticalOptions="Center" />
+                    <Picker Grid.Column="1"
+                            ItemsSource="{Binding MaColorOptions}"
+                            ItemDisplayBinding="{Binding Name}"
+                            SelectedItem="{Binding SellOrderColorOption}"
+                            FontSize="12" />
+                </Grid>
             </VerticalStackLayout>
         </Border>
     </Grid>

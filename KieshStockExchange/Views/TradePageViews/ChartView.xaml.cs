@@ -143,6 +143,8 @@ public partial class ChartView : ContentView
         // brittle if a future feature mutates from a different thread.
         _drawable.Markers = _vm.Markers.ToArray();
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
+        _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
+        _drawable.OpenOrderSellColor = ResolveColor(_vm.SellOrderColorOption.Key);
     }
 
     // Theme-aware colour lookup used for MA series so the VM stays free of

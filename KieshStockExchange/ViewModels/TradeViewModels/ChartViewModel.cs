@@ -129,6 +129,15 @@ public partial class ChartViewModel : StockAwareViewModel
     // buy, red for sell). Synced from IOrderCacheService.OrdersChanged.
     public ObservableCollection<OpenOrderLine> OpenOrderLines { get; } = new();
 
+    // User-configurable line colour per side. Defaults to ChartBull / ChartBear
+    // (the Binance + TradingView convention) but selectable from the same palette
+    // the MA color picker uses, surfaced in the chart settings overlay.
+    [ObservableProperty] private MaColorOption _buyOrderColorOption  = MaColorOption.FromKey("ChartBull");
+    [ObservableProperty] private MaColorOption _sellOrderColorOption = MaColorOption.FromKey("ChartBear");
+
+    partial void OnBuyOrderColorOptionChanged(MaColorOption value)  => RequestRedraw();
+    partial void OnSellOrderColorOptionChanged(MaColorOption value) => RequestRedraw();
+
     // "Live" includes any negative offset (latest candle still in view, with empty
     // future-space on the right). Going strictly positive means we've panned into
     // history — that's when the LIVE button lights up as off.
