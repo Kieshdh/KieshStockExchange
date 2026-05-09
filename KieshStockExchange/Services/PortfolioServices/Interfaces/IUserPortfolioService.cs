@@ -100,6 +100,14 @@ public interface IUserPortfolioService
     /// </summary>
     Task<bool> WithdrawAsync(decimal amount, CurrencyType currency, string? note = null,
         int? asUserId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the user's <see cref="FundTransaction"/> audit rows ordered newest
+    /// first. Read-only and not snapshot-cached; the caller should request a fresh
+    /// fetch each time the history view is opened or refreshed.
+    /// </summary>
+    Task<IReadOnlyList<FundTransaction>> GetFundTransactionsAsync(int? asUserId = null,
+        CancellationToken ct = default);
     #endregion
 
     #region Mutations (Positions)

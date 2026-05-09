@@ -122,6 +122,9 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
     // three buttons) so it needs more vertical room than the simple change-* forms.
     [RelayCommand] private void OpenDepositWithdraw() =>
         OpenInWindow<DepositWithdrawPage>("Deposit / Withdraw", width: 520, height: 700);
+    // Audit-trail companion: lists every Deposit/Withdraw the user has performed.
+    [RelayCommand] private void OpenFundHistory() =>
+        OpenInWindow<FundTransactionHistoryPage>("Fund history", width: 720, height: 600);
 
     private void OpenInWindow<TPage>(string title, double width = 480, double height = 520)
         where TPage : ContentPage

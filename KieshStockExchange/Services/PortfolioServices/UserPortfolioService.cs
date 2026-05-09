@@ -301,6 +301,21 @@ public class UserPortfolioService : IUserPortfolioService
         return success;
     }
 
+    public async Task<IReadOnlyList<FundTransaction>> GetFundTransactionsAsync(int? asUserId = null,
+        CancellationToken ct = default)
+    {
+        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authErr);
+        if (authErr != null) { _logger.LogWarning(authErr); return Array.Empty<FundTransaction>(); }
+        // Read-only path; only self or admin may view another user's audit trail.
+        if (!CanModifyPortfolio(targetUserId))
+        {
+            _logger.LogWarning("No permission to view fund transactions for user {UserId}", targetUserId);
+            return Array.Empty<FundTransaction>();
+        }
+        var rows = await _db.GetFundTransactionsByUserId(targetUserId, ct).ConfigureAwait(false);
+        return rows;
+    }
+
     private sealed class InsufficientFundsException : Exception { }
 
     private async Task<bool> MutateFundAsync(FundMutation mutation, decimal amount, CurrencyType currency,
