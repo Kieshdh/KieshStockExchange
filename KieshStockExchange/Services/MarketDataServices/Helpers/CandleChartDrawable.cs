@@ -39,6 +39,11 @@ public sealed class CandleChartDrawable : IDrawable
     public IReadOnlyList<PriceMarker> Markers { get; set; } = Array.Empty<PriceMarker>();
     public Guid? DraggingMarkerId { get; set; }
 
+    // The user's open limit orders for the visible stock+currency, rendered as
+    // dashed horizontal lines tagged with the side and quantity. Drawn before
+    // the live-price line so the live tag stays the most prominent.
+    public IReadOnlyList<OpenOrderLine> OpenOrderLines { get; set; } = Array.Empty<OpenOrderLine>();
+
     // Current live price; when set, drawn as a horizontal price line and tag in the right gutter.
     public decimal? CurrentPrice { get; set; }
 
@@ -217,6 +222,7 @@ public sealed class CandleChartDrawable : IDrawable
 
         DrawCandles(canvas, plot, X, Y);
         DrawMovingAverages(canvas, plot, tMin, tMax, yMin, yMax, X, Y);
+        DrawOpenOrderLines(canvas, plot, Y, currency);
         DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
         DrawMarkers(canvas, plot, Y, currency);
 
@@ -231,6 +237,43 @@ public sealed class CandleChartDrawable : IDrawable
         // Crosshair sits on top of everything else so it stays visible against candles.
         DrawCrosshair(canvas, plot, currency, X);
 
+        canvas.RestoreState();
+    }
+
+    /// <summary>
+    /// Draw a dashed horizontal line at each open-order price with a side-coloured
+    /// tag in the right gutter showing "BUY 10" / "SELL 10". Reuses the same
+    /// gutter strip the price markers use; the dashed pattern keeps these lines
+    /// distinct from the solid live-price line.
+    /// </summary>
+    private void DrawOpenOrderLines(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)
+    {
+        if (OpenOrderLines.Count == 0) return;
+        canvas.SaveState();
+        canvas.StrokeSize = 1f;
+        for (int i = 0; i < OpenOrderLines.Count; i++)
+        {
+            var line = OpenOrderLines[i];
+            float y = Y((double)line.Price);
+            if (y < plot.Top || y > plot.Bottom) continue;
+
+            var color = line.IsBuy ? Bull : Bear;
+            canvas.StrokeColor = color;
+            canvas.StrokeDashPattern = new float[] { 4f, 4f };
+            canvas.DrawLine(plot.Left, y, plot.Right, y);
+            canvas.StrokeDashPattern = null;
+
+            // Tag in the right gutter: side abbreviation + quantity. Shorter than
+            // the marker tag so it doesn't clash if a marker happens to land near.
+            var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
+            canvas.FillColor = color;
+            canvas.FillRectangle(tagRect);
+            canvas.FontColor = Colors.White;
+            canvas.FontSize = PriceTagFont;
+            canvas.DrawString($"{(line.IsBuy ? "B" : "S")} {line.Quantity}",
+                new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
         canvas.RestoreState();
     }
 

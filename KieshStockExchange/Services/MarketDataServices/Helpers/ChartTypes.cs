@@ -44,3 +44,8 @@ public readonly record struct MovingAverageSeries(
     IReadOnlyList<MaPoint> Points);
 
 public readonly record struct PriceMarker(Guid Id, decimal Price);
+
+// Snapshot of one of the user's open limit orders rendered on the chart as a
+// horizontal price line. IsBuy drives the line colour (green vs red); Quantity
+// shows in the right-gutter tag so the user can see the size at a glance.
+public readonly record struct OpenOrderLine(int OrderId, decimal Price, bool IsBuy, int Quantity);

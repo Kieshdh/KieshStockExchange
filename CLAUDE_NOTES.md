@@ -251,6 +251,17 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - Touches `CandleChartDrawable` — render volume bars first with low alpha + a separate y-axis scaled to the bottom ~20% of the chart area.
 - Keep volume axis hidden by default (TradingView-style).
 
+### 4.10 Open orders as price lines on chart (Wave 2 follow-on)
+- The user's open limit orders for the selected stock+currency render as dashed
+  horizontal lines on the chart (green for buy, red for sell) with a side+qty
+  tag in the right gutter.
+- `OpenOrderLine` value type lives in `ChartTypes.cs`; `ChartViewModel` syncs
+  the collection from `IOrderCacheService.OrdersChanged`; the drawable's
+  `DrawOpenOrderLines` runs before the live-price line.
+- Possible follow-ups (deferred): tap-to-edit (open the Modify popup directly
+  from the line), drag-to-reprice the limit order, hover tooltip showing total
+  notional value.
+
 ### 4.5 Responsive layout for window resizing
 - Layouts feel cramped on small windows and empty on large ones.
 - Audit each `ContentPage` for `Auto` vs `*` row/column distributions.

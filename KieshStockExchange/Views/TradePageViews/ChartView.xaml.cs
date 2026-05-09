@@ -142,6 +142,7 @@ public partial class ChartView : ContentView
         // ObservableCollection enumeration with concurrent edits would still be
         // brittle if a future feature mutates from a different thread.
         _drawable.Markers = _vm.Markers.ToArray();
+        _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
     }
 
     // Theme-aware colour lookup used for MA series so the VM stays free of

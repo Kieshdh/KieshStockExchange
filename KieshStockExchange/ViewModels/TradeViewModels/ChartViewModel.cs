@@ -7,7 +7,9 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 
@@ -122,6 +124,11 @@ public partial class ChartViewModel : StockAwareViewModel
     // Visual only — they do not trigger notifications.
     public ObservableCollection<PriceMarker> Markers { get; } = new();
 
+    // Live snapshot of the user's open limit orders for the currently selected
+    // stock+currency, rendered on the chart as horizontal price lines (green for
+    // buy, red for sell). Synced from IOrderCacheService.OrdersChanged.
+    public ObservableCollection<OpenOrderLine> OpenOrderLines { get; } = new();
+
     // "Live" includes any negative offset (latest candle still in view, with empty
     // future-space on the right). Going strictly positive means we've panned into
     // history — that's when the LIVE button lights up as off.
@@ -145,26 +152,63 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly ICandleService _candles;
     private readonly ILogger<ChartViewModel> _logger;
     private readonly IMarketDataService _market;
+    private readonly IOrderCacheService _orderCache;
+    private readonly IAuthService _auth;
 
     private CancellationTokenSource? _streamCts;
     private bool _loadingOlder;
     private readonly SemaphoreSlim _restartGate = new(1, 1);
 
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
+        IOrderCacheService orderCache, IAuthService auth,
         ISelectedStockService selected, INotificationService notification)
         : base(selected, notification, logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
         _market = market ?? throw new ArgumentNullException(nameof(market));
+        _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
+        _auth = auth ?? throw new ArgumentNullException(nameof(auth));
 
         // Repaint whenever the user adds, removes, toggles, or edits an MA.
         MaSeries.CollectionChanged += OnMaSeriesCollectionChanged;
         foreach (var cfg in MaSeries) cfg.PropertyChanged += OnMaConfigPropertyChanged;
 
         Markers.CollectionChanged += (_, __) => RequestRedraw();
+        OpenOrderLines.CollectionChanged += (_, __) => RequestRedraw();
+
+        // Keep open-order overlays in sync with the cache. Rebuild on selection
+        // change too so switching stocks shows the right user lines.
+        _orderCache.OrdersChanged += OnOrdersChanged;
 
         InitializeSelection();
+    }
+
+    private void OnOrdersChanged(object? sender, EventArgs e)
+    {
+        try { MainThread.BeginInvokeOnMainThread(SyncOpenOrderLines); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to sync chart open-order lines."); }
+    }
+
+    /// <summary>
+    /// Snapshot the user's open LIMIT orders for the currently selected stock +
+    /// currency and mirror them into <see cref="OpenOrderLines"/>. Market orders
+    /// have no meaningful price line so they are skipped.
+    /// </summary>
+    private void SyncOpenOrderLines()
+    {
+        OpenOrderLines.Clear();
+        if (!Selected.HasSelectedStock || _auth.CurrentUserId <= 0) return;
+
+        var stockId = Selected.StockId!.Value;
+        var currency = Selected.Currency;
+        foreach (var o in _orderCache.OpenOrders)
+        {
+            if (o.StockId != stockId || o.CurrencyType != currency) continue;
+            if (o.IsMarketOrder) continue;
+            if (o.UserId != _auth.CurrentUserId) continue;
+            OpenOrderLines.Add(new OpenOrderLine(o.OrderId, o.Price, o.IsBuyOrder, o.Quantity));
+        }
     }
 
     private void OnMaSeriesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -183,6 +227,8 @@ public partial class ChartViewModel : StockAwareViewModel
     protected override async Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct)
     {
         await RestartStreamAsync(stockId, currency, SelectedResolution, ct).ConfigureAwait(false);
+        // After switching stock the open-order line set changes too.
+        SyncOpenOrderLines();
     }
 
     protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency,
@@ -201,6 +247,7 @@ public partial class ChartViewModel : StockAwareViewModel
             _streamCts?.Dispose();
             _streamCts = null;
             StopCandleStream();
+            _orderCache.OrdersChanged -= OnOrdersChanged;
             _restartGate.Dispose();
         }
         base.Dispose(disposing);
