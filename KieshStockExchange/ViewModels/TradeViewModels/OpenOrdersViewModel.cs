@@ -6,6 +6,8 @@ using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
+using KieshStockExchange.Views.TradePageViews;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
@@ -18,17 +20,19 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
     private readonly IStockService _stocks;
     private readonly ILogger<OpenOrdersViewModel> _logger;
     private readonly IAuthService _auth;
+    private readonly IServiceProvider _services;
 
     public OpenOrdersViewModel(ILogger<OpenOrdersViewModel> logger,
         IOrderCacheService cache, IOrderEntryService orders, IStockService stocks, IAuthService auth,
-        ISelectedStockService selected, INotificationService notification)
+        ISelectedStockService selected, INotificationService notification, IServiceProvider services)
         : base(selected, notification, logger)
     {
-        _cache  = cache  ?? throw new ArgumentNullException(nameof(cache));
-        _orders = orders ?? throw new ArgumentNullException(nameof(orders));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
-        _auth   = auth   ?? throw new ArgumentNullException(nameof(auth));
+        _cache    = cache    ?? throw new ArgumentNullException(nameof(cache));
+        _orders   = orders   ?? throw new ArgumentNullException(nameof(orders));
+        _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
+        _auth     = auth     ?? throw new ArgumentNullException(nameof(auth));
+        _services = services ?? throw new ArgumentNullException(nameof(services));
 
         _cache.OrdersChanged += OnOrdersChanged;
         InitializeSelection();
@@ -78,66 +82,20 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
         finally { IsBusy = false; }
     }
 
-    [RelayCommand] private async Task ModifyAsync(Order order)
+    // Open the Modify Order popup window (Binance-style). The VM does the work
+    // on Confirm; we just construct the page here and pass it the target order.
+    [RelayCommand] private void Modify(Order order)
     {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
-        {
-            // let users change price, quantity, or both with quick prompts.
-            var choice = await Shell.Current.DisplayActionSheet(
-                "Modify order", "Cancel", null, "Price", "Quantity", "Price & Quantity");
-            if (choice is null || choice == "Cancel") return;
-
-            int? newQty = null;
-            decimal? newPrice = null;
-
-            // Cannot change price of market orders
-            if (choice.Contains("Price") && order.IsMarketOrder)
-            {
-                await Shell.Current.DisplayAlert("Modify not allowed",
-                    "Cannot modify price of a market order.", "OK");
-                return;
-            }
-
-            // Change price
-            if (choice.Contains("Price"))
-            {
-                var priceStr = await Shell.Current.DisplayPromptAsync(
-                    "New limit price", $"Current: {order.PriceDisplay}",
-                    accept: "OK", cancel: "Back",
-                    keyboard: Keyboard.Numeric);
-                if (string.IsNullOrWhiteSpace(priceStr)) return;
-
-                var parsed = CurrencyHelper.Parse(priceStr, order.CurrencyType);
-                if (!parsed.HasValue || parsed.Value <= 0m)
-                    throw new ArgumentException("Invalid price.");
-                newPrice = parsed.Value;
-            }
-
-            if (choice.Contains("Quantity"))
-            {
-                var qtyStr = await Shell.Current.DisplayPromptAsync(
-                    "New quantity", $"Current: {order.Quantity}",
-                    accept: "OK", cancel: "Back",
-                    keyboard: Keyboard.Numeric);
-                if (!int.TryParse(qtyStr, out var q) || q < order.AmountFilled)
-                    throw new ArgumentException("Quantity must be ≥ filled amount.");
-                if (q == order.Quantity && newPrice is null) return;
-                newQty = q;
-            }
-
-            var result = await _orders.ModifyOrderAsync(_auth.CurrentUserId, order.OrderId, newQty, newPrice);
-            _logger.LogInformation("Modify order #{OrderId}: {Status}", order.OrderId, result.Status);
-            await _cache.RefreshAsync(_auth.CurrentUserId);
-            UpdateFromCache();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Modify order failed for #{OrderId}", order.OrderId);
-            await Shell.Current.DisplayAlert("Modify failed", ex.Message, "OK");
-        }
-        finally { IsBusy = false; }
+        if (order is null) return;
+        var page = _services.GetRequiredService<ModifyOrderPage>();
+        page.Initialize(order);
+        var window = new Window(page) { Title = "Modify order", Width = 460, Height = 420 };
+        // Refresh on close so a successful modify shows up in this list immediately
+        // even if the popup's RefreshAsync raced ahead of the OrdersChanged hop.
+        // UpdateFromCache has optional params, so wrap in a parameterless lambda
+        // for BeginInvokeOnMainThread's Action overload.
+        window.Destroying += (_, __) => MainThread.BeginInvokeOnMainThread(() => UpdateFromCache());
+        Application.Current?.OpenWindow(window);
     }
     #endregion
 
