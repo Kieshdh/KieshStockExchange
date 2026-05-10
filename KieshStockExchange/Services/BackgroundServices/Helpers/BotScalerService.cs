@@ -33,6 +33,13 @@ internal sealed class BotScalerService
     private DateTime _lastChangeAt = DateTime.MinValue;
     private int _highCount;
     private int _lowCount;
+
+    // Logging throttle. Cap changes happen frequently when load wobbles around a
+    // threshold; emitting one INFO per change buries the rest of the log. Buffer
+    // changes here and emit a summary at most every LogInterval.
+    private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(30);
+    private DateTime _lastLogAt = DateTime.MinValue;
+    private readonly List<(int Old, int New, double Load, double Ewma)> _pendingChanges = new();
     #endregion
 
     private readonly ILogger _logger;
@@ -50,6 +57,11 @@ internal sealed class BotScalerService
     {
         if (!Enabled) return null;
         if (!trade.LoopStartedAtUtc.HasValue) return null;
+
+        // Even on a no-change tick, flush a buffered summary if the throttle
+        // window has elapsed — otherwise rapid bursts followed by quiet would
+        // leave the last summary stuck in the buffer indefinitely.
+        FlushPendingLog(TimeHelper.NowUtc(), force: false);
 
         var intervalMs = trade.TradeInterval.TotalMilliseconds;
         if (intervalMs <= 0) return null;
@@ -109,10 +121,49 @@ internal sealed class BotScalerService
         _highCount = _lowCount = 0;
         LastTarget = target;
 
-        _logger.LogInformation(
-            "Scaler: ActiveBotCap {Old}→{New} (load {Pct:P0} → target {Tgt:P0}, ewma {Ewma:F1}ms)",
-            current, target.Value, loadFrac, TargetLoadFraction, ewma);
+        _pendingChanges.Add((current, target.Value, loadFrac, ewma));
+        FlushPendingLog(now, force: false);
 
         return target;
+    }
+
+    /// <summary>
+    /// Emit a buffered summary of cap changes if the throttle window has elapsed
+    /// (or unconditionally when <paramref name="force"/> is true). One INFO line
+    /// per window — single change reads as before; multiple changes collapse to
+    /// "first→last via N steps" with the load range across the window.
+    /// </summary>
+    private void FlushPendingLog(DateTime now, bool force)
+    {
+        if (_pendingChanges.Count == 0) return;
+        if (!force && (now - _lastLogAt) < LogInterval) return;
+
+        if (_pendingChanges.Count == 1)
+        {
+            var c = _pendingChanges[0];
+            _logger.LogInformation(
+                "Scaler: ActiveBotCap {Old}→{New} (load {Pct:P0} → target {Tgt:P0}, ewma {Ewma:F1}ms)",
+                c.Old, c.New, c.Load, TargetLoadFraction, c.Ewma);
+        }
+        else
+        {
+            var first = _pendingChanges[0];
+            var last = _pendingChanges[^1];
+            double minLoad = first.Load, maxLoad = first.Load, lastEwma = first.Ewma;
+            for (int i = 1; i < _pendingChanges.Count; i++)
+            {
+                var c = _pendingChanges[i];
+                if (c.Load < minLoad) minLoad = c.Load;
+                if (c.Load > maxLoad) maxLoad = c.Load;
+                lastEwma = c.Ewma;
+            }
+            _logger.LogInformation(
+                "Scaler: ActiveBotCap {First}→{Last} via {Count} steps in {Secs:F0}s (load {MinPct:P0}–{MaxPct:P0} → target {Tgt:P0}, ewma {Ewma:F1}ms)",
+                first.Old, last.New, _pendingChanges.Count,
+                (now - _lastLogAt).TotalSeconds, minLoad, maxLoad, TargetLoadFraction, lastEwma);
+        }
+
+        _pendingChanges.Clear();
+        _lastLogAt = now;
     }
 }

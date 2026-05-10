@@ -19,6 +19,15 @@ internal sealed class AiBotStateService
     private readonly IDataBaseService _db;
     private readonly ILogger<AiBotStateService> _logger;
 
+    // Throttle "Applied active bot cap" — the scaler may toggle the cap several
+    // times per minute when load wobbles. One INFO per change buries everything
+    // else; collapse identical state and rate-limit the rest to ApplyCapLogInterval.
+    private static readonly TimeSpan ApplyCapLogInterval = TimeSpan.FromSeconds(30);
+    private DateTime _lastApplyCapLogAt = DateTime.MinValue;
+    private int? _lastLoggedCap;
+    private int _lastLoggedEnabled = -1;
+    private int _suppressedApplyCapCount;
+
     internal AiBotStateService(IDataBaseService db, ILogger<AiBotStateService> logger)
     {
         _db     = db     ?? throw new ArgumentNullException(nameof(db));
@@ -94,8 +103,35 @@ internal sealed class AiBotStateService
             if (active) enabled++;
         }
 
-        _logger.LogInformation("Applied active bot cap (cap={Cap}, enabled={Enabled})",
-            cap?.ToString() ?? "none", enabled);
+        // Skip the log when nothing changed, otherwise rate-limit so rapid scaler
+        // bursts collapse into one summary line.
+        bool stateChanged = !Nullable.Equals(_lastLoggedCap, cap) || _lastLoggedEnabled != enabled;
+        if (!stateChanged) return;
+
+        var now = TimeHelper.NowUtc();
+        bool firstEver = _lastApplyCapLogAt == DateTime.MinValue;
+        bool windowElapsed = (now - _lastApplyCapLogAt) >= ApplyCapLogInterval;
+
+        if (firstEver || windowElapsed)
+        {
+            if (_suppressedApplyCapCount > 0)
+                _logger.LogInformation(
+                    "Applied active bot cap (cap={Cap}, enabled={Enabled}; +{Suppressed} suppressed change(s) in last {Secs:F0}s)",
+                    cap?.ToString() ?? "none", enabled, _suppressedApplyCapCount,
+                    (now - _lastApplyCapLogAt).TotalSeconds);
+            else
+                _logger.LogInformation("Applied active bot cap (cap={Cap}, enabled={Enabled})",
+                    cap?.ToString() ?? "none", enabled);
+
+            _lastApplyCapLogAt = now;
+            _lastLoggedCap = cap;
+            _lastLoggedEnabled = enabled;
+            _suppressedApplyCapCount = 0;
+        }
+        else
+        {
+            _suppressedApplyCapCount++;
+        }
     }
     #endregion
 
