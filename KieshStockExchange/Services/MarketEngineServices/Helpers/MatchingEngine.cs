@@ -21,7 +21,12 @@ public readonly record struct MakerSnapshot(Order Order, int OriginalAmountFille
 
 public sealed class MatchingEngine : IMatchingEngine
 {
-    private readonly bool DebugMode = false;
+    // Diagnostic switches. Flip DebugMode on to see one INFO line per fill with
+    // full taker/maker/trade-price context. Set DebugUserId to filter the log
+    // to a single user (e.g. the admin running manual tests), or null to log
+    // every fill (noisy under bot load).
+    private readonly bool DebugMode = true;
+    private readonly int? DebugUserId = 20001;
 
     #region Services and Constructor
     private readonly ILogger<MatchingEngine> _logger;
@@ -73,15 +78,24 @@ public sealed class MatchingEngine : IMatchingEngine
             // Build an in-memory transaction (not persisted yet)
             fills.Add(CreateTransaction(taker, bestOpposite, qty));
 
-            // Log
-            if (DebugMode) _logger.LogInformation("Matched {Taker} with {bestOpposite} for {Qty} @ {Price}",
-                taker.OrderId, bestOpposite.OrderId, qty, bestOpposite.Price);
+            // Diagnostic: per-fill log with full taker/maker/trade-price context.
+            // Gated by DebugMode (master switch) and optionally filtered to one
+            // user by DebugUserId — admin manual tests stay visible while the
+            // bot fleet's matches don't flood the log.
+            if (DebugMode && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
+                _logger.LogInformation(
+                    "Match: taker #{TakerId} user={TakerUser} side={TakerSide} limit={TakerPrice}  ↔  maker #{MakerId} user={MakerUser} price={MakerPrice}  → qty={Qty} tradePrice={TradePrice}",
+                    taker.OrderId, taker.UserId, taker.IsBuyOrder ? "BUY" : "SELL",
+                    taker.IsTrueMarketOrder ? "MARKET" : taker.Price.ToString(),
+                    bestOpposite.OrderId, bestOpposite.UserId, bestOpposite.Price,
+                    qty, bestOpposite.Price);
 
             // Taker is not in the book; mutate it directly. Maker fill must go through
             // the book so per-level totals stay in sync.
             taker.Fill(qty);
             var wasRemoved = book.ApplyMakerFill(bestOpposite, qty);
-            if (wasRemoved && DebugMode)
+            if (wasRemoved && DebugMode
+                && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
                 _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);
 
             makerSnapshots.Add(new MakerSnapshot(bestOpposite, makerOriginalFilled, wasRemoved));
