@@ -95,12 +95,11 @@ Hidden costs: domain (~$10–15/year, optional), self-host ops time (~1–2 hrs/
 
 ## 1. Feature additions (originally requested)
 
-### 1.1 Fund transaction history view
-- Companion to the new `DepositWithdrawPage` / `FundTransaction` model + table.
-- Mirror the shape of `PortfolioTransactionHistoryView` (paginated list, filter, sort).
-- Lives under `Views/AccountPageViews/` with a matching VM in `ViewModels/AccountViewModels/`.
-- Data path: new query in `IDataBaseService` → service method on `IUserPortfolioService` → VM.
-- Surface as a navigation link from `AccountPage` (probably under the Funds card or the Deposit/Withdraw button group).
+### 1.1 Fund transaction history view ✅ DONE
+- `FundTransactionHistoryPage.xaml(.cs)` + `FundTransactionHistoryViewModel.cs`
+  back the page; surfaced from `AccountPage` via "Transaction history" button
+  under the Funds card. Opens in a 720×600 child window.
+- Data path: `IUserPortfolioService.GetFundTransactionsAsync()`.
 
 ### 1.2 NotificationService implementation
 - `INotificationService` / `NotificationService` already exist but the UI is silent.
