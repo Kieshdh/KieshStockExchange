@@ -276,14 +276,10 @@ public class LocalDBService: IDataBaseService, IDisposable
         // list (e.g., orders where many rows share the same UserId).
         var distinct = userIds.Distinct().ToList();
 
-        return await RunDbAsync(async () =>
-        {
-            // SQLite-net translates Contains() into an IN (...) clause, so this is a
-            // single round-trip regardless of how many IDs are in the list.
-            return await _db.Table<User>()
-                .Where(u => distinct.Contains(u.UserId))
-                .ToListAsync();
-        }, ct);
+        // ChunkedContainsAsync handles the SQLite ~999-variable limit; each chunk
+        // is a single round-trip and the helper concatenates results.
+        return await ChunkedContainsAsync(distinct, chunk => RunDbAsync(() =>
+            _db.Table<User>().Where(u => chunk.Contains(u.UserId)).ToListAsync(), ct), ct);
     }
 
     public async Task<bool> UserExists(int userId, CancellationToken ct = default)
@@ -530,11 +526,32 @@ public class LocalDBService: IDataBaseService, IDisposable
     {
         if (orderIds is null || orderIds.Count == 0) return new List<Order>();
         await InitializeAsync(ct);
-        return await RunDbAsync(() =>
-            _db.Table<Order>()
-               .Where(o => orderIds.Contains(o.OrderId))
-               .ToListAsync(),
-            ct);
+        return await ChunkedContainsAsync(orderIds, chunk => RunDbAsync(() =>
+            _db.Table<Order>().Where(o => chunk.Contains(o.OrderId)).ToListAsync(), ct), ct);
+    }
+
+    /// <summary>
+    /// SQLite caps a single statement at ~999 variables, and SQLite-net translates
+    /// <c>List.Contains(column)</c> into an <c>IN (?, ?, ...)</c> clause. Any caller
+    /// that may pass more than ~500 ids must funnel through here so the IN-list is
+    /// chunked. Returns the concatenation of per-chunk query results in input order.
+    /// </summary>
+    private static async Task<List<T>> ChunkedContainsAsync<T>(
+        List<int> ids, Func<List<int>, Task<List<T>>> chunkQuery, CancellationToken ct,
+        int chunkSize = 500)
+    {
+        if (ids.Count <= chunkSize) return await chunkQuery(ids).ConfigureAwait(false);
+
+        var result = new List<T>(ids.Count);
+        for (int start = 0; start < ids.Count; start += chunkSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            var take = Math.Min(chunkSize, ids.Count - start);
+            var chunk = ids.GetRange(start, take);
+            var rows = await chunkQuery(chunk).ConfigureAwait(false);
+            result.AddRange(rows);
+        }
+        return result;
     }
 
     public async Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default)
@@ -573,12 +590,11 @@ public class LocalDBService: IDataBaseService, IDisposable
     {
         if (userIds is null || userIds.Count == 0) return new List<Order>();
         await InitializeAsync(ct);
-        return await RunDbAsync(() =>
+        return await ChunkedContainsAsync(userIds, chunk => RunDbAsync(() =>
             _db.Table<Order>()
-               .Where(o => userIds.Contains(o.UserId) && o.Status == Order.Statuses.Open &&
+               .Where(o => chunk.Contains(o.UserId) && o.Status == Order.Statuses.Open &&
                      (o.OrderType == Order.Types.LimitBuy || o.OrderType == Order.Types.LimitSell))
-               .ToListAsync(),
-            ct);
+               .ToListAsync(), ct), ct);
     }
 
     public async Task CreateOrder(Order order, CancellationToken ct = default)
@@ -794,11 +810,8 @@ public class LocalDBService: IDataBaseService, IDisposable
     {
         if (userIds is null || userIds.Count == 0) return new List<Position>();
         await InitializeAsync(ct);
-        return await RunDbAsync(() =>
-            _db.Table<Position>()
-               .Where(p => userIds.Contains(p.UserId))
-               .ToListAsync(),
-            ct);
+        return await ChunkedContainsAsync(userIds, chunk => RunDbAsync(() =>
+            _db.Table<Position>().Where(p => chunk.Contains(p.UserId)).ToListAsync(), ct), ct);
     }
 
     public async Task CreatePosition(Position position, CancellationToken ct = default)
@@ -929,11 +942,8 @@ public class LocalDBService: IDataBaseService, IDisposable
     {
         if (userIds is null || userIds.Count == 0) return new List<Fund>();
         await InitializeAsync(ct);
-        return await RunDbAsync(() =>
-            _db.Table<Fund>()
-               .Where(f => userIds.Contains(f.UserId))
-               .ToListAsync(),
-            ct);
+        return await ChunkedContainsAsync(userIds, chunk => RunDbAsync(() =>
+            _db.Table<Fund>().Where(f => chunk.Contains(f.UserId)).ToListAsync(), ct), ct);
     }
 
     public async Task CreateFund(Fund fund, CancellationToken ct = default)
