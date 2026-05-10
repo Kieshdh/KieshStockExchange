@@ -374,8 +374,15 @@ public sealed class CandleChartDrawable : IDrawable
         for (int i = 0; i < OpenOrderLines.Count; i++)
         {
             var line = OpenOrderLines[i];
+            // Mirror the draw-time price selection: when the user is mid-modify
+            // we paint the line at DraggingOrderPrice, not line.Price. The hit
+            // zone must follow or the visible line and the clickable line drift
+            // apart — a second drag would miss because the cursor is over the
+            // visual position but the test fires against the DB position.
+            bool dragging = DraggingOrderId == line.OrderId;
+            decimal price = dragging && DraggingOrderPrice is decimal dp ? dp : line.Price;
             float y = (float)(_lastPlot.Bottom
-                              - ((double)line.Price - _lastYMin) / (_lastYMax - _lastYMin)
+                              - ((double)price - _lastYMin) / (_lastYMax - _lastYMin)
                                 * _lastPlot.Height);
             // Skip lines whose price is currently outside the visible Y range —
             // they aren't drawn, so they shouldn't be hit-testable either.

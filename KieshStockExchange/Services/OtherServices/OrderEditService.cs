@@ -33,6 +33,16 @@ public sealed class OrderEditService : IOrderEditService
         Raise(nameof(IsEditing));
     }
 
+    public void UpdatePrefillPrice(decimal newPrice)
+    {
+        if (_editingOrder is null) return;
+        if (newPrice <= 0m) return;
+        if (_prefillPrice == newPrice) return;
+
+        _prefillPrice = newPrice;
+        Raise(nameof(PrefillPrice));
+    }
+
     public void EndEdit()
     {
         if (_editingOrder is null) return;

@@ -5,6 +5,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
@@ -22,17 +23,20 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
 {
     private readonly IOrderEntryService _orders;
     private readonly IOrderCacheService _cache;
+    private readonly IUserPortfolioService _portfolio;
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
     private readonly ILogger<ModifyOrderViewModel> _logger;
 
     public ModifyOrderViewModel(IOrderEntryService orders, IOrderCacheService cache,
+        IUserPortfolioService portfolio,
         IAuthService auth, IOrderEditService editService,
         ILogger<ModifyOrderViewModel> logger)
     {
         Title = "Modify order";
         _orders      = orders      ?? throw new ArgumentNullException(nameof(orders));
         _cache       = cache       ?? throw new ArgumentNullException(nameof(cache));
+        _portfolio   = portfolio   ?? throw new ArgumentNullException(nameof(portfolio));
         _auth        = auth        ?? throw new ArgumentNullException(nameof(auth));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
         _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
@@ -55,19 +59,47 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
+    // When the user types a new price into the modify panel, push it back into
+    // IOrderEditService.PrefillPrice. The chart view subscribes to that service
+    // and moves the dragged line to track the panel's value live. Round-trips
+    // are loop-safe because UpdatePrefillPrice no-ops when the value matches
+    // and ObservableProperty no-ops when PriceString already equals the new
+    // formatted value.
+    partial void OnPriceStringChanged(string value)
+    {
+        var order = _editService.EditingOrder;
+        if (order is null) return;
+        var parsed = CurrencyHelper.Parse((value ?? string.Empty).Trim(), order.CurrencyType);
+        if (parsed.HasValue && parsed.Value > 0m)
+            _editService.UpdatePrefillPrice(parsed.Value);
+    }
+
     private void OnEditServiceChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(IOrderEditService.EditingOrder)) return;
-
-        // Service flipping back to null clears the form; flipping to a new order
-        // initialises it. Marshal to the UI thread because the trigger could be
-        // a chart-drag pointer release on the platform input thread.
-        MainThread.BeginInvokeOnMainThread(() =>
+        // Marshal to the UI thread because triggers can come from platform input
+        // threads (chart-drag pointer release).
+        if (e.PropertyName == nameof(IOrderEditService.EditingOrder))
         {
-            var order = _editService.EditingOrder;
-            if (order is null) Reset();
-            else Initialize(order, _editService.PrefillPrice);
-        });
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                var order = _editService.EditingOrder;
+                if (order is null) Reset();
+                else Initialize(order, _editService.PrefillPrice);
+            });
+        }
+        else if (e.PropertyName == nameof(IOrderEditService.PrefillPrice))
+        {
+            // The user re-dragged the chart line while the modify panel was
+            // already open. Refresh the price field to the new dragged value.
+            // The order itself hasn't changed, so leave qty + summary alone.
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                var order = _editService.EditingOrder;
+                if (order is null) return;
+                if (_editService.PrefillPrice is decimal p && p > 0m)
+                    PriceString = CurrencyHelper.FormatForEdit(p, order.CurrencyType);
+            });
+        }
     }
 
     private void Reset()
@@ -120,6 +152,10 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
                 TargetOrder.OrderId, result.Status);
 
             await _cache.RefreshAsync(_auth.CurrentUserId).ConfigureAwait(false);
+            // Re-pull funds + positions so the AccountPage Funds card and any
+            // portfolio-driven UI see the new reservation. Without this the
+            // engine's in-tx fund persist is real but the UI never repaints.
+            await _portfolio.RefreshAsync(null).ConfigureAwait(false);
 
             MainThread.BeginInvokeOnMainThread(() => _editService.EndEdit());
         }

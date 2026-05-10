@@ -27,6 +27,14 @@ public interface IOrderEditService : INotifyPropertyChanged
     /// <summary>Swap the panel into modify mode for the given order.</summary>
     void BeginEdit(Order order, decimal? prefillPrice = null);
 
+    /// <summary>
+    /// Replace the current prefill price without changing the order being edited.
+    /// Used when the user re-drags the same order line while the modify panel is
+    /// still open: the panel's price field updates to the new dragged-to value.
+    /// No-op when not currently in edit mode.
+    /// </summary>
+    void UpdatePrefillPrice(decimal newPrice);
+
     /// <summary>Swap the panel back to place-order mode.</summary>
     void EndEdit();
 }

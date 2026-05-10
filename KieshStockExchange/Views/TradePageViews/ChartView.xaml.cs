@@ -12,6 +12,7 @@ public partial class ChartView : ContentView
     private readonly CandleChartDrawable _drawable = new();
     private ChartViewModel? _vm;
     private readonly IThemeService? _theme;
+    private readonly IOrderEditService? _editService;
 
     // Pan-gesture tracking
     private int _panLastDelta;
@@ -67,6 +68,14 @@ public partial class ChartView : ContentView
         _theme = Application.Current?.Handler?.MauiContext?.Services?.GetService<IThemeService>();
         if (_theme != null)
             _theme.ThemeChanged += OnThemeChanged;
+
+        // Watch the modify-edit service so the dragged price line stays at its
+        // dragged-to value while the modify panel is open, and snaps back (or to
+        // the new DB price after a successful confirm) once edit mode ends.
+        _editService = Application.Current?.Handler?.MauiContext?.Services?.GetService<IOrderEditService>();
+        if (_editService != null)
+            _editService.PropertyChanged += OnEditServiceChanged;
+
         Unloaded += OnUnloaded;
 
 #if WINDOWS
@@ -83,6 +92,60 @@ public partial class ChartView : ContentView
     private void OnUnloaded(object? sender, EventArgs e)
     {
         if (_theme != null) _theme.ThemeChanged -= OnThemeChanged;
+        if (_editService != null) _editService.PropertyChanged -= OnEditServiceChanged;
+    }
+
+    // Keep the drawable's transient drag state synced with the modify panel:
+    //   • IsEditing flips false  → clear (Cancel snaps back, Confirm paints at
+    //     the refreshed DB price).
+    //   • EditingOrder set + no drag in flight → seed DraggingOrderId so the
+    //     ✎-button entry point also gets a live price line (not just chart-drag).
+    //   • PrefillPrice changes (typed in panel or re-dragged) → move the line.
+    private void OnEditServiceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (_editService is null) return;
+
+        if (e.PropertyName == nameof(IOrderEditService.IsEditing))
+        {
+            if (_editService.IsEditing) return;
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                if (_drawable.DraggingOrderId is null) return;
+                _drawable.DraggingOrderId = null;
+                _drawable.DraggingOrderPrice = null;
+                Chart.Invalidate();
+            });
+            return;
+        }
+
+        if (e.PropertyName == nameof(IOrderEditService.EditingOrder))
+        {
+            var order = _editService.EditingOrder;
+            if (order is null) return;
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                if (_drawable.DraggingOrderId == order.OrderId) return; // already seeded by chart drag
+                _drawable.DraggingOrderId = order.OrderId;
+                _drawable.DraggingOrderPrice = _editService.PrefillPrice ?? order.Price;
+                Chart.Invalidate();
+            });
+            return;
+        }
+
+        if (e.PropertyName == nameof(IOrderEditService.PrefillPrice))
+        {
+            var order = _editService.EditingOrder;
+            var newPrice = _editService.PrefillPrice;
+            if (order is null || newPrice is null) return;
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                if (_drawable.DraggingOrderId != order.OrderId) return;
+                if (_drawable.DraggingOrderPrice == newPrice) return;
+                _drawable.DraggingOrderPrice = newPrice;
+                Chart.Invalidate();
+            });
+            return;
+        }
     }
 
     // Pull the palette from Colors.xaml so the drawable doesn't carry its own hex values.
@@ -324,20 +387,36 @@ public partial class ChartView : ContentView
         }
 
         // Priority 2: open-order line — drag changes the limit price; on release
-        // the Modify Order modal opens pre-filled with the new price.
+        // the Modify Order modal opens (or, if already open for *this* order,
+        // its price field updates). A drag on a *different* order while the
+        // modify panel is open is suppressed so the visible drag state always
+        // matches the order being edited.
         var orderHit = _drawable.HitOpenOrderLine(p);
         if (orderHit is OpenOrderLine ol)
         {
-            _dragMode = DragMode.OpenOrder;
-            _draggingOrderId = ol.OrderId;
-            _draggingOrderStartPrice = ol.Price;
-            _draggingOrderStartY = p.Y;
-            _drawable.DraggingOrderId = ol.OrderId;
-            _drawable.DraggingOrderPrice = ol.Price;
-            (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
-            Chart.Invalidate();
-            e.Handled = true;
-            return;
+            bool modalOpen = _editService?.IsEditing == true;
+            int? editingOrderId = _editService?.EditingOrder?.OrderId;
+            bool isSameOrder = modalOpen && editingOrderId == ol.OrderId;
+
+            if (!modalOpen || isSameOrder)
+            {
+                _dragMode = DragMode.OpenOrder;
+                _draggingOrderId = ol.OrderId;
+                // Use the drawable's last drawn price when re-dragging mid-edit so
+                // the threshold check measures travel since the previous release,
+                // not since the original placement.
+                _draggingOrderStartPrice = isSameOrder
+                    ? (_drawable.DraggingOrderPrice ?? ol.Price)
+                    : ol.Price;
+                _draggingOrderStartY = p.Y;
+                _drawable.DraggingOrderId = ol.OrderId;
+                if (!isSameOrder) _drawable.DraggingOrderPrice = ol.Price;
+                (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
+                Chart.Invalidate();
+                e.Handled = true;
+                return;
+            }
+            // else: modal is open for a different order — fall through to other priorities.
         }
 
         // Priority 3: Y-axis gutter — scales the price range around the click.
@@ -476,22 +555,35 @@ public partial class ChartView : ContentView
                 ? PlatformPointerToControl(uel, e).Y
                 : startY;
             bool moved = Math.Abs(releaseY - startY) >= OpenOrderDragThresholdPx;
+            bool committable = moved && oid.HasValue && finalPrice.HasValue && _vm != null;
+            bool modalAlreadyOpen = _editService?.IsEditing == true;
 
+            // Always release pointer capture and reset local drag state. The drawable's
+            // DraggingOrderId/Price are kept set whenever a modify is in flight — either
+            // we're about to open the modal, or the modal is already open and the user
+            // just re-dragged. They get cleared when OnEditServiceChanged sees IsEditing
+            // flip back to false (cancel or confirm).
             _draggingOrderId = null;
             _draggingOrderStartPrice = 0m;
             _draggingOrderStartY = 0f;
-            _drawable.DraggingOrderId = null;
-            _drawable.DraggingOrderPrice = null;
+            if (!committable && !modalAlreadyOpen)
+            {
+                _drawable.DraggingOrderId = null;
+                _drawable.DraggingOrderPrice = null;
+            }
             Chart.Invalidate();
 
             _dragMode = DragMode.None;
             (sender as Microsoft.UI.Xaml.Controls.Control)?.ReleasePointerCapture(e.Pointer);
             e.Handled = true;
 
-            // Only open the modal when the pointer actually moved — a bare tap on the
-            // line shouldn't pop a dialog (1-px decimal jitter would otherwise trigger).
-            if (moved && oid is int id && finalPrice is decimal np && _vm != null)
-                _ = _vm.BeginModifyOrderAtAsync(id, np);
+            if (committable)
+            {
+                if (modalAlreadyOpen)
+                    _vm!.UpdateModifyPrice(finalPrice!.Value);
+                else
+                    _ = _vm!.BeginModifyOrderAtAsync(oid!.Value, finalPrice!.Value);
+            }
             return;
         }
 

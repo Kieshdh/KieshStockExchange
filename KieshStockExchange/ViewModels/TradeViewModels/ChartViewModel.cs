@@ -374,6 +374,21 @@ public partial class ChartViewModel : StockAwareViewModel
     }
 
     /// <summary>
+    /// Called by ChartView on a re-drag while the modify panel is already open.
+    /// Updates the panel's prefill price (the user is exploring different prices
+    /// without confirming yet); the order being edited is unchanged.
+    /// </summary>
+    public void UpdateModifyPrice(decimal newPrice)
+    {
+        if (newPrice <= 0m) return;
+        if (!_editService.IsEditing) return;
+        var order = _editService.EditingOrder;
+        if (order is null) return;
+        var rounded = CurrencyHelper.RoundMoney(newPrice, order.CurrencyType);
+        _editService.UpdatePrefillPrice(rounded);
+    }
+
+    /// <summary>
     /// Called by ChartView on drag release. Resolves the order from the cache,
     /// rounds the dragged price to the currency's decimals, and swaps the
     /// right-hand panel into modify mode via <see cref="IOrderEditService"/>.

@@ -105,14 +105,19 @@ public sealed class SettlementEngine : ISettlementEngine
             buyReservation = InitialBuyReservation(incoming);
 
             if (buyFund == null || buyFund.AvailableBalance < buyReservation)
-                return IsTrueMarketBuy(incoming)
-                    ? OrderResultFactory.InsufficientFunds($"Insufficient funds for TrueMarketBuy (user {incoming.UserId}).")
-                    : OrderResultFactory.InsufficientFunds($"Insufficient funds (user {incoming.UserId}).");
+            {
+                var available = buyFund?.AvailableBalance ?? 0m;
+                return OrderResultFactory.InsufficientFunds(
+                    $"Order requires {CurrencyHelper.Format(buyReservation, incoming.CurrencyType)} " +
+                    $"but only {CurrencyHelper.Format(available, incoming.CurrencyType)} is available.");
+            }
 
             try { buyFund.ReserveFunds(buyReservation); }
             catch (ArgumentException)
             {
-                return OrderResultFactory.InsufficientFunds($"Insufficient funds (user {incoming.UserId}).");
+                return OrderResultFactory.InsufficientFunds(
+                    $"Order requires {CurrencyHelper.Format(buyReservation, incoming.CurrencyType)} " +
+                    $"but only {CurrencyHelper.Format(buyFund.AvailableBalance, incoming.CurrencyType)} is available.");
             }
         }
         else
@@ -122,23 +127,43 @@ public sealed class SettlementEngine : ISettlementEngine
             // this user's other open sells in the book, so a multi-order over-promise is
             // rejected at place time instead of at settlement.
             if (sellPos == null || sellPos.AvailableQuantity < incoming.Quantity)
-                return OrderResultFactory.InsufficientStocks($"Insufficient shares for sell order (user {incoming.UserId}).");
+            {
+                var avail = sellPos?.AvailableQuantity ?? 0;
+                return OrderResultFactory.InsufficientStocks(
+                    $"Order requires {incoming.Quantity} share(s) but only {avail} available.");
+            }
 
             try { sellPos.ReserveStock(incoming.Quantity); }
             catch (ArgumentException)
             {
                 // Lost a race against another reserver — treat as insufficient.
-                return OrderResultFactory.InsufficientStocks($"Insufficient shares for sell order (user {incoming.UserId}).");
+                return OrderResultFactory.InsufficientStocks(
+                    $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available.");
             }
         }
 
+        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
             await _db.CreateOrder(incoming, ct).ConfigureAwait(false);
+
+            // Persist the reservation we just took on the cached fund/position so
+            // IUserPortfolioService.RefreshAsync (which reads from DB) sees the new
+            // ReservedBalance / ReservedQuantity. Without this, the AccountPage Funds
+            // card and TopNavBar funds chip stay stuck on the pre-place balance until
+            // the order eventually fills (or never, if it rests on the book).
+            if (buyFund is not null && buyReservation > 0m)
+                await _db.UpdateAllAsync(new[] { buyFund }, ct).ConfigureAwait(false);
+            if (sellPos is not null)
+                await _db.UpdateAllAsync(new[] { sellPos }, ct).ConfigureAwait(false);
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
             return null;
         }
         catch (Exception ex)
         {
+            await tx.RollbackAsync(ct).ConfigureAwait(false);
+
             // Persist failed — release the reservation we just took so the cache stays consistent.
             if (sellPos is not null)
             {
@@ -541,25 +566,60 @@ public sealed class SettlementEngine : ISettlementEngine
     {
         ct.ThrowIfCancellationRequested();
 
-        // Compute reservation delta up front so we can apply it after the tx commits.
-        // Sell-only: delta in reservation == delta in Quantity (RemainingQuantity = Quantity − AmountFilled
-        // shifts identically with Quantity since AmountFilled is unchanged here).
-        int reservationDelta = 0;
+        // Cache covers fund + position for this user across all currencies/stocks.
+        // Without this call, modifies for users not yet trading in this session
+        // would find GetFund/GetPosition null and silently skip the reservation
+        // delta — funds in DB and admin tables would never see the new reservation.
+        await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
+
+        // Compute reservation deltas up front so we can apply them after the tx commits
+        // and validate "would the new order overdraft this user?" before mutating the DB.
+        // Sell side: delta in reservation == delta in Quantity (RemainingQuantity moves
+        // with Quantity since AmountFilled is unchanged here). Buy side: delta is
+        // (newPrice × newRemainingQty) − (oldPrice × oldRemainingQty) for limit/slippage;
+        // TrueMarketBuy budget is not modifiable so its delta is always 0.
+        int sellReservationDelta = 0;
         Position? sellPos = null;
         if (newQuantity.HasValue && order.IsSellOrder)
         {
-            reservationDelta = newQuantity.Value - order.Quantity;
-            if (reservationDelta != 0)
+            sellReservationDelta = newQuantity.Value - order.Quantity;
+            if (sellReservationDelta != 0)
             {
                 sellPos = _accounts.GetPosition(order.UserId, order.StockId);
                 if (sellPos is null)
                     throw new InvalidOperationException(
-                        $"Position not found for seller {order.UserId} on stock {order.StockId}.");
-                if (reservationDelta > 0 && sellPos.AvailableQuantity < reservationDelta)
+                        "Could not load your position for this stock. Try reloading the page.");
+                if (sellReservationDelta > 0 && sellPos.AvailableQuantity < sellReservationDelta)
                     throw new InvalidOperationException(
-                        $"Insufficient shares to grow sell order (user {order.UserId}).");
+                        $"Order needs {sellReservationDelta} more share(s) but only {sellPos.AvailableQuantity} available.");
             }
         }
+
+        decimal buyReservationDelta = 0m;
+        Fund? buyFund = null;
+        if (order.IsBuyOrder && (newQuantity.HasValue || newPrice.HasValue))
+        {
+            var oldBuyRes = RemainingBuyReservation(order);
+            var newBuyRes = ProjectedBuyReservation(order, newQuantity, newPrice);
+            buyReservationDelta = newBuyRes - oldBuyRes;
+            if (buyReservationDelta != 0m)
+            {
+                buyFund = _accounts.GetFund(order.UserId, order.CurrencyType);
+                if (buyFund is null)
+                    throw new InvalidOperationException(
+                        "Could not load your funds for this currency. Try reloading the page.");
+                if (buyReservationDelta > 0m && buyFund.AvailableBalance < buyReservationDelta)
+                    throw new InvalidOperationException(
+                        $"Order needs {CurrencyHelper.Format(buyReservationDelta, order.CurrencyType)} more " +
+                        $"but only {CurrencyHelper.Format(buyFund.AvailableBalance, order.CurrencyType)} is available.");
+            }
+        }
+
+        // Snapshot cache state so we can roll the in-memory fund/position back if the
+        // tx fails after we've already mutated them.
+        int? sellPosOldReserved = sellPos?.ReservedQuantity;
+        decimal? buyFundOldTotal = buyFund?.TotalBalance;
+        decimal? buyFundOldReserved = buyFund?.ReservedBalance;
 
         await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -579,24 +639,43 @@ public sealed class SettlementEngine : ISettlementEngine
             if (newPrice.HasValue) order.UpdatePrice(newPrice.Value);
             if (newQuantity.HasValue) order.UpdateQuantity(newQuantity.Value);
 
+            // Apply reservation deltas to cache and persist the fund/position inside the
+            // same tx so DB and cache stay in sync. Without the persist, the admin tables
+            // and a cold-load AccountsCache would never see the new reservation.
+            if (sellPos is not null && sellReservationDelta != 0)
+            {
+                if (sellReservationDelta > 0) sellPos.ReserveStock(sellReservationDelta);
+                else sellPos.UnreserveStock(-sellReservationDelta);
+                sellPos.UpdatedAt = TimeHelper.NowUtc();
+                await _db.UpdateAllAsync(new[] { sellPos }, ct).ConfigureAwait(false);
+            }
+
+            if (buyFund is not null && buyReservationDelta != 0m)
+            {
+                if (buyReservationDelta > 0m) buyFund.ReserveFunds(buyReservationDelta);
+                else buyFund.UnreserveFunds(-buyReservationDelta);
+                buyFund.UpdatedAt = TimeHelper.NowUtc();
+                await _db.UpdateAllAsync(new[] { buyFund }, ct).ConfigureAwait(false);
+            }
+
             await tx.CommitAsync(ct).ConfigureAwait(false);
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
-            throw;
-        }
 
-        // Apply reservation change only after the tx commits — otherwise we'd have to roll
-        // it back on throw, and the throw path above already restores via tx rollback.
-        if (sellPos is not null && reservationDelta != 0)
-        {
-            try
+            // Restore cache mutations — the tx rollback already reverted the DB.
+            if (sellPos is not null && sellPosOldReserved.HasValue
+                && sellPos.ReservedQuantity != sellPosOldReserved.Value)
             {
-                if (reservationDelta > 0) sellPos.ReserveStock(reservationDelta);
-                else sellPos.UnreserveStock(-reservationDelta);
+                sellPos.ReservedQuantity = sellPosOldReserved.Value;
             }
-            catch (ArgumentException) { /* defensive — pre-checked above */ }
+            if (buyFund is not null && buyFundOldReserved.HasValue)
+            {
+                buyFund.TotalBalance = buyFundOldTotal!.Value;
+                buyFund.ReservedBalance = buyFundOldReserved.Value;
+            }
+            throw;
         }
     }
     #endregion
@@ -642,6 +721,31 @@ public sealed class SettlementEngine : ISettlementEngine
         if (!o.IsBuyOrder) return 0m;
         if (IsTrueMarketBuy(o)) return o.BuyBudget ?? 0m;
         return Round(ReservationPerUnit(o) * o.RemainingQuantity, o.CurrencyType);
+    }
+
+    /// <summary>
+    /// What <see cref="RemainingBuyReservation"/> would return if the order's price
+    /// and/or quantity were changed to the supplied values. Used by
+    /// <see cref="ApplyOrderChangeAsync"/> to size the reservation delta before
+    /// mutating the order. Caller passes nulls for fields that are not changing.
+    /// </summary>
+    internal static decimal ProjectedBuyReservation(Order o, int? newQty, decimal? newPrice)
+    {
+        if (!o.IsBuyOrder) return 0m;
+        if (IsTrueMarketBuy(o)) return o.BuyBudget ?? 0m; // budget is not modifiable
+
+        decimal perUnit;
+        if (o.IsLimitOrder)
+            perUnit = newPrice ?? o.Price;
+        else if (o.IsSlippageOrder && o.PriceWithSlippage.HasValue)
+            perUnit = o.PriceWithSlippage.Value; // slippage upper bound isn't modified
+        else
+            return 0m;
+
+        var qty = newQty ?? o.Quantity;
+        var remainingQty = Math.Max(0, qty - o.AmountFilled);
+        if (remainingQty == 0) return 0m;
+        return Round(perUnit * remainingQty, o.CurrencyType);
     }
     #endregion
 }

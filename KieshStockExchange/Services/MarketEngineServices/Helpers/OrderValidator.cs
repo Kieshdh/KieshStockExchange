@@ -25,6 +25,19 @@ public interface IOrderValidator
 public sealed class OrderValidator : IOrderValidator
 {
     #region Services and Constructor
+
+    // Quantity ceiling — reject obviously-bad inputs early so reservation math
+    // (Quantity × Price) never produces an unhelpful OverflowException stack trace.
+    // Decimal max (~7.9e28) is far above any realistic value; the cap exists for
+    // user-error protection, not arithmetic safety. Tune up if the project ever
+    // needs genuinely larger orders.
+    //
+    // Intentionally NO BuyBudget ceiling: the legitimate value is "whatever the
+    // user actually has", which the AvailableBalance check in SettleOrderAsync
+    // enforces with a clean "Insufficient funds" message. A hardcoded ceiling
+    // here would falsely reject high-balance users.
+    private const int MaxOrderQuantity = 1_000_000;
+
     private readonly IStockService _stock;
 
     public OrderValidator(IStockService stock) =>
@@ -41,6 +54,8 @@ public sealed class OrderValidator : IOrderValidator
             return OrderResultFactory.InvalidParams("Invalid stock ID.");
         if (quantity <= 0)
             return OrderResultFactory.InvalidParams("Quantity must be positive.");
+        if (quantity > MaxOrderQuantity)
+            return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
         if (!CurrencyHelper.IsSupported(currency))
             return OrderResultFactory.InvalidParams("Unsupported currency.");
 
@@ -81,6 +96,8 @@ public sealed class OrderValidator : IOrderValidator
     {
         if (order is null) return OrderResultFactory.InvalidParams("Order is null.");
         if (order.Quantity <= 0) return OrderResultFactory.InvalidParams("Quantity must be positive.");
+        if (order.Quantity > MaxOrderQuantity)
+            return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
         if (!_stock.TryGetById(order.StockId, out _))
             return OrderResultFactory.InvalidParams("Invalid stock ID.");
 
@@ -139,6 +156,8 @@ public sealed class OrderValidator : IOrderValidator
         {
             if (newQty.Value <= 0)
                 return OrderResultFactory.InvalidParams("New quantity must be positive.");
+            if (newQty.Value > MaxOrderQuantity)
+                return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
             if (!order.IsLimitOrder)
                 return OrderResultFactory.InvalidParams("Cannot modify quantity for non-limit orders.");
         }
