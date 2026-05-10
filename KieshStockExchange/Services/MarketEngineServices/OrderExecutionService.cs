@@ -767,6 +767,18 @@ public sealed class OrderExecutionService : IOrderExecutionService
     /// Cancelled makers are added to <paramref name="ordersById"/> so the caller can persist
     /// them in the same root tx.
     /// </summary>
+    /// <summary>Aggregated per-maker state collected by the rollback walk. Replaces
+    /// four parallel dictionaries (earliestSnap, anyRemoved, rejectedQty, reason) with
+    /// a single keyed lookup so the GC pressure on the per-batch hot path scales with
+    /// distinct makers, not 4 × distinct makers.</summary>
+    private struct MakerRollback
+    {
+        public MakerSnapshot EarliestSnap;
+        public bool AnyRemovedFromBook;
+        public int RejectedQty;
+        public string Reason;
+    }
+
     private void RollbackRejectedFills(
         IReadOnlyList<(Order Taker, MatchResult Match)> matches,
         OrderBook book,
@@ -779,8 +791,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // WasRemovedFromBook across all snapshots for that maker. Rolling back to the earliest
         // snapshot's state, with the cumulative filled delta, restores the maker as if it had
         // never been touched in this batch.
-        var earliestSnapByMaker = new Dictionary<int, MakerSnapshot>();
-        var anyRemovedByMaker = new Dictionary<int, bool>();
+        var byMaker = new Dictionary<int, MakerRollback>();
         var fillToTaker = new Dictionary<Transaction, Order>(ReferenceEqualityComparer.Instance);
 
         for (int m = 0; m < matches.Count; m++)
@@ -790,33 +801,39 @@ public sealed class OrderExecutionService : IOrderExecutionService
             {
                 var snap = match.MakerSnapshots[s];
                 var id = snap.Order.OrderId;
-                if (earliestSnapByMaker.TryGetValue(id, out var existing))
+                if (byMaker.TryGetValue(id, out var agg))
                 {
-                    if (snap.OriginalAmountFilled < existing.OriginalAmountFilled)
-                        earliestSnapByMaker[id] = snap;
-                    anyRemovedByMaker[id] = anyRemovedByMaker[id] || snap.WasRemovedFromBook;
+                    if (snap.OriginalAmountFilled < agg.EarliestSnap.OriginalAmountFilled)
+                        agg.EarliestSnap = snap;
+                    agg.AnyRemovedFromBook |= snap.WasRemovedFromBook;
+                    byMaker[id] = agg;
                 }
                 else
                 {
-                    earliestSnapByMaker[id] = snap;
-                    anyRemovedByMaker[id] = snap.WasRemovedFromBook;
+                    byMaker[id] = new MakerRollback
+                    {
+                        EarliestSnap = snap,
+                        AnyRemovedFromBook = snap.WasRemovedFromBook,
+                    };
                 }
             }
             for (int f = 0; f < match.Fills.Count; f++)
                 fillToTaker[match.Fills[f]] = taker;
         }
 
-        // Aggregate rejected qty by maker (for the single rollback per maker) and by taker
-        // (for AmountFilled adjustment).
-        var rejectedQtyByMaker = new Dictionary<int, int>();
-        var reasonByMaker = new Dictionary<int, string>();
+        // Aggregate rejected qty into the same per-maker entry. Per-taker rejected qty
+        // stays in its own dictionary because it's keyed by Order (the taker), not by id.
         var rejectedQtyByTaker = new Dictionary<Order, int>();
         for (int i = 0; i < rejected.Count; i++)
         {
             var rj = rejected[i];
-            rejectedQtyByMaker.TryGetValue(rj.MakerOrderId, out var mqty);
-            rejectedQtyByMaker[rj.MakerOrderId] = mqty + rj.Trade.Quantity;
-            reasonByMaker[rj.MakerOrderId] = rj.Reason;
+            if (byMaker.TryGetValue(rj.MakerOrderId, out var agg))
+            {
+                agg.RejectedQty += rj.Trade.Quantity;
+                agg.Reason = rj.Reason;
+                byMaker[rj.MakerOrderId] = agg;
+            }
+            // No maker entry means we'll log + skip below; nothing to update here.
 
             if (fillToTaker.TryGetValue(rj.Trade, out var taker))
             {
@@ -832,26 +849,28 @@ public sealed class OrderExecutionService : IOrderExecutionService
         }
 
         // Roll back each maker exactly once with the cumulative delta.
-        foreach (var kv in rejectedQtyByMaker)
+        foreach (var kv in byMaker)
         {
             var makerId = kv.Key;
-            if (!earliestSnapByMaker.TryGetValue(makerId, out var snap))
-            {
-                _logger.LogError(
-                    "Rejected fill references maker #{MakerId} not in any MatchResult.MakerSnapshots",
-                    makerId);
-                continue;
-            }
-            var maker = snap.Order;
-            var wasRemoved = anyRemovedByMaker[makerId];
+            var agg = kv.Value;
+            if (agg.RejectedQty == 0) continue; // Maker had snapshots but no rejected fills.
+
+            var maker = agg.EarliestSnap.Order;
+            // Forward-compat guard: only limit orders sit in the book today (UpsertOrder
+            // is gated on IsOpenLimitOrder), so a maker reopened via Status = Open must
+            // be a limit order. If a future change ever inserts non-limits we want the
+            // assertion to fire here, not produce a silently mis-restored book.
+            if (!maker.IsLimitOrder)
+                throw new InvalidOperationException(
+                    $"Rollback assumes limit-only makers, got {maker.OrderType} for #{makerId}.");
 
             // RollbackMakerFill handles both "still in book" (credit level qty) and
             // "was removed" (re-insert + credit) cases. We then remove the maker since
             // it's being cancelled.
-            var filledDelta = maker.AmountFilled - snap.OriginalAmountFilled;
-            maker.AmountFilled = snap.OriginalAmountFilled;
+            var filledDelta = maker.AmountFilled - agg.EarliestSnap.OriginalAmountFilled;
+            maker.AmountFilled = agg.EarliestSnap.OriginalAmountFilled;
             maker.Status = Order.Statuses.Open;
-            book.RollbackMakerFill(maker, filledDelta, wasRemoved);
+            book.RollbackMakerFill(maker, filledDelta, agg.AnyRemovedFromBook);
 
             maker.Cancel();
             book.RemoveById(makerId);
@@ -859,7 +878,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
             _logger.LogWarning(
                 "Cancelled stale maker order #{OrderId} (seller {UserId}, stock {StockId}): {Reason}",
-                makerId, maker.UserId, maker.StockId, reasonByMaker[makerId]);
+                makerId, maker.UserId, maker.StockId, agg.Reason);
         }
 
         // Reduce each taker's AmountFilled and reopen if matcher had flipped it to Filled.
@@ -883,6 +902,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         foreach (var snap in result.MakerSnapshots)
         {
+            // Same forward-compat guard as RollbackRejectedFills — book holds limits only.
+            if (!snap.Order.IsLimitOrder)
+                throw new InvalidOperationException(
+                    $"Rollback assumes limit-only makers, got {snap.Order.OrderType} for #{snap.Order.OrderId}.");
+
             // ApplyMakerFill mutated AmountFilled by (currentFilled - snap.OriginalAmountFilled).
             // Capture that delta before restoring AmountFilled so the book can credit the
             // corresponding qty back to the level total.

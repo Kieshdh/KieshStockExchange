@@ -615,13 +615,22 @@ public sealed class OrderBook
             return RemoveBestExclude(side);
 
         // Skip self-orders (same userId) while still respecting best-price then FIFO.
-        var priceKeys = side.Keys.ToList(); // stable snapshot since we may remove price levels
-        foreach (var price in priceKeys)
+        // Iterate side.Keys directly to avoid a per-call ToList allocation. Two safety
+        // notes about mutation during enumeration:
+        //   • The "found a non-self order" path (return below) drains the level if
+        //     it's now empty, then returns immediately — the foreach enumerator is
+        //     never advanced past that point, so .NET's "Collection was modified"
+        //     check (which fires only on MoveNext) never triggers.
+        //   • The defensive "level was empty" branch CAN'T mutate before continue,
+        //     so we defer those removals to a stale-keys list applied after the
+        //     loop. Allocates only when stale levels actually exist (rare).
+        List<decimal>? staleKeys = null;
+        foreach (var price in side.Keys)
         {
-            // Try get the level list
             if (!side.TryGetValue(price, out var list) || list.Count == 0)
             {
-                side.Remove(price);
+                staleKeys ??= new List<decimal>();
+                staleKeys.Add(price);
                 continue;
             }
 
@@ -640,12 +649,19 @@ public sealed class OrderBook
                 if (list.Count == 0)
                     side.Remove(price);
 
+                if (staleKeys != null)
+                    foreach (var p in staleKeys) side.Remove(p);
+
                 _index.Remove(order.OrderId);
                 return order;
             }
         }
 
-        // No non-self orders exist on this side
+        // No non-self orders exist on this side. Drain any stale empty levels we
+        // skipped during the search.
+        if (staleKeys != null)
+            foreach (var p in staleKeys) side.Remove(p);
+
         return null;
     }
 
