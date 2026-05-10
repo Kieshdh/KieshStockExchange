@@ -377,6 +377,9 @@ public sealed class CandleChartDrawable : IDrawable
             float y = (float)(_lastPlot.Bottom
                               - ((double)line.Price - _lastYMin) / (_lastYMax - _lastYMin)
                                 * _lastPlot.Height);
+            // Skip lines whose price is currently outside the visible Y range —
+            // they aren't drawn, so they shouldn't be hit-testable either.
+            if (y < _lastPlot.Top || y > _lastPlot.Bottom) continue;
             if (Math.Abs(pInControl.Y - y) > 4f) continue;
             if (pInControl.X < _lastPlot.Left
                 || pInControl.X > _lastPlot.Right + RightAxisW) continue;

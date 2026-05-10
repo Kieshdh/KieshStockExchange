@@ -28,6 +28,11 @@ public partial class ChartView : ContentView
     // Open-order-drag state — set when _dragMode == OpenOrder.
     private int? _draggingOrderId;
     private decimal _draggingOrderStartPrice;
+    private float _draggingOrderStartY;
+
+    // Minimum vertical pixel travel before a press-release counts as a drag.
+    // Below this we treat the gesture as a tap and skip opening the modal.
+    private const float OpenOrderDragThresholdPx = 4f;
 
     // Y-axis-drag state — captured at press, kept constant for the whole drag
     // so the math anchors to where the user clicked (matching TradingView).
@@ -272,6 +277,10 @@ public partial class ChartView : ContentView
             el.PointerMoved    += OnPlatformPointerMoved;
             el.PointerReleased -= OnPlatformPointerReleased;
             el.PointerReleased += OnPlatformPointerReleased;
+            el.PointerCaptureLost -= OnPlatformPointerCaptureLostOrCanceled;
+            el.PointerCaptureLost += OnPlatformPointerCaptureLostOrCanceled;
+            el.PointerCanceled -= OnPlatformPointerCaptureLostOrCanceled;
+            el.PointerCanceled += OnPlatformPointerCaptureLostOrCanceled;
             el.RightTapped     -= OnPlatformRightTapped;
             el.RightTapped     += OnPlatformRightTapped;
         }
@@ -322,6 +331,7 @@ public partial class ChartView : ContentView
             _dragMode = DragMode.OpenOrder;
             _draggingOrderId = ol.OrderId;
             _draggingOrderStartPrice = ol.Price;
+            _draggingOrderStartY = p.Y;
             _drawable.DraggingOrderId = ol.OrderId;
             _drawable.DraggingOrderPrice = ol.Price;
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
@@ -461,9 +471,15 @@ public partial class ChartView : ContentView
         {
             var oid = _draggingOrderId;
             var finalPrice = _drawable.DraggingOrderPrice;
-            var startPrice = _draggingOrderStartPrice;
+            var startY = _draggingOrderStartY;
+            var releaseY = sender is Microsoft.UI.Xaml.UIElement uel
+                ? PlatformPointerToControl(uel, e).Y
+                : startY;
+            bool moved = Math.Abs(releaseY - startY) >= OpenOrderDragThresholdPx;
 
             _draggingOrderId = null;
+            _draggingOrderStartPrice = 0m;
+            _draggingOrderStartY = 0f;
             _drawable.DraggingOrderId = null;
             _drawable.DraggingOrderPrice = null;
             Chart.Invalidate();
@@ -472,8 +488,9 @@ public partial class ChartView : ContentView
             (sender as Microsoft.UI.Xaml.Controls.Control)?.ReleasePointerCapture(e.Pointer);
             e.Handled = true;
 
-            // Only open the modal when the price actually moved — a bare tap should not pop a dialog.
-            if (oid is int id && finalPrice is decimal np && np != startPrice && _vm != null)
+            // Only open the modal when the pointer actually moved — a bare tap on the
+            // line shouldn't pop a dialog (1-px decimal jitter would otherwise trigger).
+            if (moved && oid is int id && finalPrice is decimal np && _vm != null)
                 _ = _vm.BeginModifyOrderAtAsync(id, np);
             return;
         }
@@ -488,6 +505,26 @@ public partial class ChartView : ContentView
         _dragMode = DragMode.None;
         (sender as Microsoft.UI.Xaml.Controls.Control)?.ReleasePointerCapture(e.Pointer);
         e.Handled = true;
+    }
+
+    // Pointer capture can be revoked without a paired Released — alt-tab, focus
+    // loss, system gestures. Without a reset path the drag state would leak into
+    // the next interaction (highlighted line, marker stuck "dragging"). Treat
+    // both PointerCaptureLost and PointerCanceled as drag-aborts.
+    private void OnPlatformPointerCaptureLostOrCanceled(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_dragMode == DragMode.None) return;
+
+        _draggingMarkerId = null;
+        _drawable.DraggingMarkerId = null;
+        _draggingOrderId = null;
+        _draggingOrderStartPrice = 0m;
+        _draggingOrderStartY = 0f;
+        _drawable.DraggingOrderId = null;
+        _drawable.DraggingOrderPrice = null;
+        _dragMode = DragMode.None;
+
+        Chart.Invalidate();
     }
 
     private void OnPlatformRightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)

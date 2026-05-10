@@ -147,6 +147,14 @@ public static class CurrencyHelper
             return result;
         return null;
     }
+
+    /// <summary>
+    /// Formats a price for an editable text field using the currency's own decimal
+    /// separator so the value round-trips correctly through <see cref="Parse"/>.
+    /// No currency symbol or thousands grouping — digits and decimal point only.
+    /// </summary>
+    public static string FormatForEdit(decimal price, CurrencyType currency)
+        => price.ToString("0.######", CultureCache[currency]);
     #endregion
 
     #region Rounding Helpers

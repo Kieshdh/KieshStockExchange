@@ -48,12 +48,21 @@
             <views:OrderBookView Grid.Row="1" Grid.Column="1" Grid.RowSpan="2"
                                  BindingContext="{Binding OrderBookVm}"/>
 
-            <!-- Section for placing orders - PlaceOrderView is its own card.
-                 Spans only Rows 1-2 (same height as OrderBookView) so the
-                 trade-tabs section below can run full width. -->
+            <!-- Right-hand trade panel — two sibling cards share the same Grid
+                 cell, only one is visible at a time. Default is PlaceOrderView;
+                 swaps to ModifyOrderView while IOrderEditService.IsEditing flips
+                 true (driven by chart-drag or the ✎ button on the open-orders
+                 table). The placing VM keeps its state — no rebinds, no rebuild. -->
             <views:PlaceOrderView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
                                   WidthRequest="260"
+                                  IsVisible="{Binding Source={x:Reference TradePageRoot},
+                                                      Path=BindingContext.IsPlacing}"
                                   BindingContext="{Binding PlacingVm}"/>
+            <views:ModifyOrderView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
+                                   WidthRequest="260"
+                                   IsVisible="{Binding Source={x:Reference TradePageRoot},
+                                                       Path=BindingContext.IsModifying}"
+                                   BindingContext="{Binding ModifyingVm}"/>
 
             <!-- Shows the current orders, order history and current positions.
                  Spans all 3 columns so the table is as wide as the page. -->

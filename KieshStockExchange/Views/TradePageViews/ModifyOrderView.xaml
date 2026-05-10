@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="KieshStockExchange.Views.TradePageViews.ModifyOrderView">
+
+    <Border Style="{StaticResource TradingPanelStyle}">
+        <VerticalStackLayout Spacing="12">
+
+            <!-- Card head: title + side/type chip (read-only — user can't change side/type while modifying) -->
+            <Grid ColumnDefinitions="*,Auto"
+                  VerticalOptions="Center">
+                <Label Grid.Column="0"
+                       Text="Modify order"
+                       Style="{StaticResource SectionHeaderLabelStyle}"
+                       VerticalOptions="Center" />
+                <Border Grid.Column="1"
+                        StrokeThickness="0"
+                        Padding="10,4"
+                        VerticalOptions="Center">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="6" />
+                    </Border.StrokeShape>
+                    <Border.Triggers>
+                        <DataTrigger TargetType="Border"
+                                     Binding="{Binding IsBuyOrder}"
+                                     Value="True">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource BuyGreen}" />
+                        </DataTrigger>
+                        <DataTrigger TargetType="Border"
+                                     Binding="{Binding IsBuyOrder}"
+                                     Value="False">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource SellRed}" />
+                        </DataTrigger>
+                    </Border.Triggers>
+                    <Label Text="{Binding SideTypeChip}"
+                           TextColor="White"
+                           FontSize="12"
+                           FontAttributes="Bold" />
+                </Border>
+            </Grid>
+
+            <!-- Order summary line — what the user is editing -->
+            <Label Text="{Binding Summary}"
+                   Style="{StaticResource OrderTotalsLabel}"
+                   FontSize="12" />
+
+            <!-- Quantity -->
+            <VerticalStackLayout Spacing="0">
+                <Label Text="Quantity"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding QuantityString, Mode=TwoWay}"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric"
+                       HorizontalTextAlignment="End" />
+            </VerticalStackLayout>
+
+            <!-- Limit price -->
+            <VerticalStackLayout Spacing="0">
+                <Label Text="Limit price"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding PriceString, Mode=TwoWay}"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric"
+                       HorizontalTextAlignment="End" />
+            </VerticalStackLayout>
+
+            <!-- Error message (only visible when set) -->
+            <Label Text="{Binding ErrorMessage}"
+                   IsVisible="{Binding HasError}"
+                   TextColor="{DynamicResource SellRed}"
+                   FontSize="12" />
+
+            <!-- Cancel + Confirm CTA pair -->
+            <Grid ColumnDefinitions="*,*"
+                  ColumnSpacing="8"
+                  Margin="0,4,0,0">
+                <Button Grid.Column="0"
+                        Text="Cancel"
+                        Command="{Binding CancelCommand}"
+                        Style="{StaticResource UnselectedSegmentButtonStyle}" />
+                <Button Grid.Column="1"
+                        Text="Confirm"
+                        Command="{Binding ConfirmCommand}"
+                        Style="{StaticResource BuyButtonStyle}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding IsBuyOrder}"
+                                     Value="False">
+                            <Setter Property="BackgroundColor" Value="{DynamicResource SellRed}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+            </Grid>
+
+        </VerticalStackLayout>
+    </Border>
+</ContentView>

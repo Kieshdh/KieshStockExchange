@@ -54,7 +54,6 @@ public static class MauiProgram
         builder.Services.AddTransient<ChangeUsernamePage>();
         builder.Services.AddTransient<DepositWithdrawPage>();
         builder.Services.AddTransient<FundTransactionHistoryPage>();
-        builder.Services.AddTransient<ModifyOrderPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<AdminPage>();
         builder.Services.AddTransient<BotDashboardPage>();
@@ -81,6 +80,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
         builder.Services.AddSingleton<IThemeService, ThemeService>();
         builder.Services.AddSingleton<IProfileService, ProfileService>();
+        builder.Services.AddSingleton<IOrderEditService, OrderEditService>();
         // Market engine
         builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
         builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();

@@ -6,8 +6,6 @@ using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
-using KieshStockExchange.Views.TradePageViews;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
@@ -20,19 +18,19 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
     private readonly IStockService _stocks;
     private readonly ILogger<OpenOrdersViewModel> _logger;
     private readonly IAuthService _auth;
-    private readonly IServiceProvider _services;
+    private readonly IOrderEditService _editService;
 
     public OpenOrdersViewModel(ILogger<OpenOrdersViewModel> logger,
         IOrderCacheService cache, IOrderEntryService orders, IStockService stocks, IAuthService auth,
-        ISelectedStockService selected, INotificationService notification, IServiceProvider services)
+        ISelectedStockService selected, INotificationService notification, IOrderEditService editService)
         : base(selected, notification, logger)
     {
-        _cache    = cache    ?? throw new ArgumentNullException(nameof(cache));
-        _orders   = orders   ?? throw new ArgumentNullException(nameof(orders));
-        _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
-        _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
-        _auth     = auth     ?? throw new ArgumentNullException(nameof(auth));
-        _services = services ?? throw new ArgumentNullException(nameof(services));
+        _cache       = cache       ?? throw new ArgumentNullException(nameof(cache));
+        _orders      = orders      ?? throw new ArgumentNullException(nameof(orders));
+        _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
+        _stocks      = stocks      ?? throw new ArgumentNullException(nameof(stocks));
+        _auth        = auth        ?? throw new ArgumentNullException(nameof(auth));
+        _editService = editService ?? throw new ArgumentNullException(nameof(editService));
 
         _cache.OrdersChanged += OnOrdersChanged;
         InitializeSelection();
@@ -82,28 +80,14 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
         finally { IsBusy = false; }
     }
 
-    // Open the Modify Order popup as a Shell modal page (Binance-style). Modal
-    // navigation keeps the popup on top of the Trade page within the same
-    // window — hovering the chart can no longer steal focus and shove the
-    // popup behind the main UI. ModifyOrderPage.IsOpen guards against double-
-    // tap pushing two stacked modals.
-    [RelayCommand] private async Task Modify(Order order)
+    // Swap the right-hand panel into modify mode for this order. The actual
+    // form lives in ModifyOrderView and is bound to ModifyOrderViewModel via
+    // IOrderEditService — no modal, no navigation.
+    [RelayCommand] private void Modify(Order order)
     {
         if (order is null) return;
-        if (ModifyOrderPage.IsOpen) return;
-        try
-        {
-            var page = _services.GetRequiredService<ModifyOrderPage>();
-            page.Initialize(order);
-            // Refresh open-orders rows after the modal is dismissed.
-            page.Disappearing += (_, __) =>
-                MainThread.BeginInvokeOnMainThread(() => UpdateFromCache());
-            await Shell.Current.Navigation.PushModalAsync(page).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to open Modify Order popup for #{OrderId}.", order.OrderId);
-        }
+        if (_editService.IsEditing) return;
+        _editService.BeginEdit(order);
     }
     #endregion
 

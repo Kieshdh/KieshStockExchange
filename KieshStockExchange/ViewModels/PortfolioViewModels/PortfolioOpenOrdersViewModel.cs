@@ -5,11 +5,10 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.ViewModels.TradeViewModels;
-using KieshStockExchange.Views.TradePageViews;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
 
@@ -21,7 +20,8 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
     private readonly IOrderEntryService  _orders;
     private readonly IStockService       _stocks;
     private readonly IAuthService        _auth;
-    private readonly IServiceProvider    _services;
+    private readonly ISelectedStockService _selected;
+    private readonly IOrderEditService   _editService;
     private readonly ILogger<PortfolioOpenOrdersViewModel> _logger;
 
     [ObservableProperty] private ObservableCollection<OpenOrderRow> _currentView = new();
@@ -31,15 +31,17 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
         IOrderEntryService  orders,
         IStockService       stocks,
         IAuthService        auth,
-        IServiceProvider    services,
+        ISelectedStockService selected,
+        IOrderEditService   editService,
         ILogger<PortfolioOpenOrdersViewModel> logger)
     {
-        _cache    = cache    ?? throw new ArgumentNullException(nameof(cache));
-        _orders   = orders   ?? throw new ArgumentNullException(nameof(orders));
-        _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
-        _auth     = auth     ?? throw new ArgumentNullException(nameof(auth));
-        _services = services ?? throw new ArgumentNullException(nameof(services));
-        _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _cache       = cache       ?? throw new ArgumentNullException(nameof(cache));
+        _orders      = orders      ?? throw new ArgumentNullException(nameof(orders));
+        _stocks      = stocks      ?? throw new ArgumentNullException(nameof(stocks));
+        _auth        = auth        ?? throw new ArgumentNullException(nameof(auth));
+        _selected    = selected    ?? throw new ArgumentNullException(nameof(selected));
+        _editService = editService ?? throw new ArgumentNullException(nameof(editService));
+        _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
 
         _cache.OrdersChanged += OnOrdersChanged;
     }
@@ -81,26 +83,24 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
         finally { IsBusy = false; }
     }
 
-    // Open the Modify Order popup as a Shell modal page (Binance-style). Modal
-    // navigation keeps the popup on top within the same window so it can't
-    // slip behind chart hover. ModifyOrderPage.IsOpen prevents a double-tap
-    // from stacking two modals.
+    // Modify lives on the Trade page (the inline ModifyOrderView panel that
+    // swaps in for PlaceOrderView). From the portfolio, navigate to TradePage
+    // for the order's stock, then enter edit mode on arrival.
     [RelayCommand]
     private async Task Modify(Order order)
     {
         if (order is null) return;
-        if (ModifyOrderPage.IsOpen) return;
+        if (_editService.IsEditing) return;
         try
         {
-            var page = _services.GetRequiredService<ModifyOrderPage>();
-            page.Initialize(order);
-            page.Disappearing += (_, __) =>
-                MainThread.BeginInvokeOnMainThread(RebuildView);
-            await Shell.Current.Navigation.PushModalAsync(page).ConfigureAwait(false);
+            await _selected.Set(order.StockId).ConfigureAwait(false);
+            await _selected.ChangeCurrencyAsync(order.CurrencyType).ConfigureAwait(false);
+            await Shell.Current.GoToAsync("///TradePage").ConfigureAwait(false);
+            _editService.BeginEdit(order);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to open Modify Order popup for #{OrderId}.", order.OrderId);
+            _logger.LogError(ex, "Failed to navigate to Trade page for modify on #{OrderId}.", order.OrderId);
         }
     }
 

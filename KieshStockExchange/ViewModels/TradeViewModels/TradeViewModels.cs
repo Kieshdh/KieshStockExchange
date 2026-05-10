@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
@@ -36,6 +37,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
 
     #region ViewModel Properties
     public PlaceOrderViewModel PlacingVm { get; }
+    public ModifyOrderViewModel ModifyingVm { get; }
     public TransactionHistoryViewModel TransactionVm { get; }
     public OpenOrdersViewModel OpenOrdersVm { get; }
     public OrderHistoryViewModel OrderHistoryVm { get; }
@@ -43,6 +45,11 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     public ChartViewModel ChartVm { get; }
     public OrderBookViewModel OrderBookVm { get; }
     public TopNavBarViewModel TopNavBarVm { get; }
+
+    /// <summary>True while the right-hand panel is showing ModifyOrderView.</summary>
+    public bool IsModifying => _editService.IsEditing;
+    /// <summary>True while the right-hand panel is showing PlaceOrderView.</summary>
+    public bool IsPlacing => !_editService.IsEditing;
     #endregion
 
     #region Fields and Constructor
@@ -50,10 +57,13 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     private readonly IMarketDataService _market;
     private readonly ILogger<TradeViewModel> _logger;
     private readonly IUserSessionService _session;
+    private readonly IOrderEditService _editService;
 
     public TradeViewModel( ISelectedStockService selected, IMarketDataService market,
         ILogger<TradeViewModel> logger, IUserSessionService userSession,
-        PlaceOrderViewModel placingVm, TransactionHistoryViewModel historyVm,
+        IOrderEditService editService,
+        PlaceOrderViewModel placingVm, ModifyOrderViewModel modifyingVm,
+        TransactionHistoryViewModel historyVm,
         OpenOrdersViewModel openOrdersVm, UserPositionsViewModel positionsVm,
         ChartViewModel chartVm, OrderBookViewModel orderBookVm, OrderHistoryViewModel orderHistoryVm,
         TopNavBarViewModel topNavBarVm)
@@ -63,9 +73,11 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _selected = selected ?? throw new ArgumentNullException(nameof(selected));
         _session = userSession ?? throw new ArgumentNullException(nameof(userSession));
+        _editService = editService ?? throw new ArgumentNullException(nameof(editService));
 
         // Initialize ViewModels
         PlacingVm = placingVm;
+        ModifyingVm = modifyingVm;
         TransactionVm = historyVm;
         OpenOrdersVm = openOrdersVm;
         PositionsVm = positionsVm;
@@ -77,6 +89,17 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         // Other initialization
         Title = "Trade";
         _selected.PropertyChanged += OnSelectedChanged;
+        _editService.PropertyChanged += OnEditServiceChanged;
+    }
+
+    private void OnEditServiceChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(IOrderEditService.IsEditing)) return;
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            OnPropertyChanged(nameof(IsModifying));
+            OnPropertyChanged(nameof(IsPlacing));
+        });
     }
     #endregion
 
@@ -123,6 +146,8 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     public void Dispose()
     {
         _selected.PropertyChanged -= OnSelectedChanged;
+        _editService.PropertyChanged -= OnEditServiceChanged;
+        ModifyingVm.Dispose();
         TopNavBarVm.Dispose();
     }
     #endregion
