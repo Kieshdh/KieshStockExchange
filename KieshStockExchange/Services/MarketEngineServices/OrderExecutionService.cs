@@ -462,14 +462,20 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
         }
 
-        // Phases 2 + 3 share one root SQLite transaction. Inserting the orders, matching,
-        // and settling per-book all run inside it — one BEGIN, one COMMIT, regardless of
-        // how many books the batch touches. On any failure we roll back the tx, undo the
-        // in-memory book mutations, and restore cache snapshots.
+        // Section 1b: split the single root tx that used to wrap Phase 2 + every Phase 3
+        // group into (a) a short Phase 2 tx that only does the bulk InsertAllAsync and (b)
+        // one independent root tx per book group. _writeGate is released between groups so
+        // a user-issued modify/cancel/place doesn't queue behind the entire batch.
+        //
+        // Cross-group atomicity is intentionally lost: if group G fails after groups A+B
+        // committed, A's and B's orders stay filled. Acceptable because each group is
+        // already independently atomic, the matcher is deterministic per book, and the
+        // caller (AiTradeService) reads OrderResult per order — there's no batch-level
+        // rollback signal anyone depends on.
         var orderList = new List<Order>(validOrders.Count);
         for (int i = 0; i < validOrders.Count; i++) orderList.Add(validOrders[i].order);
 
-        // Group by (stockId, currency) up-front so the in-tx loop knows what to do.
+        // Group by (stockId, currency) up-front so each group's tx scope is known.
         var groups = new Dictionary<(int, CurrencyType), List<(int index, Order order)>>();
         for (int i = 0; i < validOrders.Count; i++)
         {
@@ -483,200 +489,282 @@ public sealed class OrderExecutionService : IOrderExecutionService
             list.Add(vo);
         }
 
-        // groupOutcomes records every match and book upsert so books can be put back to their
-        // pre-batch state on rollback. fund/pos/budget snapshots were declared earlier — Phase
-        // 1.5 already populated posSnapshots with the seller positions it reserved against.
-        var groupOutcomes = new List<GroupOutcome>(groups.Count);
-        var allFills = new List<Transaction>();
-        var ordersByIdAccum = new Dictionary<int, Order>();
-
-        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // Phase 2: short tx — bulk-insert all valid orders so each one has its
+        // AutoIncrement OrderId before any matcher runs. If this commit fails, restore the
+        // Phase 1.5/1.6 cache reservations and abort the entire batch — none of the groups
+        // get to run because the matcher needs OrderIds to populate Transaction rows.
         try
         {
-            // Phase 2: bulk-insert orders inside the tx. AutoIncrement IDs land on the
-            // entity instances so subsequent UpdateAllAsync calls hit the right rows.
-            await _db.InsertAllAsync(orderList, ct).ConfigureAwait(false);
-
-            // Phase 3: per-book matching + settlement, all under the ambient tx.
-            // Sequential — book locks are independent SemaphoreSlims, but the SQLite writer
-            // is shared so fan-out wins nothing on the DB side. Fail-fast on first error.
-            foreach (var kv in groups)
+            await using var phase2Tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
             {
-                var (stockId, currency) = kv.Key;
-                var groupItems = kv.Value;
-                var outcome = new GroupOutcome { StockId = stockId, Currency = currency };
-
-                await _books.WithBookLockAsync(stockId, currency, ct, async book =>
-                {
-                    var groupFills = new List<Transaction>();
-                    var groupOrdersById = new Dictionary<int, Order>(groupItems.Count * 2);
-                    for (int i = 0; i < groupItems.Count; i++)
-                    {
-                        var (idx, order) = groupItems[i];
-                        var match = _matching.Match(order, book, ct);
-                        outcome.Records.Add(new MatchRecord(idx, order, match, false));
-                        groupFills.AddRange(match.Fills);
-
-                        groupOrdersById[order.OrderId] = order;
-                        ordersByIdAccum[order.OrderId] = order;
-                        for (int s = 0; s < match.MakerSnapshots.Count; s++)
-                        {
-                            var maker = match.MakerSnapshots[s].Order;
-                            groupOrdersById[maker.OrderId] = maker;
-                            ordersByIdAccum[maker.OrderId] = maker;
-                        }
-                    }
-
-                    if (groupFills.Count > 0)
-                    {
-                        var (settleErr, rejected) = await _settlement.SettleTradesNoTxAsync(
-                            groupFills, groupOrdersById,
-                            fundSnapshots, posSnapshots, budgetSnapshots, pendingNewPositions,
-                            ct).ConfigureAwait(false);
-                        if (settleErr != null)
-                            throw new InvalidOperationException(
-                                settleErr.ErrorMessage ?? "Settlement failed.");
-
-                        if (rejected.Count > 0)
-                        {
-                            // Aggregate across all takers in this group — the same maker
-                            // can appear in multiple MatchResults if partially filled by
-                            // taker A then fully filled by taker B.
-                            var pairs = new (Order, MatchResult)[outcome.Records.Count];
-                            for (int r = 0; r < outcome.Records.Count; r++)
-                                pairs[r] = (outcome.Records[r].Order, outcome.Records[r].Match);
-                            RollbackRejectedFills(pairs, book, rejected, groupOrdersById);
-
-                            // Persist cancelled makers in the same root tx. The apply-pass
-                            // already wrote groupOrdersById.Values once; this second write
-                            // updates the rows we just flipped to Cancelled.
-                            var cancelled = new List<Order>(rejected.Count);
-                            for (int i = 0; i < rejected.Count; i++)
-                            {
-                                if (groupOrdersById.TryGetValue(rejected[i].MakerOrderId, out var maker)
-                                    && maker.Status == Order.Statuses.Cancelled)
-                                    cancelled.Add(maker);
-                            }
-                            if (cancelled.Count > 0)
-                                await _db.UpdateAllAsync(cancelled, ct).ConfigureAwait(false);
-
-                            // Filter rejected from groupFills (publishes ticks downstream)
-                            // and from each per-taker MatchResult.Fills (drives the per-order
-                            // Success result at the end of PlaceAndMatchBatchAsync).
-                            var rejectedSet = new HashSet<Transaction>(ReferenceEqualityComparer.Instance);
-                            foreach (var rj in rejected) rejectedSet.Add(rj.Trade);
-                            groupFills.RemoveAll(rejectedSet.Contains);
-                            for (int r = 0; r < outcome.Records.Count; r++)
-                                outcome.Records[r].Match.Fills.RemoveAll(rejectedSet.Contains);
-                        }
-                    }
-
-                    // Upsert remainders / cancel non-open orders. Both happen inside the
-                    // same tx; CancelRemainderAsync's UpdateOrder call piggybacks on it.
-                    for (int i = 0; i < outcome.Records.Count; i++)
-                    {
-                        var rec = outcome.Records[i];
-                        if (rec.Order.IsOpenLimitOrder)
-                        {
-                            book.UpsertOrder(rec.Order);
-                            outcome.Records[i] = rec with { Upserted = true };
-                        }
-                        else if (rec.Order.IsOpen)
-                        {
-                            await _settlement.CancelRemainderAsync(rec.Order, ct).ConfigureAwait(false);
-                        }
-                    }
-
-                    allFills.AddRange(groupFills);
-                }).ConfigureAwait(false);
-
-                groupOutcomes.Add(outcome);
+                await _db.InsertAllAsync(orderList, ct).ConfigureAwait(false);
+                await phase2Tx.CommitAsync(ct).ConfigureAwait(false);
             }
-
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-
-            // After commit: register any positions created during this batch in the cache.
-            foreach (var pos in pendingNewPositions.Values)
-                _accounts.TrackNewPosition(pos);
+            catch
+            {
+                await phase2Tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
-            _logger.LogError(ex,
-                "PlaceAndMatchBatchAsync: root tx failed across {GroupCount} groups; rolling back",
-                groups.Count);
-
-            // Roll back every book mutation we performed, in reverse order. Upserts placed
-            // the taker on the book, so removing it first leaves only the maker fills to
-            // undo via the existing RollbackMatch helper.
-            for (int i = groupOutcomes.Count - 1; i >= 0; i--)
-            {
-                var outcome = groupOutcomes[i];
-                try
-                {
-                    await _books.WithBookLockAsync(outcome.StockId, outcome.Currency, ct, book =>
-                    {
-                        for (int j = outcome.Records.Count - 1; j >= 0; j--)
-                        {
-                            var rec = outcome.Records[j];
-                            if (rec.Upserted) book.RemoveById(rec.Order.OrderId);
-                            RollbackMatch(rec.Order, rec.Match, book);
-                        }
-                        return Task.CompletedTask;
-                    }).ConfigureAwait(false);
-                }
-                catch (Exception inner)
-                {
-                    _logger.LogError(inner,
-                        "PlaceAndMatchBatchAsync: book rollback failed for ({StockId},{Currency})",
-                        outcome.StockId, outcome.Currency);
-                }
-            }
-
-            // Restore cache snapshots through the settlement engine so the same instances
-            // settlement mutated get put back to their pre-batch values. Pending new
-            // positions were never registered in the cache, so they simply drop.
-            _settlement.RestoreCacheSnapshots(ordersByIdAccum, fundSnapshots, posSnapshots, budgetSnapshots);
-
+            _logger.LogError(ex, "PlaceAndMatchBatchAsync: Phase 2 InsertAllAsync failed");
+            _settlement.RestoreCacheSnapshots(
+                new Dictionary<int, Order>(), fundSnapshots, posSnapshots, budgetSnapshots);
             for (int i = 0; i < validOrders.Count; i++)
                 results[validOrders[i].index] = OrderResultFactory.OperationFailed(
-                    $"Batch settlement failed: {ex.Message}");
+                    $"Bulk insert failed: {ex.Message}");
             return results;
         }
 
-        // Phase 4: publish ticks outside all locks (coalesced across books).
+        // Phase 3: one root tx per group. Sequential — book locks are independent
+        // semaphores, but the SQLite writer is shared so we'd serialise anyway.
+        var allFills = new List<Transaction>();
+        foreach (var kv in groups)
+        {
+            var (stockId, currency) = kv.Key;
+            var groupItems = kv.Value;
+
+            try
+            {
+                var groupFills = await RunGroupTxAsync(
+                    stockId, currency, groupItems, results, ct).ConfigureAwait(false);
+                if (groupFills.Count > 0) allFills.AddRange(groupFills);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
+                    stockId, currency);
+
+                // The group tx already rolled back any settle DB writes. The orders for
+                // this group are still in DB (inserted in Phase 2) but they aren't on the
+                // book and the engine doesn't know about them. Cancel them and release
+                // the Phase 1.5/1.6 reservations they consumed so the books don't get
+                // ghost open rows that the bot's next refresh treats as still-pending.
+                await RecoverFailedGroupAsync(groupItems, results, ex.Message, ct).ConfigureAwait(false);
+            }
+        }
+
+        // Phase 4: publish ticks outside all locks. Per-group NotifyOrdersMutated already
+        // fired inside RunGroupTxAsync; this is the cross-group coalesced tick publish.
         if (allFills.Count > 0)
             await _marketData.OnTicksAsync(allFills, ct).ConfigureAwait(false);
 
-        // Refresh the active user's order cache if any touched order belonged to
-        // them. Aggregate across all groups so the cache fires-and-forgets one
-        // RefreshAsync, not one per group.
-        var allAffected = new HashSet<int>();
-        for (int gi = 0; gi < groupOutcomes.Count; gi++)
-        {
-            var outcome = groupOutcomes[gi];
-            for (int i = 0; i < outcome.Records.Count; i++)
-            {
-                var rec = outcome.Records[i];
-                allAffected.Add(rec.Order.UserId);
-                for (int s = 0; s < rec.Match.MakerSnapshots.Count; s++)
-                    allAffected.Add(rec.Match.MakerSnapshots[s].Order.UserId);
-            }
-        }
-        if (allAffected.Count > 0)
-            _orderCache.NotifyOrdersMutated(allAffected);
-
-        // Mark every successful order with its result.
-        for (int gi = 0; gi < groupOutcomes.Count; gi++)
-        {
-            var outcome = groupOutcomes[gi];
-            for (int i = 0; i < outcome.Records.Count; i++)
-            {
-                var rec = outcome.Records[i];
-                results[rec.Index] = OrderResultFactory.Success(rec.Order, rec.Match.Fills);
-            }
-        }
         return results;
+    }
+
+    /// <summary>
+    /// Run one book group's matcher + settlement inside its own root tx. Mutations
+    /// committed here are durable independently of any other group's outcome. Throws on
+    /// settlement failure; the caller is responsible for the recovery path (which marks
+    /// the group's orders Cancelled and releases their Phase 1.5/1.6 reservations).
+    /// </summary>
+    private async Task<List<Transaction>> RunGroupTxAsync(
+        int stockId, CurrencyType currency,
+        List<(int index, Order order)> groupItems,
+        OrderResult[] results,
+        CancellationToken ct)
+    {
+        // Fresh snapshot dicts for THIS group only. Restoring them on failure rolls back
+        // the settle-pass mutations; Phase 1.5/1.6 reservations are recovered separately
+        // by RecoverFailedGroupAsync because they were taken outside any tx.
+        var groupFundSnapshots = new Dictionary<(int, CurrencyType), (decimal Total, decimal Reserved)>();
+        var groupPosSnapshots = new Dictionary<(int, int), (int Quantity, int Reserved)>();
+        var groupBudgetSnapshots = new Dictionary<int, decimal?>();
+        var groupPendingNewPositions = new Dictionary<(int, int), Position>();
+
+        var outcome = new GroupOutcome { StockId = stockId, Currency = currency };
+        var groupFills = new List<Transaction>();
+        var groupOrdersById = new Dictionary<int, Order>(groupItems.Count * 2);
+
+        bool committed = false;
+        await _books.WithBookLockAsync(stockId, currency, ct, async book =>
+        {
+            // Match every item in this group while we hold the book lock. The book is
+            // mutated in-memory; if the group tx later rolls back we undo via
+            // RollbackMatch in reverse order.
+            for (int i = 0; i < groupItems.Count; i++)
+            {
+                var (idx, order) = groupItems[i];
+                var match = _matching.Match(order, book, ct);
+                outcome.Records.Add(new MatchRecord(idx, order, match, false));
+                groupFills.AddRange(match.Fills);
+
+                groupOrdersById[order.OrderId] = order;
+                for (int s = 0; s < match.MakerSnapshots.Count; s++)
+                {
+                    var maker = match.MakerSnapshots[s].Order;
+                    groupOrdersById[maker.OrderId] = maker;
+                }
+            }
+
+            await using var groupTx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (groupFills.Count > 0)
+                {
+                    var (settleErr, rejected) = await _settlement.SettleTradesNoTxAsync(
+                        groupFills, groupOrdersById,
+                        groupFundSnapshots, groupPosSnapshots, groupBudgetSnapshots,
+                        groupPendingNewPositions, ct).ConfigureAwait(false);
+                    if (settleErr != null)
+                        throw new InvalidOperationException(
+                            settleErr.ErrorMessage ?? "Settlement failed.");
+
+                    if (rejected.Count > 0)
+                    {
+                        var pairs = new (Order, MatchResult)[outcome.Records.Count];
+                        for (int r = 0; r < outcome.Records.Count; r++)
+                            pairs[r] = (outcome.Records[r].Order, outcome.Records[r].Match);
+                        RollbackRejectedFills(pairs, book, rejected, groupOrdersById);
+
+                        var cancelled = new List<Order>(rejected.Count);
+                        for (int i = 0; i < rejected.Count; i++)
+                        {
+                            if (groupOrdersById.TryGetValue(rejected[i].MakerOrderId, out var maker)
+                                && maker.Status == Order.Statuses.Cancelled)
+                                cancelled.Add(maker);
+                        }
+                        if (cancelled.Count > 0)
+                            await _db.UpdateAllAsync(cancelled, ct).ConfigureAwait(false);
+
+                        var rejectedSet = new HashSet<Transaction>(ReferenceEqualityComparer.Instance);
+                        foreach (var rj in rejected) rejectedSet.Add(rj.Trade);
+                        groupFills.RemoveAll(rejectedSet.Contains);
+                        for (int r = 0; r < outcome.Records.Count; r++)
+                            outcome.Records[r].Match.Fills.RemoveAll(rejectedSet.Contains);
+                    }
+                }
+
+                for (int i = 0; i < outcome.Records.Count; i++)
+                {
+                    var rec = outcome.Records[i];
+                    if (rec.Order.IsOpenLimitOrder)
+                    {
+                        book.UpsertOrder(rec.Order);
+                        outcome.Records[i] = rec with { Upserted = true };
+                    }
+                    else if (rec.Order.IsOpen)
+                    {
+                        await _settlement.CancelRemainderAsync(rec.Order, ct).ConfigureAwait(false);
+                    }
+                }
+
+                await groupTx.CommitAsync(ct).ConfigureAwait(false);
+                committed = true;
+            }
+            catch
+            {
+                await groupTx.RollbackAsync(ct).ConfigureAwait(false);
+
+                // Undo book mutations recorded this group, in reverse order. Upserts come
+                // off first so RollbackMatch only has to put maker fills back.
+                for (int j = outcome.Records.Count - 1; j >= 0; j--)
+                {
+                    var rec = outcome.Records[j];
+                    if (rec.Upserted) book.RemoveById(rec.Order.OrderId);
+                    RollbackMatch(rec.Order, rec.Match, book);
+                }
+                _settlement.RestoreCacheSnapshots(
+                    groupOrdersById, groupFundSnapshots, groupPosSnapshots, groupBudgetSnapshots);
+                throw;
+            }
+        }).ConfigureAwait(false);
+
+        if (!committed) return groupFills; // unreachable in practice — throw above covers it
+
+        // After commit: register newly-created positions in the cache and fire the order
+        // cache notify for this group's affected users. Per-group notifies replace the
+        // single batch-wide notify so the UI gets smaller, more frequent pushes.
+        foreach (var pos in groupPendingNewPositions.Values)
+            _accounts.TrackNewPosition(pos);
+
+        var groupAffected = new HashSet<int>();
+        for (int i = 0; i < outcome.Records.Count; i++)
+        {
+            var rec = outcome.Records[i];
+            groupAffected.Add(rec.Order.UserId);
+            for (int s = 0; s < rec.Match.MakerSnapshots.Count; s++)
+                groupAffected.Add(rec.Match.MakerSnapshots[s].Order.UserId);
+            results[rec.Index] = OrderResultFactory.Success(rec.Order, rec.Match.Fills);
+        }
+        if (groupAffected.Count > 0)
+            _orderCache.NotifyOrdersMutated(groupAffected);
+
+        return groupFills;
+    }
+
+    /// <summary>
+    /// Group tx failed after Phase 2 already committed the group's orders. Mark them
+    /// Cancelled in DB, release the Phase 1.5/1.6 reservations they consumed, and stamp
+    /// OperationFailed in the results array. Best-effort: any error here is logged
+    /// rather than rethrown, because the batch already failed for these items and we
+    /// don't want to mask the original failure cause.
+    /// </summary>
+    private async Task RecoverFailedGroupAsync(
+        List<(int index, Order order)> groupItems,
+        OrderResult[] results,
+        string failureReason,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var recoveryTx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var toUpdate = new List<Order>(groupItems.Count);
+                for (int i = 0; i < groupItems.Count; i++)
+                {
+                    var (idx, order) = groupItems[i];
+                    if (order.IsOpen) order.Cancel();
+                    toUpdate.Add(order);
+
+                    if (order.IsSellOrder)
+                    {
+                        var pos = _accounts.GetPosition(order.UserId, order.StockId);
+                        if (pos is not null)
+                        {
+                            try { pos.UnreserveStock(order.Quantity); pos.UpdatedAt = TimeHelper.NowUtc(); }
+                            catch (ArgumentException) { /* hydration mismatch — defensive */ }
+                            await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
+                        }
+                    }
+                    else if (order.IsBuyOrder)
+                    {
+                        var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
+                        var reservation = SettlementEngine.InitialBuyReservation(order);
+                        if (fund is not null && reservation > 0m)
+                        {
+                            try { fund.UnreserveFunds(reservation); fund.UpdatedAt = TimeHelper.NowUtc(); }
+                            catch (ArgumentException) { /* hydration mismatch — defensive */ }
+                            await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    results[idx] = OrderResultFactory.OperationFailed(
+                        $"Batch settlement failed: {failureReason}");
+                }
+                if (toUpdate.Count > 0)
+                    await _db.UpdateAllAsync(toUpdate, ct).ConfigureAwait(false);
+
+                await recoveryTx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await recoveryTx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "PlaceAndMatchBatchAsync: recovery tx failed for failed group; orders may be in inconsistent state");
+            for (int i = 0; i < groupItems.Count; i++)
+                results[groupItems[i].index] = OrderResultFactory.OperationFailed(
+                    $"Batch settlement failed and recovery failed: {ex.Message}");
+        }
     }
 
     private sealed record MatchRecord(int Index, Order Order, MatchResult Match, bool Upserted);
