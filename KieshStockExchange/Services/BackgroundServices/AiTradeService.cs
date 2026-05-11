@@ -10,7 +10,10 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 namespace KieshStockExchange.Services.BackgroundServices;
@@ -85,6 +88,43 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
     public IReadOnlyList<string> RecentFailures
     {
+        get
+        {
+            lock (_recentFailures)
+            {
+                if (_recentFailures.Count == 0) return Array.Empty<string>();
+                var copy = new string[_recentFailures.Count];
+                int i = 0;
+                foreach (var r in _recentFailures) copy[i++] = FormatFailureLine(r);
+                return copy;
+            }
+        }
+    }
+
+    public IReadOnlyDictionary<FailureCategory, long> FailuresByCategory
+    {
+        get
+        {
+            // Materialise to a plain dictionary so callers can't observe the live
+            // ConcurrentDictionary mutating beneath them. Cheap (~7 entries max).
+            var copy = new Dictionary<FailureCategory, long>(_failuresByCategory.Count);
+            foreach (var kv in _failuresByCategory) copy[kv.Key] = kv.Value;
+            return copy;
+        }
+    }
+
+    public IReadOnlyDictionary<int, long> FailuresByStockId
+    {
+        get
+        {
+            var copy = new Dictionary<int, long>(_failuresByStockId.Count);
+            foreach (var kv in _failuresByStockId) copy[kv.Key] = kv.Value;
+            return copy;
+        }
+    }
+
+    public IReadOnlyList<FailureRecord> RecentFailureRecords
+    {
         get { lock (_recentFailures) return _recentFailures.ToArray(); }
     }
 
@@ -98,7 +138,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private DateTime _nextStatsLogTime = DateTime.MinValue;
 
     private const int    PruneOrdersPerBot   = 2;
-    private const int    RecentFailuresMax   = 10;
+    // Bounded ring for the dashboard + CSV export. At 20k bots the failure rate
+    // can hit ~5k/min — 5000 records covers roughly one minute. Aggregates
+    // (_failuresByCategory / _failuresByStockId) are unbounded and survive ring
+    // eviction so totals stay accurate even when the raw rows roll off.
+    private const int    RecentFailuresMax   = 5000;
     private static readonly TimeSpan PruneStaleAge = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(30);
     private const decimal PruneDistanceFactor = 2.0m;
@@ -108,7 +152,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private long   _tickCount = 0;
     private long   _tradesPlacedThisSession = 0;
     private long   _failuresThisSession = 0;
-    private readonly Queue<string> _recentFailures = new();
+    private readonly Queue<FailureRecord> _recentFailures = new();
+    private readonly ConcurrentDictionary<FailureCategory, long> _failuresByCategory = new();
+    private readonly ConcurrentDictionary<int, long> _failuresByStockId = new();
 
     // Cumulative counters used to emit a 30s window log (snapshot-and-diff).
     private long _buyTotal       = 0;
@@ -241,6 +287,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         Interlocked.Exchange(ref _lastTickWorkMicros, 0);
         _nextStatsLogTime = TimeHelper.NowUtc() + StatsLogInterval;
         lock (_recentFailures) _recentFailures.Clear();
+        _failuresByCategory.Clear();
+        _failuresByStockId.Clear();
         LastTradeAtUtc = null;
         LoopStartedAtUtc = TimeHelper.NowUtc();
 
@@ -362,7 +410,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                                 user.AiUserId, order.StockId, result.Status, result.ErrorMessage);
                         user.RecordError();
                         Interlocked.Increment(ref _failuresThisSession);
-                        RecordFailure($"AIUser {user.AiUserId} stock {order.StockId}: {result.Status} — {result.ErrorMessage}");
+                        RecordFailure(new FailureRecord(
+                            TimestampUtc: TimeHelper.NowUtc(),
+                            AiUserId:     user.AiUserId,
+                            UserId:       user.UserId,
+                            StockId:      order.StockId,
+                            Side:         order.IsBuyOrder ? "Buy" : "Sell",
+                            OrderType:    order.OrderType ?? string.Empty,
+                            Quantity:     order.Quantity,
+                            Price:        order.Price,
+                            Status:       result.Status,
+                            Category:     result.Status.ToCategory(),
+                            ErrorMessage: result.ErrorMessage ?? string.Empty));
                         continue;
                     }
                     if (_logger.IsEnabled(LogLevel.Debug))
@@ -418,15 +477,71 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         Volatile.Write(ref _tickWorkMsEwma, next);
     }
 
-    private void RecordFailure(string message)
+    private void RecordFailure(FailureRecord record)
     {
-        if (string.IsNullOrEmpty(message)) return;
-        var stamped = $"{TimeHelper.NowUtc().ToLocalTime():HH:mm:ss}  {message}";
+        // Aggregates first (cheap, lock-free) so even if the ring eviction races
+        // we never lose a count. Stock-id 0 is filtered out to keep the per-stock
+        // breakdown legible — that bucket would otherwise lump together any
+        // engine errors that surface before the order's stockId is set.
+        _failuresByCategory.AddOrUpdate(record.Category, 1L, static (_, n) => n + 1);
+        if (record.StockId > 0)
+            _failuresByStockId.AddOrUpdate(record.StockId, 1L, static (_, n) => n + 1);
+
         lock (_recentFailures)
         {
-            _recentFailures.Enqueue(stamped);
+            _recentFailures.Enqueue(record);
             while (_recentFailures.Count > RecentFailuresMax) _recentFailures.Dequeue();
         }
+    }
+
+    private static string FormatFailureLine(FailureRecord r) =>
+        $"{r.TimestampUtc.ToLocalTime():HH:mm:ss}  AIUser {r.AiUserId} stock {r.StockId}: " +
+        $"{r.Category.DisplayName()} — {r.ErrorMessage}";
+
+    public string SuggestedFailuresExportFileName =>
+        $"bot_failures_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}";
+
+    public async Task<string> ExportFailuresCsvAsync(string path, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Export path is required.", nameof(path));
+
+        FailureRecord[] snapshot;
+        lock (_recentFailures) snapshot = _recentFailures.ToArray();
+
+        var sb = new StringBuilder(2048 + snapshot.Length * 96);
+        sb.AppendLine("TimestampUtc,AiUserId,UserId,StockId,Symbol,Side,Type,Quantity,Price,Category,Status,ErrorMessage");
+        for (int i = 0; i < snapshot.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var r = snapshot[i];
+            _stocks.TryGetSymbol(r.StockId, out var symbol);
+            sb.Append(r.TimestampUtc.ToString("O", CultureInfo.InvariantCulture)).Append(',')
+              .Append(r.AiUserId).Append(',')
+              .Append(r.UserId).Append(',')
+              .Append(r.StockId).Append(',')
+              .Append(EscapeCsv(symbol ?? string.Empty)).Append(',')
+              .Append(EscapeCsv(r.Side)).Append(',')
+              .Append(EscapeCsv(r.OrderType)).Append(',')
+              .Append(r.Quantity).Append(',')
+              .Append(r.Price.ToString(CultureInfo.InvariantCulture)).Append(',')
+              .Append(r.Category).Append(',')
+              .Append(r.Status).Append(',')
+              .Append(EscapeCsv(r.ErrorMessage))
+              .Append('\n');
+        }
+
+        await File.WriteAllTextAsync(path, sb.ToString(), ct).ConfigureAwait(false);
+        _logger.LogInformation("Exported {Count} bot failure records to {Path}.", snapshot.Length, path);
+        return path;
+    }
+
+    private static string EscapeCsv(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        bool needsQuote = value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0;
+        if (!needsQuote) return value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
     }
     #endregion
 

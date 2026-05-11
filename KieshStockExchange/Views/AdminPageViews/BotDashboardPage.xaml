@@ -218,13 +218,46 @@
                     </VerticalStackLayout>
                 </Border>
 
-                <!-- Recent failures -->
+                <!-- Failure breakdown + export -->
+                <Border Style="{StaticResource AdminCardStyle}">
+                    <VerticalStackLayout Spacing="8">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <Label Grid.Column="0" Text="Failure breakdown"
+                                   Style="{StaticResource AdminCardSubtitle}"
+                                   VerticalOptions="Center" />
+                            <Button Grid.Column="1" Text="Export CSV"
+                                    Style="{StaticResource AdminPrimaryButton}"
+                                    Command="{Binding ExportFailuresCommand}"
+                                    MinimumWidthRequest="120" />
+                        </Grid>
+
+                        <!-- Reasons on the left, top stocks on the right. -->
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                            <Border Grid.Column="0" Style="{StaticResource AdminInsetPanel}">
+                                <Label Text="{Binding FailuresByReasonText}"
+                                       Style="{StaticResource AdminMutedNote}" />
+                            </Border>
+                            <Border Grid.Column="1" Style="{StaticResource AdminInsetPanel}">
+                                <Label Text="{Binding FailuresByStockText}"
+                                       Style="{StaticResource AdminMutedNote}" />
+                            </Border>
+                        </Grid>
+
+                        <Label Text="{Binding ExportFailuresStatusText}"
+                               Style="{StaticResource AdminMutedNote}" />
+                    </VerticalStackLayout>
+                </Border>
+
+                <!-- Recent failures (last 100, scrollable) -->
                 <Border Style="{StaticResource AdminCardStyle}">
                     <Border Style="{StaticResource AdminInsetPanel}">
                         <VerticalStackLayout Spacing="2">
-                            <Label Text="Recent failures" Style="{StaticResource AdminMetricLabel}" />
-                            <Label Text="{Binding RecentFailuresText}"
-                                   Style="{StaticResource AdminMutedNote}" />
+                            <Label Text="Recent failures (last 100)"
+                                   Style="{StaticResource AdminMetricLabel}" />
+                            <ScrollView MaximumHeightRequest="240">
+                                <Label Text="{Binding RecentFailuresText}"
+                                       Style="{StaticResource AdminMutedNote}" />
+                            </ScrollView>
                         </VerticalStackLayout>
                     </Border>
                 </Border>

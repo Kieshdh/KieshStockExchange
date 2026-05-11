@@ -2,10 +2,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.BackgroundServices.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
+using System.Text;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -33,6 +35,9 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private string _loadFractionText = "—";
     [ObservableProperty] private string _tickLatencyText = "—";
     [ObservableProperty] private string _recentFailuresText = string.Empty;
+    [ObservableProperty] private string _failuresByReasonText = string.Empty;
+    [ObservableProperty] private string _failuresByStockText = string.Empty;
+    [ObservableProperty] private string _exportFailuresStatusText = string.Empty;
     #endregion
 
     #region 24h stats fields
@@ -46,6 +51,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     private readonly IAiTradeService _trade;
     private readonly IUserSessionService _session;
     private readonly IDataBaseService _db;
+    private readonly IStockService _stocks;
     private readonly ILogger<BotDashboardViewModel> _logger;
 
     public TopNavBarViewModel TopNavBarVm { get; }
@@ -54,15 +60,18 @@ public partial class BotDashboardViewModel : BaseViewModel
     private DateTime _next24hRefreshUtc = DateTime.MinValue;
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan Stats24hInterval = TimeSpan.FromSeconds(30);
+    private const int TopStockFailuresCount = 5;
+    private const int RecentFailuresDisplayCount = 100;
     #endregion
 
     public BotDashboardViewModel(IAiTradeService trade,
-        IUserSessionService session, IDataBaseService db,
+        IUserSessionService session, IDataBaseService db, IStockService stocks,
         ILogger<BotDashboardViewModel> logger, TopNavBarViewModel topNavBarVm)
     {
         _trade = trade ?? throw new ArgumentNullException(nameof(trade));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
@@ -147,10 +156,145 @@ public partial class BotDashboardViewModel : BaseViewModel
             ? FormatDuration(TimeHelper.NowUtc() - started)
             : "—";
 
-        var failures = _trade.RecentFailures;
-        RecentFailuresText = failures.Count == 0
-            ? "No recent failures."
-            : string.Join("\n", failures);
+        RecentFailuresText = BuildRecentFailuresText();
+        (FailuresByReasonText, FailuresByStockText) = BuildFailureBreakdownTexts();
+    }
+
+    private string BuildRecentFailuresText()
+    {
+        // Pull structured records (oldest → newest) and format only the tail so the
+        // ScrollView shows the most-recent N. The dashboard polls once a second; the
+        // engine's ring keeps up to 5000 — formatting all 5000 every tick is wasted
+        // work since the user only sees the last RecentFailuresDisplayCount.
+        var records = _trade.RecentFailureRecords;
+        if (records.Count == 0) return "No recent failures.";
+
+        int take = Math.Min(RecentFailuresDisplayCount, records.Count);
+        int start = records.Count - take;
+
+        var sb = new StringBuilder(take * 80);
+        for (int i = start; i < records.Count; i++)
+        {
+            var r = records[i];
+            sb.Append(r.TimestampUtc.ToLocalTime().ToString("HH:mm:ss"))
+              .Append("  AIUser ").Append(r.AiUserId)
+              .Append(" stock ").Append(r.StockId)
+              .Append(": ").Append(r.Category.DisplayName())
+              .Append(" — ").Append(r.ErrorMessage)
+              .Append('\n');
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    private (string ByReason, string ByStock) BuildFailureBreakdownTexts()
+    {
+        var byCategory = _trade.FailuresByCategory;
+        var byStock    = _trade.FailuresByStockId;
+        if (byCategory.Count == 0 && byStock.Count == 0)
+            return ("No failures yet this session.", string.Empty);
+
+        long total = 0;
+        foreach (var n in byCategory.Values) total += n;
+
+        var reasonsSb = new StringBuilder(160);
+        reasonsSb.Append("By reason (");
+        reasonsSb.Append(total.ToString("N0"));
+        reasonsSb.AppendLine(" total):");
+        var orderedCats = byCategory
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key.ToString());
+        foreach (var kv in orderedCats)
+        {
+            var pct = total > 0 ? (double)kv.Value * 100.0 / total : 0.0;
+            reasonsSb.Append("  ").Append(kv.Key.DisplayName())
+                     .Append(": ").Append(kv.Value.ToString("N0"))
+                     .Append("  (").Append(pct.ToString("F1")).AppendLine("%)");
+        }
+
+        string stocksText;
+        if (byStock.Count == 0)
+        {
+            stocksText = string.Empty;
+        }
+        else
+        {
+            var stocksSb = new StringBuilder(96);
+            stocksSb.Append("Top ").Append(TopStockFailuresCount).AppendLine(" stocks:");
+            var topStocks = byStock
+                .OrderByDescending(kv => kv.Value)
+                .Take(TopStockFailuresCount);
+            foreach (var kv in topStocks)
+            {
+                var symbol = _stocks.TryGetSymbol(kv.Key, out var s) ? s : kv.Key.ToString();
+                stocksSb.Append("  ").Append(symbol)
+                        .Append(": ").Append(kv.Value.ToString("N0"))
+                        .AppendLine();
+            }
+            stocksText = stocksSb.ToString().TrimEnd();
+        }
+
+        return (reasonsSb.ToString().TrimEnd(), stocksText);
+    }
+
+    [RelayCommand]
+    private async Task ExportFailuresAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        try
+        {
+            var path = await PickFailureExportPathAsync(_trade.SuggestedFailuresExportFileName)
+                .ConfigureAwait(false);
+            if (string.IsNullOrEmpty(path))
+            {
+                ExportFailuresStatusText = "Export cancelled.";
+                return;
+            }
+
+            var savedPath = await _trade.ExportFailuresCsvAsync(path).ConfigureAwait(false);
+            var count = _trade.RecentFailureRecords.Count;
+            ExportFailuresStatusText = $"Exported {count:N0} failure rows to {savedPath}";
+            _logger.LogInformation("Bot failure CSV exported: {Path}", savedPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to export bot failures.");
+            ExportFailuresStatusText = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    // Wraps the platform save-file dialog. The project only targets Windows today,
+    // so we only implement the WinUI 3 path and return null on other platforms
+    // (the build target conditional keeps this from being dead code on Windows).
+    private static async Task<string?> PickFailureExportPathAsync(string suggestedFileName)
+    {
+#if WINDOWS
+        var picker = new Windows.Storage.Pickers.FileSavePicker
+        {
+            SuggestedFileName = suggestedFileName,
+            SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+        };
+        picker.FileTypeChoices.Add("CSV file", new List<string> { ".csv" });
+
+        // WinUI 3 requires the picker to be parented to the app's window via HWND,
+        // otherwise PickSaveFileAsync throws E_FAIL on launch.
+        var window = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault();
+        if (window?.Handler?.PlatformView is Microsoft.UI.Xaml.Window winuiWindow)
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(winuiWindow);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+        }
+
+        var file = await picker.PickSaveFileAsync();
+        return file?.Path;
+#else
+        await Task.CompletedTask;
+        return null;
+#endif
     }
 
     [RelayCommand]

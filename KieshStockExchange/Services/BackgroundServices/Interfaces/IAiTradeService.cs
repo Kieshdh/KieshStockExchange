@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.BackgroundServices.Helpers;
 
 namespace KieshStockExchange.Services.BackgroundServices.Interfaces;
 
@@ -68,6 +69,43 @@ public interface IAiTradeService
 
     /// <summary>Snapshot of the most recent failure messages (bounded ring).</summary>
     IReadOnlyList<string> RecentFailures { get; }
+
+    /// <summary>
+    /// Aggregate failure counts grouped into UI-friendly buckets (insufficient
+    /// shares, insufficient funds, engine error, ...). Keys are stable for the
+    /// session; values are cumulative since the last <c>StartBotAsync</c>.
+    /// </summary>
+    IReadOnlyDictionary<FailureCategory, long> FailuresByCategory { get; }
+
+    /// <summary>
+    /// Aggregate failure counts grouped by <see cref="Models.Order.StockId"/>.
+    /// Useful for spotting a single stock that's eating the failure budget.
+    /// </summary>
+    IReadOnlyDictionary<int, long> FailuresByStockId { get; }
+
+    /// <summary>
+    /// Snapshot of the structured failure records still in the bounded ring.
+    /// Order is oldest → newest; older records may have been dropped if the
+    /// session has produced more failures than the ring holds.
+    /// </summary>
+    IReadOnlyList<FailureRecord> RecentFailureRecords { get; }
+
+    /// <summary>
+    /// Writes the current <see cref="RecentFailureRecords"/> to a CSV file at
+    /// <paramref name="path"/> and returns the path back. Throws if the file
+    /// cannot be created; otherwise always succeeds, even when the ring is
+    /// empty (an empty CSV with the header row is still useful). The dashboard
+    /// resolves the path via a save-file picker so the caller never hard-codes
+    /// the location.
+    /// </summary>
+    Task<string> ExportFailuresCsvAsync(string path, CancellationToken ct = default);
+
+    /// <summary>
+    /// Suggested CSV file name (without an extension) for the save-file dialog
+    /// the dashboard pops when the user exports failures. Centralised here so
+    /// the format stays in lockstep with the file the service writes.
+    /// </summary>
+    string SuggestedFailuresExportFileName { get; }
 
     /// <summary>Raised after each trading-loop tick and on lifecycle changes.</summary>
     event EventHandler? StatsChanged;
