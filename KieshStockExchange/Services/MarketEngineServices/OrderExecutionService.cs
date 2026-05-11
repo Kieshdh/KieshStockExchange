@@ -898,8 +898,15 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         // Tx committed — release the reservations held by cancelled orders. Done
         // post-commit so the failure path doesn't have to undo reservation releases.
-        // Each iteration is wrapped so one bad row (hydration mismatch, unexpected null,
-        // etc.) doesn't skip the rest of the batch and leave the cache over-reserved.
+        //
+        // Race tolerance: another path (RollbackRejectedFills via Section 5a, or the
+        // per-group CancelRemainderAsync inside RunGroupTxAsync) can cancel the same
+        // order and release its reservation before our post-commit loop runs. We
+        // fetched the order's DB row before our tx, so by the time we got here the
+        // peer release may already have happened. Detect that by comparing the live
+        // reservation against the amount we'd unreserve, and skip rather than throw
+        // — over-unreserving would corrupt the cache, and a stack trace per skipped
+        // order would bury everything else in the log.
         for (int i = 0; i < toCancel.Count; i++)
         {
             var o = toCancel[i];
@@ -911,6 +918,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     if (unreserve <= 0) continue;
                     var pos = _accounts.GetPosition(o.UserId, o.StockId);
                     if (pos is null) continue;
+                    if (pos.ReservedQuantity < unreserve)
+                    {
+                        _logger.LogDebug(
+                            "CancelOrdersBatchAsync: order #{OrderId} reservation already released " +
+                            "by a peer path (reserved={Reserved}, would unreserve={Unreserve}); skipping.",
+                            o.OrderId, pos.ReservedQuantity, unreserve);
+                        continue;
+                    }
                     pos.UnreserveStock(unreserve);
                 }
                 else if (o.IsBuyOrder)
@@ -919,6 +934,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     if (unreserve <= 0m) continue;
                     var fund = _accounts.GetFund(o.UserId, o.CurrencyType);
                     if (fund is null) continue;
+                    if (fund.ReservedBalance < unreserve)
+                    {
+                        _logger.LogDebug(
+                            "CancelOrdersBatchAsync: order #{OrderId} fund reservation already released " +
+                            "by a peer path (reserved={Reserved}, would unreserve={Unreserve}); skipping.",
+                            o.OrderId, fund.ReservedBalance, unreserve);
+                        continue;
+                    }
                     fund.UnreserveFunds(unreserve);
                 }
             }
