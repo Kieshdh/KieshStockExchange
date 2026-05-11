@@ -71,6 +71,13 @@ public interface ISettlementEngine
 
 public sealed class SettlementEngine : ISettlementEngine
 {
+    // Diagnostic switches mirroring MatchingEngine. Flip DebugMode on to surface
+    // savings-unreserve events per fill so we can verify modify-then-fill
+    // releases the correct slippage savings back to the buyer's Available.
+    // DebugUserId filters to a single user (admin) to keep bot churn silent.
+    private readonly bool DebugMode = true;
+    private readonly int? DebugUserId = 20001;
+
     #region Services and Constructor
     private readonly IDataBaseService _db;
     private readonly IAccountsCache _accounts;
@@ -360,6 +367,20 @@ public sealed class SettlementEngine : ISettlementEngine
                     Array.Empty<RejectedFill>());
             }
             buyerFund.UpdatedAt = TimeHelper.NowUtc();
+
+            // Diagnostic: log savings unreserve so we can verify modify-buy-above-market
+            // releases (perUnitReserved − fillPrice) × qty back to Available. Without
+            // this, an apparent "funds lost" report is hard to pin down — the math is
+            // correct in code, but a single log line per fill makes it observable.
+            if (DebugMode && savings > 0m
+                && (!DebugUserId.HasValue || t.BuyerId == DebugUserId.Value))
+            {
+                _logger.LogInformation(
+                    "Savings: buyer #{BuyerId} order #{OrderId} reservedPerUnit={Reserved} fillPrice={FillPrice} qty={Qty} → consumed={Notional} savingsUnreserved={Savings}",
+                    t.BuyerId, t.BuyOrderId,
+                    ordersById.TryGetValue(t.BuyOrderId, out var bo) ? ReservationPerUnit(bo) : 0m,
+                    t.Price, t.Quantity, notional, savings);
+            }
 
             // Seller receives — straight credit to TotalBalance, no reservation involved.
             var sellerKey = (t.SellerId, ccy);

@@ -296,6 +296,37 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - Add new admin views for `FundTransactions` and `AIUser` (bots) — both already have models / data.
 - Mirror existing pagination / sort patterns.
 
+### 4.13 Modify-buy-above-market matching — verified working (timing-dependent)
+- Original concern: `LimitBuy` modified to a price visibly above last-trade
+  sometimes ends with `PlacedOnBook` instead of filling.
+- Verified working: with a 2-share LimitBuy modified $535→$550 against a maker
+  at $540, the engine produced `tradePrice=540` (maker price) and order
+  status `Filled`. Engine matching is correct.
+- Root cause of the original observation: the diagnostic match log only fires
+  on actual fills, so when the bot fleet (~14k–20k active) churns the book
+  faster than the "market price" chart updates, a modify can land in a
+  millisecond where the best ask is above the modified limit. The order
+  correctly rests. The next moment, asks drop and other orders fill —
+  creating the false impression that "the same modify should have filled".
+- If a similar concern resurfaces with bots paused / scaled down (stable
+  book), it's worth adding a "Match: 0 fills, best opposite = X" diagnostic
+  log line in the no-match branch so the absence of a fill becomes visible.
+
+### 4.12 Portfolio page: equity + cash values look wrong
+- Suspected bug: reserved funds may be getting subtracted from the equity figure
+  (or otherwise double-counted) so the displayed totals don't match the actual
+  account state.
+- To verify: place a few resting limit orders that reserve fund + position,
+  compare Portfolio page equity/cash against the Admin Funds + Positions tables
+  (DB-truth) and the AccountPage Funds card. Note divergence direction.
+- Likely culprit: equity/cash computation in `PortfolioViewModel` /
+  `PortfolioHoldingsViewModel` (or their helpers) using `AvailableBalance`
+  where it should use `TotalBalance`, or summing position value at
+  `AvailableQuantity * Price` instead of `Quantity * Price`.
+- Fix once observed: equity = `Σ(Position.Quantity × LivePrice) + Σ(Fund.TotalBalance)`;
+  cash = `Σ(Fund.TotalBalance)`. Reserved amounts are still owned by the user —
+  they shouldn't reduce equity.
+
 ---
 
 ## 5. Engine / performance

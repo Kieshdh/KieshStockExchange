@@ -101,6 +101,22 @@ public sealed class MatchingEngine : IMatchingEngine
             makerSnapshots.Add(new MakerSnapshot(bestOpposite, makerOriginalFilled, wasRemoved));
         }
 
+        // Diagnostic: when the loop produces zero fills (taker rested without
+        // crossing anything), the regular per-fill log doesn't fire. Surface a
+        // single line so a Place/Modify that ends with `PlacedOnBook` isn't an
+        // invisible silence — we can tell from the log whether the matcher even
+        // saw the order or whether no opposite existed at that moment.
+        if (DebugMode && fills.Count == 0 && taker.AmountFilled == takerOriginalFilled
+            && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
+        {
+            var bestOpp = taker.IsBuyOrder ? book.PeekBestSell(taker.UserId) : book.PeekBestBuy(taker.UserId);
+            _logger.LogInformation(
+                "Match: taker #{TakerId} user={TakerUser} side={TakerSide} limit={TakerPrice}  → 0 fills (best opposite: {BestOpposite})",
+                taker.OrderId, taker.UserId, taker.IsBuyOrder ? "BUY" : "SELL",
+                taker.IsTrueMarketOrder ? "MARKET" : taker.Price.ToString(),
+                bestOpp is null ? "none" : $"#{bestOpp.OrderId} @ {bestOpp.Price}");
+        }
+
         return new MatchResult(fills, takerOriginalFilled, makerSnapshots);
     }
 
