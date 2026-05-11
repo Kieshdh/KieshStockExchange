@@ -13,7 +13,7 @@
             Padding="0">
     <Grid RowDefinitions="Auto,*"
           BackgroundColor="Transparent"
-          MinimumHeightRequest="320">
+          MinimumHeightRequest="300">
 
         <!-- Toolbar -->
         <Grid Grid.Row="0" Style="{StaticResource ChartToolbar}"

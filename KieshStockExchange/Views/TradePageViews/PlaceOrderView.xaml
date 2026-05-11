@@ -53,16 +53,6 @@
                        VerticalTextAlignment="Center" />
             </Grid>
 
-            <!-- Quantity -->
-            <VerticalStackLayout Spacing="0">
-                <Label Text="Quantity"
-                       Style="{StaticResource FormLabelStyle}" />
-                <Entry Text="{Binding QuantityString, Mode=TwoWay}"
-                       Style="{StaticResource FormEntryStyle}"
-                       Keyboard="Numeric"
-                       HorizontalTextAlignment="End" />
-            </VerticalStackLayout>
-
             <!-- Limit price (Limit mode only) -->
             <VerticalStackLayout Spacing="0"
                                  IsVisible="{Binding IsLimitSelected}">
@@ -70,6 +60,16 @@
                        Style="{StaticResource FormLabelStyle}" />
                 <Entry Text="{Binding LimitPriceString, Mode=TwoWay}"
                        Placeholder="{Binding Selected.CurrentPriceDisplay}"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric"
+                       HorizontalTextAlignment="End" />
+            </VerticalStackLayout>
+
+            <!-- Quantity -->
+            <VerticalStackLayout Spacing="0">
+                <Label Text="Quantity"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding QuantityString, Mode=TwoWay}"
                        Style="{StaticResource FormEntryStyle}"
                        Keyboard="Numeric"
                        HorizontalTextAlignment="End" />

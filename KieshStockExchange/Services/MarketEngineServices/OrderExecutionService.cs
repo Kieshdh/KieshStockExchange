@@ -15,6 +15,12 @@ public sealed class OrderExecutionService : IOrderExecutionService
 {
     private readonly bool DebugMode = false;
 
+    // Diagnostic filter for the high-volume "Cancelled stale maker order" warning
+    // below. With 20k+ bots, stale-maker cancellations fire constantly and bury
+    // everything else. Setting DebugUserId pins the log to a single user (admin)
+    // so only their order cancellations are visible. Set to null to show all.
+    private readonly int? DebugUserId = 20001;
+
     #region Services and Constructor
     private readonly IDataBaseService _db;
     private readonly IOrderBookCache _books;
@@ -173,71 +179,114 @@ public sealed class OrderExecutionService : IOrderExecutionService
     {
         ct.ThrowIfCancellationRequested();
 
+        // Diagnostic: ModifyOrderAsync was observed appearing hung under heavy bot
+        // batch load. Entry/exit logs gated by DebugUserId let us see whether the
+        // call enters/exits the engine at all, and how long it takes when it does.
+        // Pair with the _writeGate wait warning in LocalDBService to attribute the
+        // delay to gate contention vs book lock / load gate / something else.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
         Order? order = await _db.GetOrderById(orderId, ct);
-        if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+        if (order == null)
+        {
+            if (DebugMode)
+                _logger.LogInformation(
+                    "ModifyOrderAsync EXIT order #{OrderId} not found ({ElapsedMs}ms).",
+                    orderId, sw.ElapsedMilliseconds);
+            return OrderResultFactory.InvalidParams("Order not found.");
+        }
+
+        bool trace = !DebugUserId.HasValue || order.UserId == DebugUserId.Value;
+        if (trace)
+            _logger.LogInformation(
+                "ModifyOrderAsync ENTRY order #{OrderId} user {UserId} newQty={NewQty} newPx={NewPx}.",
+                orderId, order.UserId, newQuantity, newPrice);
 
         var validation = _validator.ValidateModify(order, newQuantity, newPrice);
-        if (validation != null) return validation;
+        if (validation != null)
+        {
+            if (trace)
+                _logger.LogInformation(
+                    "ModifyOrderAsync EXIT order #{OrderId} rejected by validator ({ElapsedMs}ms).",
+                    orderId, sw.ElapsedMilliseconds);
+            return validation;
+        }
 
         List<Transaction> txs = new();
         HashSet<int>? affectedUsers = null;
 
-        await _books.WithBookLockAsync(order.StockId, order.CurrencyType, ct, async book =>
+        try
         {
-            book.RemoveById(order.OrderId);
-
-            await _settlement.ApplyOrderChangeAsync(order, newQuantity, newPrice, ct);
-
-            var result = _matching.Match(order, book, ct);
-
-            var ordersById = BuildOrdersById(order, result);
-
-            var (settleErr, rejected) = await _settlement.SettleTradesAsync(result.Fills, ordersById, ct).ConfigureAwait(false);
-            if (settleErr != null)
+            await _books.WithBookLockAsync(order.StockId, order.CurrencyType, ct, async book =>
             {
-                RollbackMatch(order, result, book);
+                book.RemoveById(order.OrderId);
+
+                await _settlement.ApplyOrderChangeAsync(order, newQuantity, newPrice, ct);
+
+                var result = _matching.Match(order, book, ct);
+
+                var ordersById = BuildOrdersById(order, result);
+
+                var (settleErr, rejected) = await _settlement.SettleTradesAsync(result.Fills, ordersById, ct).ConfigureAwait(false);
+                if (settleErr != null)
+                {
+                    RollbackMatch(order, result, book);
+                    if (order.IsOpen && order.IsLimitOrder)
+                        book.UpsertOrder(order);
+                    throw new InvalidOperationException(settleErr.ToString());
+                }
+
+                if (rejected.Count > 0)
+                {
+                    RollbackRejectedFills(new[] { (order, result) }, book, rejected, ordersById);
+                    var cancelled = new List<Order>(rejected.Count);
+                    for (int i = 0; i < rejected.Count; i++)
+                    {
+                        if (ordersById.TryGetValue(rejected[i].MakerOrderId, out var maker)
+                            && maker.Status == Order.Statuses.Cancelled)
+                            cancelled.Add(maker);
+                    }
+                    if (cancelled.Count > 0)
+                        await _db.UpdateAllAsync(cancelled, ct).ConfigureAwait(false);
+                }
+
+                if (rejected.Count == 0)
+                    txs.AddRange(result.Fills);
+                else
+                {
+                    var rejectedSet = new HashSet<Transaction>(ReferenceEqualityComparer.Instance);
+                    foreach (var rj in rejected) rejectedSet.Add(rj.Trade);
+                    for (int i = 0; i < result.Fills.Count; i++)
+                        if (!rejectedSet.Contains(result.Fills[i])) txs.Add(result.Fills[i]);
+                }
+
                 if (order.IsOpen && order.IsLimitOrder)
                     book.UpsertOrder(order);
-                throw new InvalidOperationException(settleErr.ToString());
-            }
+                else if (order.IsOpen)
+                    await _settlement.CancelRemainderAsync(order, ct).ConfigureAwait(false);
 
-            if (rejected.Count > 0)
-            {
-                RollbackRejectedFills(new[] { (order, result) }, book, rejected, ordersById);
-                var cancelled = new List<Order>(rejected.Count);
-                for (int i = 0; i < rejected.Count; i++)
-                {
-                    if (ordersById.TryGetValue(rejected[i].MakerOrderId, out var maker)
-                        && maker.Status == Order.Statuses.Cancelled)
-                        cancelled.Add(maker);
-                }
-                if (cancelled.Count > 0)
-                    await _db.UpdateAllAsync(cancelled, ct).ConfigureAwait(false);
-            }
-
-            if (rejected.Count == 0)
-                txs.AddRange(result.Fills);
-            else
-            {
-                var rejectedSet = new HashSet<Transaction>(ReferenceEqualityComparer.Instance);
-                foreach (var rj in rejected) rejectedSet.Add(rj.Trade);
-                for (int i = 0; i < result.Fills.Count; i++)
-                    if (!rejectedSet.Contains(result.Fills[i])) txs.Add(result.Fills[i]);
-            }
-
-            if (order.IsOpen && order.IsLimitOrder)
-                book.UpsertOrder(order);
-            else if (order.IsOpen)
-                await _settlement.CancelRemainderAsync(order, ct).ConfigureAwait(false);
-
-            affectedUsers = CollectAffectedUsers(order, ordersById);
-        }).ConfigureAwait(false);
+                affectedUsers = CollectAffectedUsers(order, ordersById);
+            }).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (trace)
+                _logger.LogWarning(
+                    "ModifyOrderAsync EXIT order #{OrderId} threw after {ElapsedMs}ms.",
+                    orderId, sw.ElapsedMilliseconds);
+            throw;
+        }
 
         if (txs.Count > 0)
             await _marketData.OnTicksAsync(txs, ct).ConfigureAwait(false);
 
         if (affectedUsers is not null)
             _orderCache.NotifyOrdersMutated(affectedUsers);
+
+        if (trace)
+            _logger.LogInformation(
+                "ModifyOrderAsync EXIT order #{OrderId} OK fills={Fills} ({ElapsedMs}ms).",
+                orderId, txs.Count, sw.ElapsedMilliseconds);
 
         return OrderResultFactory.Modified(order, txs);
     }
@@ -940,9 +989,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
             book.RemoveById(makerId);
             ordersById[makerId] = maker;
 
-            _logger.LogWarning(
-                "Cancelled stale maker order #{OrderId} (seller {UserId}, stock {StockId}): {Reason}",
-                makerId, maker.UserId, maker.StockId, agg.Reason);
+            if (!DebugUserId.HasValue || maker.UserId == DebugUserId.Value)
+                _logger.LogWarning(
+                    "Cancelled stale maker order #{OrderId} (seller {UserId}, stock {StockId}): {Reason}",
+                    makerId, maker.UserId, maker.StockId, agg.Reason);
         }
 
         // Reduce each taker's AmountFilled and reopen if matcher had flipped it to Filled.

@@ -265,10 +265,19 @@ public sealed class SettlementEngine : ISettlementEngine
         await _accounts.EnsureLoadedAsync(userIds, ct).ConfigureAwait(false);
 
         // ---------- Validate-pass: filter fills the seller can't honor. No mutations. ----------
-        // Tracks running available quantity per (sellerId, stockId). Initialized lazily from
-        // the seller's actual Position.Quantity; decrements per accepted fill so multiple
-        // fills from the same seller in one batch are budget-checked cumulatively.
-        var sellerRemaining = new Dictionary<(int, int), int>(trades.Count);
+        // Mirror the apply-pass budget logic so a fill that the apply-pass would reject
+        // (insufficient AvailableQuantity + existing reservation) gets caught here as a
+        // recoverable RejectedFill instead of escalating into a fatal "Insufficient
+        // reservation" OperationFailed that aborts the whole batch.
+        //
+        // Two pools per seller:
+        //   • availableBySeller[(sellerId, stockId)] = AvailableQuantity (unreserved stock,
+        //     drawn from when a fill needs more than the maker's existing reservation).
+        //   • reservedRemainingByOrder[sellOrderId] = the seller order's RemainingQuantity
+        //     at start of batch (its pre-fill reservation pool). Each fill consumes from
+        //     its own order's reservation first, then tops up from available.
+        var availableBySeller = new Dictionary<(int, int), int>(trades.Count);
+        var reservedRemainingByOrder = new Dictionary<int, int>(trades.Count);
         var rejected = new List<RejectedFill>();
         var accepted = new List<Transaction>(trades.Count);
 
@@ -278,33 +287,47 @@ public sealed class SettlementEngine : ISettlementEngine
             var t = trades[ti];
             var sellerKey = (t.SellerId, t.StockId);
 
-            if (!sellerRemaining.TryGetValue(sellerKey, out var remaining))
+            // Lazy-init available pool from the seller's current AvailableQuantity.
+            if (!availableBySeller.TryGetValue(sellerKey, out var available))
             {
                 var sellerPos = _accounts.GetPosition(t.SellerId, t.StockId);
                 if (sellerPos is null && !pendingNewPositions.TryGetValue(sellerKey, out sellerPos))
                     return (OrderResultFactory.OperationFailed(
                         $"Position not found for seller {t.SellerId} on stock {t.StockId}."),
                         Array.Empty<RejectedFill>());
-                remaining = sellerPos!.Quantity;
-                sellerRemaining[sellerKey] = remaining;
+                available = sellerPos!.AvailableQuantity;
+                availableBySeller[sellerKey] = available;
             }
 
-            if (remaining < t.Quantity)
+            // Lazy-init the maker order's reservation pool from its RemainingQuantity.
+            // ordersById is keyed by OrderId; t.SellOrderId is always the seller's order id
+            // (regardless of which side was the taker). Orders not in ordersById have no
+            // pre-existing reservation (e.g. brand-new market sells created mid-batch).
+            if (!reservedRemainingByOrder.TryGetValue(t.SellOrderId, out var reservedThis))
             {
-                // Maker order id depends on which side was the taker. For a buy taker, the
-                // SELL order is the maker. For a sell taker, the BUY order is the maker.
-                // Matching always pairs a taker with a maker on the opposite side, so the
-                // seller's order id is on the SellOrderId field for taker=buy and on
-                // SellOrderId for taker=sell-self too — t.SellOrderId is always the seller's.
+                reservedThis = ordersById.TryGetValue(t.SellOrderId, out var sellOrder)
+                    ? sellOrder.RemainingQuantity
+                    : 0;
+                reservedRemainingByOrder[t.SellOrderId] = reservedThis;
+            }
+
+            // Consume from the order's own reservation first; top-up from available for
+            // any deficit. Reject if both pools combined can't cover the fill — the
+            // offending maker will be cancelled by the caller (RollbackRejectedFills).
+            var fromReserved = Math.Min(reservedThis, t.Quantity);
+            var fromAvailable = t.Quantity - fromReserved;
+            if (fromAvailable > available)
+            {
                 rejected.Add(new RejectedFill(
                     t,
                     t.SellOrderId,
                     $"Insufficient position for seller {t.SellerId} on stock {t.StockId}: " +
-                    $"has {remaining}, needs {t.Quantity}."));
+                    $"order reservation {reservedThis} + available {available} < needs {t.Quantity}."));
                 continue;
             }
 
-            sellerRemaining[sellerKey] = remaining - t.Quantity;
+            reservedRemainingByOrder[t.SellOrderId] = reservedThis - fromReserved;
+            availableBySeller[sellerKey] = available - fromAvailable;
             accepted.Add(t);
         }
 
@@ -555,32 +578,53 @@ public sealed class SettlementEngine : ISettlementEngine
 
         if (order.IsOpen) order.Cancel(); // keep in-memory order consistent
 
-        // Release the unfilled reservation. For sells: the open RemainingQuantity that was
-        // reserved at place time. For buys: the unfilled portion of the upper-bound
-        // reservation (RemainingBuyReservation handles limit/slip/TrueMarketBuy).
-        // Use the in-memory `order` — it carries the up-to-date AmountFilled set by matching.
-        ReleaseSellReservation(order, order.RemainingQuantity);
-        ReleaseBuyReservation(order);
+        // Release the unfilled reservation AND persist the resulting Position/Fund to
+        // DB so the AvailableQuantity/AvailableBalance visible to the UI (which reads
+        // from IUserPortfolioService → DB) actually drops after cancel. Pre-fix this
+        // only mutated the cache; DB and IUserPortfolioService stayed stale until the
+        // next full refresh.
+        await ReleaseSellReservationAndPersist(order, order.RemainingQuantity, ct).ConfigureAwait(false);
+        await ReleaseBuyReservationAndPersist(order, ct).ConfigureAwait(false);
     }
 
-    private void ReleaseSellReservation(Order order, int qty)
+    private async Task ReleaseSellReservationAndPersist(Order order, int qty, CancellationToken ct)
     {
         if (qty <= 0 || !order.IsSellOrder) return;
         var pos = _accounts.GetPosition(order.UserId, order.StockId);
         if (pos is null) return;
-        try { pos.UnreserveStock(qty); }
-        catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+        try
+        {
+            pos.UnreserveStock(qty);
+            pos.UpdatedAt = TimeHelper.NowUtc();
+        }
+        catch (ArgumentException) { return; /* hydration mismatch — swallow defensively */ }
+        await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
+
+        if (DebugMode && (!DebugUserId.HasValue || order.UserId == DebugUserId.Value))
+            _logger.LogInformation(
+                "Cancel: released {Qty} share(s) for order #{OrderId} (user {UserId}, stock {StockId}); available now {Avail}",
+                qty, order.OrderId, order.UserId, order.StockId, pos.AvailableQuantity);
     }
 
-    private void ReleaseBuyReservation(Order order)
+    private async Task ReleaseBuyReservationAndPersist(Order order, CancellationToken ct)
     {
         if (!order.IsBuyOrder) return;
         var amount = RemainingBuyReservation(order);
         if (amount <= 0m) return;
         var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
         if (fund is null) return;
-        try { fund.UnreserveFunds(amount); }
-        catch (ArgumentException) { /* hydration mismatch — swallow defensively */ }
+        try
+        {
+            fund.UnreserveFunds(amount);
+            fund.UpdatedAt = TimeHelper.NowUtc();
+        }
+        catch (ArgumentException) { return; /* hydration mismatch — swallow defensively */ }
+        await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+
+        if (DebugMode && (!DebugUserId.HasValue || order.UserId == DebugUserId.Value))
+            _logger.LogInformation(
+                "Cancel: released {Amount} for order #{OrderId} (user {UserId}, {Ccy}); available now {Avail}",
+                amount, order.OrderId, order.UserId, order.CurrencyType, fund.AvailableBalance);
     }
 
     public async Task ApplyOrderChangeAsync(Order order, int? newQuantity, decimal? newPrice, CancellationToken ct = default)

@@ -17,6 +17,14 @@ namespace KieshStockExchange.Services.BackgroundServices;
 
 public class AiTradeService : IAiTradeService, IAsyncDisposable
 {
+    // Diagnostic switches mirroring MatchingEngine / SettlementEngine. With 20k+ bots,
+    // batch-order warnings flood the log; filter to a single user (admin) so only the
+    // active user's bot activity (rare in practice — admin is human) is visible. Set
+    // DebugUserId to null to log every user's warnings; set DebugMode to false to
+    // suppress entirely.
+    private readonly bool DebugMode = true;
+    private readonly int? DebugUserId = 20001;
+
     #region Public Properties
     public TimeSpan TradeInterval        { get; private set; } = TimeSpan.FromSeconds(1);
     public TimeSpan DailyCheckInterval   { get; private set; } = TimeSpan.FromMinutes(1);
@@ -349,8 +357,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
                     if (!result.PlacedSuccessfully)
                     {
-                        _logger.LogWarning("Batch order AIUser {Id} stock {Stock}: {Status} — {Error}",
-                            user.AiUserId, order.StockId, result.Status, result.ErrorMessage);
+                        if (DebugMode && (!DebugUserId.HasValue || user.UserId == DebugUserId.Value))
+                            _logger.LogWarning("Batch order AIUser {Id} stock {Stock}: {Status} — {Error}",
+                                user.AiUserId, order.StockId, result.Status, result.ErrorMessage);
                         user.RecordError();
                         Interlocked.Increment(ref _failuresThisSession);
                         RecordFailure($"AIUser {user.AiUserId} stock {order.StockId}: {result.Status} — {result.ErrorMessage}");

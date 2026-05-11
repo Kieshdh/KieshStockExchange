@@ -107,7 +107,16 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
 
         InitializeSelection();
         StartAssetsAutoRefresh();
+
+        // Snapshot-driven refresh: any external mutation that calls
+        // _portfolio.RefreshAsync (cancel from OpenOrdersView, modify confirm,
+        // etc.) fires SnapshotChanged. Subscribe so the Available chip updates
+        // immediately instead of waiting for the AssetsRefreshInterval timer.
+        _portfolio.SnapshotChanged += OnPortfolioSnapshotChanged;
     }
+
+    private void OnPortfolioSnapshotChanged(object? sender, EventArgs e)
+        => _dispatcher.Dispatch(RecomputeUi);
     #endregion
 
     #region StockAware Overrides
@@ -133,7 +142,10 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
+            _portfolio.SnapshotChanged -= OnPortfolioSnapshotChanged;
             StopAssetsAutoRefresh();
+        }
         base.Dispose(disposing);
     }
     #endregion

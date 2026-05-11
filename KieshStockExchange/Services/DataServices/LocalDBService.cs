@@ -1,7 +1,9 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using Microsoft.Extensions.Logging;
 using SQLite;
 using System;
+using System.Diagnostics;
 using System.Threading;
 using KieshStockExchange.Services.DataServices.Interfaces;
 
@@ -21,12 +23,19 @@ public class LocalDBService: IDataBaseService, IDisposable
     // "cannot start a transaction within a transaction".
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly AsyncLocal<Stack<LocalDbTransaction>> _txStack = new();
+    private readonly ILogger<LocalDBService>? _logger;
     private bool _initialized;
 
-    public LocalDBService()
+    // Threshold for the diagnostic warning when _writeGate wait time gets long enough
+    // to plausibly explain a hung modify-Confirm modal. Anything under this is normal
+    // single-writer SQLite contention.
+    private const int WriteGateWaitWarnMs = 100;
+
+    public LocalDBService(ILogger<LocalDBService>? logger = null)
     {
         _dbPath = Path.Combine(FileSystem.AppDataDirectory, DB_NAME);
         _db = new SQLiteAsyncConnection(_dbPath);
+        _logger = logger;
     }
     #endregion
 
@@ -147,7 +156,16 @@ public class LocalDBService: IDataBaseService, IDisposable
         {
             // Hold _writeGate across BEGIN..COMMIT so only one root tx exists on the
             // shared connection at a time. Released in CommitAsync/RollbackAsync.
+            // Diagnostic: timing the wait surfaces _writeGate contention. Long waits
+            // here are the smoking gun for hung UI operations (modify Confirm, etc.)
+            // when the bot batch holds the gate for an entire Phase 3 sweep.
+            var sw = Stopwatch.StartNew();
             await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+            sw.Stop();
+            if (sw.ElapsedMilliseconds > WriteGateWaitWarnMs)
+                _logger?.LogWarning(
+                    "BeginTransaction waited {ElapsedMs}ms for _writeGate.",
+                    sw.ElapsedMilliseconds);
             try
             {
                 await _db.ExecuteAsync("BEGIN IMMEDIATE;");

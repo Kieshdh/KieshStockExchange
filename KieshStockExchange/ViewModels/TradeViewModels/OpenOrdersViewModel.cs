@@ -5,6 +5,7 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -15,18 +16,21 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
     #region Services and Constructors
     private readonly IOrderCacheService _cache;
     private readonly IOrderEntryService _orders;
+    private readonly IUserPortfolioService _portfolio;
     private readonly IStockService _stocks;
     private readonly ILogger<OpenOrdersViewModel> _logger;
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
 
     public OpenOrdersViewModel(ILogger<OpenOrdersViewModel> logger,
-        IOrderCacheService cache, IOrderEntryService orders, IStockService stocks, IAuthService auth,
+        IOrderCacheService cache, IOrderEntryService orders, IUserPortfolioService portfolio,
+        IStockService stocks, IAuthService auth,
         ISelectedStockService selected, INotificationService notification, IOrderEditService editService)
         : base(selected, notification, logger)
     {
         _cache       = cache       ?? throw new ArgumentNullException(nameof(cache));
         _orders      = orders      ?? throw new ArgumentNullException(nameof(orders));
+        _portfolio   = portfolio   ?? throw new ArgumentNullException(nameof(portfolio));
         _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
         _stocks      = stocks      ?? throw new ArgumentNullException(nameof(stocks));
         _auth        = auth        ?? throw new ArgumentNullException(nameof(auth));
@@ -70,6 +74,12 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
             var result = await _orders.CancelOrderAsync(_auth.CurrentUserId, order.OrderId);
             _logger.LogInformation("Cancel order #{OrderId}: {Status}", order.OrderId, result.Status);
             await _cache.RefreshAsync(_auth.CurrentUserId);
+            // Re-pull funds + positions so PlaceOrderView's "Available shares" /
+            // "Available funds" chip reflects the released reservation. Without
+            // this the engine has correctly freed the reservation in cache + DB
+            // but IUserPortfolioService's snapshot stays at the pre-cancel
+            // numbers until the next user-driven refresh.
+            await _portfolio.RefreshAsync(null);
             UpdateFromCache();
         }
         catch (Exception ex)
