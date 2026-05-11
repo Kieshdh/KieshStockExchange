@@ -100,6 +100,15 @@ public sealed class SettlementEngine : ISettlementEngine
         // happens at most once per user; warm calls are O(1).
         await _accounts.EnsureLoadedAsync(incoming.UserId, ct).ConfigureAwait(false);
 
+        // Per-user reservation gate: serialise this user's Fund.ReservedBalance / Position.
+        // ReservedQuantity mutation against any other concurrent flow that touches the same
+        // (user, resource). Pre-1b this was masked by _writeGate; post-1b the batch path
+        // releases _writeGate between groups, so the race becomes real and the gate is the
+        // only protection. Released on scope exit via IAsyncDisposable.
+        await using var gate = incoming.IsBuyOrder
+            ? await _accounts.AcquireFundGateAsync(incoming.UserId, incoming.CurrencyType, ct).ConfigureAwait(false)
+            : await _accounts.AcquirePositionGateAsync(incoming.UserId, incoming.StockId, ct).ConfigureAwait(false);
+
         // Read-only balance check from cache — no DB hit on warm path. Reserve at place
         // time so subsequent same-account orders see the reduced AvailableBalance /
         // AvailableQuantity (multi-order over-promise rejected here, not at settlement).
@@ -196,6 +205,28 @@ public sealed class SettlementEngine : ISettlementEngine
         ct.ThrowIfCancellationRequested();
         if (trades is null || trades.Count == 0)
             return (null, Array.Empty<RejectedFill>());
+
+        // Eagerly enumerate every (user, resource) touched by these trades so we can
+        // serialise the apply-pass against any concurrent flow on the same user. Mirror
+        // the apply-pass exactly: buyer/seller funds in the trade currency, plus buyer/
+        // seller positions on the trade stock. Sorted acquisition inside
+        // AcquireUserGatesAsync prevents AB/BA deadlocks across overlapping batches.
+        var fundKeys = new HashSet<(int, CurrencyType)>();
+        var posKeys = new HashSet<(int, int)>();
+        var userSet = new HashSet<int>();
+        for (int i = 0; i < trades.Count; i++)
+        {
+            var t = trades[i];
+            fundKeys.Add((t.BuyerId,  t.CurrencyType));
+            fundKeys.Add((t.SellerId, t.CurrencyType));
+            posKeys.Add((t.BuyerId,  t.StockId));
+            posKeys.Add((t.SellerId, t.StockId));
+            userSet.Add(t.BuyerId);
+            userSet.Add(t.SellerId);
+        }
+        var userIds = new List<int>(userSet);
+        await _accounts.EnsureLoadedAsync(userIds, ct).ConfigureAwait(false);
+        await using var gates = await _accounts.AcquireUserGatesAsync(fundKeys, posKeys, ct).ConfigureAwait(false);
 
         // Single-call wrapper: own the tx, own the snapshots, restore on failure.
         var fundSnapshots = new Dictionary<(int, CurrencyType), (decimal Total, decimal Reserved)>();
@@ -564,6 +595,15 @@ public sealed class SettlementEngine : ISettlementEngine
     {
         ct.ThrowIfCancellationRequested();
 
+        // EnsureLoaded outside the gate so we never nest _loadGate inside a gate scope.
+        await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
+
+        // Per-user gate: hold across release + persist so a concurrent SettleOrderAsync
+        // on the same (user, resource) can't observe a half-released reservation.
+        await using var gate = order.IsSellOrder
+            ? await _accounts.AcquirePositionGateAsync(order.UserId, order.StockId, ct).ConfigureAwait(false)
+            : await _accounts.AcquireFundGateAsync(order.UserId, order.CurrencyType, ct).ConfigureAwait(false);
+
         var dbOrder = await _db.GetOrderById(order.OrderId, ct).ConfigureAwait(false)
                      ?? throw new InvalidOperationException($"Order #{order.OrderId} not found.");
 
@@ -636,6 +676,14 @@ public sealed class SettlementEngine : ISettlementEngine
         // would find GetFund/GetPosition null and silently skip the reservation
         // delta — funds in DB and admin tables would never see the new reservation.
         await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
+
+        // Per-user gate: a modify mutates either the user's fund reservation (buy) or
+        // position reservation (sell). Acquire the matching gate around the delta
+        // computation + tx + cache write so a concurrent settle/cancel/place on the
+        // same resource doesn't race on ReservedBalance / ReservedQuantity.
+        await using var gate = order.IsBuyOrder
+            ? await _accounts.AcquireFundGateAsync(order.UserId, order.CurrencyType, ct).ConfigureAwait(false)
+            : await _accounts.AcquirePositionGateAsync(order.UserId, order.StockId, ct).ConfigureAwait(false);
 
         // Compute reservation deltas up front so we can apply them after the tx commits
         // and validate "would the new order overdraft this user?" before mutating the DB.
