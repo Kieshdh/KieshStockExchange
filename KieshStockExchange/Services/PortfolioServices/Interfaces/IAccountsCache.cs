@@ -30,4 +30,27 @@ public interface IAccountsCache
     /// risks leaving a phantom row in the cache if the tx rolls back.
     /// </summary>
     void TrackNewPosition(Position pos);
+
+    /// <summary>
+    /// Acquires a per-user fund gate (one slot per (userId, currency) pair). Hold this
+    /// across reservation + DB write + commit so two concurrent settlements can't race
+    /// on the same <see cref="Fund.ReservedBalance"/>. Dispose to release.
+    /// </summary>
+    ValueTask<IAsyncDisposable> AcquireFundGateAsync(int userId, CurrencyType ccy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Mirror of <see cref="AcquireFundGateAsync"/> for the per-user position gate keyed
+    /// by (userId, stockId). Hold across reservation + DB write + commit.
+    /// </summary>
+    ValueTask<IAsyncDisposable> AcquirePositionGateAsync(int userId, int stockId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Acquires every gate in <paramref name="fundKeys"/> and <paramref name="positionKeys"/>
+    /// in a single deterministic order so two batches touching the same users don't deadlock
+    /// on opposite acquisition sequences. Disposing releases all gates in reverse order.
+    /// </summary>
+    ValueTask<IAsyncDisposable> AcquireUserGatesAsync(
+        IReadOnlyCollection<(int UserId, CurrencyType Ccy)> fundKeys,
+        IReadOnlyCollection<(int UserId, int StockId)> positionKeys,
+        CancellationToken ct = default);
 }
