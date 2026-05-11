@@ -22,4 +22,13 @@ public interface IOrderCacheService
 
     /// <summary> Reload all orders for the user and repartition into Open/Closed. </summary>
     Task<bool> RefreshAsync(int userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Engine hook: called after every successful settlement / modify / cancel so
+    /// the cache can refresh in real time when the active user's orders changed
+    /// (e.g. a maker fill on another user's incoming taker). No-op when the cache
+    /// hasn't been refreshed yet, or when the active user isn't in the affected
+    /// set. Fire-and-forget — failures are logged inside RefreshAsync.
+    /// </summary>
+    void NotifyOrdersMutated(IReadOnlyCollection<int> affectedUserIds);
 }

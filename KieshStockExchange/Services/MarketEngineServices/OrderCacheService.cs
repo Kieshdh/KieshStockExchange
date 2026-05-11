@@ -18,6 +18,11 @@ public sealed class OrderCacheService : IOrderCacheService
     public IReadOnlyList<Order> ClosedOrders { get; private set; } = Array.Empty<Order>();
 
     public event EventHandler? OrdersChanged;
+
+    // The user id of the most recent successful RefreshAsync. NotifyOrdersMutated
+    // uses this to filter engine notifications: only refresh when the active user
+    // is actually in the affected set. 0 means "no refresh has happened yet".
+    private int _activeUserId;
     #endregion
 
     #region Services and Constructor
@@ -51,6 +56,7 @@ public sealed class OrderCacheService : IOrderCacheService
             AllOrders = all;
             OpenOrders = open;
             ClosedOrders = closed;
+            _activeUserId = userId;
 
             OrdersChanged?.Invoke(this, EventArgs.Empty);
             return true;
@@ -60,6 +66,17 @@ public sealed class OrderCacheService : IOrderCacheService
             _logger.LogError(ex, "Failed to refresh orders for user #{UserId}", userId);
             return false;
         }
+    }
+
+    public void NotifyOrdersMutated(IReadOnlyCollection<int> affectedUserIds)
+    {
+        if (_activeUserId <= 0 || affectedUserIds is null || affectedUserIds.Count == 0) return;
+        if (!affectedUserIds.Contains(_activeUserId)) return;
+
+        // Fire-and-forget. RefreshAsync logs its own errors and is idempotent —
+        // multiple overlapping notifications collapse to at most a few extra DB
+        // reads. Don't await here so the engine path stays synchronous-feeling.
+        _ = RefreshAsync(_activeUserId, CancellationToken.None);
     }
     #endregion
 }

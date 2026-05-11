@@ -23,11 +23,13 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly ISettlementEngine _settlement;
     private readonly IMarketDataService _marketData;
     private readonly IAccountsCache _accounts;
+    private readonly IOrderCacheService _orderCache;
     private readonly ILogger<OrderExecutionService> _logger;
 
     public OrderExecutionService(IDataBaseService db, IOrderBookCache books,
         IMatchingEngine matching, IOrderValidator validator, ISettlementEngine settlement,
         IMarketDataService marketData, IAccountsCache accounts,
+        IOrderCacheService orderCache,
         ILogger<OrderExecutionService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -37,7 +39,21 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _settlement = settlement ?? throw new ArgumentNullException(nameof(settlement));
         _marketData = marketData ?? throw new ArgumentNullException(nameof(marketData));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+        _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Build the set of user ids whose orders changed in this settlement so the
+    /// active-user order cache can refresh in real time (a maker fill on user A's
+    /// resting order should clear that row from A's UI without waiting for the
+    /// minute-boundary portfolio poll).
+    /// </summary>
+    private static HashSet<int> CollectAffectedUsers(Order taker, IReadOnlyDictionary<int, Order> ordersById)
+    {
+        var set = new HashSet<int>(ordersById.Count + 1) { taker.UserId };
+        foreach (var o in ordersById.Values) set.Add(o.UserId);
+        return set;
     }
     #endregion
 
@@ -56,6 +72,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         // Matching & settlement under book lock
         List<Transaction> trades = new();
+        HashSet<int>? affectedUsers = null;
 
         // Why the book lock is held across the DB settlement call (not released between
         // Match and SettleTrades): MatchingEngine.Match mutates the book in-memory.
@@ -111,11 +128,22 @@ public sealed class OrderExecutionService : IOrderExecutionService
             else if (incoming.IsOpen)
                 await _settlement.CancelRemainderAsync(incoming, ct).ConfigureAwait(false);
 
+            // Snapshot affected users before lock releases. The cache notify happens
+            // outside the lock so the fire-and-forget RefreshAsync doesn't extend the
+            // critical section.
+            affectedUsers = CollectAffectedUsers(incoming, ordersById);
+
         }).ConfigureAwait(false);
 
         // Publish ticks to market data (outside lock)
         if (trades.Count > 0)
             await _marketData.OnTicksAsync(trades, ct).ConfigureAwait(false);
+
+        // Refresh the order cache for the active user if they're in the affected set.
+        // No-op when the cache hasn't been refreshed yet (cold start) or when the
+        // active user isn't one of the touched users.
+        if (affectedUsers is not null)
+            _orderCache.NotifyOrdersMutated(affectedUsers);
 
         return OrderResultFactory.Success(incoming, trades);
     }
@@ -136,6 +164,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
             await _settlement.CancelRemainderAsync(order, ct);
         });
 
+        _orderCache.NotifyOrdersMutated(new[] { order.UserId });
         return OrderResultFactory.Cancelled(order);
     }
 
@@ -151,6 +180,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (validation != null) return validation;
 
         List<Transaction> txs = new();
+        HashSet<int>? affectedUsers = null;
 
         await _books.WithBookLockAsync(order.StockId, order.CurrencyType, ct, async book =>
         {
@@ -199,10 +229,15 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 book.UpsertOrder(order);
             else if (order.IsOpen)
                 await _settlement.CancelRemainderAsync(order, ct).ConfigureAwait(false);
+
+            affectedUsers = CollectAffectedUsers(order, ordersById);
         }).ConfigureAwait(false);
 
         if (txs.Count > 0)
             await _marketData.OnTicksAsync(txs, ct).ConfigureAwait(false);
+
+        if (affectedUsers is not null)
+            _orderCache.NotifyOrdersMutated(affectedUsers);
 
         return OrderResultFactory.Modified(order, txs);
     }
@@ -564,6 +599,24 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (allFills.Count > 0)
             await _marketData.OnTicksAsync(allFills, ct).ConfigureAwait(false);
 
+        // Refresh the active user's order cache if any touched order belonged to
+        // them. Aggregate across all groups so the cache fires-and-forgets one
+        // RefreshAsync, not one per group.
+        var allAffected = new HashSet<int>();
+        for (int gi = 0; gi < groupOutcomes.Count; gi++)
+        {
+            var outcome = groupOutcomes[gi];
+            for (int i = 0; i < outcome.Records.Count; i++)
+            {
+                var rec = outcome.Records[i];
+                allAffected.Add(rec.Order.UserId);
+                for (int s = 0; s < rec.Match.MakerSnapshots.Count; s++)
+                    allAffected.Add(rec.Match.MakerSnapshots[s].Order.UserId);
+            }
+        }
+        if (allAffected.Count > 0)
+            _orderCache.NotifyOrdersMutated(allAffected);
+
         // Mark every successful order with its result.
         for (int gi = 0; gi < groupOutcomes.Count; gi++)
         {
@@ -745,6 +798,17 @@ public sealed class OrderExecutionService : IOrderExecutionService
             if (resultIdxByOrderId.TryGetValue(toCancel[i].OrderId, out var idx))
                 results[idx] = OrderResultFactory.Cancelled(toCancel[i]);
         }
+
+        // Refresh the active user's order cache if any cancelled orders belonged
+        // to them. Bot prune cancels rarely touch the active user, so the inner
+        // HashSet stays small.
+        if (toCancel.Count > 0)
+        {
+            var affected = new HashSet<int>(toCancel.Count);
+            for (int i = 0; i < toCancel.Count; i++) affected.Add(toCancel[i].UserId);
+            _orderCache.NotifyOrdersMutated(affected);
+        }
+
         return results;
     }
     #endregion
