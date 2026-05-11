@@ -989,6 +989,35 @@ public sealed class OrderExecutionService : IOrderExecutionService
             book.RemoveById(makerId);
             ordersById[makerId] = maker;
 
+            // Section 5a: release the maker's Position.ReservedQuantity. Without this
+            // every rollback leaves the cancelled order's reservation parked on the
+            // seller's Position — AccountsCache's view of AvailableQuantity shrinks
+            // permanently while the bot's view (which derives committed from open
+            // orders only) keeps reporting full availability, so every subsequent
+            // sell from that user/stock fails Phase 1.5 with InsufficientShares.
+            // Buyer-side makers never reach this path (validate-pass is seller-only),
+            // so there's no symmetric fund-reservation release here. The Order's
+            // Cancelled status is persisted by the caller via UpdateAllAsync;
+            // Position writes back to DB the next time a fill touches it.
+            if (maker.IsSellOrder && maker.RemainingQuantity > 0)
+            {
+                var pos = _accounts.GetPosition(maker.UserId, maker.StockId);
+                if (pos is not null)
+                {
+                    try
+                    {
+                        pos.UnreserveStock(maker.RemainingQuantity);
+                        pos.UpdatedAt = TimeHelper.NowUtc();
+                    }
+                    catch (ArgumentException)
+                    {
+                        // ReservedQuantity already below the released amount — the
+                        // cache is out of sync but we can't make it worse by ignoring.
+                        // The warning below already documents the cancellation.
+                    }
+                }
+            }
+
             if (!DebugUserId.HasValue || maker.UserId == DebugUserId.Value)
                 _logger.LogWarning(
                     "Cancelled stale maker order #{OrderId} (seller {UserId}, stock {StockId}): {Reason}",
