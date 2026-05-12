@@ -558,6 +558,35 @@ public sealed class SettlementEngine : ISettlementEngine
                 if (!budgetSnapshots.ContainsKey(orderId))
                     budgetSnapshots[orderId] = o.BuyBudget;
                 o.BuyBudget = Math.Max(0m, Round(o.BuyBudget!.Value - spent, o.CurrencyType));
+
+                // Reservation-leak fix: a TrueMarketBuy that fully fills at prices below
+                // its budgeted average leaves BuyBudget > 0 with no remaining quantity to
+                // spend it on. The order's Status is Filled (matcher set it during the
+                // apply loop) so CancelRemainderAsync never fires, and the apply-pass
+                // doesn't release "savings" for TrueMarketBuy (ReservationPerUnit returns
+                // 0 by design). Without this release the leftover sits on Fund.Reserved
+                // permanently — the reconciler observed users with $100k+ phantom reserved
+                // balance and zero open buys, all from cumulative full-fill leftovers.
+                //
+                // Limit / Slippage buys aren't affected because their apply-pass already
+                // releases (perUnit − fillPrice) × fillQty as savings per fill.
+                if (o.Status == Order.Statuses.Filled && o.BuyBudget > 0m)
+                {
+                    var leftover = o.BuyBudget.Value;
+                    if (fundMap.TryGetValue((o.UserId, o.CurrencyType), out var leftoverFund))
+                    {
+                        // Clamp to live ReservedBalance — defensive against a concurrent
+                        // release on the same fund (per-user gate makes this rare, but
+                        // we don't want a stale snapshot to break the apply-pass).
+                        var toRelease = Math.Min(leftover, leftoverFund.ReservedBalance);
+                        if (toRelease > 0m)
+                        {
+                            leftoverFund.UnreserveFunds(toRelease);
+                            leftoverFund.UpdatedAt = TimeHelper.NowUtc();
+                        }
+                        o.BuyBudget = 0m;
+                    }
+                }
             }
         }
 
