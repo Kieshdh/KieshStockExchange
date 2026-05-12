@@ -4,6 +4,20 @@ using KieshStockExchange.Models;
 namespace KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 /// <summary>
+/// One row of the reservation reconciler's report: cache-side value vs the value
+/// computed from this user's open orders in DB. <see cref="Delta"/> is positive
+/// when the cache over-reserved (a leak) and negative when it under-reserved.
+/// </summary>
+public sealed record ReservationMismatch(
+    int UserId,
+    int? StockId,
+    CurrencyType? Currency,
+    decimal ExpectedReserved,
+    decimal ActualReserved,
+    decimal Delta,
+    int OpenOrderCount);
+
+/// <summary>
 /// In-memory cache of <see cref="Fund"/> and <see cref="Position"/> rows for the active users.
 /// Phase B of the MarketEngine perf rework: lets <c>SettlementEngine</c> avoid hitting SQLite
 /// on every order or trade settlement. The cache stores the same mutable instances that the
@@ -53,4 +67,16 @@ public interface IAccountsCache
         IReadOnlyCollection<(int UserId, CurrencyType Ccy)> fundKeys,
         IReadOnlyCollection<(int UserId, int StockId)> positionKeys,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Diagnostic: for every cached Position with <c>ReservedQuantity &gt; 0</c> and every
+    /// Fund with <c>ReservedBalance &gt; 0</c>, computes the expected reserved value from
+    /// the user's open limit orders in DB and reports any mismatch. Useful for hunting
+    /// reservation leaks — a positive <see cref="ReservationMismatch.Delta"/> means the
+    /// cache holds more reservation than the open orders account for (phantom).
+    /// If <paramref name="clamp"/> is true, mismatches are corrected in-cache (clamped to
+    /// the expected value); otherwise the method is read-only.
+    /// </summary>
+    Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
+        bool clamp = false, CancellationToken ct = default);
 }

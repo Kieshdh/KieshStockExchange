@@ -263,6 +263,86 @@ public sealed class AccountsCache : IAccountsCache
     }
     #endregion
 
+    #region Reservation Reconciler
+    public async Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
+        bool clamp = false, CancellationToken ct = default)
+    {
+        // Collect every userId that has a non-zero reservation in either dictionary.
+        // Skip the whole DB query if there's nothing to reconcile.
+        var userIds = new HashSet<int>();
+        foreach (var kv in _positions)
+            if (kv.Value.ReservedQuantity > 0) userIds.Add(kv.Key.UserId);
+        foreach (var kv in _funds)
+            if (kv.Value.ReservedBalance > 0m) userIds.Add(kv.Key.UserId);
+        if (userIds.Count == 0) return Array.Empty<ReservationMismatch>();
+
+        var userList = new List<int>(userIds);
+        var openOrders = await _db.GetOpenOrdersForUsersAsync(userList, ct).ConfigureAwait(false);
+
+        // Aggregate the open orders by the keys we reserve against.
+        var expectedQtyByPos = new Dictionary<(int UserId, int StockId), int>();
+        var expectedBalByFund = new Dictionary<(int UserId, CurrencyType Ccy), decimal>();
+        var orderCountByPos = new Dictionary<(int, int), int>();
+        var orderCountByFund = new Dictionary<(int, CurrencyType), int>();
+
+        for (int i = 0; i < openOrders.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var o = openOrders[i];
+            if (!o.IsLimitOrder) continue;
+
+            if (o.IsSellOrder)
+            {
+                var key = (o.UserId, o.StockId);
+                expectedQtyByPos.TryGetValue(key, out var qSum);
+                expectedQtyByPos[key] = qSum + o.RemainingQuantity;
+                orderCountByPos.TryGetValue(key, out var c);
+                orderCountByPos[key] = c + 1;
+            }
+            else if (o.IsBuyOrder)
+            {
+                var reservation = SettlementEngine.RemainingBuyReservation(o);
+                if (reservation <= 0m) continue;
+                var key = (o.UserId, o.CurrencyType);
+                expectedBalByFund.TryGetValue(key, out var bSum);
+                expectedBalByFund[key] = bSum + reservation;
+                orderCountByFund.TryGetValue(key, out var c);
+                orderCountByFund[key] = c + 1;
+            }
+        }
+
+        var mismatches = new List<ReservationMismatch>();
+
+        foreach (var kv in _positions)
+        {
+            var actual = kv.Value.ReservedQuantity;
+            if (actual == 0) continue;
+            expectedQtyByPos.TryGetValue(kv.Key, out var expected);
+            if (expected == actual) continue;
+            orderCountByPos.TryGetValue(kv.Key, out var count);
+            mismatches.Add(new ReservationMismatch(
+                kv.Key.UserId, kv.Key.StockId, null,
+                expected, actual, actual - expected, count));
+            if (clamp) kv.Value.ReservedQuantity = expected;
+        }
+
+        foreach (var kv in _funds)
+        {
+            var actual = kv.Value.ReservedBalance;
+            if (actual == 0m) continue;
+            expectedBalByFund.TryGetValue(kv.Key, out var expected);
+            if (expected == actual) continue;
+            orderCountByFund.TryGetValue(kv.Key, out var count);
+            mismatches.Add(new ReservationMismatch(
+                kv.Key.UserId, null, kv.Key.Ccy,
+                expected, actual, actual - expected, count));
+            if (clamp) kv.Value.ReservedBalance = expected;
+        }
+
+        return mismatches;
+    }
+    #endregion
+
     #region Per-User Gates
     public async ValueTask<IAsyncDisposable> AcquireFundGateAsync(
         int userId, CurrencyType ccy, CancellationToken ct = default)

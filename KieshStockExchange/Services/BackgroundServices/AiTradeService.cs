@@ -136,6 +136,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private DateTime _nextAssetReload  = DateTime.MinValue;
     private DateTime _nextPruneTime    = DateTime.MinValue;
     private DateTime _nextStatsLogTime = DateTime.MinValue;
+    private DateTime _nextReconcileTime = DateTime.MinValue;
 
     private const int    PruneOrdersPerBot   = 2;
     // Bounded ring for the dashboard + CSV export. At 20k bots the failure rate
@@ -145,6 +146,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private const int    RecentFailuresMax   = 5000;
     private static readonly TimeSpan PruneStaleAge = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(30);
+    // Diagnostic: reconcile engine reservations against the open-orders truth. The
+    // first run fires shortly after startup so we can see whether the cold-load already
+    // produced a mismatch; thereafter every 5 minutes is plenty — we're hunting a leak
+    // pattern, not policing every fill.
+    private static readonly TimeSpan ReconcileInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ReconcileFirstDelay = TimeSpan.FromMinutes(1);
     private const decimal PruneDistanceFactor = 2.0m;
 
     private CancellationTokenSource? _cts;
@@ -286,6 +293,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         Volatile.Write(ref _tickWorkMsEwma, 0.0);
         Interlocked.Exchange(ref _lastTickWorkMicros, 0);
         _nextStatsLogTime = TimeHelper.NowUtc() + StatsLogInterval;
+        _nextReconcileTime = TimeHelper.NowUtc() + ReconcileFirstDelay;
         lock (_recentFailures) _recentFailures.Clear();
         _failuresByCategory.Clear();
         _failuresByStockId.Clear();
@@ -567,6 +575,72 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         {
             LogStatsWindow();
             _nextStatsLogTime = now + StatsLogInterval;
+        }
+        if (now >= _nextReconcileTime)
+        {
+            await ReconcileReservationsAsync(ct).ConfigureAwait(false);
+            _nextReconcileTime = now + ReconcileInterval;
+        }
+    }
+
+    /// <summary>
+    /// Reservation-leak hunter. Logs every (user, resource) where the engine's cached
+    /// ReservedQuantity / ReservedBalance disagrees with the sum implied by the user's
+    /// open limit orders in DB. The leak source is unknown — this passive observer
+    /// surfaces mismatches over time so the pattern reveals the buggy path. Logs are
+    /// rate-limited to a summary line + the top 10 offenders per pass; with 20k bots
+    /// the full list could be enormous and bury everything else.
+    /// </summary>
+    private async Task ReconcileReservationsAsync(CancellationToken ct)
+    {
+        IReadOnlyList<ReservationMismatch> mismatches;
+        try
+        {
+            mismatches = await _accounts.ReconcileReservationsAsync(clamp: false, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Reservation reconcile pass failed");
+            return;
+        }
+
+        if (mismatches.Count == 0)
+        {
+            _logger.LogInformation("Reservation reconcile: no mismatches across cached positions/funds.");
+            return;
+        }
+
+        // Sort by absolute delta descending so the worst leaks are visible first.
+        var ordered = mismatches.OrderByDescending(m => Math.Abs(m.Delta)).ToList();
+        long phantomCount = 0;       // Delta > 0 — cache over-reserved (leak)
+        long underCount = 0;         // Delta < 0 — cache under-reserved (refresh race / missing reserve)
+        decimal phantomTotal = 0m;   // sum of positive deltas (just to give a magnitude feel)
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            if (ordered[i].Delta > 0m) { phantomCount++; phantomTotal += ordered[i].Delta; }
+            else                       { underCount++; }
+        }
+
+        _logger.LogWarning(
+            "Reservation reconcile: {Mismatch} mismatches ({Phantom} phantom, {Under} under-reserved, phantomTotal≈{Total:F2}).",
+            mismatches.Count, phantomCount, underCount, phantomTotal);
+
+        int sample = Math.Min(10, ordered.Count);
+        for (int i = 0; i < sample; i++)
+        {
+            var m = ordered[i];
+            if (m.StockId is int sid)
+            {
+                _logger.LogWarning(
+                    "  pos user={User} stock={Stock}: expected={Expected}, actual={Actual}, delta={Delta} ({Count} open sells)",
+                    m.UserId, sid, m.ExpectedReserved, m.ActualReserved, m.Delta, m.OpenOrderCount);
+            }
+            else if (m.Currency is CurrencyType ccy)
+            {
+                _logger.LogWarning(
+                    "  fund user={User} ccy={Ccy}: expected={Expected}, actual={Actual}, delta={Delta} ({Count} open buys)",
+                    m.UserId, ccy, m.ExpectedReserved, m.ActualReserved, m.Delta, m.OpenOrderCount);
+            }
         }
     }
 
