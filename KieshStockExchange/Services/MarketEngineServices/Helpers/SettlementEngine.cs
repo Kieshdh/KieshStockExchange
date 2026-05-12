@@ -120,20 +120,31 @@ public sealed class SettlementEngine : ISettlementEngine
             buyFund = _accounts.GetFund(incoming.UserId, incoming.CurrencyType);
             buyReservation = InitialBuyReservation(incoming);
 
-            if (buyFund == null || buyFund.AvailableBalance < buyReservation)
+            if (buyFund == null)
             {
-                var available = buyFund?.AvailableBalance ?? 0m;
+                return OrderResultFactory.InsufficientFunds(
+                    $"Order requires {CurrencyHelper.Format(buyReservation, incoming.CurrencyType)}: " +
+                    $"no fund row for user {incoming.UserId} in {incoming.CurrencyType}.");
+            }
+            if (buyFund.AvailableBalance < buyReservation)
+            {
                 return OrderResultFactory.InsufficientFunds(
                     $"Order requires {CurrencyHelper.Format(buyReservation, incoming.CurrencyType)} " +
-                    $"but only {CurrencyHelper.Format(available, incoming.CurrencyType)} is available.");
+                    $"but only {CurrencyHelper.Format(buyFund.AvailableBalance, incoming.CurrencyType)} is available " +
+                    $"(Total={CurrencyHelper.Format(buyFund.TotalBalance, incoming.CurrencyType)}, " +
+                    $"Reserved={CurrencyHelper.Format(buyFund.ReservedBalance, incoming.CurrencyType)}).");
             }
 
             try { buyFund.ReserveFunds(buyReservation); }
             catch (ArgumentException)
             {
+                // Race against another reserver — emit the same enriched diagnostic.
                 return OrderResultFactory.InsufficientFunds(
                     $"Order requires {CurrencyHelper.Format(buyReservation, incoming.CurrencyType)} " +
-                    $"but only {CurrencyHelper.Format(buyFund.AvailableBalance, incoming.CurrencyType)} is available.");
+                    $"but only {CurrencyHelper.Format(buyFund.AvailableBalance, incoming.CurrencyType)} is available " +
+                    $"(Total={CurrencyHelper.Format(buyFund.TotalBalance, incoming.CurrencyType)}, " +
+                    $"Reserved={CurrencyHelper.Format(buyFund.ReservedBalance, incoming.CurrencyType)}); " +
+                    $"race on ReserveFunds.");
             }
         }
         else
@@ -142,19 +153,26 @@ public sealed class SettlementEngine : ISettlementEngine
             // AvailableQuantity = Quantity - ReservedQuantity. Reserved already accounts for
             // this user's other open sells in the book, so a multi-order over-promise is
             // rejected at place time instead of at settlement.
-            if (sellPos == null || sellPos.AvailableQuantity < incoming.Quantity)
+            if (sellPos == null)
             {
-                var avail = sellPos?.AvailableQuantity ?? 0;
                 return OrderResultFactory.InsufficientStocks(
-                    $"Order requires {incoming.Quantity} share(s) but only {avail} available.");
+                    $"Order requires {incoming.Quantity} share(s): " +
+                    $"no position row for user {incoming.UserId} on stock {incoming.StockId}.");
+            }
+            if (sellPos.AvailableQuantity < incoming.Quantity)
+            {
+                return OrderResultFactory.InsufficientStocks(
+                    $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available " +
+                    $"(Quantity={sellPos.Quantity}, Reserved={sellPos.ReservedQuantity}).");
             }
 
             try { sellPos.ReserveStock(incoming.Quantity); }
             catch (ArgumentException)
             {
-                // Lost a race against another reserver — treat as insufficient.
+                // Lost a race against another reserver — same enriched diagnostic.
                 return OrderResultFactory.InsufficientStocks(
-                    $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available.");
+                    $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available " +
+                    $"(Quantity={sellPos.Quantity}, Reserved={sellPos.ReservedQuantity}); race on ReserveStock.");
             }
         }
 
@@ -180,16 +198,20 @@ public sealed class SettlementEngine : ISettlementEngine
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
 
-            // Persist failed — release the reservation we just took so the cache stays consistent.
+            // Persist failed — release the reservation we just took so the cache stays
+            // consistent. Clamp rather than try/catch: a concurrent flow could have
+            // touched ReservedQuantity / ReservedBalance between our reserve and
+            // this rollback, and the first-chance exception under 20k bots floods
+            // the debugger even when handled.
             if (sellPos is not null)
             {
-                try { sellPos.UnreserveStock(incoming.Quantity); }
-                catch (ArgumentException) { /* should not happen; swallow defensively */ }
+                var toRelease = Math.Min(incoming.Quantity, sellPos.ReservedQuantity);
+                if (toRelease > 0) sellPos.UnreserveStock(toRelease);
             }
             if (buyFund is not null && buyReservation > 0m)
             {
-                try { buyFund.UnreserveFunds(buyReservation); }
-                catch (ArgumentException) { /* should not happen; swallow defensively */ }
+                var toRelease = Math.Min(buyReservation, buyFund.ReservedBalance);
+                if (toRelease > 0m) buyFund.UnreserveFunds(toRelease);
             }
             _logger.LogError(ex, "SettleOrderAsync failed to persist order");
             return OrderResultFactory.OperationFailed($"Failed to persist order: {ex.Message}");
@@ -632,18 +654,22 @@ public sealed class SettlementEngine : ISettlementEngine
         if (qty <= 0 || !order.IsSellOrder) return;
         var pos = _accounts.GetPosition(order.UserId, order.StockId);
         if (pos is null) return;
-        try
+        // Clamp to live ReservedQuantity instead of try/catch ArgumentException — a peer
+        // path (RollbackRejectedFills 5a, CancelOrdersBatchAsync) may already have
+        // released some or all of this order's reservation, and under 20k bots the
+        // first-chance exception window floods the debugger even when handled.
+        var toRelease = Math.Min(qty, pos.ReservedQuantity);
+        if (toRelease > 0)
         {
-            pos.UnreserveStock(qty);
+            pos.UnreserveStock(toRelease);
             pos.UpdatedAt = TimeHelper.NowUtc();
+            await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
         }
-        catch (ArgumentException) { return; /* hydration mismatch — swallow defensively */ }
-        await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
 
         if (DebugMode && (!DebugUserId.HasValue || order.UserId == DebugUserId.Value))
             _logger.LogInformation(
                 "Cancel: released {Qty} share(s) for order #{OrderId} (user {UserId}, stock {StockId}); available now {Avail}",
-                qty, order.OrderId, order.UserId, order.StockId, pos.AvailableQuantity);
+                toRelease, order.OrderId, order.UserId, order.StockId, pos.AvailableQuantity);
     }
 
     private async Task ReleaseBuyReservationAndPersist(Order order, CancellationToken ct)
@@ -653,18 +679,18 @@ public sealed class SettlementEngine : ISettlementEngine
         if (amount <= 0m) return;
         var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
         if (fund is null) return;
-        try
+        var toRelease = Math.Min(amount, fund.ReservedBalance);
+        if (toRelease > 0m)
         {
-            fund.UnreserveFunds(amount);
+            fund.UnreserveFunds(toRelease);
             fund.UpdatedAt = TimeHelper.NowUtc();
+            await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
         }
-        catch (ArgumentException) { return; /* hydration mismatch — swallow defensively */ }
-        await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
 
         if (DebugMode && (!DebugUserId.HasValue || order.UserId == DebugUserId.Value))
             _logger.LogInformation(
                 "Cancel: released {Amount} for order #{OrderId} (user {UserId}, {Ccy}); available now {Avail}",
-                amount, order.OrderId, order.UserId, order.CurrencyType, fund.AvailableBalance);
+                toRelease, order.OrderId, order.UserId, order.CurrencyType, fund.AvailableBalance);
     }
 
     public async Task ApplyOrderChangeAsync(Order order, int? newQuantity, decimal? newPrice, CancellationToken ct = default)

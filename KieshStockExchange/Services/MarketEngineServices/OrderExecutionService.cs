@@ -352,10 +352,26 @@ public sealed class OrderExecutionService : IOrderExecutionService
             {
                 var (idx, order) = sellOrders[i];
                 var pos = _accounts.GetPosition(order.UserId, order.StockId);
-                if (pos is null || pos.AvailableQuantity < order.Quantity)
+                // Enriched error messages: include the engine's view (Quantity, Reserved,
+                // Available) alongside what the order needs so the failure CSV reveals
+                // whether the bot's ctx Quantity is stale (engine has fewer total shares)
+                // or whether ReservedQuantity is over-committed (engine has shares but
+                // they're locked up elsewhere). Without these numbers the message just
+                // said "Insufficient shares" with no way to triage divergence.
+                if (pos is null)
                 {
                     results[idx] = OrderResultFactory.InsufficientStocks(
-                        $"Insufficient shares for sell order (user {order.UserId}).");
+                        $"Insufficient shares for sell order (user {order.UserId}, stock {order.StockId}): no position row.");
+                    rejected ??= new HashSet<int>();
+                    rejected.Add(idx);
+                    continue;
+                }
+                if (pos.AvailableQuantity < order.Quantity)
+                {
+                    results[idx] = OrderResultFactory.InsufficientStocks(
+                        $"Insufficient shares for sell order (user {order.UserId}, stock {order.StockId}): " +
+                        $"needs {order.Quantity}, available {pos.AvailableQuantity} " +
+                        $"(Quantity={pos.Quantity}, Reserved={pos.ReservedQuantity}).");
                     rejected ??= new HashSet<int>();
                     rejected.Add(idx);
                     continue;
@@ -369,8 +385,13 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 try { pos.ReserveStock(order.Quantity); }
                 catch (ArgumentException)
                 {
+                    // Race: AvailableQuantity changed between the check above and the
+                    // ReserveStock call. Re-read so the failure message reflects the
+                    // value ReserveStock actually saw.
                     results[idx] = OrderResultFactory.InsufficientStocks(
-                        $"Insufficient shares for sell order (user {order.UserId}).");
+                        $"Insufficient shares for sell order (user {order.UserId}, stock {order.StockId}): " +
+                        $"race on ReserveStock, needs {order.Quantity}, available {pos.AvailableQuantity} " +
+                        $"(Quantity={pos.Quantity}, Reserved={pos.ReservedQuantity}).");
                     rejected ??= new HashSet<int>();
                     rejected.Add(idx);
                 }
@@ -423,10 +444,29 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 var (idx, order) = buyOrders[i];
                 var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
                 var reservation = SettlementEngine.InitialBuyReservation(order);
-                if (fund is null || reservation <= 0m || fund.AvailableBalance < reservation)
+                if (fund is null)
                 {
                     results[idx] = OrderResultFactory.InsufficientFunds(
-                        $"Insufficient funds for buy order (user {order.UserId}).");
+                        $"Insufficient funds for buy order (user {order.UserId}, {order.CurrencyType}): no fund row.");
+                    buyRejected ??= new HashSet<int>();
+                    buyRejected.Add(idx);
+                    continue;
+                }
+                if (reservation <= 0m)
+                {
+                    results[idx] = OrderResultFactory.InsufficientFunds(
+                        $"Insufficient funds for buy order (user {order.UserId}, {order.CurrencyType}): " +
+                        $"computed reservation is {reservation} (price={order.Price}, qty={order.Quantity}).");
+                    buyRejected ??= new HashSet<int>();
+                    buyRejected.Add(idx);
+                    continue;
+                }
+                if (fund.AvailableBalance < reservation)
+                {
+                    results[idx] = OrderResultFactory.InsufficientFunds(
+                        $"Insufficient funds for buy order (user {order.UserId}, {order.CurrencyType}): " +
+                        $"needs {reservation}, available {fund.AvailableBalance} " +
+                        $"(Total={fund.TotalBalance}, Reserved={fund.ReservedBalance}).");
                     buyRejected ??= new HashSet<int>();
                     buyRejected.Add(idx);
                     continue;
@@ -440,7 +480,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 catch (ArgumentException)
                 {
                     results[idx] = OrderResultFactory.InsufficientFunds(
-                        $"Insufficient funds for buy order (user {order.UserId}).");
+                        $"Insufficient funds for buy order (user {order.UserId}, {order.CurrencyType}): " +
+                        $"race on ReserveFunds, needs {reservation}, available {fund.AvailableBalance} " +
+                        $"(Total={fund.TotalBalance}, Reserved={fund.ReservedBalance}).");
                     buyRejected ??= new HashSet<int>();
                     buyRejected.Add(idx);
                 }
@@ -726,8 +768,12 @@ public sealed class OrderExecutionService : IOrderExecutionService
                         var pos = _accounts.GetPosition(order.UserId, order.StockId);
                         if (pos is not null)
                         {
-                            try { pos.UnreserveStock(order.Quantity); pos.UpdatedAt = TimeHelper.NowUtc(); }
-                            catch (ArgumentException) { /* hydration mismatch — defensive */ }
+                            var toRelease = Math.Min(order.Quantity, pos.ReservedQuantity);
+                            if (toRelease > 0)
+                            {
+                                pos.UnreserveStock(toRelease);
+                                pos.UpdatedAt = TimeHelper.NowUtc();
+                            }
                             await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
                         }
                     }
@@ -737,8 +783,12 @@ public sealed class OrderExecutionService : IOrderExecutionService
                         var reservation = SettlementEngine.InitialBuyReservation(order);
                         if (fund is not null && reservation > 0m)
                         {
-                            try { fund.UnreserveFunds(reservation); fund.UpdatedAt = TimeHelper.NowUtc(); }
-                            catch (ArgumentException) { /* hydration mismatch — defensive */ }
+                            var toRelease = Math.Min(reservation, fund.ReservedBalance);
+                            if (toRelease > 0m)
+                            {
+                                fund.UnreserveFunds(toRelease);
+                                fund.UpdatedAt = TimeHelper.NowUtc();
+                            }
                             await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
                         }
                     }
@@ -1110,21 +1160,23 @@ public sealed class OrderExecutionService : IOrderExecutionService
             // so there's no symmetric fund-reservation release here. The Order's
             // Cancelled status is persisted by the caller via UpdateAllAsync;
             // Position writes back to DB the next time a fill touches it.
+            //
+            // Clamp the release to the live ReservedQuantity rather than try/catch
+            // ArgumentException — under 20k bots the first-chance exception window
+            // floods the debugger even when the catch is intentional. A peer path
+            // (CancelOrdersBatchAsync, CancelRemainderAsync) may have already
+            // released some or all of this maker's reservation, so the actual
+            // release amount is min(remaining, live reserved).
             if (maker.IsSellOrder && maker.RemainingQuantity > 0)
             {
                 var pos = _accounts.GetPosition(maker.UserId, maker.StockId);
                 if (pos is not null)
                 {
-                    try
+                    var toRelease = Math.Min(maker.RemainingQuantity, pos.ReservedQuantity);
+                    if (toRelease > 0)
                     {
-                        pos.UnreserveStock(maker.RemainingQuantity);
+                        pos.UnreserveStock(toRelease);
                         pos.UpdatedAt = TimeHelper.NowUtc();
-                    }
-                    catch (ArgumentException)
-                    {
-                        // ReservedQuantity already below the released amount — the
-                        // cache is out of sync but we can't make it worse by ignoring.
-                        // The warning below already documents the cancellation.
                     }
                 }
             }
