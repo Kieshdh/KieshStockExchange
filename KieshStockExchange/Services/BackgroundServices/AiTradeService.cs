@@ -8,6 +8,7 @@ using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -196,6 +197,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly IMarketDataService     _market;
     private readonly IStockService          _stocks;
     private readonly IAccountsCache         _accounts;
+    private readonly IReservationLedger     _ledger;
     private readonly ILogger<AiTradeService> _logger;
 
     public AiTradeService(
@@ -204,6 +206,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IStockService stocks,
         IDataBaseService db,
         IAccountsCache accounts,
+        IReservationLedger ledger,
         ILogger<AiTradeService> logger,
         ILoggerFactory loggerFactory)
     {
@@ -211,6 +214,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _market       = market        ?? throw new ArgumentNullException(nameof(market));
         _stocks       = stocks        ?? throw new ArgumentNullException(nameof(stocks));
         _accounts     = accounts      ?? throw new ArgumentNullException(nameof(accounts));
+        _ledger       = ledger        ?? throw new ArgumentNullException(nameof(ledger));
         _logger       = logger        ?? throw new ArgumentNullException(nameof(logger));
 
         _ctx       = new AiBotContext();
@@ -509,6 +513,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     public string SuggestedFailuresExportFileName =>
         $"bot_failures_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}";
 
+    public int ReservationLedgerEntryCount => _ledger.EntryCount;
+    public string SuggestedLedgerExportFileName => _ledger.SuggestedExportFileName;
+    public Task<string> ExportReservationLedgerCsvAsync(string path, CancellationToken ct = default)
+        => _ledger.ExportCsvAsync(path, ct);
+
     public async Task<string> ExportFailuresCsvAsync(string path, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -596,6 +605,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IReadOnlyList<ReservationMismatch> mismatches;
         try
         {
+            // clamp:false — report only. clamp:true was tried but proved unsafe:
+            // GetOpenOrdersForUsersAsync filters to Limit orders, so transient
+            // SlippageMarket / TrueMarket orders mid-Phase-3 are missed by the
+            // expected calc, and clamping legitimate reservation away caused
+            // downstream "Reservation drift on buyer X: Reserved=$0" failures
+            // (entire batch groups failing because one buyer's reservation
+            // was incorrectly zeroed). Until the reconciler can take an
+            // atomic snapshot under per-user gates AND include market orders
+            // in transit, leave it as a passive observer.
             mismatches = await _accounts.ReconcileReservationsAsync(clamp: false, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
