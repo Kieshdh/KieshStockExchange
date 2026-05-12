@@ -248,6 +248,23 @@
                     </VerticalStackLayout>
                 </Border>
 
+                <!-- Reservation ledger export -->
+                <Border Style="{StaticResource AdminCardStyle}">
+                    <VerticalStackLayout Spacing="8">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <Label Grid.Column="0" Text="Reservation ledger (tracked users)"
+                                   Style="{StaticResource AdminCardSubtitle}"
+                                   VerticalOptions="Center" />
+                            <Button Grid.Column="1" Text="Export CSV"
+                                    Style="{StaticResource AdminPrimaryButton}"
+                                    Command="{Binding ExportLedgerCommand}"
+                                    MinimumWidthRequest="120" />
+                        </Grid>
+                        <Label Text="{Binding ExportLedgerStatusText}"
+                               Style="{StaticResource AdminMutedNote}" />
+                    </VerticalStackLayout>
+                </Border>
+
                 <!-- Recent failures (last 100, scrollable) -->
                 <Border Style="{StaticResource AdminCardStyle}">
                     <Border Style="{StaticResource AdminInsetPanel}">

@@ -3,6 +3,7 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -205,7 +206,7 @@ public static class SettlementRollbackSelfTest
     {
         var db = new FakeDb();
         var cache = new AccountsCache(db, factory.CreateLogger<AccountsCache>());
-        var engine = new SettlementEngine(db, cache, factory.CreateLogger<SettlementEngine>());
+        var engine = new SettlementEngine(db, cache, new ReservationLedger(), factory.CreateLogger<SettlementEngine>());
         return (db, cache, engine);
     }
 

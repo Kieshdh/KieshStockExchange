@@ -5,6 +5,7 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
@@ -30,12 +31,13 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly IMarketDataService _marketData;
     private readonly IAccountsCache _accounts;
     private readonly IOrderCacheService _orderCache;
+    private readonly IReservationLedger _ledger;
     private readonly ILogger<OrderExecutionService> _logger;
 
     public OrderExecutionService(IDataBaseService db, IOrderBookCache books,
         IMatchingEngine matching, IOrderValidator validator, ISettlementEngine settlement,
         IMarketDataService marketData, IAccountsCache accounts,
-        IOrderCacheService orderCache,
+        IOrderCacheService orderCache, IReservationLedger ledger,
         ILogger<OrderExecutionService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -46,6 +48,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _marketData = marketData ?? throw new ArgumentNullException(nameof(marketData));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
+        _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -476,6 +479,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 if (!fundSnapshots.ContainsKey(fundKey))
                     fundSnapshots[fundKey] = (fund.TotalBalance, fund.ReservedBalance);
 
+                var resBefore = fund.ReservedBalance;
+                var totBefore = fund.TotalBalance;
                 try { fund.ReserveFunds(reservation); }
                 catch (ArgumentException)
                 {
@@ -485,7 +490,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
                         $"(Total={fund.TotalBalance}, Reserved={fund.ReservedBalance}).");
                     buyRejected ??= new HashSet<int>();
                     buyRejected.Add(idx);
+                    continue;
                 }
+                _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
+                    "Phase1.6:Reserve", reservation, resBefore, fund.ReservedBalance,
+                    totBefore, fund.TotalBalance);
             }
 
             if (buyRejected is not null)
@@ -786,8 +795,13 @@ public sealed class OrderExecutionService : IOrderExecutionService
                             var toRelease = Math.Min(reservation, fund.ReservedBalance);
                             if (toRelease > 0m)
                             {
+                                var resB = fund.ReservedBalance;
+                                var totB = fund.TotalBalance;
                                 fund.UnreserveFunds(toRelease);
                                 fund.UpdatedAt = TimeHelper.NowUtc();
+                                _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
+                                    "RecoverFailedGroup:Unreserve", toRelease, resB, fund.ReservedBalance,
+                                    totB, fund.TotalBalance);
                             }
                             await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
                         }
@@ -992,7 +1006,12 @@ public sealed class OrderExecutionService : IOrderExecutionService
                             o.OrderId, fund.ReservedBalance, unreserve);
                         continue;
                     }
+                    var resB = fund.ReservedBalance;
+                    var totB = fund.TotalBalance;
                     fund.UnreserveFunds(unreserve);
+                    _ledger.LogFund(o.UserId, o.CurrencyType, o.OrderId,
+                        "CancelOrdersBatch:Unreserve", unreserve, resB, fund.ReservedBalance,
+                        totB, fund.TotalBalance);
                 }
             }
             catch (Exception ex)

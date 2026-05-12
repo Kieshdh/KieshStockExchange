@@ -38,6 +38,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private string _failuresByReasonText = string.Empty;
     [ObservableProperty] private string _failuresByStockText = string.Empty;
     [ObservableProperty] private string _exportFailuresStatusText = string.Empty;
+    [ObservableProperty] private string _exportLedgerStatusText = string.Empty;
     #endregion
 
     #region 24h stats fields
@@ -260,6 +261,36 @@ public partial class BotDashboardViewModel : BaseViewModel
         {
             _logger.LogError(ex, "Failed to export bot failures.");
             ExportFailuresStatusText = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportLedgerAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        try
+        {
+            var path = await PickFailureExportPathAsync(_trade.SuggestedLedgerExportFileName)
+                .ConfigureAwait(false);
+            if (string.IsNullOrEmpty(path))
+            {
+                ExportLedgerStatusText = "Export cancelled.";
+                return;
+            }
+            var savedPath = await _trade.ExportReservationLedgerCsvAsync(path).ConfigureAwait(false);
+            var count = _trade.ReservationLedgerEntryCount;
+            ExportLedgerStatusText = $"Exported {count:N0} ledger rows to {savedPath}";
+            _logger.LogInformation("Reservation ledger CSV exported: {Path}", savedPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to export reservation ledger.");
+            ExportLedgerStatusText = $"Export failed: {ex.Message}";
         }
         finally
         {

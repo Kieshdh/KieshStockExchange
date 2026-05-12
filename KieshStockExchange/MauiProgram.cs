@@ -10,6 +10,7 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices;
 using KieshStockExchange.Services.UserServices.Interfaces;
@@ -76,6 +77,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IStockService, StockService>();
         builder.Services.AddSingleton<ITransactionService, TransactionService>();
         builder.Services.AddSingleton<IAccountsCache, AccountsCache>();
+        builder.Services.AddSingleton<IReservationLedger, ReservationLedger>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
         builder.Services.AddSingleton<IThemeService, ThemeService>();

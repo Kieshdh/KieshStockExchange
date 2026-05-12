@@ -107,6 +107,20 @@ public interface IAiTradeService
     /// </summary>
     string SuggestedFailuresExportFileName { get; }
 
+    /// <summary>Number of mutation rows the reservation ledger currently holds.</summary>
+    int ReservationLedgerEntryCount { get; }
+
+    /// <summary>Suggested file name (without extension) for the ledger export dialog.</summary>
+    string SuggestedLedgerExportFileName { get; }
+
+    /// <summary>
+    /// Writes every traced <c>Fund.ReservedBalance</c> mutation for the whitelisted
+    /// users (see <see cref="Services.PortfolioServices.Helpers.IReservationLedger"/>)
+    /// to a CSV at <paramref name="path"/>. Used to hunt the reservation leak by
+    /// summing the per-call deltas offline.
+    /// </summary>
+    Task<string> ExportReservationLedgerCsvAsync(string path, CancellationToken ct = default);
+
     /// <summary>Raised after each trading-loop tick and on lifecycle changes.</summary>
     event EventHandler? StatsChanged;
 

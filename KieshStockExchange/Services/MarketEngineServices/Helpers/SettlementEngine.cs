@@ -3,6 +3,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
@@ -81,12 +82,15 @@ public sealed class SettlementEngine : ISettlementEngine
     #region Services and Constructor
     private readonly IDataBaseService _db;
     private readonly IAccountsCache _accounts;
+    private readonly IReservationLedger _ledger;
     private readonly ILogger<SettlementEngine> _logger;
 
-    public SettlementEngine(IDataBaseService db, IAccountsCache accounts, ILogger<SettlementEngine> logger)
+    public SettlementEngine(IDataBaseService db, IAccountsCache accounts,
+        IReservationLedger ledger, ILogger<SettlementEngine> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+        _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -135,6 +139,8 @@ public sealed class SettlementEngine : ISettlementEngine
                     $"Reserved={CurrencyHelper.Format(buyFund.ReservedBalance, incoming.CurrencyType)}).");
             }
 
+            var resBefore = buyFund.ReservedBalance;
+            var totBefore = buyFund.TotalBalance;
             try { buyFund.ReserveFunds(buyReservation); }
             catch (ArgumentException)
             {
@@ -146,6 +152,9 @@ public sealed class SettlementEngine : ISettlementEngine
                     $"Reserved={CurrencyHelper.Format(buyFund.ReservedBalance, incoming.CurrencyType)}); " +
                     $"race on ReserveFunds.");
             }
+            _ledger.LogFund(incoming.UserId, incoming.CurrencyType, incoming.OrderId,
+                "SettleOrderAsync:Reserve", buyReservation, resBefore, buyFund.ReservedBalance,
+                totBefore, buyFund.TotalBalance);
         }
         else
         {
@@ -211,7 +220,15 @@ public sealed class SettlementEngine : ISettlementEngine
             if (buyFund is not null && buyReservation > 0m)
             {
                 var toRelease = Math.Min(buyReservation, buyFund.ReservedBalance);
-                if (toRelease > 0m) buyFund.UnreserveFunds(toRelease);
+                if (toRelease > 0m)
+                {
+                    var resB = buyFund.ReservedBalance;
+                    var totB = buyFund.TotalBalance;
+                    buyFund.UnreserveFunds(toRelease);
+                    _ledger.LogFund(incoming.UserId, incoming.CurrencyType, incoming.OrderId,
+                        "SettleOrderAsync:Rollback:Unreserve", toRelease, resB, buyFund.ReservedBalance,
+                        totB, buyFund.TotalBalance);
+                }
             }
             _logger.LogError(ex, "SettleOrderAsync failed to persist order");
             return OrderResultFactory.OperationFailed($"Failed to persist order: {ex.Message}");
@@ -429,10 +446,11 @@ public sealed class SettlementEngine : ISettlementEngine
                 }
             }
 
+            var apResBefore = buyerFund.ReservedBalance;
+            var apTotBefore = buyerFund.TotalBalance;
             try
             {
                 buyerFund.ConsumeReservedFunds(notional);
-                if (savings > 0m) buyerFund.UnreserveFunds(savings);
             }
             catch (ArgumentException ex)
             {
@@ -441,6 +459,24 @@ public sealed class SettlementEngine : ISettlementEngine
                 return (OrderResultFactory.OperationFailed(
                     $"Reservation drift on buyer {t.BuyerId}: {ex.Message}"),
                     Array.Empty<RejectedFill>());
+            }
+            _ledger.LogFund(t.BuyerId, t.CurrencyType, t.BuyOrderId,
+                "ApplyPass:ConsumeReserved", notional, apResBefore, buyerFund.ReservedBalance,
+                apTotBefore, buyerFund.TotalBalance);
+            if (savings > 0m)
+            {
+                var resB2 = buyerFund.ReservedBalance;
+                var totB2 = buyerFund.TotalBalance;
+                try { buyerFund.UnreserveFunds(savings); }
+                catch (ArgumentException ex)
+                {
+                    return (OrderResultFactory.OperationFailed(
+                        $"Savings-unreserve drift on buyer {t.BuyerId}: {ex.Message}"),
+                        Array.Empty<RejectedFill>());
+                }
+                _ledger.LogFund(t.BuyerId, t.CurrencyType, t.BuyOrderId,
+                    "ApplyPass:Savings:Unreserve", savings, resB2, buyerFund.ReservedBalance,
+                    totB2, buyerFund.TotalBalance);
             }
             buyerFund.UpdatedAt = TimeHelper.NowUtc();
 
@@ -581,8 +617,13 @@ public sealed class SettlementEngine : ISettlementEngine
                         var toRelease = Math.Min(leftover, leftoverFund.ReservedBalance);
                         if (toRelease > 0m)
                         {
+                            var resB = leftoverFund.ReservedBalance;
+                            var totB = leftoverFund.TotalBalance;
                             leftoverFund.UnreserveFunds(toRelease);
                             leftoverFund.UpdatedAt = TimeHelper.NowUtc();
+                            _ledger.LogFund(o.UserId, o.CurrencyType, orderId,
+                                "ApplyPass:TrueMarketBuy:Leftover:Unreserve", toRelease,
+                                resB, leftoverFund.ReservedBalance, totB, leftoverFund.TotalBalance);
                         }
                         o.BuyBudget = 0m;
                     }
@@ -711,8 +752,13 @@ public sealed class SettlementEngine : ISettlementEngine
         var toRelease = Math.Min(amount, fund.ReservedBalance);
         if (toRelease > 0m)
         {
+            var resB = fund.ReservedBalance;
+            var totB = fund.TotalBalance;
             fund.UnreserveFunds(toRelease);
             fund.UpdatedAt = TimeHelper.NowUtc();
+            _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
+                "CancelRemainder:ReleaseBuy", toRelease, resB, fund.ReservedBalance,
+                totB, fund.TotalBalance);
             await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
         }
 
@@ -820,9 +866,15 @@ public sealed class SettlementEngine : ISettlementEngine
 
             if (buyFund is not null && buyReservationDelta != 0m)
             {
+                var resB = buyFund.ReservedBalance;
+                var totB = buyFund.TotalBalance;
                 if (buyReservationDelta > 0m) buyFund.ReserveFunds(buyReservationDelta);
                 else buyFund.UnreserveFunds(-buyReservationDelta);
                 buyFund.UpdatedAt = TimeHelper.NowUtc();
+                _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
+                    buyReservationDelta > 0m ? "ApplyOrderChange:Reserve" : "ApplyOrderChange:Unreserve",
+                    Math.Abs(buyReservationDelta), resB, buyFund.ReservedBalance,
+                    totB, buyFund.TotalBalance);
                 await _db.UpdateAllAsync(new[] { buyFund }, ct).ConfigureAwait(false);
             }
 
