@@ -2,6 +2,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
@@ -14,11 +15,14 @@ internal sealed class AiBotDecisionService
 {
     #region Services and Constructor
     private readonly IMarketDataService _market;
+    private readonly IAccountsCache _accounts;
     private readonly ILogger<AiBotDecisionService> _logger;
 
-    internal AiBotDecisionService(IMarketDataService market, ILogger<AiBotDecisionService> logger)
+    internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
+        ILogger<AiBotDecisionService> logger)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
+        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -143,7 +147,16 @@ internal sealed class AiBotDecisionService
             {
                 var pos       = ctx.GetPosition(user.UserId, id);
                 var committed = ComputeCommittedSellShares(ctx, user.UserId, id);
-                if (pos.Quantity - committed > 0) candidates.Add(id);
+                var ctxAvail  = pos.Quantity - committed;
+                // Plan B: cross-check against the engine's authoritative AvailableQuantity
+                // (= Quantity − ReservedQuantity). If the engine has reservations the bot's
+                // ctx doesn't know about (a leak elsewhere, a refresh race, etc.) the bot
+                // would otherwise generate orders that fail Phase 1.5 with InsufficientShares.
+                // Take the minimum so the candidate set never includes a stock the engine
+                // would reject.
+                var enginePos   = _accounts.GetPosition(user.UserId, id);
+                var engineAvail = enginePos?.AvailableQuantity ?? 0;
+                if (Math.Min(ctxAvail, engineAvail) > 0) candidates.Add(id);
             }
             // Return 0 when bot has nothing to sell — avoids a wasted price lookup and DB call
             return candidates.Count > 0 ? candidates[rng.Next(candidates.Count)] : 0;
@@ -210,17 +223,25 @@ internal sealed class AiBotDecisionService
 
         if (IsBuyOrder(type))
         {
-            var committed      = ComputeCommittedBuyFunds(ctx, user.UserId, currency);
-            var freeBalance    = Math.Max(0m, fund.TotalBalance - committed);
-            var allowedBalance = Math.Min(Math.Min(freeBalance, rawTrade), roomValue);
+            var committed       = ComputeCommittedBuyFunds(ctx, user.UserId, currency);
+            var ctxFreeBalance  = Math.Max(0m, fund.TotalBalance - committed);
+            // Plan B: clamp to the engine's AvailableBalance so the bot never generates
+            // an order that's doomed at Phase 1.6 — same defence as the sell branch below.
+            var engineFreeBalance = _accounts.GetFund(user.UserId, currency)?.AvailableBalance ?? 0m;
+            var freeBalance       = Math.Min(ctxFreeBalance, engineFreeBalance);
+            var allowedBalance    = Math.Min(Math.Min(freeBalance, rawTrade), roomValue);
             var qty = (int)Math.Floor(allowedBalance / estimatePrice);
             return qty > 0 ? qty : 0;
         }
         else
         {
-            var committed    = ComputeCommittedSellShares(ctx, user.UserId, stockId);
-            var availableQty = Math.Max(0, pos.Quantity - committed);
-            var desiredQty   = Math.Max(1, (int)Math.Floor(rawTrade / estimatePrice));
+            var committed     = ComputeCommittedSellShares(ctx, user.UserId, stockId);
+            var ctxAvailable  = Math.Max(0, pos.Quantity - committed);
+            // Plan B: same clamp as ChooseStockId — engine view is authoritative. If the
+            // ctx says we have N free but engine has more reserved, take engine's number.
+            var engineAvailable = _accounts.GetPosition(user.UserId, stockId)?.AvailableQuantity ?? 0;
+            var availableQty    = Math.Min(ctxAvailable, engineAvailable);
+            var desiredQty      = Math.Max(1, (int)Math.Floor(rawTrade / estimatePrice));
             return Math.Min(desiredQty, availableQty);
         }
     }

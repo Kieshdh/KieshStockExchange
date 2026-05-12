@@ -208,7 +208,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         _ctx       = new AiBotContext();
         _state     = new AiBotStateService(db, loggerFactory.CreateLogger<AiBotStateService>());
-        _decisions = new AiBotDecisionService(market, loggerFactory.CreateLogger<AiBotDecisionService>());
+        _decisions = new AiBotDecisionService(market, accounts, loggerFactory.CreateLogger<AiBotDecisionService>());
         _scaler    = new BotScalerService(loggerFactory.CreateLogger<BotScalerService>());
 
         _market.QuoteUpdated += OnQuoteUpdated;
