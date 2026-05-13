@@ -878,11 +878,51 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         if (toCancel.Count == 0) return results;
 
-        // Hand-rolled grouping; avoids LINQ allocations on a path that the bot prune timer hits.
-        var groups = new Dictionary<(int, CurrencyType), List<Order>>();
+        // Per-user gates held across re-read + book mutations + DB write + release.
+        // Mirrors CancelRemainderAsync's gate scope so a concurrent settle on the same
+        // user can't slip a fill in between our read and write. AcquireUserGatesAsync
+        // sorts keys to avoid AB/BA deadlocks against any other multi-gate acquirer.
+        var fundKeys = new HashSet<(int, CurrencyType)>();
+        var posKeys  = new HashSet<(int, int)>();
+        var userIds  = new HashSet<int>();
         for (int i = 0; i < toCancel.Count; i++)
         {
             var o = toCancel[i];
+            userIds.Add(o.UserId);
+            if (o.IsBuyOrder)  fundKeys.Add((o.UserId, o.CurrencyType));
+            if (o.IsSellOrder) posKeys.Add((o.UserId, o.StockId));
+        }
+        var userIdList = new List<int>(userIds);
+        await _accounts.EnsureLoadedAsync(userIdList, ct).ConfigureAwait(false);
+        await using var userGates = await _accounts.AcquireUserGatesAsync(
+            fundKeys, posKeys, ct).ConfigureAwait(false);
+
+        // Re-read order rows under the gate. Concurrent fills either already committed
+        // (visible here) or are blocked on a gate we hold.
+        var liveOrders = await _db.GetOrdersByIds(idList, ct).ConfigureAwait(false);
+        var liveById = new Dictionary<int, Order>(liveOrders.Count);
+        for (int i = 0; i < liveOrders.Count; i++) liveById[liveOrders[i].OrderId] = liveOrders[i];
+
+        // Skip orders a peer path already closed (fill or cancel landed before we got the gate).
+        var liveToCancel = new List<Order>(toCancel.Count);
+        for (int i = 0; i < toCancel.Count; i++)
+        {
+            var staleId = toCancel[i].OrderId;
+            if (!liveById.TryGetValue(staleId, out var live) || !live.IsOpen)
+            {
+                if (resultIdxByOrderId.TryGetValue(staleId, out var idx))
+                    results[idx] = OrderResultFactory.AlreadyClosed();
+                continue;
+            }
+            liveToCancel.Add(live);
+        }
+        if (liveToCancel.Count == 0) return results;
+
+        // Hand-rolled grouping; avoids LINQ allocations on a path the bot prune timer hits.
+        var groups = new Dictionary<(int, CurrencyType), List<Order>>();
+        for (int i = 0; i < liveToCancel.Count; i++)
+        {
+            var o = liveToCancel[i];
             var key = (o.StockId, o.CurrencyType);
             if (!groups.TryGetValue(key, out var list))
             {
@@ -914,13 +954,13 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }).ConfigureAwait(false);
             }
 
-            await _db.UpdateAllAsync(toCancel, ct).ConfigureAwait(false);
+            await _db.UpdateAllAsync(liveToCancel, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
-            _logger.LogError(ex, "CancelOrdersBatchAsync: tx failed for {Count} orders", toCancel.Count);
+            _logger.LogError(ex, "CancelOrdersBatchAsync: tx failed for {Count} orders", liveToCancel.Count);
 
             // Restore book state for the orders we removed; status mutation on the in-memory
             // Order is unchanged since we only flipped Cancel on the same instance, but the
@@ -951,29 +991,22 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }
             }
 
-            for (int i = 0; i < toCancel.Count; i++)
+            for (int i = 0; i < liveToCancel.Count; i++)
             {
-                if (resultIdxByOrderId.TryGetValue(toCancel[i].OrderId, out var idx))
+                if (resultIdxByOrderId.TryGetValue(liveToCancel[i].OrderId, out var idx))
                     results[idx] = OrderResultFactory.OperationFailed(
                         $"Cancel batch failed: {ex.Message}");
             }
             return results;
         }
 
-        // Tx committed — release the reservations held by cancelled orders. Done
-        // post-commit so the failure path doesn't have to undo reservation releases.
-        //
-        // Race tolerance: another path (RollbackRejectedFills via Section 5a, or the
-        // per-group CancelRemainderAsync inside RunGroupTxAsync) can cancel the same
-        // order and release its reservation before our post-commit loop runs. We
-        // fetched the order's DB row before our tx, so by the time we got here the
-        // peer release may already have happened. Detect that by comparing the live
-        // reservation against the amount we'd unreserve, and skip rather than throw
-        // — over-unreserving would corrupt the cache, and a stack trace per skipped
-        // order would bury everything else in the log.
-        for (int i = 0; i < toCancel.Count; i++)
+        // Release reservations post-commit so the failure path needn't undo them.
+        // Each `o` is the live row, so unreserve amounts match what apply-pass left.
+        // The clamp + log path stays as defense-in-depth for any gate-less peer
+        // (e.g. RollbackRejectedFills 5a) that may still race the release.
+        for (int i = 0; i < liveToCancel.Count; i++)
         {
-            var o = toCancel[i];
+            var o = liveToCancel[i];
             try
             {
                 if (o.IsSellOrder)
@@ -1022,19 +1055,17 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
         }
 
-        for (int i = 0; i < toCancel.Count; i++)
+        for (int i = 0; i < liveToCancel.Count; i++)
         {
-            if (resultIdxByOrderId.TryGetValue(toCancel[i].OrderId, out var idx))
-                results[idx] = OrderResultFactory.Cancelled(toCancel[i]);
+            if (resultIdxByOrderId.TryGetValue(liveToCancel[i].OrderId, out var idx))
+                results[idx] = OrderResultFactory.Cancelled(liveToCancel[i]);
         }
 
-        // Refresh the active user's order cache if any cancelled orders belonged
-        // to them. Bot prune cancels rarely touch the active user, so the inner
-        // HashSet stays small.
-        if (toCancel.Count > 0)
+        // Refresh the active user's order cache if any cancels touched them.
+        if (liveToCancel.Count > 0)
         {
-            var affected = new HashSet<int>(toCancel.Count);
-            for (int i = 0; i < toCancel.Count; i++) affected.Add(toCancel[i].UserId);
+            var affected = new HashSet<int>(liveToCancel.Count);
+            for (int i = 0; i < liveToCancel.Count; i++) affected.Add(liveToCancel[i].UserId);
             _orderCache.NotifyOrdersMutated(affected);
         }
 
@@ -1072,11 +1103,44 @@ public sealed class OrderExecutionService : IOrderExecutionService
         public string Reason;
     }
 
+    /// <summary>
+    /// Per-buy-maker state for the innocent-rollback path. Distinct from <see cref="MakerRollback"/>:
+    /// no cancellation, no Position release. The buy maker is a counterparty caught up in a
+    /// seller-side rejection — the matcher already incremented its AmountFilled and possibly
+    /// flipped Status to Filled, and that mutation has to be reverted by exactly the rejected qty
+    /// (NOT the cumulative delta — accepted fills against this same maker stay applied).
+    /// </summary>
+    private struct InnocentBuyMakerRollback
+    {
+        public Order Maker;
+        public MakerSnapshot EarliestSnap;
+        public bool AnyRemovedFromBook;
+        public int RejectedQty;
+    }
+
     private void RollbackRejectedFills(
         IReadOnlyList<(Order Taker, MatchResult Match)> matches,
         OrderBook book,
         IReadOnlyList<RejectedFill> rejected,
         Dictionary<int, Order> ordersById)
+        => RollbackRejectedFillsCore(matches, book, rejected, ordersById, _accounts, _logger, DebugUserId);
+
+    /// <summary>
+    /// Static core of the rejected-fills rollback so deterministic self-tests
+    /// (<see cref="Tests.RollbackRejectedFillsSelfTest"/>) can invoke the logic without
+    /// constructing a full <see cref="OrderExecutionService"/>. The instance method
+    /// above is the only production call site; tests pass their own fakes for
+    /// <paramref name="accounts"/>, <paramref name="logger"/>, and
+    /// <paramref name="debugUserId"/>.
+    /// </summary>
+    internal static void RollbackRejectedFillsCore(
+        IReadOnlyList<(Order Taker, MatchResult Match)> matches,
+        OrderBook book,
+        IReadOnlyList<RejectedFill> rejected,
+        Dictionary<int, Order> ordersById,
+        IAccountsCache accounts,
+        ILogger logger,
+        int? debugUserId)
     {
         if (rejected.Count == 0) return;
 
@@ -1085,6 +1149,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // snapshot's state, with the cumulative filled delta, restores the maker as if it had
         // never been touched in this batch.
         var byMaker = new Dictionary<int, MakerRollback>();
+        // Per-buy-maker tracking for the innocent rollback path (seller-side rejection
+        // where the buyer happens to be a resting maker). Empty in the common case;
+        // populated only when t.BuyOrderId is a book-resident order at rejection time.
+        var innocentBuyMakers = new Dictionary<int, InnocentBuyMakerRollback>();
         var fillToTaker = new Dictionary<Transaction, Order>(ReferenceEqualityComparer.Instance);
 
         for (int m = 0; m < matches.Count; m++)
@@ -1128,6 +1196,33 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
             // No maker entry means we'll log + skip below; nothing to update here.
 
+            // A seller-side rejection still has a buyer side. If the buyer was on the book
+            // (its OrderId is in byMaker) and is NOT the same as the rejection's
+            // seller-keyed MakerOrderId, the matcher incremented its AmountFilled for a fill
+            // that won't actually happen. Track the rejected qty so the second pass can
+            // revert just that portion without cancelling the buyer — the buyer is innocent,
+            // the rejection is the seller's inability to deliver. Apply-pass never ran for
+            // this rejected fill, so Fund.ReservedBalance is unchanged; reverting AmountFilled
+            // alone is enough to make RemainingBuyReservation (= perUnit × RemainingQuantity)
+            // match the buyer's cached reservation again.
+            var buyOrderId = rj.Trade.BuyOrderId;
+            if (buyOrderId != rj.MakerOrderId
+                && byMaker.TryGetValue(buyOrderId, out var buyAgg))
+            {
+                if (!innocentBuyMakers.TryGetValue(buyOrderId, out var innocentEntry))
+                {
+                    innocentEntry = new InnocentBuyMakerRollback
+                    {
+                        Maker              = buyAgg.EarliestSnap.Order,
+                        EarliestSnap       = buyAgg.EarliestSnap,
+                        AnyRemovedFromBook = buyAgg.AnyRemovedFromBook,
+                        RejectedQty        = 0,
+                    };
+                }
+                innocentEntry.RejectedQty += rj.Trade.Quantity;
+                innocentBuyMakers[buyOrderId] = innocentEntry;
+            }
+
             if (fillToTaker.TryGetValue(rj.Trade, out var taker))
             {
                 rejectedQtyByTaker.TryGetValue(taker, out var tqty);
@@ -1135,7 +1230,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
             else
             {
-                _logger.LogError(
+                logger.LogError(
                     "Rejected fill (maker #{MakerId}, qty {Qty}) not found in any MatchResult.Fills",
                     rj.MakerOrderId, rj.Trade.Quantity);
             }
@@ -1188,7 +1283,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
             // release amount is min(remaining, live reserved).
             if (maker.IsSellOrder && maker.RemainingQuantity > 0)
             {
-                var pos = _accounts.GetPosition(maker.UserId, maker.StockId);
+                var pos = accounts.GetPosition(maker.UserId, maker.StockId);
                 if (pos is not null)
                 {
                     var toRelease = Math.Min(maker.RemainingQuantity, pos.ReservedQuantity);
@@ -1200,10 +1295,55 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }
             }
 
-            if (!DebugUserId.HasValue || maker.UserId == DebugUserId.Value)
-                _logger.LogWarning(
+            if (!debugUserId.HasValue || maker.UserId == debugUserId.Value)
+                logger.LogWarning(
                     "Cancelled stale maker order #{OrderId} (seller {UserId}, stock {StockId}): {Reason}",
                     makerId, maker.UserId, maker.StockId, agg.Reason);
+        }
+
+        // Innocent buy makers: revert ONLY the rejected portion of the matcher's
+        // AmountFilled increment, restore the book level credit, flip Status back to Open
+        // if matcher had set it to Filled. Do NOT call maker.Cancel() — the buyer was an
+        // innocent counterparty of a seller-side rejection. Fund.ReservedBalance is
+        // unchanged here: apply-pass only iterates accepted fills, so the rejected portion
+        // never consumed reservation. After this revert, RemainingQuantity is back to what
+        // the maker actually intended to hold, and the cached reservation matches
+        // RemainingBuyReservation again — eliminating the phantom that was driving the
+        // reconciler's $400M+ over-reservation report.
+        foreach (var kv in innocentBuyMakers)
+        {
+            var entry = kv.Value;
+            if (entry.RejectedQty == 0) continue; // defensive
+
+            var maker = entry.Maker;
+
+            // Forward-compat guard: market orders don't rest on the book, so any maker
+            // we revert here must be a limit order. Mirrors the assertion in the
+            // seller-cancel loop above.
+            if (!maker.IsLimitOrder)
+                throw new InvalidOperationException(
+                    $"Innocent buy-maker rollback assumes a limit order, got " +
+                    $"{maker.OrderType} for #{maker.OrderId}.");
+
+            // Revert AmountFilled by the rejected portion only — accepted fills stay
+            // applied (their cache mutations already ran in apply-pass).
+            maker.AmountFilled = Math.Max(0, maker.AmountFilled - entry.RejectedQty);
+            if (maker.Status == Order.Statuses.Filled
+                && maker.AmountFilled < maker.Quantity)
+                maker.Status = Order.Statuses.Open;
+
+            // Restore book state. RollbackMakerFill with wasRemoved=true re-inserts and
+            // credits the level by maker.RemainingQuantity (updated above); with
+            // wasRemoved=false it just credits the level by the rejected qty. Both
+            // branches do the right thing for a partial revert.
+            book.RollbackMakerFill(maker, entry.RejectedQty, entry.AnyRemovedFromBook);
+
+            ordersById[kv.Key] = maker;
+
+            if (!debugUserId.HasValue || maker.UserId == debugUserId.Value)
+                logger.LogWarning(
+                    "Reverted innocent buy-maker #{OrderId} (user {UserId}, stock {StockId}): rejectedQty={Qty}",
+                    kv.Key, maker.UserId, maker.StockId, entry.RejectedQty);
         }
 
         // Reduce each taker's AmountFilled and reopen if matcher had flipped it to Filled.
