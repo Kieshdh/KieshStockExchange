@@ -3,11 +3,7 @@ using KieshStockExchange.Models;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-/// <summary>
-/// Pure reservation arithmetic for buy orders. No dependencies; shared between
-/// the settlement helpers, <c>OrderExecutionService</c>'s pre-flight phases, and
-/// <c>AccountsCache</c>'s reconciliation.
-/// </summary>
+/// <summary> Pure reservation arithmetic for buy orders. </summary>
 public static class ReservationMath
 {
     internal static bool IsTrueMarketBuy(Order o) => o.OrderType == Order.Types.TrueMarketBuy;
