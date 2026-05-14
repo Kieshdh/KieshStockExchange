@@ -11,6 +11,7 @@ using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
@@ -208,7 +209,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IAccountsCache accounts,
         IReservationLedger ledger,
         ILogger<AiTradeService> logger,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IOptions<SeparatorLoggerOptions> loggerOptions)
     {
         _marketOrders = marketOrders  ?? throw new ArgumentNullException(nameof(marketOrders));
         _market       = market        ?? throw new ArgumentNullException(nameof(market));
@@ -216,11 +218,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _accounts     = accounts      ?? throw new ArgumentNullException(nameof(accounts));
         _ledger       = ledger        ?? throw new ArgumentNullException(nameof(ledger));
         _logger       = logger        ?? throw new ArgumentNullException(nameof(logger));
+        if (loggerFactory is null) throw new ArgumentNullException(nameof(loggerFactory));
+        if (loggerOptions is null) throw new ArgumentNullException(nameof(loggerOptions));
 
         _ctx       = new AiBotContext();
-        _state     = new AiBotStateService(db, loggerFactory.CreateLogger<AiBotStateService>());
-        _decisions = new AiBotDecisionService(market, accounts, loggerFactory.CreateLogger<AiBotDecisionService>());
-        _scaler    = new BotScalerService(loggerFactory.CreateLogger<BotScalerService>());
+        _state     = new AiBotStateService(db, new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
+        _decisions = new AiBotDecisionService(market, accounts, new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions));
+        _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
         _market.QuoteUpdated += OnQuoteUpdated;
     }

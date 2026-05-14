@@ -5,6 +5,7 @@ using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace KieshStockExchange.Services.Implementations;
 
@@ -38,10 +39,12 @@ public sealed class MarketDataService : IMarketDataService, IAsyncDisposable
     private readonly ICandleService _candle;
     private readonly IMarketLookupService _lookup;
     public MarketDataService( IDispatcher dispatcher, ILogger<MarketDataService> logger,
-        ILoggerFactory loggerFactory, ICandleService candle, IMarketLookupService lookup)
+        ILoggerFactory loggerFactory, IOptions<SeparatorLoggerOptions> loggerOptions,
+        ICandleService candle, IMarketLookupService lookup)
     {
         if (dispatcher is null) throw new ArgumentNullException(nameof(dispatcher));
         if (loggerFactory is null) throw new ArgumentNullException(nameof(loggerFactory));
+        if (loggerOptions is null) throw new ArgumentNullException(nameof(loggerOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _candle = candle ?? throw new ArgumentNullException(nameof(candle));
         _lookup = lookup ?? throw new ArgumentNullException(nameof(lookup));
@@ -49,11 +52,11 @@ public sealed class MarketDataService : IMarketDataService, IAsyncDisposable
         _subs = new SubscriptionTracker();
         _registry = new QuoteRegistry(
             dispatcher, lookup,
-            loggerFactory.CreateLogger<QuoteRegistry>(),
+            new SeparatorLogger<QuoteRegistry>(loggerFactory, loggerOptions),
             _subs.HasUiSubscribers);
         _pipeline = new TickPipeline(
             _registry, _subs, candle, dispatcher, lookup,
-            loggerFactory.CreateLogger<TickPipeline>());
+            new SeparatorLogger<TickPipeline>(loggerFactory, loggerOptions));
 
         _registry.QuoteUpdated += OnRegistryQuoteUpdated;
         _registry.Start(_lifetimeCts.Token);
