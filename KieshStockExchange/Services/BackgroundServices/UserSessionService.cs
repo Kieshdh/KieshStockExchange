@@ -22,6 +22,9 @@ public class UserSessionService : IUserSessionService
 
     // Are AI bots currently running?
     private bool _aiBotsRunning = false;
+
+    // Reset the database
+    private readonly bool _resetDatabase = false;
     #endregion
 
     #region Convenience fields
@@ -113,9 +116,11 @@ public class UserSessionService : IUserSessionService
                 return;
             }
 
-            // One-time initialization: reset DB, import Excel, start snapshots
-            //await _excel.ResetAndAddDatabases().ConfigureAwait(false);
-            await _excel.CheckAndAddDatabases().ConfigureAwait(false);
+            // One-time initialization: (reset DB), import Excel, start snapshots
+            if (_resetDatabase) 
+                await _excel.ResetAndAddDatabases().ConfigureAwait(false);
+            else
+                await _excel.CheckAndAddDatabases().ConfigureAwait(false);
             _logger.LogInformation("Database seeding complete.");
 
             // Start price snapshot service and configure trade service
