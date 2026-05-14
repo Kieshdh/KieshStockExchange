@@ -8,12 +8,7 @@ using static KieshStockExchange.Services.MarketEngineServices.ReservationMath;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-/// <summary>
-/// Trade settlement: validate-pass filters fills the seller can't honor, apply-pass
-/// mutates funds/positions per fill, TrueMarketBuy budget is reconciled, the conservation
-/// probe runs, and the accepted trades + mutated entities are persisted on the caller's
-/// ambient root tx. The single-call wrapper owns its own tx.
-/// </summary>
+/// <summary> Validate, apply, reconcile budget, probe conservation, persist. </summary>
 internal sealed class TradeSettler
 {
     private readonly IDataBaseService _db;
@@ -43,11 +38,7 @@ internal sealed class TradeSettler
         if (trades is null || trades.Count == 0)
             return (null, Array.Empty<RejectedFill>());
 
-        // Eagerly enumerate every (user, resource) touched by these trades so we can
-        // serialise the apply-pass against any concurrent flow on the same user. Mirror
-        // the apply-pass exactly: buyer/seller funds in the trade currency, plus buyer/
-        // seller positions on the trade stock. Sorted acquisition inside
-        // AcquireUserGatesAsync prevents AB/BA deadlocks across overlapping batches.
+        // Gate every (user, resource) touched. Sorted acquisition avoids AB/BA deadlock.
         var fundKeys = new HashSet<(int, CurrencyType)>();
         var posKeys = new HashSet<(int, int)>();
         var userSet = new HashSet<int>();
@@ -65,7 +56,6 @@ internal sealed class TradeSettler
         await _accounts.EnsureLoadedAsync(userIds, ct).ConfigureAwait(false);
         await using var gates = await _accounts.AcquireUserGatesAsync(fundKeys, posKeys, ct).ConfigureAwait(false);
 
-        // Single-call wrapper: own the tx, own the snapshots, restore on failure.
         var scope = new TradeBatchScope();
 
         await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -82,7 +72,7 @@ internal sealed class TradeSettler
 
             await tx.CommitAsync(ct).ConfigureAwait(false);
 
-            // Only register newly-created positions in the cache after the tx commits.
+            // Register new positions only after commit
             foreach (var pos in scope.PendingNewPositions.Values)
                 _accounts.TrackNewPosition(pos);
 
@@ -98,12 +88,7 @@ internal sealed class TradeSettler
         }
     }
 
-    /// <summary>
-    /// Apply trade deltas to the in-memory cache + DB inside the caller's ambient transaction.
-    /// All mutations are tracked into the caller-supplied snapshot dictionaries; the caller
-    /// is responsible for rolling them back via <see cref="RestoreSnapshots"/> if the
-    /// outer transaction fails.
-    /// </summary>
+    /// <summary> Apply deltas inside the caller's ambient tx; caller restores on failure. </summary>
     public async Task<(OrderResult? Error, IReadOnlyList<RejectedFill> Rejected)> SettleNoTxAsync(
         IReadOnlyList<Transaction> trades,
         Dictionary<int, Order> ordersById,
@@ -131,22 +116,16 @@ internal sealed class TradeSettler
 
         await _accounts.EnsureLoadedAsync(userIds, ct).ConfigureAwait(false);
 
-        // ---------- Validate-pass: filter fills the seller can't honor. No mutations. ----------
-        // Mirror the apply-pass budget logic so a fill that the apply-pass would reject
-        // (insufficient AvailableQuantity + existing reservation) gets caught here as a
-        // recoverable RejectedFill instead of escalating into a fatal "Insufficient
-        // reservation" OperationFailed that aborts the whole batch.
+        // Validate-pass: filter unhonorable fills into rejected
         var (validateErr, accepted, rejected) = _validator.Filter(
             trades, ordersById, _accounts, pendingNewPositions, ct);
         if (validateErr is not null)
             return (validateErr, Array.Empty<RejectedFill>());
 
-        // No accepted fills — nothing to apply, no DB writes. Return rejected list so the
-        // caller can still cancel the offending makers.
         if (accepted.Count == 0)
-            return (null, rejected);
+            return (null, rejected); // nothing to apply, caller still cancels offending makers
 
-        // ---------- Apply-pass: per-trade fund + position mutations on accepted only. ----------
+        // Apply-pass: mutate funds + positions on accepted fills only
         var fundMap = new Dictionary<(int, CurrencyType), Fund>();
         var posMap = new Dictionary<(int, int), Position>();
         var newPositionsThisCall = new List<Position>();
@@ -159,10 +138,7 @@ internal sealed class TradeSettler
             var ccy = t.CurrencyType;
             var notional = Round(t.TotalAmount, ccy);
 
-            // Buyer pays from the reservation taken at place time (or in Phase 1.5 of the
-            // batch path). Limit/Slippage buys reserved at the upper-bound price; the actual
-            // notional may be lower, so the difference is unreserved as "slippage savings".
-            // TrueMarketBuy reservation == per-fill notional, so no savings.
+            // Buyer pays from reservation. Limit/Slippage may have over-reserved → unreserve savings.
             var buyerKey = (t.BuyerId, ccy);
             if (!fundMap.TryGetValue(buyerKey, out var buyerFund))
             {
@@ -194,8 +170,7 @@ internal sealed class TradeSettler
             }
             catch (ArgumentException ex)
             {
-                // Reservation drift — should be caught at place time, but fail the batch
-                // safely if we ever land here so the caller can roll the tx back.
+                // Drift: should be caught at place time; fail the batch safely if it slips through
                 return (OrderResultFactory.OperationFailed(
                     $"Reservation drift on buyer {t.BuyerId}: {ex.Message}"),
                     Array.Empty<RejectedFill>());
@@ -220,10 +195,7 @@ internal sealed class TradeSettler
             }
             buyerFund.UpdatedAt = TimeHelper.NowUtc();
 
-            // Diagnostic: log savings unreserve so we can verify modify-buy-above-market
-            // releases (perUnitReserved − fillPrice) × qty back to Available. Without
-            // this, an apparent "funds lost" report is hard to pin down — the math is
-            // correct in code, but a single log line per fill makes it observable.
+            // Per-fill savings log so modify-buy-above-market releases stay observable
             if (SettlementDebug.Mode && savings > 0m
                 && (!SettlementDebug.UserId.HasValue || t.BuyerId == SettlementDebug.UserId.Value))
             {
@@ -234,7 +206,7 @@ internal sealed class TradeSettler
                     t.Price, t.Quantity, notional, savings);
             }
 
-            // Seller receives — straight credit to TotalBalance, no reservation involved.
+            // Seller credit: straight to TotalBalance
             var sellerKey = (t.SellerId, ccy);
             if (!fundMap.TryGetValue(sellerKey, out var sellerFund))
             {
@@ -249,7 +221,7 @@ internal sealed class TradeSettler
             sellerFund.TotalBalance += notional;
             sellerFund.UpdatedAt = TimeHelper.NowUtc();
 
-            // Buyer position — may reuse a position created earlier in the same root tx.
+            // Buyer position: may reuse a position created earlier in the same root tx
             var buyerPosKey = (t.BuyerId, t.StockId);
             if (!posMap.TryGetValue(buyerPosKey, out var buyerPos))
             {
@@ -259,7 +231,7 @@ internal sealed class TradeSettler
                     buyerPos = new Position { UserId = t.BuyerId, StockId = t.StockId };
                     pendingNewPositions[buyerPosKey] = buyerPos;
                     newPositionsThisCall.Add(buyerPos);
-                    // No snapshot for brand-new positions — caller drops the entry on rollback.
+                    // brand-new: no snapshot, caller drops on rollback
                 }
                 else if (buyerPos!.PositionId != 0 && !posSnapshots.ContainsKey(buyerPosKey))
                 {
@@ -270,14 +242,12 @@ internal sealed class TradeSettler
             buyerPos.Quantity += t.Quantity;
             buyerPos.UpdatedAt = TimeHelper.NowUtc();
 
-            // Seller position — pre-validated above to have sufficient Quantity; lookup chain
-            // is identical to the validate-pass.
+            // Seller position: validate-pass already guaranteed sufficient Quantity
             var sellerPosKey = (t.SellerId, t.StockId);
             if (!posMap.TryGetValue(sellerPosKey, out var sellerPos))
             {
                 sellerPos = _accounts.GetPosition(t.SellerId, t.StockId);
                 if (sellerPos is null) pendingNewPositions.TryGetValue(sellerPosKey, out sellerPos);
-                // Validate-pass already guaranteed non-null; this assertion is defensive.
                 if (sellerPos is null)
                     return (OrderResultFactory.OperationFailed(
                         $"Position not found for seller {t.SellerId} on stock {t.StockId}."),
@@ -287,9 +257,7 @@ internal sealed class TradeSettler
                     posSnapshots[sellerPosKey] = (sellerPos.Quantity, sellerPos.ReservedQuantity);
             }
 
-            // Sell orders are reserved at place time; settlement consumes the reservation.
-            // If the reservation is short (e.g., a taker that immediately matches without
-            // having been pre-reserved by the caller), top it up from AvailableQuantity.
+            // Top up reservation from AvailableQuantity for taker sells that skipped place-time reserve
             if (sellerPos.ReservedQuantity < t.Quantity)
             {
                 var needed = t.Quantity - sellerPos.ReservedQuantity;
@@ -303,14 +271,14 @@ internal sealed class TradeSettler
             sellerPos.ConsumeReservedStock(t.Quantity);
         }
 
-        // Materialize the existing cached entities mutated this call for the DB write step.
+        // Materialise mutated entities for the DB write step
         var loadedFunds = new List<Fund>(fundMap.Count);
         foreach (var kv in fundMap) loadedFunds.Add(kv.Value);
         var loadedPositions = new List<Position>();
         foreach (var kv in posMap)
             if (kv.Value.PositionId != 0) loadedPositions.Add(kv.Value);
 
-        // TrueMarketBuy: decrement BuyBudget by total spend for this batch (accepted fills only).
+        // TrueMarketBuy: decrement BuyBudget by batch spend
         Dictionary<int, decimal>? spendByOrderId = null;
         for (int i = 0; i < accepted.Count; i++)
         {
@@ -335,26 +303,13 @@ internal sealed class TradeSettler
                     budgetSnapshots[orderId] = o.BuyBudget;
                 o.BuyBudget = Math.Max(0m, Round(o.BuyBudget!.Value - spent, o.CurrencyType));
 
-                // Reservation-leak fix: a TrueMarketBuy that fully fills at prices below
-                // its budgeted average leaves BuyBudget > 0 with no remaining quantity to
-                // spend it on. The order's Status is Filled (matcher set it during the
-                // apply loop) so CancelRemainderAsync never fires, and the apply-pass
-                // doesn't release "savings" for TrueMarketBuy (ReservationPerUnit returns
-                // 0 by design). Without this release the leftover sits on Fund.Reserved
-                // permanently — the reconciler observed users with $100k+ phantom reserved
-                // balance and zero open buys, all from cumulative full-fill leftovers.
-                //
-                // Limit / Slippage buys aren't affected because their apply-pass already
-                // releases (perUnit − fillPrice) × fillQty as savings per fill.
+                // Filled TrueMarketBuy with leftover budget: release to avoid phantom Reserved
                 if (o.Status == Order.Statuses.Filled && o.BuyBudget > 0m)
                 {
                     var leftover = o.BuyBudget.Value;
                     if (fundMap.TryGetValue((o.UserId, o.CurrencyType), out var leftoverFund))
                     {
-                        // Clamp to live ReservedBalance — defensive against a concurrent
-                        // release on the same fund (per-user gate makes this rare, but
-                        // we don't want a stale snapshot to break the apply-pass).
-                        var toRelease = Math.Min(leftover, leftoverFund.ReservedBalance);
+                        var toRelease = Math.Min(leftover, leftoverFund.ReservedBalance); // clamp against concurrent release
                         if (toRelease > 0m)
                         {
                             var resB = leftoverFund.ReservedBalance;
@@ -371,17 +326,10 @@ internal sealed class TradeSettler
             }
         }
 
-        // Money-conservation probe: sum (post − pre) TotalBalance across every Fund this
-        // call mutated, grouped by currency. Apply-pass debits the buyer and credits the
-        // seller by the same `notional` per fill, so the net MUST be 0 within rounding.
-        // A non-zero net means a mutation was applied to one side but not the other — a
-        // hard bug that would account for the "chart rising upwards" cash leak. Same idea
-        // for Position.Quantity per stock: buyer +qty, seller −qty, sum = 0. Both probes
-        // log loudly so the next run pinpoints which call produced the asymmetry.
+        // Conservation invariant: fund + share deltas must sum to 0 per ccy / stock
         _probe.Check(fundMap, fundSnapshots, posMap, posSnapshots, accepted);
 
-        // DB writes happen on the caller's ambient root tx — no BeginTransactionAsync here.
-        // Persist accepted trades only; rejected ones never happened.
+        // DB writes on the caller's ambient root tx — accepted only
         await _db.InsertAllAsync(accepted, ct).ConfigureAwait(false);
         await _db.UpdateAllAsync(ordersById.Values, ct).ConfigureAwait(false);
         if (loadedFunds.Count > 0)
@@ -394,11 +342,7 @@ internal sealed class TradeSettler
         return (null, rejected);
     }
 
-    /// <summary>
-    /// Restore the cache instances mutated by <see cref="SettleNoTxAsync"/> back to
-    /// the values captured in the snapshot dictionaries. Idempotent — safe to call after a
-    /// successful settle (snapshots are simply re-applied with the same values, no-op).
-    /// </summary>
+    /// <summary> Restore cache from scope snapshots. Idempotent. </summary>
     public void RestoreSnapshots(Dictionary<int, Order> ordersById, TradeBatchScope scope)
     {
         if (scope is null) throw new ArgumentNullException(nameof(scope));

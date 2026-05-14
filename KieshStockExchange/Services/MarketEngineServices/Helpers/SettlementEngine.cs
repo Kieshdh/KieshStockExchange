@@ -8,11 +8,7 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-/// <summary>
-/// Thin facade composing the four operation-specific helpers behind
-/// <see cref="ISettlementEngine"/>. Helpers are implementation detail; only this facade
-/// is registered in DI (see <c>MauiProgram.cs</c>).
-/// </summary>
+/// <summary> Facade forwarding ISettlementEngine to four operation helpers. </summary>
 public sealed class SettlementEngine : ISettlementEngine
 {
     #region Services and Constructor
@@ -32,10 +28,8 @@ public sealed class SettlementEngine : ISettlementEngine
         if (loggerFactory is null) throw new ArgumentNullException(nameof(loggerFactory));
         if (loggerOptions is null) throw new ArgumentNullException(nameof(loggerOptions));
 
-        // Wrap with SeparatorLogger<T> explicitly so each helper's logs are separator-
-        // formatted to match what DI does for injected ILogger<T> via the open-generic
-        // mapping at MauiProgram.cs. loggerFactory.CreateLogger<T>() alone bypasses that
-        // mapping and produces an unwrapped logger.
+        // Construct SeparatorLogger<T> directly — loggerFactory.CreateLogger<T>() bypasses
+        // the open-generic DI mapping at MauiProgram.cs and returns an unwrapped logger
         ILogger<T> SepLogger<T>() => new SeparatorLogger<T>(loggerFactory, loggerOptions);
 
         var validator = new SellerCapacityValidator(SepLogger<SellerCapacityValidator>());

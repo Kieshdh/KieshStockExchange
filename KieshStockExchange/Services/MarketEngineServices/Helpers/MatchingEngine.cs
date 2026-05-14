@@ -21,10 +21,7 @@ public readonly record struct MakerSnapshot(Order Order, int OriginalAmountFille
 
 public sealed class MatchingEngine : IMatchingEngine
 {
-    // Diagnostic switches. Flip DebugMode on to see one INFO line per fill with
-    // full taker/maker/trade-price context. Set DebugUserId to filter the log
-    // to a single user (e.g. the admin running manual tests), or null to log
-    // every fill (noisy under bot load).
+    // Per-fill INFO log when on. DebugUserId filters to a single user; null = log every fill (noisy).
     private readonly bool DebugMode = true;
     private readonly int? DebugUserId = 20001;
 
@@ -78,10 +75,7 @@ public sealed class MatchingEngine : IMatchingEngine
             // Build an in-memory transaction (not persisted yet)
             fills.Add(CreateTransaction(taker, bestOpposite, qty));
 
-            // Diagnostic: per-fill log with full taker/maker/trade-price context.
-            // Gated by DebugMode (master switch) and optionally filtered to one
-            // user by DebugUserId — admin manual tests stay visible while the
-            // bot fleet's matches don't flood the log.
+            // Per-fill log with taker/maker/trade-price context
             if (DebugMode && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
                 _logger.LogInformation(
                     "Match: taker #{TakerId} user={TakerUser} side={TakerSide} limit={TakerPrice}  ↔  maker #{MakerId} user={MakerUser} price={MakerPrice}  → qty={Qty} tradePrice={TradePrice}",
@@ -90,8 +84,7 @@ public sealed class MatchingEngine : IMatchingEngine
                     bestOpposite.OrderId, bestOpposite.UserId, bestOpposite.Price,
                     qty, bestOpposite.Price);
 
-            // Taker is not in the book; mutate it directly. Maker fill must go through
-            // the book so per-level totals stay in sync.
+            // Taker is not in the book; maker fill routes through book to keep level totals in sync
             taker.Fill(qty);
             var wasRemoved = book.ApplyMakerFill(bestOpposite, qty);
             if (wasRemoved && DebugMode
@@ -101,11 +94,7 @@ public sealed class MatchingEngine : IMatchingEngine
             makerSnapshots.Add(new MakerSnapshot(bestOpposite, makerOriginalFilled, wasRemoved));
         }
 
-        // Diagnostic: when the loop produces zero fills (taker rested without
-        // crossing anything), the regular per-fill log doesn't fire. Surface a
-        // single line so a Place/Modify that ends with `PlacedOnBook` isn't an
-        // invisible silence — we can tell from the log whether the matcher even
-        // saw the order or whether no opposite existed at that moment.
+        // No-match log so a `PlacedOnBook` outcome isn't an invisible silence
         if (DebugMode && fills.Count == 0 && taker.AmountFilled == takerOriginalFilled
             && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
         {

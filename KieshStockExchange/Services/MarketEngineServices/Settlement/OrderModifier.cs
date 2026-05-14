@@ -8,11 +8,7 @@ using static KieshStockExchange.Services.MarketEngineServices.ReservationMath;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-/// <summary>
-/// Apply a price/quantity change to an open order: compute the reservation delta,
-/// validate that the change doesn't overdraft the user, persist the order + fund/position
-/// in one tx, and roll the cache back if the tx fails.
-/// </summary>
+/// <summary> Modify price/quantity: delta-validate, persist, roll cache back on failure. </summary>
 internal sealed class OrderModifier
 {
     private readonly IDataBaseService _db;
@@ -33,26 +29,15 @@ internal sealed class OrderModifier
     {
         ct.ThrowIfCancellationRequested();
 
-        // Cache covers fund + position for this user across all currencies/stocks.
-        // Without this call, modifies for users not yet trading in this session
-        // would find GetFund/GetPosition null and silently skip the reservation
-        // delta — funds in DB and admin tables would never see the new reservation.
+        // Load: otherwise modifies for cold users skip the reservation delta silently
         await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
 
-        // Per-user gate: a modify mutates either the user's fund reservation (buy) or
-        // position reservation (sell). Acquire the matching gate around the delta
-        // computation + tx + cache write so a concurrent settle/cancel/place on the
-        // same resource doesn't race on ReservedBalance / ReservedQuantity.
+        // Per-user gate around delta + tx + cache write
         await using var gate = order.IsBuyOrder
             ? await _accounts.AcquireFundGateAsync(order.UserId, order.CurrencyType, ct).ConfigureAwait(false)
             : await _accounts.AcquirePositionGateAsync(order.UserId, order.StockId, ct).ConfigureAwait(false);
 
-        // Compute reservation deltas up front so we can apply them after the tx commits
-        // and validate "would the new order overdraft this user?" before mutating the DB.
-        // Sell side: delta in reservation == delta in Quantity (RemainingQuantity moves
-        // with Quantity since AmountFilled is unchanged here). Buy side: delta is
-        // (newPrice × newRemainingQty) − (oldPrice × oldRemainingQty) for limit/slippage;
-        // TrueMarketBuy budget is not modifiable so its delta is always 0.
+        // Compute deltas up front to reject overdrafts before any DB mutation
         int sellReservationDelta = 0;
         Position? sellPos = null;
         if (newQuantity.HasValue && order.IsSellOrder)
@@ -90,8 +75,7 @@ internal sealed class OrderModifier
             }
         }
 
-        // Snapshot cache state so we can roll the in-memory fund/position back if the
-        // tx fails after we've already mutated them.
+        // Snapshot for cache rollback on tx failure
         int? sellPosOldReserved = sellPos?.ReservedQuantity;
         decimal? buyFundOldTotal = buyFund?.TotalBalance;
         decimal? buyFundOldReserved = buyFund?.ReservedBalance;
@@ -110,13 +94,11 @@ internal sealed class OrderModifier
 
             await _db.UpdateOrder(dbOrder, ct).ConfigureAwait(false);
 
-            // Keep in-memory order consistent for book and UI
+            // Sync in-memory order for book + UI
             if (newPrice.HasValue) order.UpdatePrice(newPrice.Value);
             if (newQuantity.HasValue) order.UpdateQuantity(newQuantity.Value);
 
-            // Apply reservation deltas to cache and persist the fund/position inside the
-            // same tx so DB and cache stay in sync. Without the persist, the admin tables
-            // and a cold-load AccountsCache would never see the new reservation.
+            // Apply delta + persist in the same tx so DB and cache stay in sync
             if (sellPos is not null && sellReservationDelta != 0)
             {
                 if (sellReservationDelta > 0) sellPos.ReserveStock(sellReservationDelta);
@@ -145,7 +127,7 @@ internal sealed class OrderModifier
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
 
-            // Restore cache mutations — the tx rollback already reverted the DB.
+            // Restore cache — tx rollback handled DB
             if (sellPos is not null && sellPosOldReserved.HasValue
                 && sellPos.ReservedQuantity != sellPosOldReserved.Value)
             {

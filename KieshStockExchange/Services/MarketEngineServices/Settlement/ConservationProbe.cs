@@ -5,14 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-/// <summary>
-/// Money- and share-conservation probe. Sums (post − pre) on every Fund/Position the
-/// apply-pass mutated; the apply-pass is symmetric per fill so both sums must be zero
-/// (modulo currency rounding for funds, exact zero for share counts). A non-zero result
-/// means a mutation fired on one side but not the other — the kind of asymmetry that
-/// would silently mint cash or shares. Logged at Error level with the first trade as a
-/// clue; never throws, so a probe-only build can keep running.
-/// </summary>
+/// <summary> Money + share conservation invariant. Net per-batch delta must be 0. </summary>
 internal sealed class ConservationProbe
 {
     private readonly ILogger<ConservationProbe> _logger;
@@ -32,8 +25,7 @@ internal sealed class ConservationProbe
         var fundNetByCcy = new Dictionary<CurrencyType, decimal>();
         foreach (var kv in fundMap)
         {
-            // fundSnapshots is populated on first touch of every Fund the apply-pass
-            // mutates. A missing snapshot would itself be a bug worth surfacing.
+            // Missing snapshot = apply-pass mutated without recording pre-state
             if (!fundSnapshots.TryGetValue(kv.Key, out var pre))
             {
                 _logger.LogError(
@@ -60,8 +52,7 @@ internal sealed class ConservationProbe
         var posNetByStock = new Dictionary<int, int>();
         foreach (var kv in posMap)
         {
-            // Existing position: pre = snapshot.Quantity. New position (PositionId == 0,
-            // created inside this call via pendingNewPositions): pre = 0 by construction.
+            // New positions (PositionId == 0) have pre = 0 by construction
             int pre = 0;
             if (kv.Value.PositionId != 0
                 && posSnapshots.TryGetValue(kv.Key, out var s))

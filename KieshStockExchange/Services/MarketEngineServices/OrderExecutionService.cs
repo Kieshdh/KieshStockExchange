@@ -15,11 +15,7 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 public sealed class OrderExecutionService : IOrderExecutionService
 {
     private readonly bool DebugMode = false;
-
-    // Diagnostic filter for the high-volume "Cancelled stale maker order" warning
-    // below. With 20k+ bots, stale-maker cancellations fire constantly and bury
-    // everything else. Setting DebugUserId pins the log to a single user (admin)
-    // so only their order cancellations are visible. Set to null to show all.
+    // Pins high-volume cancel/match warnings to one user; null = show all (bot-flood)
     private readonly int? DebugUserId = 20001;
 
     #region Services and Constructor
@@ -52,12 +48,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>
-    /// Build the set of user ids whose orders changed in this settlement so the
-    /// active-user order cache can refresh in real time (a maker fill on user A's
-    /// resting order should clear that row from A's UI without waiting for the
-    /// minute-boundary portfolio poll).
-    /// </summary>
+    // User ids touched in this settlement, for real-time order-cache refresh
     private static HashSet<int> CollectAffectedUsers(Order taker, IReadOnlyDictionary<int, Order> ordersById)
     {
         var set = new HashSet<int>(ordersById.Count + 1) { taker.UserId };
@@ -1253,23 +1244,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
             book.RemoveById(makerId);
             ordersById[makerId] = maker;
 
-            // Section 5a: release the maker's Position.ReservedQuantity. Without this
-            // every rollback leaves the cancelled order's reservation parked on the
-            // seller's Position — AccountsCache's view of AvailableQuantity shrinks
-            // permanently while the bot's view (which derives committed from open
-            // orders only) keeps reporting full availability, so every subsequent
-            // sell from that user/stock fails Phase 1.5 with InsufficientShares.
-            // Buyer-side makers never reach this path (validate-pass is seller-only),
-            // so there's no symmetric fund-reservation release here. The Order's
-            // Cancelled status is persisted by the caller via UpdateAllAsync;
-            // Position writes back to DB the next time a fill touches it.
-            //
-            // Clamp the release to the live ReservedQuantity rather than try/catch
-            // ArgumentException — under 20k bots the first-chance exception window
-            // floods the debugger even when the catch is intentional. A peer path
-            // (CancelOrdersBatchAsync, CancelRemainderAsync) may have already
-            // released some or all of this maker's reservation, so the actual
-            // release amount is min(remaining, live reserved).
+            // 5a: release Position.ReservedQuantity so cache AvailableQuantity recovers.
+            // Clamp to live Reserved (peer paths may have released first; avoids first-chance flood).
             if (maker.IsSellOrder && maker.RemainingQuantity > 0)
             {
                 var pos = accounts.GetPosition(maker.UserId, maker.StockId);
@@ -1290,15 +1266,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     makerId, maker.UserId, maker.StockId, agg.Reason);
         }
 
-        // Innocent buy makers: revert ONLY the rejected portion of the matcher's
-        // AmountFilled increment, restore the book level credit, flip Status back to Open
-        // if matcher had set it to Filled. Do NOT call maker.Cancel() — the buyer was an
-        // innocent counterparty of a seller-side rejection. Fund.ReservedBalance is
-        // unchanged here: apply-pass only iterates accepted fills, so the rejected portion
-        // never consumed reservation. After this revert, RemainingQuantity is back to what
-        // the maker actually intended to hold, and the cached reservation matches
-        // RemainingBuyReservation again — eliminating the phantom that was driving the
-        // reconciler's $400M+ over-reservation report.
+        // Innocent buy makers: revert only the rejected portion. Do NOT Cancel — the buyer
+        // was an innocent counterparty of a seller rejection. Fund.ReservedBalance is
+        // unchanged because apply-pass skips rejected fills.
         foreach (var kv in innocentBuyMakers)
         {
             var entry = kv.Value;
@@ -1306,25 +1276,19 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
             var maker = entry.Maker;
 
-            // Forward-compat guard: market orders don't rest on the book, so any maker
-            // we revert here must be a limit order. Mirrors the assertion in the
-            // seller-cancel loop above.
+            // Market orders don't rest on the book; makers reverted here must be limit
             if (!maker.IsLimitOrder)
                 throw new InvalidOperationException(
                     $"Innocent buy-maker rollback assumes a limit order, got " +
                     $"{maker.OrderType} for #{maker.OrderId}.");
 
-            // Revert AmountFilled by the rejected portion only — accepted fills stay
-            // applied (their cache mutations already ran in apply-pass).
+            // Revert rejected portion only; accepted fills already ran in apply-pass
             maker.AmountFilled = Math.Max(0, maker.AmountFilled - entry.RejectedQty);
             if (maker.Status == Order.Statuses.Filled
                 && maker.AmountFilled < maker.Quantity)
                 maker.Status = Order.Statuses.Open;
 
-            // Restore book state. RollbackMakerFill with wasRemoved=true re-inserts and
-            // credits the level by maker.RemainingQuantity (updated above); with
-            // wasRemoved=false it just credits the level by the rejected qty. Both
-            // branches do the right thing for a partial revert.
+            // Restore book: RollbackMakerFill handles both removed and partial-fill cases
             book.RollbackMakerFill(maker, entry.RejectedQty, entry.AnyRemovedFromBook);
 
             ordersById[kv.Key] = maker;

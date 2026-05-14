@@ -8,10 +8,7 @@ using static KieshStockExchange.Services.MarketEngineServices.ReservationMath;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-/// <summary>
-/// Place-time settlement: balance/stock check, take reservation, persist a freshly-placed
-/// order, and roll the reservation back if the persist fails.
-/// </summary>
+/// <summary> Place-time balance check, reserve, persist, rollback-on-fail. </summary>
 internal sealed class OrderSettler
 {
     private readonly IDataBaseService _db;
@@ -32,22 +29,14 @@ internal sealed class OrderSettler
     {
         ct.ThrowIfCancellationRequested();
 
-        // Cache covers fund + position for this user across all currencies/stocks. Cold-load
-        // happens at most once per user; warm calls are O(1).
         await _accounts.EnsureLoadedAsync(incoming.UserId, ct).ConfigureAwait(false);
 
-        // Per-user reservation gate: serialise this user's Fund.ReservedBalance / Position.
-        // ReservedQuantity mutation against any other concurrent flow that touches the same
-        // (user, resource). Pre-1b this was masked by _writeGate; post-1b the batch path
-        // releases _writeGate between groups, so the race becomes real and the gate is the
-        // only protection. Released on scope exit via IAsyncDisposable.
+        // Per-user gate: serialise this user's Reserved* mutation against concurrent flows
         await using var gate = incoming.IsBuyOrder
             ? await _accounts.AcquireFundGateAsync(incoming.UserId, incoming.CurrencyType, ct).ConfigureAwait(false)
             : await _accounts.AcquirePositionGateAsync(incoming.UserId, incoming.StockId, ct).ConfigureAwait(false);
 
-        // Read-only balance check from cache — no DB hit on warm path. Reserve at place
-        // time so subsequent same-account orders see the reduced AvailableBalance /
-        // AvailableQuantity (multi-order over-promise rejected here, not at settlement).
+        // Reserve at place time so subsequent same-account orders see reduced Available
         Position? sellPos = null;
         Fund? buyFund = null;
         decimal buyReservation = 0m;
@@ -76,7 +65,7 @@ internal sealed class OrderSettler
             try { buyFund.ReserveFunds(buyReservation); }
             catch (ArgumentException)
             {
-                // Race against another reserver — emit the same enriched diagnostic.
+                // Race against another reserver
                 return OrderResultFactory.InsufficientFunds(
                     $"Order requires {CurrencyHelper.Format(buyReservation, incoming.CurrencyType)} " +
                     $"but only {CurrencyHelper.Format(buyFund.AvailableBalance, incoming.CurrencyType)} is available " +
@@ -91,9 +80,6 @@ internal sealed class OrderSettler
         else
         {
             sellPos = _accounts.GetPosition(incoming.UserId, incoming.StockId);
-            // AvailableQuantity = Quantity - ReservedQuantity. Reserved already accounts for
-            // this user's other open sells in the book, so a multi-order over-promise is
-            // rejected at place time instead of at settlement.
             if (sellPos == null)
             {
                 return OrderResultFactory.InsufficientStocks(
@@ -110,7 +96,7 @@ internal sealed class OrderSettler
             try { sellPos.ReserveStock(incoming.Quantity); }
             catch (ArgumentException)
             {
-                // Lost a race against another reserver — same enriched diagnostic.
+                // Race against another reserver
                 return OrderResultFactory.InsufficientStocks(
                     $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available " +
                     $"(Quantity={sellPos.Quantity}, Reserved={sellPos.ReservedQuantity}); race on ReserveStock.");
@@ -122,11 +108,7 @@ internal sealed class OrderSettler
         {
             await _db.CreateOrder(incoming, ct).ConfigureAwait(false);
 
-            // Persist the reservation we just took on the cached fund/position so
-            // IUserPortfolioService.RefreshAsync (which reads from DB) sees the new
-            // ReservedBalance / ReservedQuantity. Without this, the AccountPage Funds
-            // card and TopNavBar funds chip stay stuck on the pre-place balance until
-            // the order eventually fills (or never, if it rests on the book).
+            // Persist the reservation so DB-backed views (admin, Funds card) match cache
             if (buyFund is not null && buyReservation > 0m)
                 await _db.UpdateAllAsync(new[] { buyFund }, ct).ConfigureAwait(false);
             if (sellPos is not null)
@@ -139,11 +121,8 @@ internal sealed class OrderSettler
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
 
-            // Persist failed — release the reservation we just took so the cache stays
-            // consistent. Clamp rather than try/catch: a concurrent flow could have
-            // touched ReservedQuantity / ReservedBalance between our reserve and
-            // this rollback, and the first-chance exception under 20k bots floods
-            // the debugger even when handled.
+            // Persist failed: release the reservation. Clamp instead of try/catch to dodge
+            // first-chance exception flood under 20k bots.
             if (sellPos is not null)
             {
                 var toRelease = Math.Min(incoming.Quantity, sellPos.ReservedQuantity);

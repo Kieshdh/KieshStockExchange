@@ -8,11 +8,7 @@ using static KieshStockExchange.Services.MarketEngineServices.ReservationMath;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-/// <summary>
-/// Release the unfilled reservation on an order and persist the resulting Position/Fund
-/// so the DB-backed views (admin tables, IUserPortfolioService) reflect the cancellation
-/// without waiting for the next full refresh.
-/// </summary>
+/// <summary> Cancel an order, release reservation, persist Position/Fund. </summary>
 internal sealed class OrderCanceller
 {
     private readonly IDataBaseService _db;
@@ -33,11 +29,10 @@ internal sealed class OrderCanceller
     {
         ct.ThrowIfCancellationRequested();
 
-        // EnsureLoaded outside the gate so we never nest _loadGate inside a gate scope.
+        // Load outside the gate to avoid nesting _loadGate inside a gate scope
         await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
 
-        // Per-user gate: hold across release + persist so a concurrent SettleOrderAsync
-        // on the same (user, resource) can't observe a half-released reservation.
+        // Per-user gate: hold across release + persist
         await using var gate = order.IsSellOrder
             ? await _accounts.AcquirePositionGateAsync(order.UserId, order.StockId, ct).ConfigureAwait(false)
             : await _accounts.AcquireFundGateAsync(order.UserId, order.CurrencyType, ct).ConfigureAwait(false);
@@ -47,20 +42,16 @@ internal sealed class OrderCanceller
 
         if (!dbOrder.IsOpen)
         {
-            if (order.IsOpen) order.Cancel(); // keep in-memory consistent if needed
+            if (order.IsOpen) order.Cancel(); // sync in-memory
             return;
         }
 
         dbOrder.Cancel();
         await _db.UpdateOrder(dbOrder, ct).ConfigureAwait(false);
 
-        if (order.IsOpen) order.Cancel(); // keep in-memory order consistent
+        if (order.IsOpen) order.Cancel();
 
-        // Release the unfilled reservation AND persist the resulting Position/Fund to
-        // DB so the AvailableQuantity/AvailableBalance visible to the UI (which reads
-        // from IUserPortfolioService → DB) actually drops after cancel. Pre-fix this
-        // only mutated the cache; DB and IUserPortfolioService stayed stale until the
-        // next full refresh.
+        // Release + persist so DB-backed Available* drops without waiting for full refresh
         await ReleaseSellReservationAndPersist(order, order.RemainingQuantity, ct).ConfigureAwait(false);
         await ReleaseBuyReservationAndPersist(order, ct).ConfigureAwait(false);
     }
@@ -70,10 +61,8 @@ internal sealed class OrderCanceller
         if (qty <= 0 || !order.IsSellOrder) return;
         var pos = _accounts.GetPosition(order.UserId, order.StockId);
         if (pos is null) return;
-        // Clamp to live ReservedQuantity instead of try/catch ArgumentException — a peer
-        // path (RollbackRejectedFills 5a, CancelOrdersBatchAsync) may already have
-        // released some or all of this order's reservation, and under 20k bots the
-        // first-chance exception window floods the debugger even when handled.
+        // Clamp instead of try/catch: peer paths may have already released, and first-chance
+        // exceptions under 20k bots flood the debugger
         var toRelease = Math.Min(qty, pos.ReservedQuantity);
         if (toRelease > 0)
         {
