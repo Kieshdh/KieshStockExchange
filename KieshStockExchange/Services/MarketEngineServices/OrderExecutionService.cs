@@ -316,13 +316,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         if (validOrders.Count == 0) return results;
 
-        // Per-tx mutation tracking. fund/pos/budget snapshots flow into SettleTradesNoTxAsync
-        // so the cache can be rolled back if commit fails. Allocated up front because Phase 1.5
-        // also writes into posSnapshots and fundSnapshots when it reserves stock and funds.
-        var fundSnapshots = new Dictionary<(int, CurrencyType), (decimal Total, decimal Reserved)>();
-        var posSnapshots = new Dictionary<(int, int), (int Quantity, int Reserved)>();
-        var budgetSnapshots = new Dictionary<int, decimal?>();
-        var pendingNewPositions = new Dictionary<(int, int), Position>();
+        // Per-tx mutation tracking. The scope owns fund/pos/budget snapshots that flow into
+        // SettleTradesNoTxAsync so the cache can be rolled back if commit fails. Allocated up
+        // front because Phase 1.5 also writes into PosSnapshots/FundSnapshots when it reserves
+        // stock and funds.
+        var scope = new TradeBatchScope();
 
         // Phase 1.5: pre-flight position check for sell orders. Reads the in-memory account
         // cache rather than the DB — IAccountsCache is the same instance settlement mutates,
@@ -382,8 +380,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
                 // Snapshot before mutating so RestoreCacheSnapshots can undo on rollback.
                 var key = (order.UserId, order.StockId);
-                if (pos.PositionId != 0 && !posSnapshots.ContainsKey(key))
-                    posSnapshots[key] = (pos.Quantity, pos.ReservedQuantity);
+                if (pos.PositionId != 0 && !scope.PosSnapshots.ContainsKey(key))
+                    scope.PosSnapshots[key] = (pos.Quantity, pos.ReservedQuantity);
 
                 try { pos.ReserveStock(order.Quantity); }
                 catch (ArgumentException)
@@ -412,8 +410,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     // No survivors — undo the reservations we just took for the rejects'
                     // peers (already-accepted sells from this batch). Easiest way is the
                     // snapshot restore path the rest of the failure flow uses.
-                    _settlement.RestoreCacheSnapshots(
-                        new Dictionary<int, Order>(), fundSnapshots, posSnapshots, budgetSnapshots);
+                    _settlement.RestoreCacheSnapshots(new Dictionary<int, Order>(), scope);
                     return results;
                 }
             }
@@ -446,7 +443,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
             {
                 var (idx, order) = buyOrders[i];
                 var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
-                var reservation = SettlementEngine.InitialBuyReservation(order);
+                var reservation = ReservationMath.InitialBuyReservation(order);
                 if (fund is null)
                 {
                     results[idx] = OrderResultFactory.InsufficientFunds(
@@ -476,8 +473,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }
 
                 var fundKey = (order.UserId, order.CurrencyType);
-                if (!fundSnapshots.ContainsKey(fundKey))
-                    fundSnapshots[fundKey] = (fund.TotalBalance, fund.ReservedBalance);
+                if (!scope.FundSnapshots.ContainsKey(fundKey))
+                    scope.FundSnapshots[fundKey] = (fund.TotalBalance, fund.ReservedBalance);
 
                 var resBefore = fund.ReservedBalance;
                 var totBefore = fund.TotalBalance;
@@ -506,8 +503,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 validOrders.RemoveRange(write, validOrders.Count - write);
                 if (validOrders.Count == 0)
                 {
-                    _settlement.RestoreCacheSnapshots(
-                        new Dictionary<int, Order>(), fundSnapshots, posSnapshots, budgetSnapshots);
+                    _settlement.RestoreCacheSnapshots(new Dictionary<int, Order>(), scope);
                     return results;
                 }
             }
@@ -561,8 +557,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         catch (Exception ex)
         {
             _logger.LogError(ex, "PlaceAndMatchBatchAsync: Phase 2 InsertAllAsync failed");
-            _settlement.RestoreCacheSnapshots(
-                new Dictionary<int, Order>(), fundSnapshots, posSnapshots, budgetSnapshots);
+            _settlement.RestoreCacheSnapshots(new Dictionary<int, Order>(), scope);
             for (int i = 0; i < validOrders.Count; i++)
                 results[validOrders[i].index] = OrderResultFactory.OperationFailed(
                     $"Bulk insert failed: {ex.Message}");
@@ -618,13 +613,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
         OrderResult[] results,
         CancellationToken ct)
     {
-        // Fresh snapshot dicts for THIS group only. Restoring them on failure rolls back
-        // the settle-pass mutations; Phase 1.5/1.6 reservations are recovered separately
-        // by RecoverFailedGroupAsync because they were taken outside any tx.
-        var groupFundSnapshots = new Dictionary<(int, CurrencyType), (decimal Total, decimal Reserved)>();
-        var groupPosSnapshots = new Dictionary<(int, int), (int Quantity, int Reserved)>();
-        var groupBudgetSnapshots = new Dictionary<int, decimal?>();
-        var groupPendingNewPositions = new Dictionary<(int, int), Position>();
+        // Fresh scope for THIS group only. Restoring it on failure rolls back the settle-pass
+        // mutations; Phase 1.5/1.6 reservations are recovered separately by
+        // RecoverFailedGroupAsync because they were taken outside any tx.
+        var groupScope = new TradeBatchScope();
 
         var outcome = new GroupOutcome { StockId = stockId, Currency = currency };
         var groupFills = new List<Transaction>();
@@ -657,9 +649,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 if (groupFills.Count > 0)
                 {
                     var (settleErr, rejected) = await _settlement.SettleTradesNoTxAsync(
-                        groupFills, groupOrdersById,
-                        groupFundSnapshots, groupPosSnapshots, groupBudgetSnapshots,
-                        groupPendingNewPositions, ct).ConfigureAwait(false);
+                        groupFills, groupOrdersById, groupScope, ct).ConfigureAwait(false);
                     if (settleErr != null)
                         throw new InvalidOperationException(
                             settleErr.ErrorMessage ?? "Settlement failed.");
@@ -718,8 +708,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     if (rec.Upserted) book.RemoveById(rec.Order.OrderId);
                     RollbackMatch(rec.Order, rec.Match, book);
                 }
-                _settlement.RestoreCacheSnapshots(
-                    groupOrdersById, groupFundSnapshots, groupPosSnapshots, groupBudgetSnapshots);
+                _settlement.RestoreCacheSnapshots(groupOrdersById, groupScope);
                 throw;
             }
         }).ConfigureAwait(false);
@@ -729,7 +718,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // After commit: register newly-created positions in the cache and fire the order
         // cache notify for this group's affected users. Per-group notifies replace the
         // single batch-wide notify so the UI gets smaller, more frequent pushes.
-        foreach (var pos in groupPendingNewPositions.Values)
+        foreach (var pos in groupScope.PendingNewPositions.Values)
             _accounts.TrackNewPosition(pos);
 
         var groupAffected = new HashSet<int>();
@@ -789,7 +778,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     else if (order.IsBuyOrder)
                     {
                         var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
-                        var reservation = SettlementEngine.InitialBuyReservation(order);
+                        var reservation = ReservationMath.InitialBuyReservation(order);
                         if (fund is not null && reservation > 0m)
                         {
                             var toRelease = Math.Min(reservation, fund.ReservedBalance);
@@ -1027,7 +1016,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }
                 else if (o.IsBuyOrder)
                 {
-                    var unreserve = SettlementEngine.RemainingBuyReservation(o);
+                    var unreserve = ReservationMath.RemainingBuyReservation(o);
                     if (unreserve <= 0m) continue;
                     var fund = _accounts.GetFund(o.UserId, o.CurrencyType);
                     if (fund is null) continue;

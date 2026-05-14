@@ -226,7 +226,7 @@ public sealed class AccountsCache : IAccountsCache
             for (int i = 0; i < list.Count; i++)
             {
                 var o = list[i];
-                var orderReservation = SettlementEngine.RemainingBuyReservation(o);
+                var orderReservation = ReservationMath.RemainingBuyReservation(o);
                 if (orderReservation <= 0m) continue;
 
                 if (reserved + orderReservation <= fund.TotalBalance)
@@ -301,7 +301,7 @@ public sealed class AccountsCache : IAccountsCache
             }
             else if (o.IsBuyOrder)
             {
-                var reservation = SettlementEngine.RemainingBuyReservation(o);
+                var reservation = ReservationMath.RemainingBuyReservation(o);
                 if (reservation <= 0m) continue;
                 var key = (o.UserId, o.CurrencyType);
                 expectedBalByFund.TryGetValue(key, out var bSum);
