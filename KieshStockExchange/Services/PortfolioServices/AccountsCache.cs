@@ -348,6 +348,13 @@ public sealed class AccountsCache : IAccountsCache
                     if (!fundOffenders.TryGetValue(key, out var list))
                         fundOffenders[key] = list = new List<string>();
                     list.Add($"#{o.OrderId}({o.Status},amt={o.CurrentBuyReservation})");
+                    // Persist offender to CSV. Two sequential reconciles tell us whether the
+                    // same OrderId reappears (persistent orphan) or vanishes (transient race
+                    // between Status flip and CBR release).
+                    _ledger.LogOrder(o.UserId, o.OrderId, $"Reconcile:Offender:Buy:{o.Status}",
+                        o.CurrentBuyReservation,
+                        o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
                 }
             }
             else if (o.IsSellOrder && o.CurrentSellReservedQty > 0)
@@ -366,6 +373,10 @@ public sealed class AccountsCache : IAccountsCache
                     if (!posOffenders.TryGetValue(key, out var list))
                         posOffenders[key] = list = new List<string>();
                     list.Add($"#{o.OrderId}({o.Status},qty={o.CurrentSellReservedQty})");
+                    _ledger.LogOrder(o.UserId, o.OrderId, $"Reconcile:Offender:Sell:{o.Status}",
+                        0m,
+                        o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
                 }
             }
         }
