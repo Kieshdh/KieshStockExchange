@@ -204,8 +204,10 @@ public static class RollbackRejectedFillsSelfTest
         var book = new OrderBook(stockId: 100, currency: CurrencyType.USD);
 
         // Sell maker resting on book: LimitSell 10 @ $5. Pre-seed Position so the 5a
-        // release has something to drain.
+        // release has something to drain, plus the per-order field so the post-fix
+        // Section 5a (which reads from CurrentSellReservedQty) has a value to release.
         var sellMaker = SellLimit(orderId: 3001, userId: 1, stockId: 100, qty: 10, price: 5m);
+        sellMaker.TakeSellReservation(10);
         book.UpsertOrder(sellMaker);
 
         var accounts = new StubAccountsCache();

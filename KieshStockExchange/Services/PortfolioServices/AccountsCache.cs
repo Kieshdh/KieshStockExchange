@@ -35,11 +35,13 @@ public sealed class AccountsCache : IAccountsCache
 
     #region Services and Constructor
     private readonly IDataBaseService _db;
+    private readonly IOrderRegistry _registry;
     private readonly ILogger<AccountsCache> _logger;
 
-    public AccountsCache(IDataBaseService db, ILogger<AccountsCache> logger)
+    public AccountsCache(IDataBaseService db, IOrderRegistry registry, ILogger<AccountsCache> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -70,7 +72,13 @@ public sealed class AccountsCache : IAccountsCache
             // matching the order book's price-time priority intuition). Catches the stale-
             // order class produced by xlsx reseeds that drop positions/funds without
             // dropping the corresponding orders.
-            var openOrders = await _db.GetOpenOrdersForUsersAsync(missing, ct).ConfigureAwait(false);
+            var openOrdersRaw = await _db.GetOpenOrdersForUsersAsync(missing, ct).ConfigureAwait(false);
+            // Route every loaded order through the registry so the canonical instance is
+            // shared with OrderBookCache and the settle-path lookups. If the book has
+            // already cold-loaded the same OrderId we use its instance instead.
+            var openOrders = new List<Order>(openOrdersRaw.Count);
+            for (int i = 0; i < openOrdersRaw.Count; i++)
+                openOrders.Add(_registry.GetOrAdd(openOrdersRaw[i]));
             var (sellsByPos, buysByFund) = GroupOpenOrdersBySide(openOrders);
 
             var ordersToCancel = new List<Order>();
@@ -169,6 +177,7 @@ public sealed class AccountsCache : IAccountsCache
                     var o = list[i];
                     if (o.IsOpen) o.Cancel();
                     ordersToCancel.Add(o);
+                    _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled orphan order #{OrderId} on cache load (seller {UserId}, stock {StockId}): no Position row.",
                         o.OrderId, o.UserId, o.StockId);
@@ -184,11 +193,16 @@ public sealed class AccountsCache : IAccountsCache
                 if (reserved + remaining <= pos.Quantity)
                 {
                     reserved += remaining;
+                    // Seed per-order field so Σ CurrentSellReservedQty == pos.ReservedQuantity
+                    // holds from t=0. TakeSellReservation is additive but each order is seen
+                    // exactly once here on its load.
+                    o.TakeSellReservation(remaining);
                 }
                 else
                 {
                     if (o.IsOpen) o.Cancel();
                     ordersToCancel.Add(o);
+                    _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled stale order #{OrderId} on cache load (seller {UserId}, stock {StockId}): " +
                         "would over-reserve position (Quantity={Qty}, alreadyReserved={Res}, orderRemaining={Rem}).",
@@ -215,6 +229,7 @@ public sealed class AccountsCache : IAccountsCache
                     var o = list[i];
                     if (o.IsOpen) o.Cancel();
                     ordersToCancel.Add(o);
+                    _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled orphan order #{OrderId} on cache load (buyer {UserId}, currency {Currency}): no Fund row.",
                         o.OrderId, o.UserId, o.CurrencyType);
@@ -232,11 +247,15 @@ public sealed class AccountsCache : IAccountsCache
                 if (reserved + orderReservation <= fund.TotalBalance)
                 {
                     reserved += orderReservation;
+                    // Seed per-order field so Σ CurrentBuyReservation == fund.ReservedBalance
+                    // holds from t=0.
+                    o.TakeBuyReservation(orderReservation);
                 }
                 else
                 {
                     if (o.IsOpen) o.Cancel();
                     ordersToCancel.Add(o);
+                    _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled stale order #{OrderId} on cache load (buyer {UserId}, currency {Currency}): " +
                         "would over-reserve funds (TotalBalance={Bal}, alreadyReserved={Res}, orderRemaining={Rem}).",
@@ -264,82 +283,89 @@ public sealed class AccountsCache : IAccountsCache
     #endregion
 
     #region Reservation Reconciler
-    public async Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
+    public Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
         bool clamp = false, CancellationToken ct = default)
     {
-        // Collect every userId that has a non-zero reservation in either dictionary.
-        // Skip the whole DB query if there's nothing to reconcile.
-        var userIds = new HashSet<int>();
-        foreach (var kv in _positions)
-            if (kv.Value.ReservedQuantity > 0) userIds.Add(kv.Key.UserId);
-        foreach (var kv in _funds)
-            if (kv.Value.ReservedBalance > 0m) userIds.Add(kv.Key.UserId);
-        if (userIds.Count == 0) return Array.Empty<ReservationMismatch>();
-
-        var userList = new List<int>(userIds);
-        var openOrders = await _db.GetOpenOrdersForUsersAsync(userList, ct).ConfigureAwait(false);
-
-        // Aggregate the open orders by the keys we reserve against.
-        var expectedQtyByPos = new Dictionary<(int UserId, int StockId), int>();
-        var expectedBalByFund = new Dictionary<(int UserId, CurrencyType Ccy), decimal>();
-        var orderCountByPos = new Dictionary<(int, int), int>();
-        var orderCountByFund = new Dictionary<(int, CurrencyType), int>();
-
-        for (int i = 0; i < openOrders.Count; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var o = openOrders[i];
-            if (!o.IsLimitOrder) continue;
-
-            if (o.IsSellOrder)
-            {
-                var key = (o.UserId, o.StockId);
-                expectedQtyByPos.TryGetValue(key, out var qSum);
-                expectedQtyByPos[key] = qSum + o.RemainingQuantity;
-                orderCountByPos.TryGetValue(key, out var c);
-                orderCountByPos[key] = c + 1;
-            }
-            else if (o.IsBuyOrder)
-            {
-                var reservation = ReservationMath.RemainingBuyReservation(o);
-                if (reservation <= 0m) continue;
-                var key = (o.UserId, o.CurrencyType);
-                expectedBalByFund.TryGetValue(key, out var bSum);
-                expectedBalByFund[key] = bSum + reservation;
-                orderCountByFund.TryGetValue(key, out var c);
-                orderCountByFund[key] = c + 1;
-            }
-        }
-
+        // In-memory now: registry holds canonical Order instances with CurrentReservation
+        // fields the engine mutates in lock-step. No DB query needed.
         var mismatches = new List<ReservationMismatch>();
 
         foreach (var kv in _positions)
         {
+            ct.ThrowIfCancellationRequested();
             var actual = kv.Value.ReservedQuantity;
             if (actual == 0) continue;
-            expectedQtyByPos.TryGetValue(kv.Key, out var expected);
+
+            int expected = 0;
+            int count = 0;
+            foreach (var o in _registry.GetOpenSellsForUser(kv.Key.UserId, kv.Key.StockId))
+            {
+                if (!o.IsLimitOrder) continue;
+                expected += o.CurrentSellReservedQty;
+                count++;
+            }
+
             if (expected == actual) continue;
-            orderCountByPos.TryGetValue(kv.Key, out var count);
             mismatches.Add(new ReservationMismatch(
                 kv.Key.UserId, kv.Key.StockId, null,
                 expected, actual, actual - expected, count));
             if (clamp) kv.Value.ReservedQuantity = expected;
+
+            // Name offenders so the leak is traceable to specific OrderIds. A terminally
+            // closed order with CurrentSellReservedQty > 0 is exactly the leak class.
+            var offenders = new List<string>();
+            foreach (var o in _registry.AllOrders())
+            {
+                if (o.UserId != kv.Key.UserId || o.StockId != kv.Key.StockId) continue;
+                if (!o.IsSellOrder) continue;
+                if (o.CurrentSellReservedQty <= 0) continue;
+                if (o.IsClosed)
+                    offenders.Add($"#{o.OrderId}({o.Status},qty={o.CurrentSellReservedQty})");
+            }
+            if (offenders.Count > 0)
+                _logger.LogWarning(
+                    "Phantom position reservation user={UserId} stock={StockId} Δ={Delta}; offenders: [{Offenders}]",
+                    kv.Key.UserId, kv.Key.StockId, actual - expected, string.Join(",", offenders));
         }
 
         foreach (var kv in _funds)
         {
+            ct.ThrowIfCancellationRequested();
             var actual = kv.Value.ReservedBalance;
             if (actual == 0m) continue;
-            expectedBalByFund.TryGetValue(kv.Key, out var expected);
+
+            decimal expected = 0m;
+            int count = 0;
+            foreach (var o in _registry.GetOpenBuysForUser(kv.Key.UserId, kv.Key.Ccy))
+            {
+                if (!o.IsLimitOrder && !o.IsBuyOrder) continue;
+                // Include limits + TrueMarketBuy + SlippageBuy (any buy with a live reservation).
+                expected += o.CurrentBuyReservation;
+                count++;
+            }
+
             if (expected == actual) continue;
-            orderCountByFund.TryGetValue(kv.Key, out var count);
             mismatches.Add(new ReservationMismatch(
                 kv.Key.UserId, null, kv.Key.Ccy,
                 expected, actual, actual - expected, count));
             if (clamp) kv.Value.ReservedBalance = expected;
+
+            var offenders = new List<string>();
+            foreach (var o in _registry.AllOrders())
+            {
+                if (o.UserId != kv.Key.UserId || o.CurrencyType != kv.Key.Ccy) continue;
+                if (!o.IsBuyOrder) continue;
+                if (o.CurrentBuyReservation <= 0m) continue;
+                if (o.IsClosed)
+                    offenders.Add($"#{o.OrderId}({o.Status},amt={o.CurrentBuyReservation})");
+            }
+            if (offenders.Count > 0)
+                _logger.LogWarning(
+                    "Phantom fund reservation user={UserId} ccy={Ccy} Δ={Delta}; offenders: [{Offenders}]",
+                    kv.Key.UserId, kv.Key.Ccy, actual - expected, string.Join(",", offenders));
         }
 
-        return mismatches;
+        return Task.FromResult<IReadOnlyList<ReservationMismatch>>(mismatches);
     }
     #endregion
 

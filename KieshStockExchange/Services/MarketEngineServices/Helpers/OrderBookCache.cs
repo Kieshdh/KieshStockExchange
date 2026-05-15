@@ -41,8 +41,13 @@ public sealed class OrderBookCache : IOrderBookCache
 
     #region Services and Constructor
     private readonly IDataBaseService _db;
+    private readonly IOrderRegistry _registry;
 
-    public OrderBookCache(IDataBaseService db) => _db = db ?? throw new ArgumentNullException(nameof(db));
+    public OrderBookCache(IDataBaseService db, IOrderRegistry registry)
+    {
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+    }
     #endregion
 
     #region Private Helpers
@@ -74,6 +79,13 @@ public sealed class OrderBookCache : IOrderBookCache
             // this is a fresh book.
             var book = GetOrCreate(stockId, currency);
             var openLimits = await _db.GetOpenLimitOrders(stockId, currency, ct).ConfigureAwait(false);
+
+            // Route every loaded order through the registry so the matcher and the
+            // reservation reconciler see the same canonical instances. If AccountsCache
+            // got there first for this OrderId, GetOrAdd returns its (already-seeded) ref.
+            for (int i = 0; i < openLimits.Count; i++)
+                openLimits[i] = _registry.GetOrAdd(openLimits[i]);
+
             book.BulkLoad(openLimits);
 
             _loaded[key] = true; // Mark as loaded

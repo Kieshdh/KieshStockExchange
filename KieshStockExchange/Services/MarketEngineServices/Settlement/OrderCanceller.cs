@@ -4,7 +4,6 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
-using static KieshStockExchange.Services.MarketEngineServices.ReservationMath;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
@@ -14,20 +13,27 @@ internal sealed class OrderCanceller
     private readonly IDataBaseService _db;
     private readonly IAccountsCache _accounts;
     private readonly IReservationLedger _ledger;
+    private readonly IOrderRegistry _registry;
     private readonly ILogger<OrderCanceller> _logger;
 
     public OrderCanceller(IDataBaseService db, IAccountsCache accounts,
-        IReservationLedger ledger, ILogger<OrderCanceller> logger)
+        IReservationLedger ledger, IOrderRegistry registry, ILogger<OrderCanceller> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async Task CancelAsync(Order order, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+
+        // Resolve to the canonical instance so we mutate the same Order the matcher,
+        // book, and reconciler see. Caller may have passed a freshly DB-loaded copy.
+        if (order.OrderId > 0 && _registry.TryGet(order.OrderId, out var canon))
+            order = canon;
 
         // Load outside the gate to avoid nesting _loadGate inside a gate scope
         await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
@@ -43,6 +49,9 @@ internal sealed class OrderCanceller
         if (!dbOrder.IsOpen)
         {
             if (order.IsOpen) order.Cancel(); // sync in-memory
+            // Defensive: if the order had any lingering CurrentReservation (shouldn't
+            // under the invariant), drop it so the registry observer doesn't flag it.
+            _registry.Remove(order.OrderId);
             return;
         }
 
@@ -52,22 +61,31 @@ internal sealed class OrderCanceller
         if (order.IsOpen) order.Cancel();
 
         // Release + persist so DB-backed Available* drops without waiting for full refresh
-        await ReleaseSellReservationAndPersist(order, order.RemainingQuantity, ct).ConfigureAwait(false);
+        await ReleaseSellReservationAndPersist(order, ct).ConfigureAwait(false);
         await ReleaseBuyReservationAndPersist(order, ct).ConfigureAwait(false);
+
+        // Terminal state + zero reservation: drop from registry. Reconciler doesn't
+        // need to keep seeing this order.
+        _registry.Remove(order.OrderId);
     }
 
-    private async Task ReleaseSellReservationAndPersist(Order order, int qty, CancellationToken ct)
+    private async Task ReleaseSellReservationAndPersist(Order order, CancellationToken ct)
     {
-        if (qty <= 0 || !order.IsSellOrder) return;
+        if (!order.IsSellOrder) return;
+        // CurrentSellReservedQty is the source of truth — kept in lock-step with
+        // pos.ReservedQuantity at every reservation site.
+        var qty = order.CurrentSellReservedQty;
+        if (qty <= 0) return;
         var pos = _accounts.GetPosition(order.UserId, order.StockId);
         if (pos is null) return;
-        // Clamp instead of try/catch: peer paths may have already released, and first-chance
-        // exceptions under 20k bots flood the debugger
+        // Defensive clamp against a peer path that already released: under the invariant
+        // this should never fire, but it keeps the engine from throwing on drift.
         var toRelease = Math.Min(qty, pos.ReservedQuantity);
         if (toRelease > 0)
         {
             pos.UnreserveStock(toRelease);
             pos.UpdatedAt = TimeHelper.NowUtc();
+            order.ReleaseSellReservation();
             await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
         }
 
@@ -80,7 +98,9 @@ internal sealed class OrderCanceller
     private async Task ReleaseBuyReservationAndPersist(Order order, CancellationToken ct)
     {
         if (!order.IsBuyOrder) return;
-        var amount = RemainingBuyReservation(order);
+        // CurrentBuyReservation is the source of truth — kept in lock-step with
+        // fund.ReservedBalance at every reservation site.
+        var amount = order.CurrentBuyReservation;
         if (amount <= 0m) return;
         var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
         if (fund is null) return;
@@ -91,6 +111,7 @@ internal sealed class OrderCanceller
             var totB = fund.TotalBalance;
             fund.UnreserveFunds(toRelease);
             fund.UpdatedAt = TimeHelper.NowUtc();
+            order.ReleaseBuyReservation();
             _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
                 "CancelRemainder:ReleaseBuy", toRelease, resB, fund.ReservedBalance,
                 totB, fund.TotalBalance);

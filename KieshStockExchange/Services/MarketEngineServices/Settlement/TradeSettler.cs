@@ -104,6 +104,18 @@ internal sealed class TradeSettler
         var posSnapshots = scope.PosSnapshots;
         var budgetSnapshots = scope.BudgetSnapshots;
         var pendingNewPositions = scope.PendingNewPositions;
+        var orderResSnapshots = scope.OrderReservationSnapshots;
+
+        // Snapshot per-order CurrentReservation for every order this batch will touch,
+        // so a rollback restores the field along with Fund/Position. We snapshot once per
+        // OrderId on first sight — subsequent fills on the same order keep the original
+        // pre-batch value.
+        void SnapshotOrderIfNew(Order? o)
+        {
+            if (o is null) return;
+            if (!orderResSnapshots.ContainsKey(o.OrderId))
+                orderResSnapshots[o.OrderId] = (o.CurrentBuyReservation, o.CurrentSellReservedQty);
+        }
 
         var userSet = new HashSet<int>();
         for (int i = 0; i < trades.Count; i++)
@@ -152,7 +164,8 @@ internal sealed class TradeSettler
             }
 
             decimal savings = 0m;
-            if (ordersById.TryGetValue(t.BuyOrderId, out var buyOrder))
+            ordersById.TryGetValue(t.BuyOrderId, out var buyOrder);
+            if (buyOrder is not null)
             {
                 var perUnitReserved = ReservationPerUnit(buyOrder);
                 if (perUnitReserved > 0m)
@@ -175,6 +188,16 @@ internal sealed class TradeSettler
                     $"Reservation drift on buyer {t.BuyerId}: {ex.Message}"),
                     Array.Empty<RejectedFill>());
             }
+            // Lock-step: the buy order's CurrentBuyReservation tracks fund.ReservedBalance.
+            // Clamp to handle a TrueMarketBuy whose per-fill notional may briefly exceed the
+            // current reservation (the leftover release below covers that) — but in normal
+            // limit/slippage paths the consume should equal the notional exactly.
+            if (buyOrder is not null)
+            {
+                SnapshotOrderIfNew(buyOrder);
+                var consume = Math.Min(notional, buyOrder.CurrentBuyReservation);
+                if (consume > 0m) buyOrder.ConsumeBuyReservation(consume);
+            }
             _ledger.LogFund(t.BuyerId, t.CurrencyType, t.BuyOrderId,
                 "ApplyPass:ConsumeReserved", notional, apResBefore, buyerFund.ReservedBalance,
                 apTotBefore, buyerFund.TotalBalance);
@@ -188,6 +211,11 @@ internal sealed class TradeSettler
                     return (OrderResultFactory.OperationFailed(
                         $"Savings-unreserve drift on buyer {t.BuyerId}: {ex.Message}"),
                         Array.Empty<RejectedFill>());
+                }
+                if (buyOrder is not null)
+                {
+                    var consumeSavings = Math.Min(savings, buyOrder.CurrentBuyReservation);
+                    if (consumeSavings > 0m) buyOrder.ConsumeBuyReservation(consumeSavings);
                 }
                 _ledger.LogFund(t.BuyerId, t.CurrencyType, t.BuyOrderId,
                     "ApplyPass:Savings:Unreserve", savings, resB2, buyerFund.ReservedBalance,
@@ -257,6 +285,8 @@ internal sealed class TradeSettler
                     posSnapshots[sellerPosKey] = (sellerPos.Quantity, sellerPos.ReservedQuantity);
             }
 
+            ordersById.TryGetValue(t.SellOrderId, out var sellOrder);
+
             // Top up reservation from AvailableQuantity for taker sells that skipped place-time reserve
             if (sellerPos.ReservedQuantity < t.Quantity)
             {
@@ -267,8 +297,19 @@ internal sealed class TradeSettler
                         $"has avail {sellerPos.AvailableQuantity}, needs {needed}."),
                         Array.Empty<RejectedFill>());
                 sellerPos.ReserveStock(needed);
+                if (sellOrder is not null)
+                {
+                    SnapshotOrderIfNew(sellOrder);
+                    sellOrder.TakeSellReservation(needed);
+                }
             }
             sellerPos.ConsumeReservedStock(t.Quantity);
+            if (sellOrder is not null)
+            {
+                SnapshotOrderIfNew(sellOrder);
+                var consumeQty = Math.Min(t.Quantity, sellOrder.CurrentSellReservedQty);
+                if (consumeQty > 0) sellOrder.ConsumeSellReservation(consumeQty);
+            }
         }
 
         // Materialise mutated entities for the DB write step
@@ -320,6 +361,9 @@ internal sealed class TradeSettler
                                 "ApplyPass:TrueMarketBuy:Leftover:Unreserve", toRelease,
                                 resB, leftoverFund.ReservedBalance, totB, leftoverFund.TotalBalance);
                         }
+                        // Drop per-order reservation in lock-step with the cache aggregate.
+                        SnapshotOrderIfNew(o);
+                        o.ReleaseBuyReservation();
                         o.BuyBudget = 0m;
                     }
                 }
@@ -369,6 +413,13 @@ internal sealed class TradeSettler
                 p.Quantity = prev.Quantity;
                 p.ReservedQuantity = prev.Reserved;
             }
+        }
+
+        // Restore per-order reservation fields in lock-step with Fund/Position restoration.
+        foreach (var (orderId, prev) in scope.OrderReservationSnapshots)
+        {
+            if (!ordersById.TryGetValue(orderId, out var o)) continue;
+            o.RestoreReservationFromSnapshot(prev.Buy, prev.Sell);
         }
     }
 }

@@ -59,7 +59,10 @@ internal sealed class OrderModifier
         Fund? buyFund = null;
         if (order.IsBuyOrder && (newQuantity.HasValue || newPrice.HasValue))
         {
-            var oldBuyRes = RemainingBuyReservation(order);
+            // Source of truth for the live reservation is the per-order field, kept in
+            // lock-step with fund.ReservedBalance. ProjectedBuyReservation is pure math
+            // off the hypothetical (price, qty) so it stays as the new-value calculator.
+            var oldBuyRes = order.CurrentBuyReservation;
             var newBuyRes = ProjectedBuyReservation(order, newQuantity, newPrice);
             buyReservationDelta = newBuyRes - oldBuyRes;
             if (buyReservationDelta != 0m)
@@ -79,6 +82,10 @@ internal sealed class OrderModifier
         int? sellPosOldReserved = sellPos?.ReservedQuantity;
         decimal? buyFundOldTotal = buyFund?.TotalBalance;
         decimal? buyFundOldReserved = buyFund?.ReservedBalance;
+        // Per-order snapshot mirrors the cache snapshot above so a rollback restores
+        // CurrentBuyReservation / CurrentSellReservedQty in lock-step.
+        decimal orderOldBuyReservation = order.CurrentBuyReservation;
+        int orderOldSellReservedQty = order.CurrentSellReservedQty;
 
         await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -101,8 +108,16 @@ internal sealed class OrderModifier
             // Apply delta + persist in the same tx so DB and cache stay in sync
             if (sellPos is not null && sellReservationDelta != 0)
             {
-                if (sellReservationDelta > 0) sellPos.ReserveStock(sellReservationDelta);
-                else sellPos.UnreserveStock(-sellReservationDelta);
+                if (sellReservationDelta > 0)
+                {
+                    sellPos.ReserveStock(sellReservationDelta);
+                    order.TakeSellReservation(sellReservationDelta);
+                }
+                else
+                {
+                    sellPos.UnreserveStock(-sellReservationDelta);
+                    order.ConsumeSellReservation(-sellReservationDelta);
+                }
                 sellPos.UpdatedAt = TimeHelper.NowUtc();
                 await _db.UpdateAllAsync(new[] { sellPos }, ct).ConfigureAwait(false);
             }
@@ -111,8 +126,16 @@ internal sealed class OrderModifier
             {
                 var resB = buyFund.ReservedBalance;
                 var totB = buyFund.TotalBalance;
-                if (buyReservationDelta > 0m) buyFund.ReserveFunds(buyReservationDelta);
-                else buyFund.UnreserveFunds(-buyReservationDelta);
+                if (buyReservationDelta > 0m)
+                {
+                    buyFund.ReserveFunds(buyReservationDelta);
+                    order.TakeBuyReservation(buyReservationDelta);
+                }
+                else
+                {
+                    buyFund.UnreserveFunds(-buyReservationDelta);
+                    order.ConsumeBuyReservation(-buyReservationDelta);
+                }
                 buyFund.UpdatedAt = TimeHelper.NowUtc();
                 _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
                     buyReservationDelta > 0m ? "ApplyOrderChange:Reserve" : "ApplyOrderChange:Unreserve",
@@ -138,6 +161,8 @@ internal sealed class OrderModifier
                 buyFund.TotalBalance = buyFundOldTotal!.Value;
                 buyFund.ReservedBalance = buyFundOldReserved.Value;
             }
+            // Restore per-order field in lock-step with the cache rollback above.
+            order.RestoreReservationFromSnapshot(orderOldBuyReservation, orderOldSellReservedQty);
             throw;
         }
     }

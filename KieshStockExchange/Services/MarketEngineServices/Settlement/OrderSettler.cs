@@ -14,14 +14,16 @@ internal sealed class OrderSettler
     private readonly IDataBaseService _db;
     private readonly IAccountsCache _accounts;
     private readonly IReservationLedger _ledger;
+    private readonly IOrderRegistry _registry;
     private readonly ILogger<OrderSettler> _logger;
 
     public OrderSettler(IDataBaseService db, IAccountsCache accounts,
-        IReservationLedger ledger, ILogger<OrderSettler> logger)
+        IReservationLedger ledger, IOrderRegistry registry, ILogger<OrderSettler> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -73,6 +75,7 @@ internal sealed class OrderSettler
                     $"Reserved={CurrencyHelper.Format(buyFund.ReservedBalance, incoming.CurrencyType)}); " +
                     $"race on ReserveFunds.");
             }
+            incoming.TakeBuyReservation(buyReservation);
             _ledger.LogFund(incoming.UserId, incoming.CurrencyType, incoming.OrderId,
                 "SettleOrderAsync:Reserve", buyReservation, resBefore, buyFund.ReservedBalance,
                 totBefore, buyFund.TotalBalance);
@@ -101,6 +104,7 @@ internal sealed class OrderSettler
                     $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available " +
                     $"(Quantity={sellPos.Quantity}, Reserved={sellPos.ReservedQuantity}); race on ReserveStock.");
             }
+            incoming.TakeSellReservation(incoming.Quantity);
         }
 
         await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -115,6 +119,9 @@ internal sealed class OrderSettler
                 await _db.UpdateAllAsync(new[] { sellPos }, ct).ConfigureAwait(false);
 
             await tx.CommitAsync(ct).ConfigureAwait(false);
+
+            // Register the canonical instance once OrderId is assigned by the insert.
+            _registry.Register(incoming);
             return null;
         }
         catch (Exception ex)
@@ -126,7 +133,11 @@ internal sealed class OrderSettler
             if (sellPos is not null)
             {
                 var toRelease = Math.Min(incoming.Quantity, sellPos.ReservedQuantity);
-                if (toRelease > 0) sellPos.UnreserveStock(toRelease);
+                if (toRelease > 0)
+                {
+                    sellPos.UnreserveStock(toRelease);
+                    incoming.ConsumeSellReservation(Math.Min(toRelease, incoming.CurrentSellReservedQty));
+                }
             }
             if (buyFund is not null && buyReservation > 0m)
             {
@@ -136,6 +147,7 @@ internal sealed class OrderSettler
                     var resB = buyFund.ReservedBalance;
                     var totB = buyFund.TotalBalance;
                     buyFund.UnreserveFunds(toRelease);
+                    incoming.ConsumeBuyReservation(Math.Min(toRelease, incoming.CurrentBuyReservation));
                     _ledger.LogFund(incoming.UserId, incoming.CurrencyType, incoming.OrderId,
                         "SettleOrderAsync:Rollback:Unreserve", toRelease, resB, buyFund.ReservedBalance,
                         totB, buyFund.TotalBalance);

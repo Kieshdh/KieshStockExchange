@@ -141,6 +141,13 @@ public class Order : IValidatable
         get => _updatedAt;
         set => _updatedAt = TimeHelper.EnsureUtc(value);
     }
+
+    // Runtime-only reservation tracking, mirrored against Fund.ReservedBalance /
+    // Position.ReservedQuantity. Hydrated at cold-load from ReservationMath and
+    // maintained in lock-step by every reservation site under the per-user gate.
+    // Not persisted: [Ignore] keeps SQLite away from these columns.
+    [Ignore] public decimal CurrentBuyReservation { get; private set; } = 0m;
+    [Ignore] public int CurrentSellReservedQty { get; private set; } = 0;
     #endregion
 
     #region IValidatable Implementation
@@ -294,8 +301,10 @@ public class Order : IValidatable
             Status = Statuses.Filled; 
     }
 
-    public Order Clone() =>
-        new() {
+    public Order Clone()
+    {
+        var clone = new Order
+        {
             UserId = this.UserId,
             StockId = this.StockId,
             Quantity = this.Quantity,
@@ -309,12 +318,80 @@ public class Order : IValidatable
             CreatedAt = this.CreatedAt,
             UpdatedAt = this.UpdatedAt
         };
+        clone.CurrentBuyReservation = this.CurrentBuyReservation;
+        clone.CurrentSellReservedQty = this.CurrentSellReservedQty;
+        return clone;
+    }
 
     public Order CloneFull()
-    {         
+    {
         var clone = Clone();
         clone.OrderId = OrderId;
         return clone;
     }
+
+    #region Reservation Tracking (runtime-only)
+    public void TakeBuyReservation(decimal amount)
+    {
+        if (amount < 0m)
+            throw new ArgumentException("TakeBuyReservation amount cannot be negative.", nameof(amount));
+        CurrentBuyReservation += amount;
+    }
+
+    public void ConsumeBuyReservation(decimal amount)
+    {
+        if (amount < 0m)
+            throw new ArgumentException("ConsumeBuyReservation amount cannot be negative.", nameof(amount));
+        if (amount > CurrentBuyReservation)
+            throw new InvalidOperationException(
+                $"ConsumeBuyReservation #{OrderId}: amount {amount} exceeds current {CurrentBuyReservation}.");
+        CurrentBuyReservation -= amount;
+    }
+
+    public decimal ReleaseBuyReservation()
+    {
+        var released = CurrentBuyReservation;
+        CurrentBuyReservation = 0m;
+        return released;
+    }
+
+    public void TakeSellReservation(int qty)
+    {
+        if (qty < 0)
+            throw new ArgumentException("TakeSellReservation qty cannot be negative.", nameof(qty));
+        CurrentSellReservedQty += qty;
+    }
+
+    public void ConsumeSellReservation(int qty)
+    {
+        if (qty < 0)
+            throw new ArgumentException("ConsumeSellReservation qty cannot be negative.", nameof(qty));
+        if (qty > CurrentSellReservedQty)
+            throw new InvalidOperationException(
+                $"ConsumeSellReservation #{OrderId}: qty {qty} exceeds current {CurrentSellReservedQty}.");
+        CurrentSellReservedQty -= qty;
+    }
+
+    public int ReleaseSellReservation()
+    {
+        var released = CurrentSellReservedQty;
+        CurrentSellReservedQty = 0;
+        return released;
+    }
+
+    /// <summary>
+    /// Rollback hook: restore the per-order reservation fields to a pre-mutation snapshot
+    /// captured by the settlement scope. Bypasses the Take/Consume validation since the
+    /// values being restored are already known-good (they were the state of the order
+    /// before the failed batch ran).
+    /// </summary>
+    internal void RestoreReservationFromSnapshot(decimal buy, int sell)
+    {
+        if (buy < 0m) throw new ArgumentException(nameof(buy));
+        if (sell < 0) throw new ArgumentException(nameof(sell));
+        CurrentBuyReservation = buy;
+        CurrentSellReservedQty = sell;
+    }
+    #endregion
     #endregion
 }

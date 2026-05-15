@@ -18,12 +18,13 @@ public sealed class SettlementEngine : ISettlementEngine
     private readonly TradeSettler _tradeSettler;
 
     public SettlementEngine(IDataBaseService db, IAccountsCache accounts,
-        IReservationLedger ledger, ILogger<SettlementEngine> logger,
+        IReservationLedger ledger, IOrderRegistry registry, ILogger<SettlementEngine> logger,
         ILoggerFactory loggerFactory, IOptions<SeparatorLoggerOptions> loggerOptions)
     {
         if (db is null) throw new ArgumentNullException(nameof(db));
         if (accounts is null) throw new ArgumentNullException(nameof(accounts));
         if (ledger is null) throw new ArgumentNullException(nameof(ledger));
+        if (registry is null) throw new ArgumentNullException(nameof(registry));
         if (logger is null) throw new ArgumentNullException(nameof(logger));
         if (loggerFactory is null) throw new ArgumentNullException(nameof(loggerFactory));
         if (loggerOptions is null) throw new ArgumentNullException(nameof(loggerOptions));
@@ -35,8 +36,8 @@ public sealed class SettlementEngine : ISettlementEngine
         var validator = new SellerCapacityValidator(SepLogger<SellerCapacityValidator>());
         var probe     = new ConservationProbe      (SepLogger<ConservationProbe>());
 
-        _orderSettler   = new OrderSettler  (db, accounts, ledger, SepLogger<OrderSettler>());
-        _orderCanceller = new OrderCanceller(db, accounts, ledger, SepLogger<OrderCanceller>());
+        _orderSettler   = new OrderSettler  (db, accounts, ledger, registry, SepLogger<OrderSettler>());
+        _orderCanceller = new OrderCanceller(db, accounts, ledger, registry, SepLogger<OrderCanceller>());
         _orderModifier  = new OrderModifier (db, accounts, ledger, SepLogger<OrderModifier>());
         _tradeSettler   = new TradeSettler  (db, accounts, ledger, SepLogger<TradeSettler>(),
                                              validator, probe);

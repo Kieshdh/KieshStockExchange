@@ -28,12 +28,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly IAccountsCache _accounts;
     private readonly IOrderCacheService _orderCache;
     private readonly IReservationLedger _ledger;
+    private readonly IOrderRegistry _registry;
     private readonly ILogger<OrderExecutionService> _logger;
 
     public OrderExecutionService(IDataBaseService db, IOrderBookCache books,
         IMatchingEngine matching, IOrderValidator validator, ISettlementEngine settlement,
         IMarketDataService marketData, IAccountsCache accounts,
         IOrderCacheService orderCache, IReservationLedger ledger,
+        IOrderRegistry registry,
         ILogger<OrderExecutionService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -45,6 +47,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -133,6 +136,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
             // critical section.
             affectedUsers = CollectAffectedUsers(incoming, ordersById);
 
+            // Drop terminally Filled orders with zero reservation from the registry.
+            // Open orders stay (book + reconciler still need them).
+            foreach (var o in ordersById.Values)
+            {
+                if (o.IsFilled && o.CurrentBuyReservation == 0m && o.CurrentSellReservedQty == 0)
+                    _registry.Remove(o.OrderId);
+            }
+
         }).ConfigureAwait(false);
 
         // Publish ticks to market data (outside lock)
@@ -154,6 +165,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         Order? order = await _db.GetOrderById(orderId, ct);
         if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+
+        // Resolve to canonical so OrderCanceller releases against the live per-order
+        // reservation, not the zero on a freshly DB-loaded instance.
+        if (_registry.TryGet(order.OrderId, out var canon)) order = canon;
 
         var validation = _validator.ValidateCancel(order);
         if (validation != null) return validation;
@@ -189,6 +204,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     orderId, sw.ElapsedMilliseconds);
             return OrderResultFactory.InvalidParams("Order not found.");
         }
+
+        // Resolve to canonical so OrderModifier sees the live CurrentBuyReservation /
+        // CurrentSellReservedQty that the engine has been maintaining. DB-loaded
+        // instances have zero per-order reservation and would over-apply the delta.
+        if (_registry.TryGet(order.OrderId, out var canon)) order = canon;
 
         bool trace = !DebugUserId.HasValue || order.UserId == DebugUserId.Value;
         if (trace)
@@ -386,7 +406,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
                         $"(Quantity={pos.Quantity}, Reserved={pos.ReservedQuantity}).");
                     rejected ??= new HashSet<int>();
                     rejected.Add(idx);
+                    continue;
                 }
+                order.TakeSellReservation(order.Quantity);
             }
 
             if (rejected is not null)
@@ -480,6 +502,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     buyRejected.Add(idx);
                     continue;
                 }
+                order.TakeBuyReservation(reservation);
                 _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
                     "Phase1.6:Reserve", reservation, resBefore, fund.ReservedBalance,
                     totBefore, fund.TotalBalance);
@@ -544,6 +567,12 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 await phase2Tx.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
+
+            // OrderIds are assigned by InsertAllAsync; register canonical instances so
+            // the reconciler, matcher, and downstream settle paths all reference the
+            // same Order ref the engine is mutating.
+            for (int i = 0; i < orderList.Count; i++)
+                _registry.Register(orderList[i]);
         }
         catch (Exception ex)
         {
@@ -724,6 +753,25 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (groupAffected.Count > 0)
             _orderCache.NotifyOrdersMutated(groupAffected);
 
+        // Registry cleanup: orders that ended Filled with zero reservation can leave.
+        // Open orders stay registered (book + reconciler still need them). The maker
+        // snapshots are canonical refs by the time we get here (book routes through
+        // registry on cold-load + post-Phase-2 register).
+        for (int i = 0; i < outcome.Records.Count; i++)
+        {
+            var rec = outcome.Records[i];
+            if (rec.Order.IsFilled && rec.Order.CurrentBuyReservation == 0m
+                && rec.Order.CurrentSellReservedQty == 0)
+                _registry.Remove(rec.Order.OrderId);
+            for (int s = 0; s < rec.Match.MakerSnapshots.Count; s++)
+            {
+                var m = rec.Match.MakerSnapshots[s].Order;
+                if (m.IsFilled && m.CurrentBuyReservation == 0m
+                    && m.CurrentSellReservedQty == 0)
+                    _registry.Remove(m.OrderId);
+            }
+        }
+
         return groupFills;
     }
 
@@ -757,11 +805,16 @@ public sealed class OrderExecutionService : IOrderExecutionService
                         var pos = _accounts.GetPosition(order.UserId, order.StockId);
                         if (pos is not null)
                         {
-                            var toRelease = Math.Min(order.Quantity, pos.ReservedQuantity);
+                            // CurrentSellReservedQty is the live reservation taken in
+                            // Phase 1.5 (less anything an in-flight settlement consumed
+                            // before the failure). Releasing it — not order.Quantity —
+                            // is what makes the per-user invariant hold across recovery.
+                            var toRelease = Math.Min(order.CurrentSellReservedQty, pos.ReservedQuantity);
                             if (toRelease > 0)
                             {
                                 pos.UnreserveStock(toRelease);
                                 pos.UpdatedAt = TimeHelper.NowUtc();
+                                order.ReleaseSellReservation();
                             }
                             await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
                         }
@@ -769,7 +822,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     else if (order.IsBuyOrder)
                     {
                         var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
-                        var reservation = ReservationMath.InitialBuyReservation(order);
+                        // Source of truth: per-order field. Using InitialBuyReservation
+                        // double-releases when a partial fill consumed some of the
+                        // reservation before the failure — that was the audited cause
+                        // of one of the leak classes.
+                        var reservation = order.CurrentBuyReservation;
                         if (fund is not null && reservation > 0m)
                         {
                             var toRelease = Math.Min(reservation, fund.ReservedBalance);
@@ -779,6 +836,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                                 var totB = fund.TotalBalance;
                                 fund.UnreserveFunds(toRelease);
                                 fund.UpdatedAt = TimeHelper.NowUtc();
+                                order.ReleaseBuyReservation();
                                 _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
                                     "RecoverFailedGroup:Unreserve", toRelease, resB, fund.ReservedBalance,
                                     totB, fund.TotalBalance);
@@ -926,9 +984,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 {
                     for (int i = 0; i < list.Count; i++)
                     {
-                        var o = list[i];
-                        book.RemoveById(o.OrderId);
-                        if (o.IsOpen) o.Cancel();
+                        var dbRow = list[i];
+                        book.RemoveById(dbRow.OrderId);
+                        // Also flip the canonical so the registry reflects the cancel —
+                        // otherwise downstream readers (reconciler, UI) see an Open
+                        // canonical with CurrentReservation=0 after the release below.
+                        if (_registry.TryGet(dbRow.OrderId, out var canon) && canon.IsOpen)
+                            canon.Cancel();
+                        if (dbRow.IsOpen) dbRow.Cancel();
                     }
                     return Task.CompletedTask;
                 }).ConfigureAwait(false);
@@ -955,10 +1018,16 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     {
                         for (int i = 0; i < list.Count; i++)
                         {
-                            var o = list[i];
+                            var dbRow = list[i];
                             // Cancel() flipped status; restore Open so UpsertOrder accepts it.
-                            if (!o.IsOpen) o.Status = Order.Statuses.Open;
-                            if (o.IsOpenLimitOrder) book.UpsertOrder(o);
+                            if (!dbRow.IsOpen) dbRow.Status = Order.Statuses.Open;
+                            // Mirror the rollback on the canonical so registry agrees.
+                            if (_registry.TryGet(dbRow.OrderId, out var canon) && !canon.IsOpen)
+                                canon.Status = Order.Statuses.Open;
+                            // Re-upsert canonical (book holds canonical refs), not the
+                            // detached DB row.
+                            var bookRef = _registry.TryGet(dbRow.OrderId, out var c) ? c : dbRow;
+                            if (bookRef.IsOpenLimitOrder) book.UpsertOrder(bookRef);
                         }
                         return Task.CompletedTask;
                     }).ConfigureAwait(false);
@@ -980,50 +1049,43 @@ public sealed class OrderExecutionService : IOrderExecutionService
             return results;
         }
 
-        // Release reservations post-commit so the failure path needn't undo them.
-        // Each `o` is the live row, so unreserve amounts match what apply-pass left.
-        // The clamp + log path stays as defense-in-depth for any gate-less peer
-        // (e.g. RollbackRejectedFills 5a) that may still race the release.
+        // Release reservations post-commit. Each `o` here is the live row resolved from
+        // DB under the gate, NOT the canonical Order — so map through the registry to
+        // get the same instance the engine has been mutating. Per-order field is the
+        // source of truth; the silent-skip-on-mismatch branches that used to live here
+        // were one of the audited leak classes.
         for (int i = 0; i < liveToCancel.Count; i++)
         {
-            var o = liveToCancel[i];
+            var liveRow = liveToCancel[i];
+            // Prefer canonical instance — that's the one with the live CurrentReservation.
+            var o = _registry.TryGet(liveRow.OrderId, out var canon) ? canon : liveRow;
             try
             {
                 if (o.IsSellOrder)
                 {
-                    var unreserve = o.Quantity - o.AmountFilled;
+                    var unreserve = o.CurrentSellReservedQty;
                     if (unreserve <= 0) continue;
                     var pos = _accounts.GetPosition(o.UserId, o.StockId);
                     if (pos is null) continue;
-                    if (pos.ReservedQuantity < unreserve)
-                    {
-                        _logger.LogDebug(
-                            "CancelOrdersBatchAsync: order #{OrderId} reservation already released " +
-                            "by a peer path (reserved={Reserved}, would unreserve={Unreserve}); skipping.",
-                            o.OrderId, pos.ReservedQuantity, unreserve);
-                        continue;
-                    }
-                    pos.UnreserveStock(unreserve);
+                    var toRelease = Math.Min(unreserve, pos.ReservedQuantity);
+                    if (toRelease <= 0) continue;
+                    pos.UnreserveStock(toRelease);
+                    o.ReleaseSellReservation();
                 }
                 else if (o.IsBuyOrder)
                 {
-                    var unreserve = ReservationMath.RemainingBuyReservation(o);
+                    var unreserve = o.CurrentBuyReservation;
                     if (unreserve <= 0m) continue;
                     var fund = _accounts.GetFund(o.UserId, o.CurrencyType);
                     if (fund is null) continue;
-                    if (fund.ReservedBalance < unreserve)
-                    {
-                        _logger.LogDebug(
-                            "CancelOrdersBatchAsync: order #{OrderId} fund reservation already released " +
-                            "by a peer path (reserved={Reserved}, would unreserve={Unreserve}); skipping.",
-                            o.OrderId, fund.ReservedBalance, unreserve);
-                        continue;
-                    }
+                    var toRelease = Math.Min(unreserve, fund.ReservedBalance);
+                    if (toRelease <= 0m) continue;
                     var resB = fund.ReservedBalance;
                     var totB = fund.TotalBalance;
-                    fund.UnreserveFunds(unreserve);
+                    fund.UnreserveFunds(toRelease);
+                    o.ReleaseBuyReservation();
                     _ledger.LogFund(o.UserId, o.CurrencyType, o.OrderId,
-                        "CancelOrdersBatch:Unreserve", unreserve, resB, fund.ReservedBalance,
+                        "CancelOrdersBatch:Unreserve", toRelease, resB, fund.ReservedBalance,
                         totB, fund.TotalBalance);
                 }
             }
@@ -1245,17 +1307,19 @@ public sealed class OrderExecutionService : IOrderExecutionService
             ordersById[makerId] = maker;
 
             // 5a: release Position.ReservedQuantity so cache AvailableQuantity recovers.
-            // Clamp to live Reserved (peer paths may have released first; avoids first-chance flood).
-            if (maker.IsSellOrder && maker.RemainingQuantity > 0)
+            // Source of truth is the per-order field (CurrentSellReservedQty); clamp to
+            // live Reserved as defense-in-depth (under the invariant they're equal).
+            if (maker.IsSellOrder && maker.CurrentSellReservedQty > 0)
             {
                 var pos = accounts.GetPosition(maker.UserId, maker.StockId);
                 if (pos is not null)
                 {
-                    var toRelease = Math.Min(maker.RemainingQuantity, pos.ReservedQuantity);
+                    var toRelease = Math.Min(maker.CurrentSellReservedQty, pos.ReservedQuantity);
                     if (toRelease > 0)
                     {
                         pos.UnreserveStock(toRelease);
                         pos.UpdatedAt = TimeHelper.NowUtc();
+                        maker.ReleaseSellReservation();
                     }
                 }
             }
