@@ -327,6 +327,10 @@ public sealed class AccountsCache : IAccountsCache
         var posOrderCount     = new Dictionary<(int, int), int>();
         Dictionary<(int, CurrencyType), List<string>>? fundOffenders = null;
         Dictionary<(int, int), List<string>>? posOffenders = null;
+        // Open-order contributors per fund/position — used by the second pass to
+        // emit per-order ledger rows when actual < expected (under-reserve direction).
+        Dictionary<(int, CurrencyType), List<Order>>? openBuysByFund = null;
+        Dictionary<(int, int), List<Order>>? openSellsByPos = null;
 
         foreach (var o in _registry.AllOrders())
         {
@@ -341,6 +345,10 @@ public sealed class AccountsCache : IAccountsCache
                     expectedBalByFund[key] = sum + o.CurrentBuyReservation;
                     fundOrderCount.TryGetValue(key, out var c);
                     fundOrderCount[key] = c + 1;
+                    openBuysByFund ??= new();
+                    if (!openBuysByFund.TryGetValue(key, out var openList))
+                        openBuysByFund[key] = openList = new List<Order>();
+                    openList.Add(o);
                 }
                 else if (o.IsClosed)
                 {
@@ -366,6 +374,10 @@ public sealed class AccountsCache : IAccountsCache
                     expectedQtyByPos[key] = sum + o.CurrentSellReservedQty;
                     posOrderCount.TryGetValue(key, out var c);
                     posOrderCount[key] = c + 1;
+                    openSellsByPos ??= new();
+                    if (!openSellsByPos.TryGetValue(key, out var openList))
+                        openSellsByPos[key] = openList = new List<Order>();
+                    openList.Add(o);
                 }
                 else if (o.IsClosed)
                 {
@@ -406,6 +418,23 @@ public sealed class AccountsCache : IAccountsCache
                     "Phantom position reservation user={UserId} stock={StockId} Δ={Delta}; offenders: [{Offenders}]",
                     kv.Key.UserId, kv.Key.StockId, actual - expected, string.Join(",", offenders));
             }
+
+            // Under-reserve direction: actual < expected. Emit one ledger row per
+            // open sell contributor so successive reconciles distinguish a churning
+            // race (different OrderIds each pass) from persistent drift (same IDs).
+            if (actual < expected
+                && openSellsByPos is not null
+                && openSellsByPos.TryGetValue(kv.Key, out var underSells))
+            {
+                for (int i = 0; i < underSells.Count; i++)
+                {
+                    var o = underSells[i];
+                    _ledger.LogOrder(o.UserId, o.OrderId, "Reconcile:Offender:Sell:UnderReserve",
+                        0m,
+                        o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
+                }
+            }
         }
 
         foreach (var kv in _funds)
@@ -430,6 +459,20 @@ public sealed class AccountsCache : IAccountsCache
                 _logger.LogWarning(
                     "Phantom fund reservation user={UserId} ccy={Ccy} Δ={Delta}; offenders: [{Offenders}]",
                     kv.Key.UserId, kv.Key.Ccy, actual - expected, string.Join(",", offenders));
+            }
+
+            if (actual < expected
+                && openBuysByFund is not null
+                && openBuysByFund.TryGetValue(kv.Key, out var underBuys))
+            {
+                for (int i = 0; i < underBuys.Count; i++)
+                {
+                    var o = underBuys[i];
+                    _ledger.LogOrder(o.UserId, o.OrderId, "Reconcile:Offender:Buy:UnderReserve",
+                        o.CurrentBuyReservation,
+                        o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
+                }
             }
         }
 
