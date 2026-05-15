@@ -3,6 +3,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Data;
 using System.Globalization;
@@ -22,11 +23,16 @@ public class ExcelImportService : IExcelImportService
     private bool _dataLoaded = false;
 
     private readonly IDataBaseService _db;
+    private readonly IAccountsCache _accounts;
+    private readonly IOrderRegistry _registry;
     private readonly ILogger<ExcelImportService> _logger;
 
-    public ExcelImportService(ILogger<ExcelImportService> logger, IDataBaseService db)
+    public ExcelImportService(ILogger<ExcelImportService> logger, IDataBaseService db,
+        IAccountsCache accounts, IOrderRegistry registry)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -406,8 +412,13 @@ public class ExcelImportService : IExcelImportService
             await _db.InsertAllAsync(funds, ct);
             await _db.InsertAllAsync(positions, ct);
         }).ConfigureAwait(false);
-        _logger.LogInformation("Loaded in total {FundCount} funds with {PositionCount} positions.", funds.Count, positions.Count);
 
+        // In-memory caches now hold stale refs to dropped Fund/Position/Order rows.
+        // Drop them so the next EnsureLoadedAsync / hydration round re-reads from DB.
+        _accounts.Clear();
+        _registry.Clear();
+
+        _logger.LogInformation("Loaded in total {FundCount} funds with {PositionCount} positions.", funds.Count, positions.Count);
     }
     #endregion
 

@@ -48,4 +48,10 @@ public interface IOrderRegistry
 
     /// <summary>Approximate count, for diagnostics.</summary>
     int Count { get; }
+
+    /// <summary>
+    /// Drop every registered order. Call after a DB reseed (e.g. ExcelImportService
+    /// reset of the Orders table) so stale Order refs don't survive into the next run.
+    /// </summary>
+    void Clear();
 }

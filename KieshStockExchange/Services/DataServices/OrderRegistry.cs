@@ -84,4 +84,6 @@ public sealed class OrderRegistry : IOrderRegistry
     }
 
     public int Count => _byId.Count;
+
+    public void Clear() => _byId.Clear();
 }

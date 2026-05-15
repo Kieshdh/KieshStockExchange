@@ -343,4 +343,5 @@ internal sealed class StubAccountsCache : IAccountsCache
         CancellationToken ct = default) => throw new NotImplementedException();
     public Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
         bool clamp = false, CancellationToken ct = default) => throw new NotImplementedException();
+    public void Clear() => throw new NotImplementedException();
 }

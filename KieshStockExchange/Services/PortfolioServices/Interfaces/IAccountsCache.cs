@@ -79,4 +79,11 @@ public interface IAccountsCache
     /// </summary>
     Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
         bool clamp = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Drop every cached Fund / Position / loaded-user marker. Call after a DB reseed
+    /// (e.g. ExcelImportService reset) so the next EnsureLoadedAsync re-reads from DB
+    /// instead of returning stale instances from before the reset.
+    /// </summary>
+    void Clear();
 }

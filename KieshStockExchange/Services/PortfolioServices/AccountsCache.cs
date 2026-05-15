@@ -280,6 +280,17 @@ public sealed class AccountsCache : IAccountsCache
         if (pos is null) return;
         _positions[(pos.UserId, pos.StockId)] = pos;
     }
+
+    public void Clear()
+    {
+        _funds.Clear();
+        _positions.Clear();
+        _loadedUsers.Clear();
+        // Per-user gates are intentionally NOT cleared — disposing them while held
+        // by an in-flight settle/cancel would deadlock that caller. They're cheap to
+        // keep (one SemaphoreSlim per touched user); the next caller still gets
+        // mutual exclusion against any survivors.
+    }
     #endregion
 
     #region Reservation Reconciler
