@@ -221,8 +221,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (loggerFactory is null) throw new ArgumentNullException(nameof(loggerFactory));
         if (loggerOptions is null) throw new ArgumentNullException(nameof(loggerOptions));
 
-        _ctx       = new AiBotContext();
-        _state     = new AiBotStateService(db, new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
+        _ctx       = new AiBotContext(accounts);
+        _state     = new AiBotStateService(db, accounts, new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
         _decisions = new AiBotDecisionService(market, accounts, new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions));
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
@@ -591,8 +591,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
         if (now >= _nextReconcileTime)
         {
-            await ReconcileReservationsAsync(ct).ConfigureAwait(false);
             _nextReconcileTime = now + ReconcileInterval;
+            // Fire-and-forget on the thread pool: reconcile is a passive diagnostic
+            // observer. Even with the O(N) single-pass rewrite, a 200k+ order walk
+            // shouldn't be allowed to block the bot tick loop. Concurrent state
+            // changes during the walk are acceptable (ConcurrentDictionary
+            // enumeration is best-effort).
+            _ = Task.Run(async () =>
+            {
+                try { await ReconcileReservationsAsync(ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { _logger.LogError(ex, "Reservation reconcile pass failed (off-thread)."); }
+            }, ct);
         }
     }
 

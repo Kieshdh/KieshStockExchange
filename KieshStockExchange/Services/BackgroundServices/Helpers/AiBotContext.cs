@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using System.Collections.Concurrent;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
@@ -7,25 +8,32 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
 /// <summary>
 /// Plain data container shared by AiBotStateService and AiBotDecisionService.
-/// All dictionaries are single-threaded (only accessed from the bot loop).
+/// Fund/Position state is read live from AccountsCache (the single source of truth);
+/// CurrenciesByUser / StocksByUser are lightweight metadata for per-user iteration.
 /// Price caches use ConcurrentDictionary because OnQuoteUpdated fires on external threads.
 /// </summary>
 internal sealed class AiBotContext
 {
     #region Fields
+    private readonly IAccountsCache _accounts;
+
     internal readonly Dictionary<int, AIUser>  AiUsersByAiUserId = new();
     internal readonly Dictionary<int, AIUser>  AiUsersByUserId   = new();
     internal readonly Dictionary<int, Random>  AiUserRngs        = new();
 
-    internal readonly Dictionary<int, Dictionary<int, Position>>         Positions  = new();
-    internal readonly Dictionary<int, Dictionary<CurrencyType, Fund>>    Funds      = new();
-    internal readonly Dictionary<int, Dictionary<int, Order>>            OpenOrders = new();
+    // Metadata indexes: which currencies / stocks each user has. Rebuilt every 60s
+    // by RefreshAssetsAsync. Actual Fund/Position instances come from _accounts on
+    // each access — no shadow copy, no drift.
+    internal readonly Dictionary<int, HashSet<CurrencyType>> CurrenciesByUser = new();
+    internal readonly Dictionary<int, HashSet<int>>          StocksByUser     = new();
+
+    internal readonly Dictionary<int, Dictionary<int, Order>> OpenOrders = new();
 
     // Raw last price from market quotes — set on every tick
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> StockPrices    = new();
     // Previous raw price snapshot — for tick-to-tick delta computation
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> PreviousPrices = new();
-    // EWMA-smoothed price (Î±=0.15) — reacts over ~6 ticks to filter spike noise
+    // EWMA-smoothed price (α=0.15) — reacts over ~6 ticks to filter spike noise
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> SmoothedPrices = new();
 
     // AiUserId → burst-session end time
@@ -34,26 +42,25 @@ internal sealed class AiBotContext
     internal readonly HashSet<int>              ProcessedTxIds = new();
 
     internal DateOnly LastRefreshDate = DateOnly.MinValue;
+
+    // Empty placeholders so callers can keep reading .TotalBalance / .Quantity without
+    // null checks. Safe to share since shadow mutations are gone — these are read-only
+    // from the bot's perspective.
+    private static readonly Fund     EmptyFund     = new();
+    private static readonly Position EmptyPosition = new();
     #endregion
+
+    internal AiBotContext(IAccountsCache accounts)
+    {
+        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+    }
 
     #region Accessors
     internal Fund GetFund(int userId, CurrencyType currency)
-    {
-        if (!Funds.ContainsKey(userId))
-            Funds[userId] = new Dictionary<CurrencyType, Fund>();
-        if (!Funds[userId].ContainsKey(currency))
-            Funds[userId][currency] = new Fund { UserId = userId, CurrencyType = currency };
-        return Funds[userId][currency];
-    }
+        => _accounts.GetFund(userId, currency) ?? EmptyFund;
 
     internal Position GetPosition(int userId, int stockId)
-    {
-        if (!Positions.ContainsKey(userId))
-            Positions[userId] = new Dictionary<int, Position>();
-        if (!Positions[userId].ContainsKey(stockId))
-            Positions[userId][stockId] = new Position { UserId = userId, StockId = stockId };
-        return Positions[userId][stockId];
-    }
+        => _accounts.GetPosition(userId, stockId) ?? EmptyPosition;
 
     internal Random GetRandom(int aiUserId)
     {
@@ -87,11 +94,12 @@ internal sealed class AiBotContext
     internal decimal PortfolioValueByCurrency(int userId, CurrencyType currency)
     {
         decimal total = GetFund(userId, currency).TotalBalance;
-        if (!Positions.TryGetValue(userId, out var positions)) return total;
-        foreach (var pos in positions.Values)
+        if (!StocksByUser.TryGetValue(userId, out var stocks)) return total;
+        foreach (var stockId in stocks)
         {
-            if (pos.Quantity <= 0) continue;
-            if (StockPrices.TryGetValue((pos.StockId, currency), out var price))
+            var pos = _accounts.GetPosition(userId, stockId);
+            if (pos is null || pos.Quantity <= 0) continue;
+            if (StockPrices.TryGetValue((stockId, currency), out var price))
                 total += pos.Quantity * price;
         }
         return total;
@@ -133,8 +141,8 @@ internal sealed class AiBotContext
         AiUsersByAiUserId.Clear();
         AiUsersByUserId.Clear();
         AiUserRngs.Clear();
-        Positions.Clear();
-        Funds.Clear();
+        CurrenciesByUser.Clear();
+        StocksByUser.Clear();
         OpenOrders.Clear();
         StockPrices.Clear();
         PreviousPrices.Clear();

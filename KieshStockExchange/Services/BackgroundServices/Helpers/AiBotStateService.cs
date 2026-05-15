@@ -4,6 +4,7 @@ using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
@@ -17,6 +18,7 @@ internal sealed class AiBotStateService
 {
     #region Services and Constructor
     private readonly IDataBaseService _db;
+    private readonly IAccountsCache _accounts;
     private readonly ILogger<AiBotStateService> _logger;
 
     // Throttle "Applied active bot cap" — the scaler may toggle the cap several
@@ -28,10 +30,12 @@ internal sealed class AiBotStateService
     private int _lastLoggedEnabled = -1;
     private int _suppressedApplyCapCount;
 
-    internal AiBotStateService(IDataBaseService db, ILogger<AiBotStateService> logger)
+    internal AiBotStateService(IDataBaseService db, IAccountsCache accounts,
+        ILogger<AiBotStateService> logger)
     {
-        _db     = db     ?? throw new ArgumentNullException(nameof(db));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _db       = db       ?? throw new ArgumentNullException(nameof(db));
+        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+        _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
 
@@ -54,23 +58,37 @@ internal sealed class AiBotStateService
 
     internal async Task RefreshAssetsAsync(AiBotContext ctx, CancellationToken ct)
     {
-        ctx.Positions.Clear();
-        ctx.Funds.Clear();
+        ctx.CurrenciesByUser.Clear();
+        ctx.StocksByUser.Clear();
         ctx.OpenOrders.Clear();
 
         var userIds = ctx.AiUsersByAiUserId.Values
             .Where(u => u.IsEnabled).Select(u => u.UserId).ToList();
         if (userIds.Count == 0) return;
 
+        // Make sure the canonical Fund/Position state is loaded in AccountsCache.
+        // After this returns, ctx.GetFund / GetPosition will see the live engine view.
+        await _accounts.EnsureLoadedAsync(userIds, ct).ConfigureAwait(false);
+
+        // Build the metadata indexes (which currencies / stocks each user touches).
+        // We discard the Fund/Position instances themselves — AccountsCache owns those.
         var allFunds     = await _db.GetFundsForUsersAsync(userIds, ct).ConfigureAwait(false);
         var allPositions = await _db.GetPositionsForUsersAsync(userIds, ct).ConfigureAwait(false);
         var allOrders    = await _db.GetOpenOrdersForUsersAsync(userIds, ct).ConfigureAwait(false);
 
-        foreach (var g in allFunds.GroupBy(f => f.UserId))
-            ctx.Funds[g.Key] = g.ToDictionary(f => f.CurrencyType, f => f);
+        foreach (var f in allFunds)
+        {
+            if (!ctx.CurrenciesByUser.TryGetValue(f.UserId, out var set))
+                ctx.CurrenciesByUser[f.UserId] = set = new HashSet<CurrencyType>();
+            set.Add(f.CurrencyType);
+        }
 
-        foreach (var g in allPositions.GroupBy(p => p.UserId))
-            ctx.Positions[g.Key] = g.ToDictionary(p => p.StockId, p => p);
+        foreach (var p in allPositions)
+        {
+            if (!ctx.StocksByUser.TryGetValue(p.UserId, out var set))
+                ctx.StocksByUser[p.UserId] = set = new HashSet<int>();
+            set.Add(p.StockId);
+        }
 
         foreach (var g in allOrders.GroupBy(o => o.UserId))
             ctx.OpenOrders[g.Key] = g.ToDictionary(o => o.OrderId, o => o);
@@ -170,28 +188,11 @@ internal sealed class AiBotStateService
 
     internal void ApplyResultToCache(AiBotContext ctx, OrderResult result)
     {
+        // Fund/Position mutations happen in the engine (TradeSettler.SettleNoTxAsync)
+        // against the canonical AccountsCache instances — no shadow accounting here.
+        // The bot reads live state via ctx.GetFund / ctx.GetPosition on its next decision.
         foreach (var fill in result.FillTransactions)
-        {
             RecordTx(ctx, fill);
-
-            var notional = CurrencyHelper.RoundMoney(fill.TotalAmount, fill.CurrencyType);
-
-            // Buyer pays cash, receives shares
-            if (ctx.Funds.TryGetValue(fill.BuyerId, out var buyerFunds)
-                && buyerFunds.TryGetValue(fill.CurrencyType, out var bf))
-                bf.TotalBalance -= notional;
-
-            ctx.GetPosition(fill.BuyerId, fill.StockId).Quantity += fill.Quantity;
-
-            // Seller receives cash, loses shares
-            if (ctx.Funds.TryGetValue(fill.SellerId, out var sellerFunds)
-                && sellerFunds.TryGetValue(fill.CurrencyType, out var sf))
-                sf.TotalBalance += notional;
-
-            if (ctx.Positions.TryGetValue(fill.SellerId, out var sellerPos)
-                && sellerPos.TryGetValue(fill.StockId, out var sp))
-                sp.Quantity -= fill.Quantity;
-        }
 
         // Track newly resting limit orders immediately so CanPlaceMoreOrder and
         // ComputeCommitted* see them before the next RefreshAssetsAsync.

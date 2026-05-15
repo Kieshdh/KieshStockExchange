@@ -286,8 +286,59 @@ public sealed class AccountsCache : IAccountsCache
     public Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
         bool clamp = false, CancellationToken ct = default)
     {
-        // In-memory now: registry holds canonical Order instances with CurrentReservation
-        // fields the engine mutates in lock-step. No DB query needed.
+        // Single O(N) pass over the registry: aggregate expected sums per (user, resource)
+        // AND collect offenders (closed orders with non-zero CurrentReservation) by the same
+        // key. Pre-fix this was O(F × N) + O(P × N) with full registry walks per fund/position;
+        // at 20k users + 100k+ orders the tick loop froze for >1 min per reconcile pass.
+        var expectedBalByFund = new Dictionary<(int, CurrencyType), decimal>();
+        var expectedQtyByPos  = new Dictionary<(int, int), int>();
+        var fundOrderCount    = new Dictionary<(int, CurrencyType), int>();
+        var posOrderCount     = new Dictionary<(int, int), int>();
+        Dictionary<(int, CurrencyType), List<string>>? fundOffenders = null;
+        Dictionary<(int, int), List<string>>? posOffenders = null;
+
+        foreach (var o in _registry.AllOrders())
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (o.IsBuyOrder && o.CurrentBuyReservation > 0m)
+            {
+                var key = (o.UserId, o.CurrencyType);
+                if (o.IsOpen)
+                {
+                    expectedBalByFund.TryGetValue(key, out var sum);
+                    expectedBalByFund[key] = sum + o.CurrentBuyReservation;
+                    fundOrderCount.TryGetValue(key, out var c);
+                    fundOrderCount[key] = c + 1;
+                }
+                else if (o.IsClosed)
+                {
+                    fundOffenders ??= new();
+                    if (!fundOffenders.TryGetValue(key, out var list))
+                        fundOffenders[key] = list = new List<string>();
+                    list.Add($"#{o.OrderId}({o.Status},amt={o.CurrentBuyReservation})");
+                }
+            }
+            else if (o.IsSellOrder && o.CurrentSellReservedQty > 0)
+            {
+                var key = (o.UserId, o.StockId);
+                if (o.IsOpen && o.IsLimitOrder)
+                {
+                    expectedQtyByPos.TryGetValue(key, out var sum);
+                    expectedQtyByPos[key] = sum + o.CurrentSellReservedQty;
+                    posOrderCount.TryGetValue(key, out var c);
+                    posOrderCount[key] = c + 1;
+                }
+                else if (o.IsClosed)
+                {
+                    posOffenders ??= new();
+                    if (!posOffenders.TryGetValue(key, out var list))
+                        posOffenders[key] = list = new List<string>();
+                    list.Add($"#{o.OrderId}({o.Status},qty={o.CurrentSellReservedQty})");
+                }
+            }
+        }
+
         var mismatches = new List<ReservationMismatch>();
 
         foreach (var kv in _positions)
@@ -296,36 +347,23 @@ public sealed class AccountsCache : IAccountsCache
             var actual = kv.Value.ReservedQuantity;
             if (actual == 0) continue;
 
-            int expected = 0;
-            int count = 0;
-            foreach (var o in _registry.GetOpenSellsForUser(kv.Key.UserId, kv.Key.StockId))
-            {
-                if (!o.IsLimitOrder) continue;
-                expected += o.CurrentSellReservedQty;
-                count++;
-            }
-
+            expectedQtyByPos.TryGetValue(kv.Key, out var expected);
             if (expected == actual) continue;
+
+            posOrderCount.TryGetValue(kv.Key, out var count);
             mismatches.Add(new ReservationMismatch(
                 kv.Key.UserId, kv.Key.StockId, null,
                 expected, actual, actual - expected, count));
             if (clamp) kv.Value.ReservedQuantity = expected;
 
-            // Name offenders so the leak is traceable to specific OrderIds. A terminally
-            // closed order with CurrentSellReservedQty > 0 is exactly the leak class.
-            var offenders = new List<string>();
-            foreach (var o in _registry.AllOrders())
+            if (posOffenders is not null
+                && posOffenders.TryGetValue(kv.Key, out var offenders)
+                && offenders.Count > 0)
             {
-                if (o.UserId != kv.Key.UserId || o.StockId != kv.Key.StockId) continue;
-                if (!o.IsSellOrder) continue;
-                if (o.CurrentSellReservedQty <= 0) continue;
-                if (o.IsClosed)
-                    offenders.Add($"#{o.OrderId}({o.Status},qty={o.CurrentSellReservedQty})");
-            }
-            if (offenders.Count > 0)
                 _logger.LogWarning(
                     "Phantom position reservation user={UserId} stock={StockId} Δ={Delta}; offenders: [{Offenders}]",
                     kv.Key.UserId, kv.Key.StockId, actual - expected, string.Join(",", offenders));
+            }
         }
 
         foreach (var kv in _funds)
@@ -334,35 +372,23 @@ public sealed class AccountsCache : IAccountsCache
             var actual = kv.Value.ReservedBalance;
             if (actual == 0m) continue;
 
-            decimal expected = 0m;
-            int count = 0;
-            foreach (var o in _registry.GetOpenBuysForUser(kv.Key.UserId, kv.Key.Ccy))
-            {
-                if (!o.IsLimitOrder && !o.IsBuyOrder) continue;
-                // Include limits + TrueMarketBuy + SlippageBuy (any buy with a live reservation).
-                expected += o.CurrentBuyReservation;
-                count++;
-            }
-
+            expectedBalByFund.TryGetValue(kv.Key, out var expected);
             if (expected == actual) continue;
+
+            fundOrderCount.TryGetValue(kv.Key, out var count);
             mismatches.Add(new ReservationMismatch(
                 kv.Key.UserId, null, kv.Key.Ccy,
                 expected, actual, actual - expected, count));
             if (clamp) kv.Value.ReservedBalance = expected;
 
-            var offenders = new List<string>();
-            foreach (var o in _registry.AllOrders())
+            if (fundOffenders is not null
+                && fundOffenders.TryGetValue(kv.Key, out var offenders)
+                && offenders.Count > 0)
             {
-                if (o.UserId != kv.Key.UserId || o.CurrencyType != kv.Key.Ccy) continue;
-                if (!o.IsBuyOrder) continue;
-                if (o.CurrentBuyReservation <= 0m) continue;
-                if (o.IsClosed)
-                    offenders.Add($"#{o.OrderId}({o.Status},amt={o.CurrentBuyReservation})");
-            }
-            if (offenders.Count > 0)
                 _logger.LogWarning(
                     "Phantom fund reservation user={UserId} ccy={Ccy} Δ={Delta}; offenders: [{Offenders}]",
                     kv.Key.UserId, kv.Key.Ccy, actual - expected, string.Join(",", offenders));
+            }
         }
 
         return Task.FromResult<IReadOnlyList<ReservationMismatch>>(mismatches);
