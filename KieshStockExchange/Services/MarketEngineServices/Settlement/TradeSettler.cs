@@ -442,8 +442,13 @@ internal sealed class TradeSettler
             var f = _accounts.GetFund(key.UserId, key.Ccy);
             if (f != null)
             {
+                var resBefore = f.ReservedBalance;
+                var totBefore = f.TotalBalance;
                 f.TotalBalance = prev.Total;
                 f.ReservedBalance = prev.Reserved;
+                _ledger.LogFund(key.UserId, key.Ccy, null,
+                    "RestoreSnapshots:Fund", prev.Reserved - resBefore,
+                    resBefore, f.ReservedBalance, totBefore, f.TotalBalance);
             }
         }
 
@@ -452,16 +457,35 @@ internal sealed class TradeSettler
             var p = _accounts.GetPosition(key.UserId, key.StockId);
             if (p != null)
             {
+                var posResBefore = p.ReservedQuantity;
+                var posQtyBefore = p.Quantity;
                 p.Quantity = prev.Quantity;
                 p.ReservedQuantity = prev.Reserved;
+                _ledger.LogPosition(key.UserId, key.StockId, null,
+                    "RestoreSnapshots:Position", prev.Reserved - posResBefore,
+                    posResBefore, p.ReservedQuantity, posQtyBefore, p.Quantity);
             }
         }
 
         // Restore per-order reservation fields in lock-step with Fund/Position restoration.
         foreach (var (orderId, prev) in scope.OrderReservationSnapshots)
         {
-            if (!ordersById.TryGetValue(orderId, out var o)) continue;
+            if (!ordersById.TryGetValue(orderId, out var o))
+            {
+                // Hypothesized leak source: snapshot exists but order isn't in this
+                // ordersById, so its CBR/CSR isn't restored even though Fund was.
+                // Log the user from the snapshot key's currency partner... we don't
+                // have the user here, but the orderId is enough to reconstruct after.
+                _ledger.LogOrder(0, orderId, "RestoreSnapshots:OrderSkipped",
+                    prev.Buy, prev.Buy, prev.Buy, prev.Sell, prev.Sell);
+                continue;
+            }
+            var orderBuyBefore = o.CurrentBuyReservation;
+            var orderSellBefore = o.CurrentSellReservedQty;
             o.RestoreReservationFromSnapshot(prev.Buy, prev.Sell);
+            _ledger.LogOrder(o.UserId, o.OrderId, "RestoreSnapshots:Order",
+                prev.Buy - orderBuyBefore, orderBuyBefore, o.CurrentBuyReservation,
+                orderSellBefore, o.CurrentSellReservedQty);
         }
     }
 }

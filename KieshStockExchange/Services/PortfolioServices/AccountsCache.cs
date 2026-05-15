@@ -121,8 +121,11 @@ public sealed class AccountsCache : IAccountsCache
         for (int i = 0; i < funds.Count; i++)
         {
             var f = funds[i];
+            var resBefore = f.ReservedBalance;
             f.ReservedBalance = 0m; // backfilled below in EnsureLoadedAsync
             _funds[(f.UserId, f.CurrencyType)] = f;
+            _ledger.LogFund(f.UserId, f.CurrencyType, null, "Hydrate:LoadFund:Clear",
+                -resBefore, resBefore, 0m, f.TotalBalance, f.TotalBalance);
         }
     }
 
@@ -132,8 +135,11 @@ public sealed class AccountsCache : IAccountsCache
         for (int i = 0; i < positions.Count; i++)
         {
             var p = positions[i];
+            var resBefore = p.ReservedQuantity;
             p.ReservedQuantity = 0; // backfilled below in EnsureLoadedAsync
             _positions[(p.UserId, p.StockId)] = p;
+            _ledger.LogPosition(p.UserId, p.StockId, null, "Hydrate:LoadPosition:Clear",
+                -resBefore, resBefore, 0, p.Quantity, p.Quantity);
         }
     }
 
@@ -221,7 +227,11 @@ public sealed class AccountsCache : IAccountsCache
                         o.OrderId, o.UserId, o.StockId, pos.Quantity, reserved, remaining);
                 }
             }
+            var posResBefore = pos.ReservedQuantity;
             pos.ReservedQuantity = reserved;
+            _ledger.LogPosition(pos.UserId, pos.StockId, null, "Hydrate:SeedPosition",
+                reserved - posResBefore, posResBefore, pos.ReservedQuantity,
+                pos.Quantity, pos.Quantity);
         }
     }
 
@@ -282,7 +292,11 @@ public sealed class AccountsCache : IAccountsCache
                         o.OrderId, o.UserId, o.CurrencyType, fund.TotalBalance, reserved, orderReservation);
                 }
             }
+            var resBefore = fund.ReservedBalance;
             fund.ReservedBalance = reserved;
+            _ledger.LogFund(fund.UserId, fund.CurrencyType, null, "Hydrate:SeedFund",
+                reserved - resBefore, resBefore, fund.ReservedBalance,
+                fund.TotalBalance, fund.TotalBalance);
         }
     }
 

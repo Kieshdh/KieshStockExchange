@@ -167,15 +167,34 @@ internal sealed class OrderModifier
             if (sellPos is not null && sellPosOldReserved.HasValue
                 && sellPos.ReservedQuantity != sellPosOldReserved.Value)
             {
+                var posResBefore = sellPos.ReservedQuantity;
                 sellPos.ReservedQuantity = sellPosOldReserved.Value;
+                _ledger.LogPosition(order.UserId, order.StockId, order.OrderId,
+                    "OrderModifier:Rollback:Position",
+                    sellPosOldReserved.Value - posResBefore,
+                    posResBefore, sellPos.ReservedQuantity,
+                    sellPos.Quantity, sellPos.Quantity);
             }
             if (buyFund is not null && buyFundOldReserved.HasValue)
             {
+                var resBefore = buyFund.ReservedBalance;
+                var totBefore = buyFund.TotalBalance;
                 buyFund.TotalBalance = buyFundOldTotal!.Value;
                 buyFund.ReservedBalance = buyFundOldReserved.Value;
+                _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
+                    "OrderModifier:Rollback:Fund",
+                    buyFundOldReserved.Value - resBefore,
+                    resBefore, buyFund.ReservedBalance,
+                    totBefore, buyFund.TotalBalance);
             }
             // Restore per-order field in lock-step with the cache rollback above.
+            var orderBuyBefore = order.CurrentBuyReservation;
+            var orderSellBefore = order.CurrentSellReservedQty;
             order.RestoreReservationFromSnapshot(orderOldBuyReservation, orderOldSellReservedQty);
+            _ledger.LogOrder(order.UserId, order.OrderId, "OrderModifier:Rollback:Order",
+                orderOldBuyReservation - orderBuyBefore,
+                orderBuyBefore, order.CurrentBuyReservation,
+                orderSellBefore, order.CurrentSellReservedQty);
             throw;
         }
     }
