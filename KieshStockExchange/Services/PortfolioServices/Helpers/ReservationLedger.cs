@@ -96,24 +96,20 @@ public interface IReservationLedger
 
 public sealed class ReservationLedger : IReservationLedger
 {
-    private const int RingCapacity = 500_000;
+    private const int RingCapacity = 250_000;
 
-    // Pre-seeded with admin (20001), a few users from earlier phantom samples, and
-    // the latest reconciler's top phantom users. Adjust via the exposed HashSet at
-    // runtime, or set TrackAll=true to firehose every user.
+    // Curated list of 20: admin + the latest reconcile's top phantom-holders.
+    // Mix of "0 open buys" pure orphans (e.g. 578, 159) and partial overlays
+    // ("expected != 0 but actual >> expected", e.g. 806, 1247) so the CSV
+    // captures both leak signatures. Adjust at runtime via the exposed HashSet.
     public HashSet<int> TrackedUserIds { get; } = new()
     {
-        20001,
-        // Earlier phantom-heavy users
-        159, 848, 911, 1336, 4017, 8069,
-        // Buyers that hit "Reservation drift on buyer X" failures
-        436, 1764, 536, 1232,
-        // Top phantom users from recent reconcile passes
-        1286, 983, 404, 1350, 1051, 952, 806, 10, 539, 1256,
-        1597, 1049, 35, 579, 1417, 4140, 1946, 2644, 1631, 957,
+        20001,                                                // admin
+        806, 578, 3584, 1625, 159, 118, 35, 1247, 956, 1679, // top 10 latest reconcile
+        4017, 848, 911, 4140, 1597, 1631, 957, 1049, 2644,   // continuing offenders
     };
 
-    public bool TrackAll { get; set; } = true;
+    public bool TrackAll { get; set; } = false;
 
     private readonly Queue<LedgerEntry> _entries = new();
     private readonly object _lock = new();
