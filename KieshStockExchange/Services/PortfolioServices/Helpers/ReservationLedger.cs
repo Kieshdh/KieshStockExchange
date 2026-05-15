@@ -98,15 +98,16 @@ public sealed class ReservationLedger : IReservationLedger
 {
     private const int RingCapacity = 250_000;
 
-    // Curated list of 20: admin + the latest reconcile's top phantom-holders.
-    // Mix of "0 open buys" pure orphans (e.g. 578, 159) and partial overlays
-    // ("expected != 0 but actual >> expected", e.g. 806, 1247) so the CSV
-    // captures both leak signatures. Adjust at runtime via the exposed HashSet.
+    // Curated list of 20: admin + the latest reconcile's top under-reserve
+    // offenders + the one transient-phantom hit + a few historical phantom
+    // users as controls (should now be clean post-DbClosed fix, useful to
+    // detect regression). Adjust at runtime via the exposed HashSet.
     public HashSet<int> TrackedUserIds { get; } = new()
     {
-        20001,                                                // admin
-        806, 578, 3584, 1625, 159, 118, 35, 1247, 956, 1679, // top 10 latest reconcile
-        4017, 848, 911, 4140, 1597, 1631, 957, 1049, 2644,   // continuing offenders
+        20001,                                                  // admin
+        1350, 499, 1205, 158, 1055, 1391, 699, 52, 274, 1084,  // top 10 under-reserve
+        118, 2644,                                              // recent phantom + sell offender
+        806, 578, 1625, 1247, 911, 957, 35,                    // historical phantom controls
     };
 
     public bool TrackAll { get; set; } = false;
