@@ -49,12 +49,15 @@ internal sealed class OrderCanceller
         if (!dbOrder.IsOpen)
         {
             if (order.IsOpen) order.Cancel(); // sync in-memory
-            // Defensive: if the order had any lingering CurrentReservation (shouldn't
-            // under the invariant), drop it so the registry observer doesn't flag it.
+            // DB row was closed by another path (fill, peer cancel) but this in-memory
+            // copy still holds CurrentReservation — release it so Fund.ReservedBalance
+            // and Position.ReservedQuantity drop in lock-step before we drop the order.
             _ledger.LogOrder(order.UserId, order.OrderId, "Remove:Cancel:DbClosed",
                 order.CurrentBuyReservation,
                 order.CurrentBuyReservation, order.CurrentBuyReservation,
                 order.CurrentSellReservedQty, order.CurrentSellReservedQty);
+            await ReleaseSellReservationAndPersist(order, ct).ConfigureAwait(false);
+            await ReleaseBuyReservationAndPersist(order, ct).ConfigureAwait(false);
             _registry.Remove(order.OrderId);
             return;
         }
