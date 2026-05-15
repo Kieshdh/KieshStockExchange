@@ -195,8 +195,12 @@ internal sealed class TradeSettler
             if (buyOrder is not null)
             {
                 SnapshotOrderIfNew(buyOrder);
+                var orderBefore = buyOrder.CurrentBuyReservation;
                 var consume = Math.Min(notional, buyOrder.CurrentBuyReservation);
                 if (consume > 0m) buyOrder.ConsumeBuyReservation(consume);
+                _ledger.LogOrder(buyOrder.UserId, buyOrder.OrderId, "ApplyPass:ConsumeReserved",
+                    consume, orderBefore, buyOrder.CurrentBuyReservation,
+                    buyOrder.CurrentSellReservedQty, buyOrder.CurrentSellReservedQty);
             }
             _ledger.LogFund(t.BuyerId, t.CurrencyType, t.BuyOrderId,
                 "ApplyPass:ConsumeReserved", notional, apResBefore, buyerFund.ReservedBalance,
@@ -214,8 +218,12 @@ internal sealed class TradeSettler
                 }
                 if (buyOrder is not null)
                 {
+                    var orderBefore = buyOrder.CurrentBuyReservation;
                     var consumeSavings = Math.Min(savings, buyOrder.CurrentBuyReservation);
                     if (consumeSavings > 0m) buyOrder.ConsumeBuyReservation(consumeSavings);
+                    _ledger.LogOrder(buyOrder.UserId, buyOrder.OrderId, "ApplyPass:Savings:Unreserve",
+                        consumeSavings, orderBefore, buyOrder.CurrentBuyReservation,
+                        buyOrder.CurrentSellReservedQty, buyOrder.CurrentSellReservedQty);
                 }
                 _ledger.LogFund(t.BuyerId, t.CurrencyType, t.BuyOrderId,
                     "ApplyPass:Savings:Unreserve", savings, resB2, buyerFund.ReservedBalance,
@@ -246,8 +254,12 @@ internal sealed class TradeSettler
                 if (!fundSnapshots.ContainsKey(sellerKey))
                     fundSnapshots[sellerKey] = (sellerFund.TotalBalance, sellerFund.ReservedBalance);
             }
+            var sellerTotBefore = sellerFund.TotalBalance;
             sellerFund.TotalBalance += notional;
             sellerFund.UpdatedAt = TimeHelper.NowUtc();
+            _ledger.LogFund(t.SellerId, t.CurrencyType, t.SellOrderId,
+                "ApplyPass:SellerCredit", notional, sellerFund.ReservedBalance, sellerFund.ReservedBalance,
+                sellerTotBefore, sellerFund.TotalBalance);
 
             // Buyer position: may reuse a position created earlier in the same root tx
             var buyerPosKey = (t.BuyerId, t.StockId);
@@ -267,8 +279,12 @@ internal sealed class TradeSettler
                 }
                 posMap[buyerPosKey] = buyerPos;
             }
+            var buyerPosQtyBefore = buyerPos.Quantity;
             buyerPos.Quantity += t.Quantity;
             buyerPos.UpdatedAt = TimeHelper.NowUtc();
+            _ledger.LogPosition(t.BuyerId, t.StockId, t.BuyOrderId, "ApplyPass:BuyerCredit",
+                t.Quantity, buyerPos.ReservedQuantity, buyerPos.ReservedQuantity,
+                buyerPosQtyBefore, buyerPos.Quantity);
 
             // Seller position: validate-pass already guaranteed sufficient Quantity
             var sellerPosKey = (t.SellerId, t.StockId);
@@ -296,19 +312,35 @@ internal sealed class TradeSettler
                         $"Insufficient reservation for seller {t.SellerId} on stock {t.StockId}: " +
                         $"has avail {sellerPos.AvailableQuantity}, needs {needed}."),
                         Array.Empty<RejectedFill>());
+                var posResBefore = sellerPos.ReservedQuantity;
                 sellerPos.ReserveStock(needed);
+                _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:TakerSellTopUp",
+                    needed, posResBefore, sellerPos.ReservedQuantity,
+                    sellerPos.Quantity, sellerPos.Quantity);
                 if (sellOrder is not null)
                 {
                     SnapshotOrderIfNew(sellOrder);
+                    var orderBefore = sellOrder.CurrentSellReservedQty;
                     sellOrder.TakeSellReservation(needed);
+                    _ledger.LogOrder(sellOrder.UserId, sellOrder.OrderId, "ApplyPass:TakerSellTopUp",
+                        needed, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
+                        orderBefore, sellOrder.CurrentSellReservedQty);
                 }
             }
+            var sellerPosResBefore = sellerPos.ReservedQuantity;
             sellerPos.ConsumeReservedStock(t.Quantity);
+            _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:ConsumeReservedStock",
+                t.Quantity, sellerPosResBefore, sellerPos.ReservedQuantity,
+                sellerPos.Quantity, sellerPos.Quantity);
             if (sellOrder is not null)
             {
                 SnapshotOrderIfNew(sellOrder);
+                var orderBefore = sellOrder.CurrentSellReservedQty;
                 var consumeQty = Math.Min(t.Quantity, sellOrder.CurrentSellReservedQty);
                 if (consumeQty > 0) sellOrder.ConsumeSellReservation(consumeQty);
+                _ledger.LogOrder(sellOrder.UserId, sellOrder.OrderId, "ApplyPass:ConsumeSellReservation",
+                    consumeQty, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
+                    orderBefore, sellOrder.CurrentSellReservedQty);
             }
         }
 
@@ -363,8 +395,12 @@ internal sealed class TradeSettler
                         }
                         // Drop per-order reservation in lock-step with the cache aggregate.
                         SnapshotOrderIfNew(o);
-                        o.ReleaseBuyReservation();
+                        var orderBefore = o.CurrentBuyReservation;
+                        var released = o.ReleaseBuyReservation();
                         o.BuyBudget = 0m;
+                        _ledger.LogOrder(o.UserId, o.OrderId, "ApplyPass:TrueMarketBuy:Leftover:Release",
+                            released, orderBefore, o.CurrentBuyReservation,
+                            o.CurrentSellReservedQty, o.CurrentSellReservedQty);
                     }
                 }
             }
@@ -374,6 +410,12 @@ internal sealed class TradeSettler
         _probe.Check(fundMap, fundSnapshots, posMap, posSnapshots, accepted);
 
         // DB writes on the caller's ambient root tx — accepted only
+        for (int i = 0; i < accepted.Count; i++)
+        {
+            var t = accepted[i];
+            _ledger.LogTransaction(t.BuyerId, t.SellerId, t.StockId, t.CurrencyType,
+                t.BuyOrderId, t.SellOrderId, t.Quantity, t.Price, t.TotalAmount);
+        }
         await _db.InsertAllAsync(accepted, ct).ConfigureAwait(false);
         await _db.UpdateAllAsync(ordersById.Values, ct).ConfigureAwait(false);
         if (loadedFunds.Count > 0)

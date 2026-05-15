@@ -75,10 +75,14 @@ internal sealed class OrderSettler
                     $"Reserved={CurrencyHelper.Format(buyFund.ReservedBalance, incoming.CurrencyType)}); " +
                     $"race on ReserveFunds.");
             }
+            var orderBuyBefore = incoming.CurrentBuyReservation;
             incoming.TakeBuyReservation(buyReservation);
             _ledger.LogFund(incoming.UserId, incoming.CurrencyType, incoming.OrderId,
                 "SettleOrderAsync:Reserve", buyReservation, resBefore, buyFund.ReservedBalance,
                 totBefore, buyFund.TotalBalance);
+            _ledger.LogOrder(incoming.UserId, incoming.OrderId, "SettleOrderAsync:Reserve",
+                buyReservation, orderBuyBefore, incoming.CurrentBuyReservation,
+                incoming.CurrentSellReservedQty, incoming.CurrentSellReservedQty);
         }
         else
         {
@@ -96,6 +100,7 @@ internal sealed class OrderSettler
                     $"(Quantity={sellPos.Quantity}, Reserved={sellPos.ReservedQuantity}).");
             }
 
+            var posResBefore = sellPos.ReservedQuantity;
             try { sellPos.ReserveStock(incoming.Quantity); }
             catch (ArgumentException)
             {
@@ -104,7 +109,14 @@ internal sealed class OrderSettler
                     $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available " +
                     $"(Quantity={sellPos.Quantity}, Reserved={sellPos.ReservedQuantity}); race on ReserveStock.");
             }
+            _ledger.LogPosition(incoming.UserId, incoming.StockId, incoming.OrderId, "SettleOrderAsync:Reserve",
+                incoming.Quantity, posResBefore, sellPos.ReservedQuantity,
+                sellPos.Quantity, sellPos.Quantity);
+            var orderSellBefore = incoming.CurrentSellReservedQty;
             incoming.TakeSellReservation(incoming.Quantity);
+            _ledger.LogOrder(incoming.UserId, incoming.OrderId, "SettleOrderAsync:Reserve",
+                incoming.Quantity, incoming.CurrentBuyReservation, incoming.CurrentBuyReservation,
+                orderSellBefore, incoming.CurrentSellReservedQty);
         }
 
         await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -135,8 +147,19 @@ internal sealed class OrderSettler
                 var toRelease = Math.Min(incoming.Quantity, sellPos.ReservedQuantity);
                 if (toRelease > 0)
                 {
+                    var posResBefore = sellPos.ReservedQuantity;
                     sellPos.UnreserveStock(toRelease);
-                    incoming.ConsumeSellReservation(Math.Min(toRelease, incoming.CurrentSellReservedQty));
+                    _ledger.LogPosition(incoming.UserId, incoming.StockId, incoming.OrderId,
+                        "SettleOrderAsync:Rollback:Unreserve",
+                        toRelease, posResBefore, sellPos.ReservedQuantity,
+                        sellPos.Quantity, sellPos.Quantity);
+                    var orderSellBefore = incoming.CurrentSellReservedQty;
+                    var consumeQty = Math.Min(toRelease, incoming.CurrentSellReservedQty);
+                    incoming.ConsumeSellReservation(consumeQty);
+                    _ledger.LogOrder(incoming.UserId, incoming.OrderId,
+                        "SettleOrderAsync:Rollback:Unreserve",
+                        consumeQty, incoming.CurrentBuyReservation, incoming.CurrentBuyReservation,
+                        orderSellBefore, incoming.CurrentSellReservedQty);
                 }
             }
             if (buyFund is not null && buyReservation > 0m)
@@ -147,10 +170,16 @@ internal sealed class OrderSettler
                     var resB = buyFund.ReservedBalance;
                     var totB = buyFund.TotalBalance;
                     buyFund.UnreserveFunds(toRelease);
-                    incoming.ConsumeBuyReservation(Math.Min(toRelease, incoming.CurrentBuyReservation));
+                    var orderBuyBefore = incoming.CurrentBuyReservation;
+                    var consumeAmt = Math.Min(toRelease, incoming.CurrentBuyReservation);
+                    incoming.ConsumeBuyReservation(consumeAmt);
                     _ledger.LogFund(incoming.UserId, incoming.CurrencyType, incoming.OrderId,
                         "SettleOrderAsync:Rollback:Unreserve", toRelease, resB, buyFund.ReservedBalance,
                         totB, buyFund.TotalBalance);
+                    _ledger.LogOrder(incoming.UserId, incoming.OrderId,
+                        "SettleOrderAsync:Rollback:Unreserve",
+                        consumeAmt, orderBuyBefore, incoming.CurrentBuyReservation,
+                        incoming.CurrentSellReservedQty, incoming.CurrentSellReservedQty);
                 }
             }
             _logger.LogError(ex, "SettleOrderAsync failed to persist order");

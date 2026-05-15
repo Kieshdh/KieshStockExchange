@@ -108,6 +108,8 @@ internal sealed class OrderModifier
             // Apply delta + persist in the same tx so DB and cache stay in sync
             if (sellPos is not null && sellReservationDelta != 0)
             {
+                var posResBefore = sellPos.ReservedQuantity;
+                var orderSellBefore = order.CurrentSellReservedQty;
                 if (sellReservationDelta > 0)
                 {
                     sellPos.ReserveStock(sellReservationDelta);
@@ -119,6 +121,13 @@ internal sealed class OrderModifier
                     order.ConsumeSellReservation(-sellReservationDelta);
                 }
                 sellPos.UpdatedAt = TimeHelper.NowUtc();
+                var posAction = sellReservationDelta > 0 ? "ApplyOrderChange:Reserve" : "ApplyOrderChange:Unreserve";
+                _ledger.LogPosition(order.UserId, order.StockId, order.OrderId, posAction,
+                    Math.Abs(sellReservationDelta), posResBefore, sellPos.ReservedQuantity,
+                    sellPos.Quantity, sellPos.Quantity);
+                _ledger.LogOrder(order.UserId, order.OrderId, posAction,
+                    Math.Abs(sellReservationDelta), order.CurrentBuyReservation, order.CurrentBuyReservation,
+                    orderSellBefore, order.CurrentSellReservedQty);
                 await _db.UpdateAllAsync(new[] { sellPos }, ct).ConfigureAwait(false);
             }
 
@@ -126,6 +135,7 @@ internal sealed class OrderModifier
             {
                 var resB = buyFund.ReservedBalance;
                 var totB = buyFund.TotalBalance;
+                var orderBuyBefore = order.CurrentBuyReservation;
                 if (buyReservationDelta > 0m)
                 {
                     buyFund.ReserveFunds(buyReservationDelta);
@@ -137,10 +147,13 @@ internal sealed class OrderModifier
                     order.ConsumeBuyReservation(-buyReservationDelta);
                 }
                 buyFund.UpdatedAt = TimeHelper.NowUtc();
-                _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
-                    buyReservationDelta > 0m ? "ApplyOrderChange:Reserve" : "ApplyOrderChange:Unreserve",
+                var fundAction = buyReservationDelta > 0m ? "ApplyOrderChange:Reserve" : "ApplyOrderChange:Unreserve";
+                _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId, fundAction,
                     Math.Abs(buyReservationDelta), resB, buyFund.ReservedBalance,
                     totB, buyFund.TotalBalance);
+                _ledger.LogOrder(order.UserId, order.OrderId, fundAction,
+                    Math.Abs(buyReservationDelta), orderBuyBefore, order.CurrentBuyReservation,
+                    order.CurrentSellReservedQty, order.CurrentSellReservedQty);
                 await _db.UpdateAllAsync(new[] { buyFund }, ct).ConfigureAwait(false);
             }
 

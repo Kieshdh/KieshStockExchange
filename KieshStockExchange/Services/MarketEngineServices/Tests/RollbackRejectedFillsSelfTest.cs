@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -119,7 +120,7 @@ public static class RollbackRejectedFillsSelfTest
         var ordersById = new Dictionary<int, Order> { [1001] = buyMaker, [1002] = sellTaker };
 
         OrderExecutionService.RollbackRejectedFillsCore(
-            matches, book, rejected, ordersById, accounts, logger, debugUserId: null);
+            matches, book, rejected, ordersById, accounts, new ReservationLedger(), logger, debugUserId: null);
 
         // Buy maker reverted, not cancelled, still on the book.
         AssertEqual(0, buyMaker.AmountFilled, "buy maker AmountFilled reverted to pre-fill");
@@ -177,7 +178,7 @@ public static class RollbackRejectedFillsSelfTest
         var ordersById = new Dictionary<int, Order> { [2001] = buyMaker, [2002] = sellTaker };
 
         OrderExecutionService.RollbackRejectedFillsCore(
-            matches, book, rejected, ordersById, accounts, logger, debugUserId: null);
+            matches, book, rejected, ordersById, accounts, new ReservationLedger(), logger, debugUserId: null);
 
         // Buy maker reverted and re-inserted into the book.
         AssertEqual(0, buyMaker.AmountFilled, "buy maker AmountFilled reverted");
@@ -242,7 +243,7 @@ public static class RollbackRejectedFillsSelfTest
         var ordersById = new Dictionary<int, Order> { [3001] = sellMaker, [3002] = buyTaker };
 
         OrderExecutionService.RollbackRejectedFillsCore(
-            matches, book, rejected, ordersById, accounts, logger, debugUserId: null);
+            matches, book, rejected, ordersById, accounts, new ReservationLedger(), logger, debugUserId: null);
 
         // Sell maker cancelled and removed.
         AssertEqual(Order.Statuses.Cancelled, sellMaker.Status, "sell maker cancelled");

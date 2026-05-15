@@ -83,9 +83,17 @@ internal sealed class OrderCanceller
         var toRelease = Math.Min(qty, pos.ReservedQuantity);
         if (toRelease > 0)
         {
+            var posResBefore = pos.ReservedQuantity;
             pos.UnreserveStock(toRelease);
             pos.UpdatedAt = TimeHelper.NowUtc();
-            order.ReleaseSellReservation();
+            _ledger.LogPosition(order.UserId, order.StockId, order.OrderId,
+                "CancelRemainder:ReleaseSell", toRelease, posResBefore, pos.ReservedQuantity,
+                pos.Quantity, pos.Quantity);
+            var orderSellBefore = order.CurrentSellReservedQty;
+            var released = order.ReleaseSellReservation();
+            _ledger.LogOrder(order.UserId, order.OrderId, "CancelRemainder:ReleaseSell",
+                released, order.CurrentBuyReservation, order.CurrentBuyReservation,
+                orderSellBefore, order.CurrentSellReservedQty);
             await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
         }
 
@@ -111,10 +119,14 @@ internal sealed class OrderCanceller
             var totB = fund.TotalBalance;
             fund.UnreserveFunds(toRelease);
             fund.UpdatedAt = TimeHelper.NowUtc();
-            order.ReleaseBuyReservation();
+            var orderBuyBefore = order.CurrentBuyReservation;
+            var released = order.ReleaseBuyReservation();
             _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
                 "CancelRemainder:ReleaseBuy", toRelease, resB, fund.ReservedBalance,
                 totB, fund.TotalBalance);
+            _ledger.LogOrder(order.UserId, order.OrderId, "CancelRemainder:ReleaseBuy",
+                released, orderBuyBefore, order.CurrentBuyReservation,
+                order.CurrentSellReservedQty, order.CurrentSellReservedQty);
             await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
         }
 

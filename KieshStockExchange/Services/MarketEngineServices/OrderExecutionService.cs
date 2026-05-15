@@ -394,6 +394,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 if (pos.PositionId != 0 && !scope.PosSnapshots.ContainsKey(key))
                     scope.PosSnapshots[key] = (pos.Quantity, pos.ReservedQuantity);
 
+                var posResBefore = pos.ReservedQuantity;
                 try { pos.ReserveStock(order.Quantity); }
                 catch (ArgumentException)
                 {
@@ -408,7 +409,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     rejected.Add(idx);
                     continue;
                 }
+                _ledger.LogPosition(order.UserId, order.StockId, order.OrderId, "Phase1.5:Reserve",
+                    order.Quantity, posResBefore, pos.ReservedQuantity,
+                    pos.Quantity, pos.Quantity);
+                var orderSellBefore = order.CurrentSellReservedQty;
                 order.TakeSellReservation(order.Quantity);
+                _ledger.LogOrder(order.UserId, order.OrderId, "Phase1.5:Reserve",
+                    order.Quantity, order.CurrentBuyReservation, order.CurrentBuyReservation,
+                    orderSellBefore, order.CurrentSellReservedQty);
             }
 
             if (rejected is not null)
@@ -502,10 +510,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     buyRejected.Add(idx);
                     continue;
                 }
+                var orderBuyBefore = order.CurrentBuyReservation;
                 order.TakeBuyReservation(reservation);
                 _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
                     "Phase1.6:Reserve", reservation, resBefore, fund.ReservedBalance,
                     totBefore, fund.TotalBalance);
+                _ledger.LogOrder(order.UserId, order.OrderId, "Phase1.6:Reserve",
+                    reservation, orderBuyBefore, order.CurrentBuyReservation,
+                    order.CurrentSellReservedQty, order.CurrentSellReservedQty);
             }
 
             if (buyRejected is not null)
@@ -812,9 +824,19 @@ public sealed class OrderExecutionService : IOrderExecutionService
                             var toRelease = Math.Min(order.CurrentSellReservedQty, pos.ReservedQuantity);
                             if (toRelease > 0)
                             {
+                                var posResBefore = pos.ReservedQuantity;
                                 pos.UnreserveStock(toRelease);
                                 pos.UpdatedAt = TimeHelper.NowUtc();
-                                order.ReleaseSellReservation();
+                                _ledger.LogPosition(order.UserId, order.StockId, order.OrderId,
+                                    "RecoverFailedGroup:Unreserve",
+                                    toRelease, posResBefore, pos.ReservedQuantity,
+                                    pos.Quantity, pos.Quantity);
+                                var orderSellBefore = order.CurrentSellReservedQty;
+                                var released = order.ReleaseSellReservation();
+                                _ledger.LogOrder(order.UserId, order.OrderId,
+                                    "RecoverFailedGroup:Unreserve",
+                                    released, order.CurrentBuyReservation, order.CurrentBuyReservation,
+                                    orderSellBefore, order.CurrentSellReservedQty);
                             }
                             await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
                         }
@@ -836,10 +858,15 @@ public sealed class OrderExecutionService : IOrderExecutionService
                                 var totB = fund.TotalBalance;
                                 fund.UnreserveFunds(toRelease);
                                 fund.UpdatedAt = TimeHelper.NowUtc();
-                                order.ReleaseBuyReservation();
+                                var orderBuyBefore = order.CurrentBuyReservation;
+                                var released = order.ReleaseBuyReservation();
                                 _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
                                     "RecoverFailedGroup:Unreserve", toRelease, resB, fund.ReservedBalance,
                                     totB, fund.TotalBalance);
+                                _ledger.LogOrder(order.UserId, order.OrderId,
+                                    "RecoverFailedGroup:Unreserve",
+                                    released, orderBuyBefore, order.CurrentBuyReservation,
+                                    order.CurrentSellReservedQty, order.CurrentSellReservedQty);
                             }
                             await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
                         }
@@ -1069,8 +1096,17 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     if (pos is null) continue;
                     var toRelease = Math.Min(unreserve, pos.ReservedQuantity);
                     if (toRelease <= 0) continue;
+                    var posResBefore = pos.ReservedQuantity;
                     pos.UnreserveStock(toRelease);
-                    o.ReleaseSellReservation();
+                    _ledger.LogPosition(o.UserId, o.StockId, o.OrderId,
+                        "CancelOrdersBatch:Unreserve",
+                        toRelease, posResBefore, pos.ReservedQuantity,
+                        pos.Quantity, pos.Quantity);
+                    var orderSellBefore = o.CurrentSellReservedQty;
+                    var released = o.ReleaseSellReservation();
+                    _ledger.LogOrder(o.UserId, o.OrderId, "CancelOrdersBatch:Unreserve",
+                        released, o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        orderSellBefore, o.CurrentSellReservedQty);
                 }
                 else if (o.IsBuyOrder)
                 {
@@ -1083,7 +1119,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     var resB = fund.ReservedBalance;
                     var totB = fund.TotalBalance;
                     fund.UnreserveFunds(toRelease);
-                    o.ReleaseBuyReservation();
+                    var orderBuyBefore = o.CurrentBuyReservation;
+                    var released = o.ReleaseBuyReservation();
+                    _ledger.LogOrder(o.UserId, o.OrderId, "CancelOrdersBatch:Unreserve",
+                        released, orderBuyBefore, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
                     _ledger.LogFund(o.UserId, o.CurrencyType, o.OrderId,
                         "CancelOrdersBatch:Unreserve", toRelease, resB, fund.ReservedBalance,
                         totB, fund.TotalBalance);
@@ -1165,7 +1205,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         OrderBook book,
         IReadOnlyList<RejectedFill> rejected,
         Dictionary<int, Order> ordersById)
-        => RollbackRejectedFillsCore(matches, book, rejected, ordersById, _accounts, _logger, DebugUserId);
+        => RollbackRejectedFillsCore(matches, book, rejected, ordersById, _accounts, _ledger, _logger, DebugUserId);
 
     /// <summary>
     /// Static core of the rejected-fills rollback so deterministic self-tests
@@ -1181,6 +1221,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         IReadOnlyList<RejectedFill> rejected,
         Dictionary<int, Order> ordersById,
         IAccountsCache accounts,
+        IReservationLedger ledger,
         ILogger logger,
         int? debugUserId)
     {
@@ -1317,9 +1358,19 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     var toRelease = Math.Min(maker.CurrentSellReservedQty, pos.ReservedQuantity);
                     if (toRelease > 0)
                     {
+                        var posResBefore = pos.ReservedQuantity;
                         pos.UnreserveStock(toRelease);
                         pos.UpdatedAt = TimeHelper.NowUtc();
-                        maker.ReleaseSellReservation();
+                        ledger.LogPosition(maker.UserId, maker.StockId, maker.OrderId,
+                            "RollbackRejectedFills:5a:Unreserve",
+                            toRelease, posResBefore, pos.ReservedQuantity,
+                            pos.Quantity, pos.Quantity);
+                        var orderSellBefore = maker.CurrentSellReservedQty;
+                        var released = maker.ReleaseSellReservation();
+                        ledger.LogOrder(maker.UserId, maker.OrderId,
+                            "RollbackRejectedFills:5a:Unreserve",
+                            released, maker.CurrentBuyReservation, maker.CurrentBuyReservation,
+                            orderSellBefore, maker.CurrentSellReservedQty);
                     }
                 }
             }
