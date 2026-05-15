@@ -141,7 +141,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
             foreach (var o in ordersById.Values)
             {
                 if (o.IsFilled && o.CurrentBuyReservation == 0m && o.CurrentSellReservedQty == 0)
+                {
+                    _ledger.LogOrder(o.UserId, o.OrderId, "Remove:PlaceAndMatch:FilledZero",
+                        0m, 0m, 0m, 0, 0);
                     _registry.Remove(o.OrderId);
+                }
             }
 
         }).ConfigureAwait(false);
@@ -774,13 +778,21 @@ public sealed class OrderExecutionService : IOrderExecutionService
             var rec = outcome.Records[i];
             if (rec.Order.IsFilled && rec.Order.CurrentBuyReservation == 0m
                 && rec.Order.CurrentSellReservedQty == 0)
+            {
+                _ledger.LogOrder(rec.Order.UserId, rec.Order.OrderId,
+                    "Remove:SettleGroup:FilledZero:Taker", 0m, 0m, 0m, 0, 0);
                 _registry.Remove(rec.Order.OrderId);
+            }
             for (int s = 0; s < rec.Match.MakerSnapshots.Count; s++)
             {
                 var m = rec.Match.MakerSnapshots[s].Order;
                 if (m.IsFilled && m.CurrentBuyReservation == 0m
                     && m.CurrentSellReservedQty == 0)
+                {
+                    _ledger.LogOrder(m.UserId, m.OrderId,
+                        "Remove:SettleGroup:FilledZero:Maker", 0m, 0m, 0m, 0, 0);
                     _registry.Remove(m.OrderId);
+                }
             }
         }
 

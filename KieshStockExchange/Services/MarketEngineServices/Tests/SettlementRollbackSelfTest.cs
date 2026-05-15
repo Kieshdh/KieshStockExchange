@@ -207,8 +207,9 @@ public static class SettlementRollbackSelfTest
     {
         var db = new FakeDb();
         var registry = new OrderRegistry();
-        var cache = new AccountsCache(db, registry, factory.CreateLogger<AccountsCache>());
-        var engine = new SettlementEngine(db, cache, new ReservationLedger(), registry,
+        var ledger = new ReservationLedger();
+        var cache = new AccountsCache(db, registry, ledger, factory.CreateLogger<AccountsCache>());
+        var engine = new SettlementEngine(db, cache, ledger, registry,
             factory.CreateLogger<SettlementEngine>(),
             factory, Options.Create(new SeparatorLoggerOptions()));
         return (db, cache, engine);

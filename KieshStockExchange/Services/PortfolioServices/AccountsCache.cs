@@ -6,6 +6,7 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 namespace KieshStockExchange.Services.PortfolioServices;
@@ -36,12 +37,15 @@ public sealed class AccountsCache : IAccountsCache
     #region Services and Constructor
     private readonly IDataBaseService _db;
     private readonly IOrderRegistry _registry;
+    private readonly IReservationLedger _ledger;
     private readonly ILogger<AccountsCache> _logger;
 
-    public AccountsCache(IDataBaseService db, IOrderRegistry registry, ILogger<AccountsCache> logger)
+    public AccountsCache(IDataBaseService db, IOrderRegistry registry,
+        IReservationLedger ledger, ILogger<AccountsCache> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -177,6 +181,10 @@ public sealed class AccountsCache : IAccountsCache
                     var o = list[i];
                     if (o.IsOpen) o.Cancel();
                     ordersToCancel.Add(o);
+                    _ledger.LogOrder(o.UserId, o.OrderId, "Remove:Hydrate:OrphanSeller:NoPos",
+                        o.CurrentBuyReservation,
+                        o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
                     _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled orphan order #{OrderId} on cache load (seller {UserId}, stock {StockId}): no Position row.",
@@ -202,6 +210,10 @@ public sealed class AccountsCache : IAccountsCache
                 {
                     if (o.IsOpen) o.Cancel();
                     ordersToCancel.Add(o);
+                    _ledger.LogOrder(o.UserId, o.OrderId, "Remove:Hydrate:StaleSeller:OverReserve",
+                        o.CurrentBuyReservation,
+                        o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
                     _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled stale order #{OrderId} on cache load (seller {UserId}, stock {StockId}): " +
@@ -229,6 +241,10 @@ public sealed class AccountsCache : IAccountsCache
                     var o = list[i];
                     if (o.IsOpen) o.Cancel();
                     ordersToCancel.Add(o);
+                    _ledger.LogOrder(o.UserId, o.OrderId, "Remove:Hydrate:OrphanBuyer:NoFund",
+                        o.CurrentBuyReservation,
+                        o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
                     _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled orphan order #{OrderId} on cache load (buyer {UserId}, currency {Currency}): no Fund row.",
@@ -255,6 +271,10 @@ public sealed class AccountsCache : IAccountsCache
                 {
                     if (o.IsOpen) o.Cancel();
                     ordersToCancel.Add(o);
+                    _ledger.LogOrder(o.UserId, o.OrderId, "Remove:Hydrate:StaleBuyer:OverReserve",
+                        o.CurrentBuyReservation,
+                        o.CurrentBuyReservation, o.CurrentBuyReservation,
+                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
                     _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled stale order #{OrderId} on cache load (buyer {UserId}, currency {Currency}): " +

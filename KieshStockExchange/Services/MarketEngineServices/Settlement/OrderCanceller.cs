@@ -51,6 +51,10 @@ internal sealed class OrderCanceller
             if (order.IsOpen) order.Cancel(); // sync in-memory
             // Defensive: if the order had any lingering CurrentReservation (shouldn't
             // under the invariant), drop it so the registry observer doesn't flag it.
+            _ledger.LogOrder(order.UserId, order.OrderId, "Remove:Cancel:DbClosed",
+                order.CurrentBuyReservation,
+                order.CurrentBuyReservation, order.CurrentBuyReservation,
+                order.CurrentSellReservedQty, order.CurrentSellReservedQty);
             _registry.Remove(order.OrderId);
             return;
         }
@@ -66,6 +70,10 @@ internal sealed class OrderCanceller
 
         // Terminal state + zero reservation: drop from registry. Reconciler doesn't
         // need to keep seeing this order.
+        _ledger.LogOrder(order.UserId, order.OrderId, "Remove:Cancel:Success",
+            order.CurrentBuyReservation,
+            order.CurrentBuyReservation, order.CurrentBuyReservation,
+            order.CurrentSellReservedQty, order.CurrentSellReservedQty);
         _registry.Remove(order.OrderId);
     }
 
