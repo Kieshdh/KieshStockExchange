@@ -218,20 +218,11 @@
                     </VerticalStackLayout>
                 </Border>
 
-                <!-- Failure breakdown + export -->
+                <!-- Failure breakdown (reasons + top stocks) -->
                 <Border Style="{StaticResource AdminCardStyle}">
                     <VerticalStackLayout Spacing="8">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <Label Grid.Column="0" Text="Failure breakdown"
-                                   Style="{StaticResource AdminCardSubtitle}"
-                                   VerticalOptions="Center" />
-                            <Button Grid.Column="1" Text="Export CSV"
-                                    Style="{StaticResource AdminPrimaryButton}"
-                                    Command="{Binding ExportFailuresCommand}"
-                                    MinimumWidthRequest="120" />
-                        </Grid>
-
-                        <!-- Reasons on the left, top stocks on the right. -->
+                        <Label Text="Failure breakdown"
+                               Style="{StaticResource AdminCardSubtitle}" />
                         <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                             <Border Grid.Column="0" Style="{StaticResource AdminInsetPanel}">
                                 <Label Text="{Binding FailuresByReasonText}"
@@ -242,28 +233,56 @@
                                        Style="{StaticResource AdminMutedNote}" />
                             </Border>
                         </Grid>
-
-                        <Label Text="{Binding ExportFailuresStatusText}"
-                               Style="{StaticResource AdminMutedNote}" />
                     </VerticalStackLayout>
                 </Border>
 
-                <!-- Reservation ledger export -->
-                <Border Style="{StaticResource AdminCardStyle}">
-                    <VerticalStackLayout Spacing="8">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <Label Grid.Column="0" Text="Reservation ledger (tracked users)"
-                                   Style="{StaticResource AdminCardSubtitle}"
-                                   VerticalOptions="Center" />
-                            <Button Grid.Column="1" Text="Export CSV"
+                <!-- CSV exports: three side-by-side cards (same column layout as the KPI grid) -->
+                <Grid ColumnDefinitions="*,*,*"
+                      ColumnSpacing="10"
+                      Padding="12,0">
+
+                    <Border Grid.Column="0" Style="{StaticResource AdminCardStyle}">
+                        <VerticalStackLayout Spacing="8">
+                            <Label Text="Failures"
+                                   Style="{StaticResource AdminCardSubtitle}" />
+                            <Button Text="Export CSV"
+                                    Style="{StaticResource AdminPrimaryButton}"
+                                    Command="{Binding ExportFailuresCommand}"
+                                    HorizontalOptions="Start"
+                                    MinimumWidthRequest="120" />
+                            <Label Text="{Binding ExportFailuresStatusText}"
+                                   Style="{StaticResource AdminMutedNote}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Column="1" Style="{StaticResource AdminCardStyle}">
+                        <VerticalStackLayout Spacing="8">
+                            <Label Text="Economy snapshots"
+                                   Style="{StaticResource AdminCardSubtitle}" />
+                            <Button Text="Export CSV"
+                                    Style="{StaticResource AdminPrimaryButton}"
+                                    Command="{Binding ExportEconomyCommand}"
+                                    HorizontalOptions="Start"
+                                    MinimumWidthRequest="120" />
+                            <Label Text="{Binding ExportEconomyStatusText}"
+                                   Style="{StaticResource AdminMutedNote}" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource AdminCardStyle}">
+                        <VerticalStackLayout Spacing="8">
+                            <Label Text="Reservation ledger"
+                                   Style="{StaticResource AdminCardSubtitle}" />
+                            <Button Text="Export CSV"
                                     Style="{StaticResource AdminPrimaryButton}"
                                     Command="{Binding ExportLedgerCommand}"
+                                    HorizontalOptions="Start"
                                     MinimumWidthRequest="120" />
-                        </Grid>
-                        <Label Text="{Binding ExportLedgerStatusText}"
-                               Style="{StaticResource AdminMutedNote}" />
-                    </VerticalStackLayout>
-                </Border>
+                            <Label Text="{Binding ExportLedgerStatusText}"
+                                   Style="{StaticResource AdminMutedNote}" />
+                        </VerticalStackLayout>
+                    </Border>
+                </Grid>
 
                 <!-- Recent failures (last 100, scrollable) -->
                 <Border Style="{StaticResource AdminCardStyle}">

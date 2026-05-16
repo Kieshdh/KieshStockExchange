@@ -94,6 +94,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     public Task<string> ExportReservationLedgerCsvAsync(string path, CancellationToken ct = default)
         => _auditor.ExportLedgerCsvAsync(path, ct);
 
+    // Economy telemetry surface delegates to the telemetry helper.
+    public int EconomySampleCount => _economy.SampleCount;
+    public string SuggestedEconomyExportFileName => _economy.SuggestedExportFileName;
+    public Task<string> ExportEconomyCsvAsync(string path, CancellationToken ct = default)
+        => _economy.ExportCsvAsync(path, ct);
+
     public event EventHandler? StatsChanged;
     #endregion
 
@@ -103,14 +109,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private DateTime _nextDailyCheck    = DateTime.MinValue;
     private DateTime _nextAssetReload   = DateTime.MinValue;
     private DateTime _nextPruneTime     = DateTime.MinValue;
-    private DateTime _nextStatsLogTime  = DateTime.MinValue;
-    private DateTime _nextReconcileTime = DateTime.MinValue;
+    private DateTime _nextStatsLogTime    = DateTime.MinValue;
+    private DateTime _nextReconcileTime   = DateTime.MinValue;
+    private DateTime _nextEconomyLogTime  = DateTime.MinValue;
 
     private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(30);
     // Reservation reconcile: 5 minutes is plenty for a passive leak hunter; first
     // run fires 1 minute after start so a cold-load mismatch surfaces early.
     private static readonly TimeSpan ReconcileInterval   = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ReconcileFirstDelay = TimeSpan.FromMinutes(1);
+    // Economy snapshot: 60s is frequent enough to spot drift trends without the
+    // per-call walk (bots × positions) crowding the log.
+    private static readonly TimeSpan EconomyLogInterval = TimeSpan.FromSeconds(60);
 
     private CancellationTokenSource? _cts;
     private Task? _runner;
@@ -130,6 +140,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly BotFailureTracker    _failures;
     private readonly BotStatsLogger       _stats;
     private readonly ReservationAuditor   _auditor;
+    private readonly BotEconomyTelemetry  _economy;
     #endregion
 
     #region Services and Constructor
@@ -164,6 +175,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions));
+        _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
         _decisions = new AiBotDecisionService(market, accounts,
@@ -264,8 +276,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         Interlocked.Exchange(ref _lastTickWorkMicros, 0);
         _stats.Reset();
         _failures.Reset();
-        _nextStatsLogTime  = TimeHelper.NowUtc() + StatsLogInterval;
-        _nextReconcileTime = TimeHelper.NowUtc() + ReconcileFirstDelay;
+        _economy.Reset();
+        _nextStatsLogTime   = TimeHelper.NowUtc() + StatsLogInterval;
+        _nextReconcileTime  = TimeHelper.NowUtc() + ReconcileFirstDelay;
+        _nextEconomyLogTime = TimeHelper.NowUtc() + EconomyLogInterval;
         LastTradeAtUtc   = null;
         LoopStartedAtUtc = TimeHelper.NowUtc();
     }
@@ -467,6 +481,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _stats.LogWindow(OnlineBotCount, LoadedBotCount);
             _nextStatsLogTime = now + StatsLogInterval;
         }
+        if (now >= _nextEconomyLogTime)
+        {
+            _economy.LogSnapshot(CurrenciesToTrade);
+            _nextEconomyLogTime = now + EconomyLogInterval;
+        }
         if (now >= _nextReconcileTime)
         {
             _nextReconcileTime = now + ReconcileInterval;
@@ -480,6 +499,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             }, ct);
         }
     }
+
     #endregion
 
     #region IAsyncDisposable

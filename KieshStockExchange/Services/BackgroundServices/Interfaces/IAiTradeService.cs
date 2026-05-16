@@ -121,6 +121,19 @@ public interface IAiTradeService
     /// </summary>
     Task<string> ExportReservationLedgerCsvAsync(string path, CancellationToken ct = default);
 
+    /// <summary>Rows currently buffered by the economy-telemetry sampler.</summary>
+    int EconomySampleCount { get; }
+
+    /// <summary>Suggested file name (without extension) for the economy export dialog.</summary>
+    string SuggestedEconomyExportFileName { get; }
+
+    /// <summary>
+    /// Writes every recorded economy snapshot (total wealth + per-snapshot drift
+    /// summary) to a CSV at <paramref name="path"/>. Used to confirm wealth
+    /// conservation and locate the stocks driving the 3.3 price drift.
+    /// </summary>
+    Task<string> ExportEconomyCsvAsync(string path, CancellationToken ct = default);
+
     /// <summary>Raised after each trading-loop tick and on lifecycle changes.</summary>
     event EventHandler? StatsChanged;
 
