@@ -657,23 +657,26 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             "Reservation reconcile: {Mismatch} mismatches ({Phantom} phantom, {Under} under-reserved, phantomTotal≈{Total:F2}).",
             mismatches.Count, phantomCount, underCount, phantomTotal);
 
-        int sample = Math.Min(10, ordered.Count);
+        // Build the final string
+        var sb = new StringBuilder();
+        int sample = Math.Min(30, ordered.Count);
         for (int i = 0; i < sample; i++)
         {
             var m = ordered[i];
             if (m.StockId is int sid)
             {
-                _logger.LogWarning(
-                    "  pos user={User} stock={Stock}: expected={Expected}, actual={Actual}, delta={Delta} ({Count} open sells)",
-                    m.UserId, sid, m.ExpectedReserved, m.ActualReserved, m.Delta, m.OpenOrderCount);
+                sb.AppendLine(
+                    $"  pos user={m.UserId} stock={sid}: expected={m.ExpectedReserved}, actual={m.ActualReserved}, delta={m.Delta} ({m.OpenOrderCount} open sells)");
             }
             else if (m.Currency is CurrencyType ccy)
             {
-                _logger.LogWarning(
-                    "  fund user={User} ccy={Ccy}: expected={Expected}, actual={Actual}, delta={Delta} ({Count} open buys)",
-                    m.UserId, ccy, m.ExpectedReserved, m.ActualReserved, m.Delta, m.OpenOrderCount);
+                sb.AppendLine(
+                    $"  fund user={m.UserId} ccy={ccy}: expected={m.ExpectedReserved}, actual={m.ActualReserved}, delta={m.Delta} ({m.OpenOrderCount} open buys)");
             }
         }
+
+        if (sb.Length > 0)
+            _logger.LogWarning("Top {Sample} reservation mismatches:{NewLine}{Details}", sample, Environment.NewLine, sb.ToString().TrimEnd());
     }
 
     private void LogStatsWindow()
