@@ -124,9 +124,9 @@ class Person:
             self.min_stocks = random.randint(*STOCKS_HIGH_MIN_RANGE)
             self.max_stocks = random.randint(*STOCKS_HIGH_MAX_RANGE)
 
-        # Watchlist is a bit larger than what they actually hold. Keyed by
-        # StockId (matches DB Position.StockId), weighted by 1/sid**alpha so
-        # larger-cap names (lower id) land in more watchlists.
+        # Watchlist: composition mildly biased toward big-caps by 1/sid**α
+        # (α = WATCHLIST_WEIGHT_ALPHA, kept low — heavy bias now lives on the
+        # holding-quantity side via HOLDING_WEIGHT_ALPHA below).
         watchlist_extra = random.randint(WATCHLIST_EXTRA_LO, WATCHLIST_EXTRA_HI)
         watchlist_size = min(len(STOCKS), self.max_stocks + watchlist_extra)
         ids = list(STOCKS)
@@ -134,11 +134,31 @@ class Person:
         watchlist = weighted_sample_no_replace(ids, weights, watchlist_size)
         self.watchlist_csv = ",".join(str(sid) for sid in sorted(watchlist))
 
-        # Select actual portfolio from watchlist (already biased, so uniform here).
+        # Allocate the bot's stock budget across n picked stocks, weighted by
+        # 1/sid**HOLDING_WEIGHT_ALPHA so larger-caps end up with more SHARES
+        # (not just more presence). Cash budget = balance × cash_frac with
+        # cash_frac = (2·min_cash + max_cash)/3 (weighted toward min_cash).
         n_stocks = random.randint(self.min_stocks, self.max_stocks)
         portfolio = random.sample(watchlist, n_stocks)
-        amount_per_stock = self.balance * (1 - (self.min_cash*2 + self.max_cash)/3) // n_stocks
-        self.holdings = { sid: int(amount_per_stock // STOCKS[sid]["price"]) for sid in portfolio }
+        cash_frac = (self.min_cash * 2 + self.max_cash) / 3
+        target_stock_value = self.balance * (1 - cash_frac)
+
+        holding_weights = [1.0 / (sid ** HOLDING_WEIGHT_ALPHA) for sid in portfolio]
+        weight_sum = sum(holding_weights)
+        self.holdings = {}
+        for sid, w in zip(portfolio, holding_weights):
+            target_value = target_stock_value * w / weight_sum
+            qty = int(target_value // STOCKS[sid]["price"])
+            if qty > 0:
+                self.holdings[sid] = qty
+
+        # Bug fix: deduct the actual spend on stocks from balance so the Excel
+        # "Balance" column carries CASH only. Previously balance was the full
+        # portfolio total and C# loaded it as Fund.TotalBalance on top of the
+        # separately-imported positions → bots ended up with ~2× the intended
+        # cash (aggregate 57% vs target ~23%).
+        spent_on_stocks = sum(qty * STOCKS[sid]["price"] for sid, qty in self.holdings.items())
+        self.balance -= spent_on_stocks
 
     def _order_types(self):
         # Probabilities for order types
