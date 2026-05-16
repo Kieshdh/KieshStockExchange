@@ -15,18 +15,29 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 internal sealed class AiBotDecisionService
 {
     #region Services and Constructor
+    // Sentiment integration knobs (3.4 v2).
+    // Linear bias: clamped sentiment in [-1, +1] nudges buyProb by at most
+    // ±SentimentMaxBias. Extreme overflow: when |raw sentiment| > 1, with
+    // probability scaling by (|raw|-1) * OverflowGain, the order is forced
+    // to a TrueMarket{Buy,Sell} in the bot's style-appropriate direction.
+    private const decimal SentimentMaxBias = 0.20m;
+    private const decimal OverflowGain     = 0.50m;
+
     private readonly IMarketDataService _market;
     private readonly IAccountsCache _accounts;
     private readonly IOrderBookCache _books;
+    private readonly BotSentimentService _sentiment;
     private readonly ILogger<AiBotDecisionService> _logger;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
-        IOrderBookCache books, ILogger<AiBotDecisionService> logger)
+        IOrderBookCache books, BotSentimentService sentiment,
+        ILogger<AiBotDecisionService> logger)
     {
-        _market   = market   ?? throw new ArgumentNullException(nameof(market));
-        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
-        _books    = books    ?? throw new ArgumentNullException(nameof(books));
-        _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _market    = market    ?? throw new ArgumentNullException(nameof(market));
+        _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
+        _books     = books     ?? throw new ArgumentNullException(nameof(books));
+        _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
+        _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
 
@@ -50,6 +61,13 @@ internal sealed class AiBotDecisionService
         var type    = ChooseOrderType(ctx, user, currency);
         var stockId = ChooseStockId(ctx, user, type);
         if (stockId <= 0) return null;
+
+        // Extreme-reaction override (3.4 v2): when the chosen stock's raw
+        // sentiment crosses ±1, with probability scaling by the overflow, the
+        // order is forced into a TrueMarket{Buy,Sell} in the bot's
+        // style-appropriate direction. Aborts the override silently if it
+        // would point at zero shares (sell with no position).
+        type = ApplyExtremeReaction(ctx, user, stockId, type);
 
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
         var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
@@ -113,6 +131,14 @@ internal sealed class AiBotDecisionService
                 break;
             // MarketMaker, Scalper, Random: no directional bias
         }
+
+        // Sentiment linear bias (3.4 v2). Watchlist-averaged so the buy/sell
+        // tilt reflects the broad market mood for stocks this bot cares about,
+        // not just any single stock. Clamped to ±1 so the bias is bounded;
+        // extremes (|raw| > 1) drive the style-dependent forced market order
+        // applied later in ComputeOrderAsync.
+        var sentimentClamped = ClampSigned(AverageWatchlistSentiment(user), 1m);
+        buyProb += sentimentClamped * SentimentMaxBias;
         buyProb = Clamp01(buyProb);
 
         // 3. Strategy-aware market-order probability
@@ -332,6 +358,99 @@ internal sealed class AiBotDecisionService
         }
         return price;
     }
+    #endregion
+
+    #region Sentiment Integration
+    private decimal AverageWatchlistSentiment(AIUser user)
+    {
+        if (user.Watchlist == null || user.Watchlist.Count == 0) return 0m;
+        decimal sum = 0m;
+        int count = 0;
+        foreach (var sid in user.Watchlist)
+        {
+            sum += _sentiment.GetSentiment(sid);
+            count++;
+        }
+        return count > 0 ? sum / count : 0m;
+    }
+
+    private OrderType ApplyExtremeReaction(AiBotContext ctx, AIUser user,
+        int stockId, OrderType currentType)
+    {
+        var raw = _sentiment.GetSentiment(stockId);
+        var absRaw = Math.Abs(raw);
+        if (absRaw <= 1m) return currentType;
+
+        var overflow   = absRaw - 1m;
+        var forcedProb = Math.Min(1m, overflow * OverflowGain);
+        if (ctx.Decimal01(user.AiUserId) >= forcedProb) return currentType;
+
+        var style = PickExtremeReactionStyle(ctx, user);
+        var dir   = (raw > 0m) ? BullDirection(style) : BearDirection(style);
+
+        // Sell override into a stock the bot doesn't hold would just fail
+        // Phase 1.5 — fall back to the original type so the order still
+        // has a chance of being placed.
+        if (dir == ExtremeDirection.Sell)
+        {
+            var pos = ctx.GetPosition(user.UserId, stockId);
+            if (pos.Quantity <= 0) return currentType;
+        }
+
+        return dir switch
+        {
+            ExtremeDirection.Buy  => OrderType.TrueMarketBuy,
+            ExtremeDirection.Sell => OrderType.TrueMarketSell,
+            _                     => currentType,
+        };
+    }
+
+    private static ExtremeReactionStyle PickExtremeReactionStyle(AiBotContext ctx, AIUser user)
+    {
+        var defaultStyle = user.Strategy switch
+        {
+            AiStrategy.TrendFollower => ExtremeReactionStyle.FOMO,
+            AiStrategy.MeanReversion => ExtremeReactionStyle.Contrarian,
+            AiStrategy.MarketMaker   => ExtremeReactionStyle.Contrarian,
+            AiStrategy.Scalper       => ExtremeReactionStyle.Panic,
+            _                        => ExtremeReactionStyle.None,
+        };
+
+        // Out-of-character branch: pick a random style uniformly among the
+        // four (one of them is None, so ~25% of out-of-character rolls land
+        // on "no extreme reaction" — same as Random-strategy bots).
+        if (ctx.Decimal01(user.AiUserId) < user.ExtremeReactionRandomnessPrc)
+        {
+            var pick = ctx.GetRandom(user.AiUserId).Next(4);
+            return pick switch
+            {
+                0 => ExtremeReactionStyle.FOMO,
+                1 => ExtremeReactionStyle.Contrarian,
+                2 => ExtremeReactionStyle.Panic,
+                _ => ExtremeReactionStyle.None,
+            };
+        }
+        return defaultStyle;
+    }
+
+    private static ExtremeDirection BullDirection(ExtremeReactionStyle style) => style switch
+    {
+        ExtremeReactionStyle.FOMO       => ExtremeDirection.Buy,   // chase the top
+        ExtremeReactionStyle.Contrarian => ExtremeDirection.Sell,  // fade the top
+        ExtremeReactionStyle.Panic      => ExtremeDirection.Sell,  // take profit
+        _                               => ExtremeDirection.None,
+    };
+
+    private static ExtremeDirection BearDirection(ExtremeReactionStyle style) => style switch
+    {
+        ExtremeReactionStyle.FOMO       => ExtremeDirection.Sell,  // panic the bottom
+        ExtremeReactionStyle.Contrarian => ExtremeDirection.Buy,   // buy the dip
+        ExtremeReactionStyle.Panic      => ExtremeDirection.Sell,  // capitulate
+        _                               => ExtremeDirection.None,
+    };
+
+    private enum ExtremeReactionStyle { FOMO, Contrarian, Panic, None }
+    private enum ExtremeDirection { Buy, Sell, None }
     #endregion
 
     #region OrderType Enum and Helpers

@@ -182,7 +182,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _sentiment = new BotSentimentService(stocks, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
-        _decisions = new AiBotDecisionService(market, accounts, books,
+        _decisions = new AiBotDecisionService(market, accounts, books, _sentiment,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions));
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 

@@ -46,7 +46,7 @@ Sequence chosen to (a) finish what's already started, (b) land cheap UX wins, (c
 13. Expand stock universe + realistic market caps (3.1) ✅ DONE
 14. Multi-currency trading (3.2) — engine already keys by `(StockId, CurrencyType)`
 15. Investigate steady price drift — bot economy balance (3.3) ✅ DONE
-16. Multi-timescale bot sentiment + rare-event shocks (3.4)
+16. Multi-timescale bot sentiment + rare-event shocks (3.4) ✅ DONE
 17. Periodic bot cash injections — nominal-growth driver (3.5)
 
 ### Wave 5 — Watchlist + notifications (1 week)
@@ -294,7 +294,28 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
   `Tools/Config.py` / `Tools/Person.py` for seed imbalances, settlement
   engine for accounting bugs.
 
-### 3.4 Multi-timescale bot sentiment + rare-event shocks
+### 3.4 Multi-timescale bot sentiment + rare-event shocks ✅ DONE
+- v1 (helper, inert) landed in commit `61a40f0`: `BotSentimentService`
+  with AR(1) factors at 24h / 1h / 10m / 1m, per-stock + global, seeded
+  from steady-state on session start. Wired through
+  `AiTradeService.CheckTimers`.
+- v2 (integration) integrates sentiment into `AiBotDecisionService`:
+  watchlist-averaged sentiment drives a linear bias on `buyProb`
+  (±0.20 max); per-stock raw sentiment crossing ±1 triggers a
+  style-dependent forced TrueMarket order with probability
+  proportional to overflow (`OverflowGain = 0.5`).
+- New `AIUser.ExtremeReactionRandomnessPrc` field (range [0, 0.5],
+  skewed toward 0). Default style derived from `AiStrategy`:
+  TrendFollower → FOMO; MeanReversion / MarketMaker → Contrarian;
+  Scalper → Panic; Random → None. Per-bot randomness picks a uniform
+  random style when the roll lands below `RandomnessPrc`.
+- Rare-event Poisson shocks were considered and dropped — the
+  overflow mechanism already produces realistic extreme-reaction
+  behaviour without a separate shock layer.
+- Action item to land for the running app: re-run
+  `python Tools/GenerateAIUsers.py` to add the new column to
+  `AIUserData.xlsx`, then restart the app.
+- Original design notes (kept for reference):
 - Goal: introduce random sentiment shocks at multiple timescales so the
   market shows organic-looking trends and reversals instead of a flat
   random-walk. Each bot's buy/sell preference is biased by the sum of
