@@ -101,11 +101,15 @@ internal sealed class AiBotDecisionService
 
         switch (user.Strategy)
         {
+            // Equal magnitude on both sides — asymmetry (TF +0.20 vs MR −0.15)
+            // gave a net +0.0125 buy bias per unit momentum across the 25/25
+            // TF/MR split, compounding any upward perturbation into a steady
+            // price drift even after the midprice limit anchor was in place.
             case AiStrategy.TrendFollower:
-                buyProb += 0.20m * momentumSignal; // Chase the move
+                buyProb += 0.175m * momentumSignal; // Chase the move
                 break;
             case AiStrategy.MeanReversion:
-                buyProb -= 0.15m * momentumSignal; // Fade the move
+                buyProb -= 0.175m * momentumSignal; // Fade the move
                 break;
             // MarketMaker, Scalper, Random: no directional bias
         }
