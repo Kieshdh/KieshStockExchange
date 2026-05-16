@@ -115,7 +115,7 @@ WATCHLIST_WEIGHT_ALPHA    = 0.4
 # watchlist, each stock gets `target_stock_value * 1/sid**alpha / Σ(weights)`.
 # Larger caps end up with more shares per bot — same cap-concentration of
 # notional value as before, just expressed via quantity instead of presence.
-HOLDING_WEIGHT_ALPHA      = 1.2
+HOLDING_WEIGHT_ALPHA      = 0.9
 
 # Order types (_order_types).
 USE_MARKET_BASE           = 0.10
@@ -125,11 +125,9 @@ USE_SLIP_BASE             = 0.50
 USE_SLIP_RANGE            = 0.40
 USE_SLIP_SKEW             = 0.5
 
-# Extreme-reaction randomness (3.4 v2): how often a bot acts out of character
-# at an extreme-sentiment event. Drawn from `0.50 * skewed01(skew)` so the
-# distribution is biased toward 0 — most bots are very in-character, small
-# tail are erratic. Range hard-capped at 0.5 (bot is never more likely to be
-# random than in character).
+# Skew for how often a bot acts out of character at an extreme-sentiment
+# event. Drawn from `0.50 * skewed01(skew)` — biased toward 0, capped at
+# 0.5 so a bot is never more likely to be random than in character.
 EXTREME_RANDOMNESS_SKEW   = 2.0
 
 # Buy bias (_order_types).

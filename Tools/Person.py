@@ -152,11 +152,10 @@ class Person:
             if qty > 0:
                 self.holdings[sid] = qty
 
-        # Bug fix: deduct the actual spend on stocks from balance so the Excel
-        # "Balance" column carries CASH only. Previously balance was the full
-        # portfolio total and C# loaded it as Fund.TotalBalance on top of the
-        # separately-imported positions → bots ended up with ~2× the intended
-        # cash (aggregate 57% vs target ~23%).
+        # balance is exported as the Excel "Balance" column, which the C#
+        # importer reads as Fund.TotalBalance. Deduct the spent stock value
+        # so the column carries cash only, otherwise the bot would land with
+        # full balance as cash AND the imported positions on top.
         spent_on_stocks = sum(qty * STOCKS[sid]["price"] for sid, qty in self.holdings.items())
         self.balance -= spent_on_stocks
 

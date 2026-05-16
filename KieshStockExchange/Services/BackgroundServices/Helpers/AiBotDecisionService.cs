@@ -15,12 +15,9 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 internal sealed class AiBotDecisionService
 {
     #region Services and Constructor
-    // Sentiment integration knobs (3.4 v2).
-    // Linear bias: clamped sentiment in [-1, +1] nudges buyProb by at most
-    // ±SentimentMaxBias. Extreme overflow: when |raw sentiment| > 1, with
-    // probability scaling by (|raw|-1) * OverflowGain, the order is forced
-    // to a TrueMarket{Buy,Sell} in the bot's style-appropriate direction.
+    // Max nudge applied to buyProb by the clamped sentiment value.
     private const decimal SentimentMaxBias = 0.20m;
+    // Probability of forcing a market order, per unit of |sentiment| > 1.
     private const decimal OverflowGain     = 0.50m;
 
     private readonly IMarketDataService _market;
@@ -62,11 +59,10 @@ internal sealed class AiBotDecisionService
         var stockId = ChooseStockId(ctx, user, type);
         if (stockId <= 0) return null;
 
-        // Extreme-reaction override (3.4 v2): when the chosen stock's raw
-        // sentiment crosses ±1, with probability scaling by the overflow, the
-        // order is forced into a TrueMarket{Buy,Sell} in the bot's
-        // style-appropriate direction. Aborts the override silently if it
-        // would point at zero shares (sell with no position).
+        // When the chosen stock's raw sentiment crosses ±1, force the order
+        // into a TrueMarket{Buy,Sell} in the bot's style-appropriate direction
+        // with probability proportional to the overflow. No-op when the
+        // override would point at zero shares (sell with no position).
         type = ApplyExtremeReaction(ctx, user, stockId, type);
 
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
@@ -119,10 +115,8 @@ internal sealed class AiBotDecisionService
 
         switch (user.Strategy)
         {
-            // Equal magnitude on both sides — asymmetry (TF +0.20 vs MR −0.15)
-            // gave a net +0.0125 buy bias per unit momentum across the 25/25
-            // TF/MR split, compounding any upward perturbation into a steady
-            // price drift even after the midprice limit anchor was in place.
+            // Equal magnitude on both sides so the net effect across the
+            // 25/25 TF/MR split is zero in expectation.
             case AiStrategy.TrendFollower:
                 buyProb += 0.175m * momentumSignal; // Chase the move
                 break;
@@ -132,10 +126,9 @@ internal sealed class AiBotDecisionService
             // MarketMaker, Scalper, Random: no directional bias
         }
 
-        // Sentiment linear bias (3.4 v2). Watchlist-averaged so the buy/sell
-        // tilt reflects the broad market mood for stocks this bot cares about,
-        // not just any single stock. Clamped to ±1 so the bias is bounded;
-        // extremes (|raw| > 1) drive the style-dependent forced market order
+        // Linear sentiment bias. Watchlist-averaged so the tilt reflects the
+        // broad mood for stocks this bot cares about, not any single name.
+        // Clamped to ±1 here — extremes drive the forced market order
         // applied later in ComputeOrderAsync.
         var sentimentClamped = ClampSigned(AverageWatchlistSentiment(user), 1m);
         buyProb += sentimentClamped * SentimentMaxBias;

@@ -9,11 +9,9 @@ using System.Text;
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
 /// <summary>
-/// Periodic snapshot of aggregate bot wealth + average price drift since session
-/// start. Used to verify the 3.3 drift symptom shape — if total wealth grows
-/// while no synthetic value is being injected, the price drift IS the growth.
-/// Each <see cref="LogSnapshot"/> call records a row in the bounded ring so the
-/// Bot Dashboard can export the full series to CSV.
+/// Periodic snapshot of aggregate bot wealth + average price drift since
+/// session start. Each <see cref="LogSnapshot"/> call records a row in the
+/// bounded ring so the Bot Dashboard can export the full series to CSV.
 /// </summary>
 internal sealed class BotEconomyTelemetry
 {
@@ -50,9 +48,8 @@ internal sealed class BotEconomyTelemetry
     internal void LogSnapshot(IReadOnlyList<CurrencyType> currencies)
     {
         decimal totalCash = 0m, totalShares = 0m;
-        // Iterate the engine's authoritative stock list, not _ctx.StocksByUser —
-        // that index is rebuilt every 60s by RefreshAssetsAsync and races with
-        // this 60s sampler, producing inconsistent TotalShares readings.
+        // Iterate the engine's authoritative stock list. _ctx.StocksByUser is a
+        // 60s-refreshed index and would race this sampler.
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
             foreach (var currency in currencies)

@@ -6,23 +6,20 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// <summary>
 /// Multi-timescale shared market-mood state. Maintains independent
 /// mean-reverting AR(1) factors at 24h / 1h / 10m / 1m scales — per-stock
-/// at every scale, plus global factors at the 24h and 1h scales. Returns
-/// the un-clamped sum per stock so callers can apply linear bias inside
-/// ±1 AND react to overflow above ±1 (style-dependent market orders;
-/// see v2 plan).
+/// at every scale, plus global factors at the 24h and 1h scales.
+/// <see cref="GetSentiment"/> returns the un-clamped sum per stock so
+/// callers can apply linear bias inside ±1 and react to the overflow
+/// above ±1 with style-dependent market orders.
 ///
 /// Driven by a single <see cref="Tick"/> call from the bot loop's
-/// <c>CheckTimers</c> — same per-scale clock pattern as the other periodic
-/// jobs in <see cref="AiTradeService"/>. <see cref="GetSentiment"/> is
-/// called from <c>AiBotDecisionService</c> (v2) on the same thread, so no
-/// locks are needed.
+/// <c>CheckTimers</c>. Tick and GetSentiment both run on the loop thread,
+/// so no locks are needed.
 /// </summary>
 internal sealed class BotSentimentService
 {
     #region Services and Constructor
-    // Amplitude per factor (decimal). Combined max ≈ ±1.85; the consumer
-    // clamps to ±1 for linear bias and uses the overflow for extreme-reaction
-    // market orders (v2).
+    // Amplitude per factor. Combined max ≈ ±1.85; the consumer clamps to ±1
+    // for linear bias and uses the overflow for extreme-reaction market orders.
     private const decimal AmpPerStock24h = 0.60m;
     private const decimal AmpPerStock1h  = 0.40m;
     private const decimal AmpPerStock10m = 0.25m;
@@ -30,13 +27,11 @@ internal sealed class BotSentimentService
     private const decimal AmpGlobal24h   = 0.30m;
     private const decimal AmpGlobal1h    = 0.20m;
 
-    // AR(1) mean-reversion fraction: x_new = α·x_old + (1-α)·amp·U(-1,+1).
-    // 0.7 keeps 70% of the prior value each reroll — bounded random walk
-    // that mean-reverts toward 0 over a few periods.
+    // AR(1) mean-reversion: x_new = α·x_old + (1-α)·amp·U(-1,+1). Higher α
+    // means slower mean reversion (0.7 keeps 70% of the prior value).
     private const decimal MeanReversionAlpha = 0.70m;
 
     // Deterministic seed so the simulation is reproducible across runs.
-    // Matches the AiBotContext.DailySeed pattern.
     private const int RngSeed = 7919;
 
     private readonly IStockService _stocks;

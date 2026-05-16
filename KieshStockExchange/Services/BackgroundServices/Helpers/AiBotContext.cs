@@ -107,12 +107,10 @@ internal sealed class AiBotContext
 
     internal decimal FundsPercentagePortfolio(int userId, CurrencyType currency)
     {
-        // TotalBalance, not AvailableBalance: this ratio drives the cash-reserve
-        // allocation target (Min/MaxCashReservePrc), which is about net-worth
-        // composition — open buy orders haven't actually deployed cash yet, so
-        // a bot with working bids shouldn't read as "low on cash" and bias toward
-        // selling. Operational liquidity is enforced elsewhere via AvailableBalance
-        // clamps in ComputeOrderQuantityAsync.
+        // Net-worth ratio used by the cash-reserve target. Uses TotalBalance —
+        // open buy reservations haven't actually deployed cash yet, so a bot
+        // with working bids shouldn't read as cash-poor here. Operational
+        // liquidity is enforced via AvailableBalance in ComputeOrderQuantityAsync.
         var cash  = GetFund(userId, currency).TotalBalance;
         var total = PortfolioValueByCurrency(userId, currency);
         if (total <= 0m) return cash > 0m ? 1m : 0m;
