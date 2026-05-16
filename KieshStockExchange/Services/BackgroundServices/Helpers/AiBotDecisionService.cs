@@ -2,6 +2,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
@@ -16,14 +17,16 @@ internal sealed class AiBotDecisionService
     #region Services and Constructor
     private readonly IMarketDataService _market;
     private readonly IAccountsCache _accounts;
+    private readonly IOrderBookCache _books;
     private readonly ILogger<AiBotDecisionService> _logger;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
-        ILogger<AiBotDecisionService> logger)
+        IOrderBookCache books, ILogger<AiBotDecisionService> logger)
     {
-        _market = market ?? throw new ArgumentNullException(nameof(market));
+        _market   = market   ?? throw new ArgumentNullException(nameof(market));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _books    = books    ?? throw new ArgumentNullException(nameof(books));
+        _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
 
@@ -200,18 +203,44 @@ internal sealed class AiBotDecisionService
 
         if (IsSlippageOrder(type)) return RoundToCurrency(marketPrice, currency);
 
+        // Limit anchor: midprice when both sides are present, last-trade otherwise.
+        // Last-trade ratchets upward whenever buys fill at the ask faster than
+        // sells at the bid; midprice stays roughly put under that imbalance.
+        var anchor = await GetMidPriceAsync(stockId, currency, ct).ConfigureAwait(false)
+                     ?? marketPrice;
+
         // Limit order: compute offset with bidirectional jitter so some orders land closer to market
         var offset = Clamp01(Lerp(user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, ctx.Decimal01(user.AiUserId)));
         var jitter = (ctx.Decimal01(user.AiUserId) * 2m - 1m) * user.AggressivenessPrc;
         offset = Math.Max(user.MinLimitOffsetPrc, Math.Min(user.MaxLimitOffsetPrc, offset * (1m + jitter)));
 
-        var limitPrice = IsBuyOrder(type) ? marketPrice * (1m - offset) : marketPrice * (1m + offset);
+        var limitPrice = IsBuyOrder(type) ? anchor * (1m - offset) : anchor * (1m + offset);
 
         // ~30% chance: snap toward a psychologically significant round level
         if (ctx.Decimal01(user.AiUserId) < 0.30m)
             limitPrice = SnapToRoundNumber(limitPrice);
 
         return RoundToCurrency(limitPrice, currency);
+    }
+
+    private async Task<decimal?> GetMidPriceAsync(int stockId, CurrencyType currency, CancellationToken ct)
+    {
+        try
+        {
+            var book = await _books.GetAsync(stockId, currency, ct).ConfigureAwait(false);
+            if (book is null) return null;
+            var bid = book.PeekBestBuy()?.Price;
+            var ask = book.PeekBestSell()?.Price;
+            // One-sided books would just reintroduce the ratchet; require both.
+            return (bid > 0m && ask > 0m) ? (bid.Value + ask.Value) / 2m : (decimal?)null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Midprice fetch failed for stock {Stock}/{Currency}; falling back to last-trade.",
+                stockId, currency);
+            return null;
+        }
     }
 
     private async Task<int> ComputeOrderQuantityAsync(AiBotContext ctx, AIUser user, OrderType type,

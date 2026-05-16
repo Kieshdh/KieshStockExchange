@@ -157,6 +157,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IDataBaseService db,
         IAccountsCache accounts,
         IReservationLedger ledger,
+        IOrderBookCache books,
         ILogger<AiTradeService> logger,
         ILoggerFactory loggerFactory,
         IOptions<SeparatorLoggerOptions> loggerOptions)
@@ -168,6 +169,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
         if (db          is null) throw new ArgumentNullException(nameof(db));
         if (ledger      is null) throw new ArgumentNullException(nameof(ledger));
+        if (books       is null) throw new ArgumentNullException(nameof(books));
         if (loggerFactory  is null) throw new ArgumentNullException(nameof(loggerFactory));
         if (loggerOptions  is null) throw new ArgumentNullException(nameof(loggerOptions));
 
@@ -178,7 +180,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
-        _decisions = new AiBotDecisionService(market, accounts,
+        _decisions = new AiBotDecisionService(market, accounts, books,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions));
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
