@@ -42,13 +42,16 @@ internal sealed class BotScalerService
     private readonly List<(int Old, int New, double Load, double Ewma)> _pendingChanges = new();
     #endregion
 
-    private readonly ILogger _logger;
+    #region Services and Constructor
+    private readonly ILogger<BotScalerService> _logger;
 
-    internal BotScalerService(ILogger logger)
+    internal BotScalerService(ILogger<BotScalerService> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+    #endregion
 
+    #region Tick
     /// <summary>
     /// Called from the bot loop after each tick. Returns the new ActiveBotCap to apply,
     /// or null if no change is warranted this tick.
@@ -126,7 +129,9 @@ internal sealed class BotScalerService
 
         return target;
     }
+    #endregion
 
+    #region Logging
     /// <summary>
     /// Emit a buffered summary of cap changes if the throttle window has elapsed
     /// (or unconditionally when <paramref name="force"/> is true). One INFO line
@@ -166,4 +171,5 @@ internal sealed class BotScalerService
         _pendingChanges.Clear();
         _lastLogAt = now;
     }
+    #endregion
 }

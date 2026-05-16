@@ -14,9 +14,16 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// </summary>
 internal sealed class AiBotContext
 {
-    #region Fields
+    #region Services and Constructor
     private readonly IAccountsCache _accounts;
 
+    internal AiBotContext(IAccountsCache accounts)
+    {
+        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+    }
+    #endregion
+
+    #region State
     internal readonly Dictionary<int, AIUser>  AiUsersByAiUserId = new();
     internal readonly Dictionary<int, AIUser>  AiUsersByUserId   = new();
     internal readonly Dictionary<int, Random>  AiUserRngs        = new();
@@ -29,31 +36,24 @@ internal sealed class AiBotContext
 
     internal readonly Dictionary<int, Dictionary<int, Order>> OpenOrders = new();
 
-    // Raw last price from market quotes — set on every tick
+    // Three-stage price cache: StockPrices is the raw last quote, PreviousPrices
+    // is the prior raw value for tick-to-tick deltas, SmoothedPrices is EWMA
+    // (α=0.15, ~6-tick window) that ChooseOrderType reads to dampen spike noise.
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> StockPrices    = new();
-    // Previous raw price snapshot — for tick-to-tick delta computation
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> PreviousPrices = new();
-    // EWMA-smoothed price (α=0.15) — reacts over ~6 ticks to filter spike noise
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> SmoothedPrices = new();
 
-    // AiUserId → burst-session end time
     internal readonly Dictionary<int, DateTime> BurstEndTimes  = new();
-    // TransactionIds already counted today (reset daily)
+    // Reset by CheckDailyRefresh so a tx that fills across the day boundary isn't double-counted.
     internal readonly HashSet<int>              ProcessedTxIds = new();
 
     internal DateOnly LastRefreshDate = DateOnly.MinValue;
 
-    // Empty placeholders so callers can keep reading .TotalBalance / .Quantity without
-    // null checks. Safe to share since shadow mutations are gone — these are read-only
-    // from the bot's perspective.
+    // Empty placeholders let callers keep reading .TotalBalance / .Quantity
+    // without null checks. Safe to share since the bot reads them as immutable.
     private static readonly Fund     EmptyFund     = new();
     private static readonly Position EmptyPosition = new();
     #endregion
-
-    internal AiBotContext(IAccountsCache accounts)
-    {
-        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
-    }
 
     #region Accessors
     internal Fund GetFund(int userId, CurrencyType currency)
