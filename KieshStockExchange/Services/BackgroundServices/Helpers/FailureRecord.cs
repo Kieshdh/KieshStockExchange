@@ -70,4 +70,5 @@ public sealed record FailureRecord(
     decimal Price,
     OrderStatus Status,
     FailureCategory Category,
-    string ErrorMessage);
+    string ErrorMessage
+);

@@ -19,6 +19,8 @@ internal sealed class AiBotStateService
     #region Services and Constructor
     private readonly IDataBaseService _db;
     private readonly IAccountsCache _accounts;
+    private readonly IOrderExecutionService _orders;
+    private readonly BotStatsLogger _stats;
     private readonly ILogger<AiBotStateService> _logger;
 
     // Throttle "Applied active bot cap" — the scaler may toggle the cap several
@@ -30,11 +32,21 @@ internal sealed class AiBotStateService
     private int _lastLoggedEnabled = -1;
     private int _suppressedApplyCapCount;
 
+    // Prune knobs: how stale before forced cancel, what fraction of MaxOpenOrders
+    // triggers capacity culling, how far off market a limit must be to qualify,
+    // and how many capacity-victims to cancel per bot per pass.
+    private static readonly TimeSpan PruneStaleAge = TimeSpan.FromMinutes(3);
+    private const decimal PruneDistanceFactor = 2.0m;
+    private const int PruneOrdersPerBot = 2;
+
     internal AiBotStateService(IDataBaseService db, IAccountsCache accounts,
+        IOrderExecutionService orders, BotStatsLogger stats,
         ILogger<AiBotStateService> logger)
     {
         _db       = db       ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+        _orders   = orders   ?? throw new ArgumentNullException(nameof(orders));
+        _stats    = stats    ?? throw new ArgumentNullException(nameof(stats));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -203,6 +215,105 @@ internal sealed class AiBotStateService
                 ctx.OpenOrders[placed.UserId] = new Dictionary<int, Order>();
             ctx.OpenOrders[placed.UserId][placed.OrderId] = placed;
         }
+    }
+    #endregion
+
+    #region Pruning
+    /// <summary>
+    /// Cancels stale (older than <see cref="PruneStaleAge"/>) and worst-priced
+    /// open limit orders for bots over ~80% of their <c>MaxOpenOrders</c>. Issues
+    /// one batched <c>CancelOrdersBatchAsync</c> call regardless of victim count.
+    /// </summary>
+    /// <param name="sessionStart">Anchor for the stale-age check; orders from before
+    /// the current loop session get a fresh grace window so a session restart
+    /// doesn't wipe everything on first prune.</param>
+    internal async Task PruneWorstOrdersAsync(AiBotContext ctx, DateTime? sessionStart, CancellationToken ct)
+    {
+        var toCancel = new List<(int userId, Order order)>();
+
+        foreach (var user in ctx.AiUsersByAiUserId.Values)
+        {
+            if (!ctx.OpenOrders.TryGetValue(user.UserId, out var userOrders) || userOrders.Count == 0)
+                continue;
+
+            var limitOrders = userOrders.Values.Where(o => o.IsOpenLimitOrder).ToList();
+            if (limitOrders.Count == 0) continue;
+
+            // Criterion 1: stale age — cancel regardless of capacity.
+            var anchorTime = sessionStart ?? DateTime.MinValue;
+            foreach (var o in limitOrders)
+            {
+                var effectiveCreated = o.CreatedAt > anchorTime ? o.CreatedAt : anchorTime;
+                if (TimeHelper.NowUtc() - effectiveCreated >= PruneStaleAge)
+                    toCancel.Add((user.UserId, o));
+            }
+
+            // Criterion 2: capacity — only when at ≥80% of MaxOpenOrders.
+            if (userOrders.Count < (int)Math.Ceiling(user.MaxOpenOrders * 0.8)) continue;
+
+            var alreadyQueued     = new HashSet<int>(toCancel.Select(x => x.order.OrderId));
+            var distanceThreshold = PruneDistanceFactor * user.MaxLimitOffsetPrc;
+
+            var scored = new List<(Order order, decimal distance)>();
+            foreach (var o in limitOrders)
+            {
+                if (alreadyQueued.Contains(o.OrderId)) continue;
+                if (!ctx.StockPrices.TryGetValue((o.StockId, o.CurrencyType), out var m) || m <= 0m) continue;
+                var dist = o.IsBuyOrder ? (m - o.Price) / m : (o.Price - m) / m;
+                if (dist > distanceThreshold) scored.Add((o, dist));
+            }
+
+            foreach (var (o, _) in scored.OrderByDescending(x => x.distance).Take(PruneOrdersPerBot))
+                toCancel.Add((user.UserId, o));
+        }
+
+        if (toCancel.Count == 0) return;
+
+        var ids = new List<int>(toCancel.Count);
+        for (int i = 0; i < toCancel.Count; i++)
+        {
+            var (userId, order) = toCancel[i];
+            if (!ctx.OpenOrders.TryGetValue(userId, out var userOrders)) continue;
+            if (!userOrders.ContainsKey(order.OrderId)) continue;
+            ids.Add(order.OrderId);
+        }
+        if (ids.Count == 0) return;
+
+        IReadOnlyList<OrderResult> results;
+        try
+        {
+            results = await _orders.CancelOrdersBatchAsync(ids, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PruneWorstOrders: CancelOrdersBatchAsync failed for {Count} orders", ids.Count);
+            return;
+        }
+
+        int pruned = 0;
+        for (int i = 0; i < results.Count; i++)
+        {
+            var orderId = ids[i];
+            var result = results[i];
+            if (result.PlacedSuccessfully || result.Status == OrderStatus.AlreadyClosed)
+            {
+                for (int j = 0; j < toCancel.Count; j++)
+                {
+                    if (toCancel[j].order.OrderId != orderId) continue;
+                    if (ctx.OpenOrders.TryGetValue(toCancel[j].userId, out var userOrders))
+                        userOrders.Remove(orderId);
+                    break;
+                }
+                pruned++;
+            }
+            else
+            {
+                _logger.LogWarning("PruneWorstOrders: cancel of {OrderId} returned {Status}",
+                    orderId, result.Status);
+            }
+        }
+
+        if (pruned > 0) _stats.AddCancelled(pruned);
     }
     #endregion
 }
