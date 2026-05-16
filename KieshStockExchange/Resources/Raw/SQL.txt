@@ -172,6 +172,7 @@ CREATE TABLE AIUsers (
     MinLimitOffsetPrc       REAL NOT NULL,
     MaxLimitOffsetPrc       REAL NOT NULL,
     AggressivenessPrc       REAL NOT NULL,
+    ExtremeReactionRandomnessPrc REAL NOT NULL DEFAULT 0.10,
     MinOpenPositions        INTEGER NOT NULL,
     MaxOpenPositions        INTEGER NOT NULL,
     MaxDailyTrades          INTEGER NOT NULL,

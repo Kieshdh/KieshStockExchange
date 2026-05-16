@@ -271,7 +271,8 @@ public class ExcelImportService : IExcelImportService
                 !ParsingHelper.TryToDecimal(row["SlippageTolerancePrc"].ToString(), out var slippageTolerancePrc) ||
                 !ParsingHelper.TryToDecimal(row["MinLimitOffsetPrc"].ToString(), out var minLimitOffsetPrc) ||
                 !ParsingHelper.TryToDecimal(row["MaxLimitOffsetPrc"].ToString(), out var maxLimitOffsetPrc) ||
-                !ParsingHelper.TryToDecimal(row["AggressivenessPrc"].ToString(), out var aggressivenessPrc))
+                !ParsingHelper.TryToDecimal(row["AggressivenessPrc"].ToString(), out var aggressivenessPrc) ||
+                !ParsingHelper.TryToDecimal(row["ExtremeReactionRandomnessPrc"].ToString(), out var extremeRandomnessPrc))
             {
                 _logger.LogWarning("Invalid percentage value(s) for User #{UserId}. Skipping.", userId);
                 continue;
@@ -293,7 +294,8 @@ public class ExcelImportService : IExcelImportService
                     MinLimitOffsetPrc = minLimitOffsetPrc, MaxLimitOffsetPrc = maxLimitOffsetPrc,
                     AggressivenessPrc = aggressivenessPrc, MinOpenPositions = minOpenPositions,
                     MaxOpenPositions = maxOpenPositions, MaxDailyTrades = maxDailyTrades,
-                    MaxOpenOrders = maxOpenOrders, WatchlistCsv = watchlistCsv, StrategyCode = strategyCode
+                    MaxOpenOrders = maxOpenOrders, WatchlistCsv = watchlistCsv, StrategyCode = strategyCode,
+                    ExtremeReactionRandomnessPrc = extremeRandomnessPrc
                 };
                 if (!aiUser.IsValid())
                 {

@@ -170,6 +170,9 @@ class Person:
         buy_bias      = clamp01(jitter(base_buy_bias, rel=BUY_BIAS_JITTER))
         self.buy_bias = max(BUY_BIAS_MIN, min(BUY_BIAS_MAX, buy_bias))
 
+        # Extreme-reaction randomness: skewed toward 0, capped at 0.5.
+        self.extreme_randomness = 0.5 * skewed01(skew=EXTREME_RANDOMNESS_SKEW)
+
     def _trade_limits(self):
         # Slippage tolerance: more aggressive bots accept higher slippage.
         base_slip_tol = SLIP_TOL_BASE + SLIP_TOL_SLOPE * self.aggressive
@@ -230,7 +233,8 @@ class Person:
             self.max_daily_trades,                          # int: max daily trades
             self.max_orders,                                # int: max open orders
             self.watchlist_csv,                             # str: watchlist CSV of stock IDs
-            self.strategy                                   # int: strategy id
+            self.strategy,                                  # int: strategy id
+            round(self.extreme_randomness, 4)               # float: extreme-reaction randomness [0, 0.5]
         ]
 
     def ToHoldingList(self):

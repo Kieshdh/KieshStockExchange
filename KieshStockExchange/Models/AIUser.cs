@@ -182,6 +182,24 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         get => _aggressivenessPrc;
         set => _aggressivenessPrc = RequiredPrc(value, nameof(AggressivenessPrc));
     }
+
+    // Probability that the bot acts out-of-character at an extreme-sentiment
+    // event — picks a random reaction style instead of the AiStrategy-derived
+    // default. Range [0, 0.5] so a bot is never more likely to be erratic than
+    // in character. Distribution at seed time is skewed toward 0 (most bots
+    // are "very in character"; small tail are "erratic"). See 3.4 plan.
+    private decimal _extremeReactionRandomnessPrc = 0.10m;
+    [Column("ExtremeReactionRandomnessPrc")] public decimal ExtremeReactionRandomnessPrc
+    {
+        get => _extremeReactionRandomnessPrc;
+        set
+        {
+            if (value < 0m || value > 0.5m)
+                throw new ArgumentOutOfRangeException(nameof(ExtremeReactionRandomnessPrc),
+                    "ExtremeReactionRandomnessPrc must be between 0 and 0.5.");
+            _extremeReactionRandomnessPrc = value;
+        }
+    }
     #endregion
 
     #region Trading Strategy Properties
@@ -271,7 +289,8 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     private static bool IsValidPrc(decimal val) => val >= 0 && val <= 1;
     private bool IsValidPercentages() => IsValidPrc(TradeProb) && IsValidPrc(UseMarketProb) &&
         IsValidPrc(MinTradeAmountPrc) && IsValidPrc(MaxTradeAmountPrc) && IsValidPrc(PerPositionMaxPrc) && IsValidPrc(BuyBiasPrc) &&
-        IsValidPrc(MinCashReservePrc) && IsValidPrc(MaxCashReservePrc) && IsValidPrc(SlippageTolerancePrc) && IsValidPrc(AggressivenessPrc);
+        IsValidPrc(MinCashReservePrc) && IsValidPrc(MaxCashReservePrc) && IsValidPrc(SlippageTolerancePrc) && IsValidPrc(AggressivenessPrc) &&
+        ExtremeReactionRandomnessPrc >= 0m && ExtremeReactionRandomnessPrc <= 0.5m;
 
     private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc;
 

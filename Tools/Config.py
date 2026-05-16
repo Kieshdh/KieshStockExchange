@@ -125,6 +125,13 @@ USE_SLIP_BASE             = 0.50
 USE_SLIP_RANGE            = 0.40
 USE_SLIP_SKEW             = 0.5
 
+# Extreme-reaction randomness (3.4 v2): how often a bot acts out of character
+# at an extreme-sentiment event. Drawn from `0.50 * skewed01(skew)` so the
+# distribution is biased toward 0 — most bots are very in-character, small
+# tail are erratic. Range hard-capped at 0.5 (bot is never more likely to be
+# random than in character).
+EXTREME_RANDOMNESS_SKEW   = 2.0
+
 # Buy bias (_order_types).
 BUY_BIAS_BASE             = 0.45
 BUY_BIAS_SLOPE            = 0.10
