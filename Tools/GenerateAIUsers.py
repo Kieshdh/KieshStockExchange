@@ -28,7 +28,7 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
 
     # Load or create workbook
     wb = load_or_create_workbook(str(excel_path))
-    print(f"✅ Loaded or created workbook at {excel_path}")
+    print(f"[OK] Loaded or created workbook at {excel_path}")
 
     # Create/clear sheets and write header rows
     sheets: dict[str, Worksheet] = {}
@@ -40,7 +40,7 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
     sheets["Holding"] = prepare_holding_sheet(wb, tickers)
     sheets["Profile"] = prepare_profile_sheet(wb)
 
-    print("✅ Prepared all AIUser sheets.")
+    print("[OK] Prepared all AIUser sheets.")
 
 
     # Append stock data
@@ -59,7 +59,7 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
         sheets["Holding"].append(p.ToHoldingList())
         sheets["Profile"].append(p.ToProfileList())
 
-    print(f"✅ Generated {num_people} AI users.")
+    print(f"[OK] Generated {num_people} AI users.")
 
 
     # Apply dark theme and autofit columns
@@ -69,7 +69,7 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
 
     # Save file
     wb.save(str(excel_path))
-    print(f"✅ Applied dark theme and saved all {num_people} AI users.")
+    print(f"[OK] Applied dark theme and saved all {num_people} AI users.")
 
 
 if __name__ == "__main__":

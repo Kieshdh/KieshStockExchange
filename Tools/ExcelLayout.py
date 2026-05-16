@@ -23,12 +23,11 @@ BACKGROUND_COLOR = Color(rgb="000000")        # Black
 # ────────────────────────────── SHEET CREATION ────────────────────────────────
 
 def load_or_create_workbook(excel_path: str) -> Workbook:
-    """Load an existing Excel workbook if it exists, otherwise create a new one."""
-    if os.path.exists(excel_path):
-        wb = load_workbook(excel_path)
-    else:
-        wb = Workbook()
-        wb.active.title = "Template"  # Minimal template if none exists
+    """Return a fresh workbook for writing at `excel_path`. The file at
+    that path is overwritten on save, so any existing contents on disk
+    are discarded. The path argument is kept for API compatibility."""
+    wb = Workbook()
+    wb.active.title = "Template"
     return wb
 
 
