@@ -58,6 +58,34 @@ public partial class OrderBookViewModel : StockAwareViewModel
         get => Depth;
         set => Depth = value;
     }
+
+    // Bucket picker. AvailableBucketSizes auto-adapts per stock (range up to a
+    // step where the biggest bucket aggregates ≥ 25% of cumulative side volume).
+    // Default step on stock change is auto-scaled from the mid price; the user
+    // override sticks until the stock changes.
+    public ObservableCollection<BucketSizeOption> AvailableBucketSizes { get; } = new();
+
+    [ObservableProperty] private BucketSizeOption? _selectedBucketSize;
+    partial void OnSelectedBucketSizeChanged(BucketSizeOption? value)
+    {
+        if (value is null || _suppressBucketPick) return;
+        _userPickedBucket = true;
+        if (_currentBucketStep == value.Value) return;
+        _currentBucketStep = value.Value;
+        if (Book is not null) UpdateOrBuildFromSnapshot(Book.Snapshot());
+    }
+
+    // _currentBucketStep is the step in use; 0 means "no bucketing yet" (we
+    // pick a default on the first snapshot once we have a mid price).
+    private decimal _currentBucketStep = 0m;
+    private bool _userPickedBucket = false;
+    private bool _suppressBucketPick = false;
+
+    // 1-5-10 progression covers typical equity tick sizes without flooding the
+    // picker. Coarsest entry is added dynamically when ≥ 25% concentration is
+    // already reached.
+    private static readonly decimal[] BucketStepCandidates =
+        new[] { 0.01m, 0.05m, 0.10m, 0.50m, 1.00m, 5.00m, 10.00m, 50.00m, 100.00m };
     #endregion
 
     #region Best levels, spread, empty-state
@@ -130,6 +158,11 @@ public partial class OrderBookViewModel : StockAwareViewModel
         PreviousPrice = 0m;
         PriceDirectionArrow = "•";
         PriceTextColour = ColorNeutral;
+
+        // Forget the user's previous bucket choice — auto-format kicks in again
+        // on the next snapshot using the new stock's mid price.
+        _userPickedBucket = false;
+        _currentBucketStep = 0m;
 
         // Reset best/spread state and empty-state defaults; the snapshot rebuild
         // below will repopulate them when there is data.
@@ -233,12 +266,21 @@ public partial class OrderBookViewModel : StockAwareViewModel
         var orderedSells = snap.Sells.OrderByDescending(l => l.Price).ToList();
         var orderedBuys = snap.Buys.OrderByDescending(l => l.Price).ToList();
 
-        ApplySideSnapshot(VisibleSellLevels, orderedSells, currency, LevelSide.Sell, accumulateForward: false);
-        ApplySideSnapshot(VisibleBuyLevels, orderedBuys, currency, LevelSide.Buy, accumulateForward: true);
-
         // Best ask = lowest sell = last of desc list. Best bid = highest buy = first of desc list.
         BestAsk = orderedSells.Count > 0 ? orderedSells[^1].Price : (decimal?)null;
         BestBid = orderedBuys.Count > 0 ? orderedBuys[0].Price : (decimal?)null;
+        var midForBucket = (BestAsk.HasValue && BestBid.HasValue)
+            ? (BestAsk.Value + BestBid.Value) / 2m
+            : (BestAsk ?? BestBid);
+
+        // Refresh the picker choices for the current book + pick a default step
+        // if the user hasn't overridden. Bucket each side before display.
+        RefreshBucketOptions(orderedSells, orderedBuys, currency, midForBucket);
+        var bucketedSells = BucketLevels(orderedSells, _currentBucketStep);
+        var bucketedBuys  = BucketLevels(orderedBuys,  _currentBucketStep);
+
+        ApplySideSnapshot(VisibleSellLevels, bucketedSells, currency, LevelSide.Sell, accumulateForward: false);
+        ApplySideSnapshot(VisibleBuyLevels, bucketedBuys, currency, LevelSide.Buy, accumulateForward: true);
 
         if (BestAsk.HasValue && BestBid.HasValue && BestBid.Value > 0m)
         {
@@ -326,9 +368,137 @@ public partial class OrderBookViewModel : StockAwareViewModel
             target.RemoveAt(target.Count - 1);
     }
     #endregion
+
+    #region Bucketing
+    /// <summary>
+    /// Aggregate adjacent price levels that share a bucket floor of
+    /// <paramref name="step"/>. Input must be sorted high → low; output keeps the
+    /// same direction with bucket-floor prices and summed quantities.
+    /// Step ≤ 0 (or no bucketing) returns the input unchanged.
+    /// </summary>
+    private static List<PriceLevel> BucketLevels(List<PriceLevel> orderedHighToLow, decimal step)
+    {
+        if (step <= 0m || orderedHighToLow.Count == 0) return orderedHighToLow;
+
+        var result = new List<PriceLevel>(orderedHighToLow.Count);
+        foreach (var level in orderedHighToLow)
+        {
+            var floor = Math.Floor(level.Price / step) * step;
+            if (result.Count > 0 && result[^1].Price == floor)
+                result[^1] = new PriceLevel(floor, result[^1].Quantity + level.Quantity);
+            else
+                result.Add(new PriceLevel(floor, level.Quantity));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Auto-derive the picker's options for the current book and (if the user
+    /// hasn't picked) pick a default step from the mid price. Mutates
+    /// <see cref="AvailableBucketSizes"/> and <see cref="SelectedBucketSize"/>
+    /// only when the resulting list / selection has changed, so the picker
+    /// doesn't flicker on every refresh.
+    /// </summary>
+    private void RefreshBucketOptions(List<PriceLevel> sells, List<PriceLevel> buys,
+        CurrencyType currency, decimal? midPrice)
+    {
+        long totalVol = 0;
+        for (int i = 0; i < sells.Count; i++) totalVol += sells[i].Quantity;
+        for (int i = 0; i < buys.Count; i++)  totalVol += buys[i].Quantity;
+
+        // Build the option list: walk candidate steps until one of them
+        // concentrates ≥ 25% of total volume in a single bucket on either side.
+        var options = new List<BucketSizeOption>();
+        long quarterThreshold = (long)Math.Ceiling(totalVol * 0.25);
+        foreach (var step in BucketStepCandidates)
+        {
+            options.Add(new BucketSizeOption(step, CurrencyHelper.Format(step, currency)));
+            if (totalVol > 0)
+            {
+                var biggest = Math.Max(MaxBucketVolumeAt(sells, step), MaxBucketVolumeAt(buys, step));
+                if (biggest >= quarterThreshold) break;
+            }
+        }
+
+        // Replace the bound collection only if the underlying set changed.
+        bool sameOptions = AvailableBucketSizes.Count == options.Count;
+        if (sameOptions)
+            for (int i = 0; i < options.Count; i++)
+                if (AvailableBucketSizes[i].Value != options[i].Value) { sameOptions = false; break; }
+
+        _suppressBucketPick = true;
+        try
+        {
+            if (!sameOptions)
+            {
+                AvailableBucketSizes.Clear();
+                foreach (var o in options) AvailableBucketSizes.Add(o);
+            }
+
+            // Default step: auto-scale from price unless the user has overridden.
+            decimal targetStep = _userPickedBucket
+                ? _currentBucketStep
+                : AutoStepForPrice(midPrice, options);
+
+            // Snap to the closest available value (the user's stored choice may
+            // have fallen off the list if the book volume shrank since).
+            var pick = options.FirstOrDefault(o => o.Value == targetStep) ?? options[^1];
+            if (!ReferenceEquals(SelectedBucketSize, pick) &&
+                (SelectedBucketSize is null || SelectedBucketSize.Value != pick.Value))
+            {
+                SelectedBucketSize = pick;
+            }
+            _currentBucketStep = pick.Value;
+        }
+        finally
+        {
+            _suppressBucketPick = false;
+        }
+    }
+
+    private static long MaxBucketVolumeAt(List<PriceLevel> levels, decimal step)
+    {
+        if (levels.Count == 0 || step <= 0m) return 0;
+        long max = 0, cur = 0;
+        decimal? prevFloor = null;
+        foreach (var l in levels)
+        {
+            var floor = Math.Floor(l.Price / step) * step;
+            if (prevFloor.HasValue && prevFloor.Value != floor)
+            {
+                if (cur > max) max = cur;
+                cur = 0;
+            }
+            cur += l.Quantity;
+            prevFloor = floor;
+        }
+        if (cur > max) max = cur;
+        return max;
+    }
+
+    private static decimal AutoStepForPrice(decimal? price, List<BucketSizeOption> options)
+    {
+        // Aim for ~0.1% of price as the default tick; snap to the closest option.
+        // Defaults to the finest step when no price is available yet.
+        if (!price.HasValue || price.Value <= 0m || options.Count == 0)
+            return options.Count > 0 ? options[0].Value : 0.01m;
+
+        var target = price.Value * 0.001m;
+        var best = options[0].Value;
+        var bestDist = Math.Abs(best - target);
+        for (int i = 1; i < options.Count; i++)
+        {
+            var d = Math.Abs(options[i].Value - target);
+            if (d < bestDist) { best = options[i].Value; bestDist = d; }
+        }
+        return best;
+    }
+    #endregion
 }
 
 public enum LevelSide { Buy, Sell }
+
+public sealed record BucketSizeOption(decimal Value, string Label);
 
 public partial class LevelRow : ObservableObject
 {

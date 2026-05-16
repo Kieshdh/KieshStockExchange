@@ -9,11 +9,20 @@
         <Grid MinimumWidthRequest="220"
               RowDefinitions="Auto,Auto,*,Auto,*">
 
-            <!-- Card head: title -->
-            <Label Grid.Row="0"
-                   Text="Order Book"
-                   Style="{StaticResource SectionHeaderLabelStyle}"
-                   Padding="12,12,12,8" />
+            <!-- Card head: title + bucket-size picker (auto-adapts per stock) -->
+            <Grid Grid.Row="0"
+                  ColumnDefinitions="*,Auto"
+                  Padding="12,12,12,8">
+                <Label Grid.Column="0"
+                       Text="Order Book"
+                       Style="{StaticResource SectionHeaderLabelStyle}"
+                       VerticalOptions="Center" />
+                <Picker Grid.Column="1"
+                        ItemsSource="{Binding AvailableBucketSizes}"
+                        ItemDisplayBinding="{Binding Label}"
+                        SelectedItem="{Binding SelectedBucketSize, Mode=TwoWay}"
+                        Style="{StaticResource StockSelectorPicker}" />
+            </Grid>
 
             <!-- Column headers: PRICE | QTY | TOTAL (uppercase tracked) -->
             <Grid Grid.Row="1"
