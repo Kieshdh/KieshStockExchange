@@ -158,12 +158,35 @@ internal sealed class AiBotDecisionService
                 var engineAvail = enginePos?.AvailableQuantity ?? 0;
                 if (Math.Min(ctxAvail, engineAvail) > 0) candidates.Add(id);
             }
-            // Return 0 when bot has nothing to sell — avoids a wasted price lookup and DB call
-            return candidates.Count > 0 ? candidates[rng.Next(candidates.Count)] : 0;
+            return candidates.Count > 0 ? WeightedPick(candidates, rng) : 0;
         }
 
-        return watch[rng.Next(watch.Count)];
+        return WeightedPick(watch, rng);
     }
+
+    /// <summary>
+    /// Roulette-wheel pick weighted by 1/StockId^alpha. STOCKS are ordered by
+    /// market cap descending in the seed (id 1 = largest), so lower ids carry
+    /// higher weight — bigger names trade more often. Applied on top of the
+    /// already-biased watchlist, so alpha is mild (0.7 here vs 1.2 at seed
+    /// time) to avoid over-concentrating on the top 5.
+    /// </summary>
+    private static int WeightedPick(IList<int> stockIds, Random rng)
+    {
+        double total = 0;
+        Span<double> cum = stackalloc double[stockIds.Count];
+        for (int i = 0; i < stockIds.Count; i++)
+        {
+            total += 1.0 / Math.Pow(stockIds[i], RuntimeWeightAlpha);
+            cum[i] = total;
+        }
+        double r = rng.NextDouble() * total;
+        for (int i = 0; i < stockIds.Count; i++)
+            if (r < cum[i]) return stockIds[i];
+        return stockIds[^1];
+    }
+
+    private const double RuntimeWeightAlpha = 0.7;
     #endregion
 
     #region Price and Quantity Computation

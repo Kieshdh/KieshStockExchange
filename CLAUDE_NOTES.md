@@ -130,11 +130,18 @@ Hidden costs: domain (~$10–15/year, optional), self-host ops time (~1–2 hrs/
 - Reuse `CandleChartDrawable` patterns? Probably simpler to write a small line-chart drawable since there's no OHLC.
 - Pair with the existing Load % / EWMA readouts so trends are visible alongside scaler decisions.
 
-### 2.2 Better starting cash/stock distribution for bots
-- Currently 50/50 cash/stocks at seed; bots prefer to hold less cash.
-- Tune in `ExcelImportService.AddHoldingsFromExcelAsync` (or wherever bot seeding happens) so stock weight is higher on average.
-- Per-bot variance is fine — distribute across a target band (e.g. 65–85% in stocks).
-- Confirm AI decision logic in `AiBotDecisionService` matches the new starting state (no hidden assumptions about 50/50).
+### 2.2 Better starting cash/stock distribution for bots ✅ DONE
+- Generator side is correct: `Tools/Person.py::_portfolio` targets ~63–90%
+  in stocks (max_cash ≈ 17–58%, min_cash ≈ 6–35%, midpoint allocation to
+  shares). Distribution is already in the 65–85% band the planning called for.
+- Generator tooling extracted to `Tools/Config.py` (dict-of-dicts STOCKS,
+  tunables); `GenerateAIUsers.py` now re-enables the Stocks-sheet write +
+  seeds RNG so output is reproducible.
+- Action item to actually pick up the new distribution: re-run
+  `python Tools/GenerateAIUsers.py` to refresh `AIUserData.xlsx`, then the
+  next app startup reseeds Funds/Positions automatically.
+- `AiBotDecisionService` has no 50/50 assumption — verified during the
+  earlier engine work; reads live cache state, not seed ratios.
 
 ### 2.3 Reduce bot transaction failure rate
 - Currently averaging ~1 failed bot transaction per tick.
@@ -212,11 +219,22 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 
 ## 3. Stocks & economy
 
-### 3.1 Expand stock universe + realistic market caps
-- Increase from 21 → ~50 stocks.
-- Scale market cap so the first stocks are noticeably larger (power-law / Zipf-style distribution).
-- Update bot stock-selection in `AiBotDecisionService.ChooseStockId` to weight by market cap so bigger names trade more often.
-- Source data: extend the seed Excel and `ExcelImportService` import path.
+### 3.1 Expand stock universe + realistic market caps ✅ DONE
+- ✅ Expanded 21 → 50 stocks in `Tools/Config.py::STOCKS`, dict keyed by
+  StockId in market-cap descending order (largest first).
+- ✅ Power-law watchlist sampling implemented in `Tools/Person.py::_portfolio`
+  via `weighted_sample_no_replace` (Efraimidis–Spirakis) with weight
+  `1/sid**WATCHLIST_WEIGHT_ALPHA`. At α=1.2 (current), top-10 stocks land
+  in ~5× more watchlists than bottom-10.
+- ✅ Source data path extended: `ExcelImportService.AddStocksFromExcelAsync`
+  already reads sheet 0; `AddHoldingsFromExcelAsync` row check now scales
+  with `stockCount` instead of hardcoded `* 21`.
+- ✅ Runtime weighting: `AiBotDecisionService.ChooseStockId` now uses a
+  roulette-wheel `WeightedPick` with `1/sid^0.7` so bigger-cap names trade
+  more often during the simulation. Applied on top of the seed bias
+  (compounding alpha 0.7 runtime × 1.2 seed); easy to tune.
+- ⏭ Excel needs regenerating (`python Tools/GenerateAIUsers.py`) for the
+  new universe to land in the running app.
 
 ### 3.2 Multi-currency trading
 - Currencies exist (`CurrencyType`, `CurrencyHelper`) but only USD actually trades.
