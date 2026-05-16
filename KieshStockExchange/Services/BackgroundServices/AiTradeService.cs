@@ -141,6 +141,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly BotStatsLogger       _stats;
     private readonly ReservationAuditor   _auditor;
     private readonly BotEconomyTelemetry  _economy;
+    private readonly BotSentimentService  _sentiment;
     #endregion
 
     #region Services and Constructor
@@ -178,6 +179,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions));
         _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
+        _sentiment = new BotSentimentService(stocks, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
         _decisions = new AiBotDecisionService(market, accounts, books,
@@ -279,6 +281,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _stats.Reset();
         _failures.Reset();
         _economy.Reset();
+        _sentiment.Reset(TimeHelper.NowUtc());
         _nextStatsLogTime   = TimeHelper.NowUtc() + StatsLogInterval;
         _nextReconcileTime  = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime = TimeHelper.NowUtc() + EconomyLogInterval;
@@ -463,6 +466,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     #region Timers
     private async Task CheckTimers(DateTime now, CancellationToken ct)
     {
+        _sentiment.Tick(now);
         if (now >= _nextDailyCheck)
         {
             _state.CheckDailyRefresh(_ctx);

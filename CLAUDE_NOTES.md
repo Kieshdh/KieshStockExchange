@@ -40,13 +40,14 @@ Sequence chosen to (a) finish what's already started, (b) land cheap UX wins, (c
 9. Engine audit pass (5.1) — fix buyer balance race + maker-fill OpenOrders lag from `project_market_engine_status.md` ✅ DONE
 10. Reduce bot transaction failure rate (2.3) ✅ DONE
 11. Better bot starting cash/stock distribution (2.2) ✅ DONE
-12. Order book price-range bucketing (4.3)
+12. Order book price-range bucketing (4.3) ✅ DONE
 
 ### Wave 4 — Economy expansion (2–3 weeks)
 13. Expand stock universe + realistic market caps (3.1) ✅ DONE
-14. Multi-currency trading (3.2)
-15. Investigate steady price drift — bot economy balance (3.3)
-16. Multi-timescale bot sentiment (3.4) — engine already keys by `(StockId, CurrencyType)`
+14. Multi-currency trading (3.2) — engine already keys by `(StockId, CurrencyType)`
+15. Investigate steady price drift — bot economy balance (3.3) ✅ DONE
+16. Multi-timescale bot sentiment + rare-event shocks (3.4)
+17. Periodic bot cash injections — nominal-growth driver (3.5)
 
 ### Wave 5 — Watchlist + notifications (1 week)
 15. Watchlist (1.3)
@@ -245,7 +246,26 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - Add an FX conversion path so users can move cash between funds (likely a new `FxService` + a "Convert" button on the new Deposit/Withdraw page or its own page).
 - `UserPreferences.BaseCurrency` already in the model — wire it through valuation / P&L displays.
 
-### 3.3 Investigate steady price drift in bot-driven economy
+### 3.3 Investigate steady price drift in bot-driven economy ✅ DONE
+- Resolution summary: drift slope reduced from ~9.2%/hr (baseline) to
+  ~4.2%/hr after three structural fixes. Residual is stochastic
+  accumulation on low-volume stocks (mid-tier cap-weighted names),
+  not a code bug.
+- Fixes that landed:
+  1. **Suspect 3** (commit `d225fae`): `AiBotContext.FundsPercentagePortfolio`
+     numerator `AvailableBalance` → `TotalBalance`. Open limit-buy
+     reservations no longer push bots toward selling.
+  2. **Suspect 2** (commit `e2ab2b2`): `AiBotDecisionService.ComputeOrderPriceAsync`
+     limit-order anchor switched from last-trade price to mid-price.
+     Removed the structural ratchet where buys filling at the ask kept
+     pulling the reference up.
+  3. **Suspect 1** (commit `5a0681b`): `AiBotDecisionService.ChooseOrderType`
+     symmetrised TrendFollower/MeanReversion momentum magnitudes to
+     ±0.175 (was +0.20 vs −0.15). Removed the +0.05 net buy bias per
+     unit momentum across the 25/25 strategy split.
+- Telemetry harness added in commit `d225fae`: `BotEconomyTelemetry`
+  records 60s wealth + drift snapshots, CSV export via Bot Dashboard.
+- Original notes (kept for context):
 - Symptom: with bots running, stock prices trend upward steadily over a session
   instead of mean-reverting around their seeded levels. Suggests a systemic
   imbalance somewhere in the bot decision / matching / settlement loop.
@@ -274,7 +294,7 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
   `Tools/Config.py` / `Tools/Person.py` for seed imbalances, settlement
   engine for accounting bugs.
 
-### 3.4 Multi-timescale bot sentiment
+### 3.4 Multi-timescale bot sentiment + rare-event shocks
 - Goal: introduce random sentiment shocks at multiple timescales so the
   market shows organic-looking trends and reversals instead of a flat
   random-walk. Each bot's buy/sell preference is biased by the sum of
@@ -309,6 +329,50 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - Watch out for: sentiment compounding with the price-drift issue (3.3) —
   fix 3.3 first or these factors will pile on top of an already biased
   baseline and mask the root cause.
+- **Rare-event shocks (disasters / good news)** — a Poisson-process layer
+  on top of the OU mean-reverting factors. Per-stock, low frequency
+  (mean inter-arrival ~2–6 simulated hours), magnitude ±5–20% sentiment
+  jump that decays exponentially over a few hours. Examples: earnings
+  beat, recall, fraud headline. Stretch: sector contagion (a shock on
+  one stock partially propagates to others in the same sector — would
+  need a Sector field on Stock first). The same `BotSentimentService`
+  hosts both layers; rare events just add to the current factor sum
+  instead of replacing it.
+
+### 3.5 Periodic bot cash injections — nominal-growth driver
+- After 3.3 lands, the trading mechanics are symmetric and the bots
+  random-walk prices around a flat level (no drift up or down on
+  average). That matches a closed market with no inflows. Real
+  markets see nominal price rise over time because new money keeps
+  flowing in from wages, savings, retained earnings, etc. Adding a
+  small, periodic cash deposit to bots replicates that.
+- Mechanism: every N minutes (e.g. 10 simulated min), pick a random
+  subset of bots and add a small cash amount each. Goal is a controlled
+  fleet-wide nominal growth rate — target maybe ~5–10%/yr equivalent
+  when annualised.
+- Sizing knobs (Config.py-style):
+  - `CashInjectionIntervalMinutes` — cadence (default 10 min)
+  - `CashInjectionFleetFraction` — fraction of bots that receive a
+    deposit per cycle (default ~20%)
+  - `CashInjectionAmountPctOfPortfolio` — per-bot deposit as a fraction
+    of that bot's current portfolio value (default ~0.05% so a $100k
+    bot gets $50 per hit)
+- Likely home: new helper `BotCashInjector` (or method on
+  `AiBotStateService` if scope stays small), triggered from a new
+  timer in `AiTradeService.CheckTimers`. Each deposit goes through the
+  engine's fund-add path so the reservation ledger and audits stay
+  consistent — no direct mutation of `Fund.TotalBalance`.
+- Telemetry: BotEconomyTelemetry already tracks `TotalCash`; with
+  injections live it'll grow over time. Useful sanity check that
+  injections fire correctly. Could add a separate `InjectedThisSession`
+  counter if helpful.
+- Interaction with 3.3 verification: do **not** turn this on while
+  validating the drift fix — it would mask whether residual drift is
+  bug or injection. Add a hard off-switch (`CashInjectionEnabled = false`
+  by default) and turn it on only after 3.3 is closed.
+- Stretch: instead of equal-weighted random subset, weight selection by
+  aggressiveness (aggressive bots earn more, like real income skew) or
+  randomise the per-bot amount with a heavy-tailed distribution.
 
 ---
 
@@ -324,7 +388,7 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - Switch to incremental updates (update existing items in place) so values blend rather than flash.
 - Affects portfolio holdings, market list, possibly admin tables.
 
-### 4.3 Order book: price-range bucketing
+### 4.3 Order book: price-range bucketing ✅ DONE
 - Currently every price level is its own row → bottom of book is invisible at low zoom.
 - Bucket adjacent prices into ranges (look at how Binance / IBKR do it — typically 0.01, 0.10, 1.00 step buckets the user can pick).
 - New helper in `OrderBookView` VM: aggregator that takes the raw book + a step size and emits bucketed levels.
