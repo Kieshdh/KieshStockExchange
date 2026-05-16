@@ -119,13 +119,18 @@ def _ensure_dark_theme_styles(wb: Workbook) -> None:
     data_edge_border   = Border(top=thin_side,  bottom=thin_side,  left=thin_side, right=thick_side)
     data_mid_border    = Border(top=thin_side,  bottom=thin_side,  left=thin_side, right=thin_side)
 
-    # NamedStyles — six distinct combinations used across the sheet.
+    # Black fill for the dark margin column past the data.
+    margin_fill = PatternFill(start_color=BACKGROUND_COLOR, end_color=BACKGROUND_COLOR, fill_type="solid")
+
+    # NamedStyles — six distinct combinations used across the sheet, plus
+    # the dark-margin style applied at column level past the data.
     wb.add_named_style(NamedStyle(name="kse_header_edge",    fill=header_fill,      font=header_font, border=header_edge_border))
     wb.add_named_style(NamedStyle(name="kse_header_mid",     fill=header_fill,      font=header_font, border=header_mid_border))
     wb.add_named_style(NamedStyle(name="kse_data_even_edge", fill=row_fill_primary, font=text_font,   border=data_edge_border))
     wb.add_named_style(NamedStyle(name="kse_data_even_mid",  fill=row_fill_primary, font=text_font,   border=data_mid_border))
     wb.add_named_style(NamedStyle(name="kse_data_odd_edge",  fill=row_fill_alt,     font=text_font,   border=data_edge_border))
     wb.add_named_style(NamedStyle(name="kse_data_odd_mid",   fill=row_fill_alt,     font=text_font,   border=data_mid_border))
+    wb.add_named_style(NamedStyle(name="kse_dark_margin",    fill=margin_fill))
 
 
 def apply_dark_theme(ws: Worksheet) -> None:
@@ -162,6 +167,17 @@ def apply_dark_theme(ws: Worksheet) -> None:
         for c_idx, cell in enumerate(row):
             cell.style = styles[c_idx]
 
+    # Dark margin column past the data — keeps the dark theme bleeding to
+    # the right of the table instead of revealing Excel's default white.
+    # Cell-level style is required: ColumnDimension.style is read-only in
+    # this openpyxl version, so each row needs an explicit empty cell to
+    # carry the kse_dark_margin style.
+    margin_col_idx = max_used_col + 1
+    margin_letter = get_column_letter(margin_col_idx)
+    for r in range(1, max_used_row + 1):
+        ws.cell(row=r, column=margin_col_idx).style = "kse_dark_margin"
+    ws.column_dimensions[margin_letter].width = 50
+
 
 def autofit_columns(ws: Worksheet, min_width: float = 8.0, max_width: float = 40.0) -> None:
     """
@@ -183,6 +199,11 @@ def autofit_columns(ws: Worksheet, min_width: float = 8.0, max_width: float = 40
             length = len(text)
             if length > max_length:
                 max_length = length
+
+        # Skip empty columns — leave whatever width/style is already set
+        # (e.g. the dark margin column past the data).
+        if max_length == 0:
+            continue
 
         adjusted_width = max_length + 2  # some padding
 

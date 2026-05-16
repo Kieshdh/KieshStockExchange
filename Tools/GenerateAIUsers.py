@@ -67,6 +67,10 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
         apply_dark_theme(ws)
         autofit_columns(ws)
 
+    # Drop the placeholder sheet that Workbook() creates by default.
+    if "Template" in wb.sheetnames:
+        del wb["Template"]
+
     # Save file
     wb.save(str(excel_path))
     print(f"[OK] Applied dark theme and saved all {num_people} AI users.")
