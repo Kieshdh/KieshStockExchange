@@ -1,14 +1,20 @@
 # run_generate_aiusers.py
 
+import random
 from pathlib import Path
 
-from Person import (Person, TICKERS, COMPANY_NAMES, PRICES, STOCKIDS)
+from Config import STOCKS
+from Person import Person, fake
 from ExcelLayout import *
 
 # Where to store the Excel
 BASE_DIR = Path(__file__).resolve().parent
 EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange" / "Resources" / "Raw" / "AIUserData.xlsx"
-NUM_PEOPLE = 20000 
+NUM_PEOPLE = 20000
+
+# Seeding both `random` and the Faker instance makes the generated Excel
+# byte-identical across runs. Set to None to get a fresh population each run.
+GENERATOR_SEED = 42
 
 
 def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_PEOPLE) -> None:
@@ -16,26 +22,35 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
     Create/refresh the AIUser Excel with Identity, Preference, Holding and AIUserTable.
     """
 
+    if GENERATOR_SEED is not None:
+        random.seed(GENERATOR_SEED)
+        fake.seed_instance(GENERATOR_SEED)
+
     # Load or create workbook
     wb = load_or_create_workbook(str(excel_path))
     print(f"✅ Loaded or created workbook at {excel_path}")
 
     # Create/clear sheets and write header rows
-    sheets = dict() # type: Dict[str, Worksheet]
-    #sheets["Stocks"] = prepare_stocks_sheet(wb)
+    sheets: dict[str, Worksheet] = {}
+    # Holding sheet uses ticker symbols as human-readable column headers.
+    tickers = [data["ticker"] for data in STOCKS.values()]
+
+    sheets["Stocks"] = prepare_stocks_sheet(wb)
     sheets["Identity"] = prepare_identity_sheet(wb)
-    sheets["Holding"] = prepare_holding_sheet(wb, TICKERS)
+    sheets["Holding"] = prepare_holding_sheet(wb, tickers)
     sheets["Profile"] = prepare_profile_sheet(wb)
 
     print("✅ Prepared all AIUser sheets.")
 
 
     # Append stock data
-    #for ticker in TICKERS:
-    #    sheets["Stocks"].append([STOCKIDS[ticker], ticker, COMPANY_NAMES[ticker], PRICES[ticker]])
+    for stock_id, data in STOCKS.items():
+        sheets["Stocks"].append([stock_id, data["ticker"], data["name"], data["price"]])
 
-    # Reset the Person index counter (so user_ids start at 1 again)
-    Person.idx = 1
+    # Reset class-level state so user_ids start at 1 and the username pool is
+    # empty for this run (otherwise a second call in the same process would
+    # spin in generate_username trying to find a fresh name).
+    Person.reset_state()
 
     # Generate people and append rows
     for _ in range(num_people):

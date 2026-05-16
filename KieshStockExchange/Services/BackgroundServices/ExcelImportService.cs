@@ -329,7 +329,7 @@ public class ExcelImportService : IExcelImportService
         {
             int countFunds = (await _db.GetFundsAsync().ConfigureAwait(false)).Count;
             int countPositions = (await _db.GetPositionsAsync().ConfigureAwait(false)).Count;
-            if (countFunds >= HoldingDataTable!.Rows.Count && countPositions >= HoldingDataTable.Rows.Count * 21)
+            if (countFunds >= HoldingDataTable!.Rows.Count && countPositions >= HoldingDataTable.Rows.Count * stockCount)
             {
                 _logger.LogInformation("Holdings data already imported. Skipping import.");
                 return;
