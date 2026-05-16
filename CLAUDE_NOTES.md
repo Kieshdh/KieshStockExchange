@@ -24,27 +24,29 @@ Sequence chosen to (a) finish what's already started, (b) land cheap UX wins, (c
 
 **Total realistic timeline with Claude Code helping: ~11–17 weeks** (~3–4 months) of consistent focus. Migration alone is the largest single chunk; Waves 1–6 total roughly 7–11 weeks.
 
-### Wave 1 — Land in-flight work (this week)
-1. Chart MA/EMA + crosshair + price markers
-2. Deposit/Withdraw + FundTransaction
-3. UserPreferences (Theme + BaseCurrency persistence)
+### Wave 1 — Land in-flight work (this week) ✅ DONE
+1. Chart MA/EMA + crosshair + price markers ✅ DONE
+2. Deposit/Withdraw + FundTransaction ✅ DONE
+3. UserPreferences (Theme + BaseCurrency persistence) ✅ DONE
 
-### Wave 2 — Quick UX wins (1–2 weeks)
-4. Reload flicker fix (4.2) — biggest perceived-quality win for the effort
-5. Fund transaction history view (1.1)
-6. Order modify UI (1.4) — `ModifyOrderAsync` plumbing already exists
-7. Market page trending load gap (4.1)
-8. Volume bars overlaid on chart (4.4) — do while in-flight chart code is fresh
+### Wave 2 — Quick UX wins (1–2 weeks) ✅ DONE
+4. Reload flicker fix (4.2) — biggest perceived-quality win for the effort ✅ DONE
+5. Fund transaction history view (1.1) ✅ DONE
+6. Order modify UI (1.4) — `ModifyOrderAsync` plumbing already exists ✅ DONE
+7. Market page trending load gap (4.1) ✅ DONE
+8. Volume bars overlaid on chart (4.4) — do while in-flight chart code is fresh ✅ DONE
 
 ### Wave 3 — Engine + bot fixes (2–3 weeks) — **must finish before Wave 7 Phase 3**
-9. Engine audit pass (5.1) — fix buyer balance race + maker-fill OpenOrders lag from `project_market_engine_status.md`
-10. Reduce bot transaction failure rate (2.3)
-11. Better bot starting cash/stock distribution (2.2)
+9. Engine audit pass (5.1) — fix buyer balance race + maker-fill OpenOrders lag from `project_market_engine_status.md` ✅ DONE
+10. Reduce bot transaction failure rate (2.3) ✅ DONE
+11. Better bot starting cash/stock distribution (2.2) ✅ DONE
 12. Order book price-range bucketing (4.3)
 
 ### Wave 4 — Economy expansion (2–3 weeks)
-13. Expand stock universe + realistic market caps (3.1)
-14. Multi-currency trading (3.2) — engine already keys by `(StockId, CurrencyType)`
+13. Expand stock universe + realistic market caps (3.1) ✅ DONE
+14. Multi-currency trading (3.2)
+15. Investigate steady price drift — bot economy balance (3.3)
+16. Multi-timescale bot sentiment (3.4) — engine already keys by `(StockId, CurrencyType)`
 
 ### Wave 5 — Watchlist + notifications (1 week)
 15. Watchlist (1.3)
@@ -114,7 +116,7 @@ Hidden costs: domain (~$10–15/year, optional), self-host ops time (~1–2 hrs/
 - Add to `IUserPortfolioService` or split into a dedicated `IWatchlistService` (probably the latter — clean separation).
 - Filter wired into `MarketPage` pagination and shown as a separate tab.
 
-### 1.4 Order modify UI
+### 1.4 Order modify UI ✅ DONE
 - Plumbing already exists: `OrderExecutionService.ModifyOrderAsync`.
 - Need: edit affordance on `OpenOrdersView` rows (price + quantity, not type).
 - Validation must mirror entry validation; reuse `OrderValidator` rather than duplicating rules.
@@ -143,7 +145,7 @@ Hidden costs: domain (~$10–15/year, optional), self-host ops time (~1–2 hrs/
 - `AiBotDecisionService` has no 50/50 assumption — verified during the
   earlier engine work; reads live cache state, not seed ratios.
 
-### 2.3 Reduce bot transaction failure rate
+### 2.3 Reduce bot transaction failure rate ✅ DONE
 - Currently averaging ~1 failed bot transaction per tick.
 - Investigate root causes via the improved Warning logs from `AiTradeService.RunLoopAsync`.
 - Suspects: race between committed-amount calc and concurrent fills, settlement seller quantity check (item 10 in the engine notes), mid-tick price moves invalidating a chosen limit price.
@@ -243,16 +245,81 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - Add an FX conversion path so users can move cash between funds (likely a new `FxService` + a "Convert" button on the new Deposit/Withdraw page or its own page).
 - `UserPreferences.BaseCurrency` already in the model — wire it through valuation / P&L displays.
 
+### 3.3 Investigate steady price drift in bot-driven economy
+- Symptom: with bots running, stock prices trend upward steadily over a session
+  instead of mean-reverting around their seeded levels. Suggests a systemic
+  imbalance somewhere in the bot decision / matching / settlement loop.
+- Suspect areas to investigate:
+  - **Bot cash injection vs. drain**: are bots starting with too much cash
+    relative to the float available to trade? Imbalance between buy-side and
+    sell-side pressure inflates prices. Check `Tools/Person.py::_portfolio`
+    cash/stock split vs. total seeded share supply.
+  - **Buy/sell decision bias**: `AiBotDecisionService.ChooseSide` — is the
+    probability of buying systematically higher than selling at neutral
+    momentum? Even a small asymmetry compounds.
+  - **Price reference for limit orders**: `ChooseLimitPrice` may be anchoring
+    on the last trade and adding spread — if buyers pay above last and sellers
+    ask above last, midprice walks up. Check that the offset is symmetric.
+  - **Settlement-side share creation**: confirm no path mints positions
+    without a counter-seller (rare but worth auditing — every fill should be
+    a zero-sum exchange between two users).
+  - **Bot top-up / refill behavior**: any periodic cash injection
+    (e.g. via `AiBotStateService` refresh) adds buying power without adding
+    shares → net upward pressure.
+- Verification approach: run with bots for a fixed window, log total bot
+  cash + total bot share value at start vs. end. Total wealth should be
+  approximately conserved (modulo fees if any); if it grows, something is
+  injecting value.
+- Likely fix layer: `Helpers/AiBotDecisionService.cs` for behavioral biases,
+  `Tools/Config.py` / `Tools/Person.py` for seed imbalances, settlement
+  engine for accounting bugs.
+
+### 3.4 Multi-timescale bot sentiment
+- Goal: introduce random sentiment shocks at multiple timescales so the
+  market shows organic-looking trends and reversals instead of a flat
+  random-walk. Each bot's buy/sell preference is biased by the sum of
+  several sentiment factors drifting on different clocks.
+- Proposed scales (per-stock, possibly global as a separate factor):
+  - **24h** — slow regime drift (bull/bear day)
+  - **1h** — session swings
+  - **10m** — shorter momentum bursts
+  - **1m** — micro noise
+- Each factor is a value in `[-1, +1]` (negative → sell-leaning, positive →
+  buy-leaning); they sum (or weighted-sum) into a single sentiment scalar
+  applied in `AiBotDecisionService.ChooseSide` as a bias on top of the
+  existing momentum/cash-share signals.
+- Update model: each factor follows a mean-reverting random walk (Ornstein–
+  Uhlenbeck style) — bounded, slow drift, occasional reversals. New random
+  draw on each factor's tick (24h-factor reseeds once a day, 1h-factor every
+  hour, etc.). Implementation can be discrete: re-roll each factor when its
+  clock expires, optionally interpolate between rolls.
+- Per-bot vs. shared: leaning is **shared market sentiment** (all bots see
+  the same 24h/1h/10m/1m factors for a given stock), but each bot mixes it
+  with its own RNG so behavior diverges. Optional per-bot personality
+  multiplier (`AIUser.SentimentSensitivity` ∈ ~[0.5, 1.5]) so some bots
+  follow the herd harder than others.
+- Per-stock vs. global: probably both — a global "market mood" factor plus
+  per-stock factors. Sector grouping is a stretch goal.
+- Likely home: new `BotSentimentService` (singleton, owns the per-stock
+  factor state + the timers) consumed by `AiBotDecisionService`. Sentiment
+  state lives in memory only; doesn't need persistence.
+- Tunables (probably Config.py-side mirrored to a C# const block):
+  amplitude per timescale (e.g. 24h ±0.6, 1h ±0.4, 10m ±0.25, 1m ±0.1),
+  mean-reversion strength, optional per-bot sensitivity range.
+- Watch out for: sentiment compounding with the price-drift issue (3.3) —
+  fix 3.3 first or these factors will pile on top of an already biased
+  baseline and mask the root cause.
+
 ---
 
 ## 4. UI / UX polish
 
-### 4.1 Market page: trending stocks initial-load gap
+### 4.1 Market page: trending stocks initial-load gap ✅ DONE
 - For the first few seconds, trending list shows nothing.
 - `TrendingService` is timer-only (5s) per the perf overhaul; need an immediate first refresh on subscribe rather than waiting for the next tick.
 - Or: prime from cached snapshot on startup.
 
-### 4.2 Reload flicker (numbers disappear briefly)
+### 4.2 Reload flicker (numbers disappear briefly) ✅ DONE
 - Live update path is replacing the whole VM collection on each refresh, which causes a brief blank frame.
 - Switch to incremental updates (update existing items in place) so values blend rather than flash.
 - Affects portfolio holdings, market list, possibly admin tables.
@@ -263,7 +330,7 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - New helper in `OrderBookView` VM: aggregator that takes the raw book + a step size and emits bucketed levels.
 - Add a "depth" picker so the user can choose granularity.
 
-### 4.4 TradingView-style volume bars on chart
+### 4.4 TradingView-style volume bars on chart ✅ DONE
 - Currently volume is a separate panel; want it overlaid on the price chart with transparency.
 - Touches `CandleChartDrawable` — render volume bars first with low alpha + a separate y-axis scaled to the bottom ~20% of the chart area.
 - Keep volume axis hidden by default (TradingView-style).
@@ -349,7 +416,7 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 
 ## 5. Engine / performance
 
-### 5.1 MarketEngine audit pass
+### 5.1 MarketEngine audit pass ✅ DONE
 - Walk through `OrderEntryService` → `OrderExecutionService` → `MatchingEngine` → `SettlementEngine` end-to-end again.
 - Look for: avoidable allocations on the hot path, lock contention, DB calls inside batch loops.
 - Check the "Known remaining issues" in memory:
