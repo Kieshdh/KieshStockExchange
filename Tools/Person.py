@@ -201,12 +201,15 @@ class Person:
         self.max_orders = max(MAX_OPEN_ORDERS_FLOOR, int(jitter(base_open_orders, rel=MAX_OPEN_ORDERS_JITTER)))
 
     def ToIdentityList(self):
+        # birthdate written as ISO "YYYY-MM-DD" string — keeps the cell a
+        # plain string so the C# importer's DateTime.TryParse works
+        # regardless of the column's number-format.
         return [
             self.user_id,
             self.username,
             self.full_name,
             self.email,
-            self.birthdate
+            self.birthdate.isoformat()
         ]
 
     def ToProfileList(self):

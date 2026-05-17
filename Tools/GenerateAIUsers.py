@@ -35,10 +35,12 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
     # Holding sheet uses ticker symbols as human-readable column headers.
     tickers = [data["ticker"] for data in STOCKS.values()]
 
+    # Sheet creation order matters: C# ExcelImportService reads by sheet
+    # index, expecting [Stocks, Identity, Profile, Holding].
     sheets["Stocks"] = prepare_stocks_sheet(wb)
     sheets["Identity"] = prepare_identity_sheet(wb)
-    sheets["Holding"] = prepare_holding_sheet(wb, tickers)
     sheets["Profile"] = prepare_profile_sheet(wb)
+    sheets["Holding"] = prepare_holding_sheet(wb, tickers)
 
     print("[OK] Prepared all AIUser sheets.")
 
