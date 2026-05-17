@@ -123,13 +123,17 @@ public class UserSessionService : IUserSessionService
                 await _excel.CheckAndAddDatabases().ConfigureAwait(false);
             _logger.LogInformation("Database seeding complete.");
 
-            // Start price snapshot service and configure trade service
+            // Start price snapshot service and configure trade service.
+            // Bots iterate every supported currency so non-USD-listed stocks
+            // get traded too; AiBotDecisionService.ChooseStockId filters each
+            // bot's watchlist to stocks whose listing currency matches the
+            // currency under consideration.
             _ = _price.Start();
             _trade.Configure(
                 tradeInterval: TimeSpan.FromSeconds(2),
                 dailyCheckInterval: TimeSpan.FromHours(1),
                 reloadAssetsInterval: TimeSpan.FromSeconds(30),
-                currencies: new List<CurrencyType> { BaseCurrency } // currently default USD
+                currencies: CurrencyHelper.SupportedCurrencies
             );
             _logger.LogInformation("Price snapshot service started and AITradeService configured.");
 

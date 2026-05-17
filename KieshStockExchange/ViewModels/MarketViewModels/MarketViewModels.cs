@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -25,6 +26,14 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     [NotifyPropertyChangedFor(nameof(PageDisplay))]
     private int _pageNumber; // 0-based
 
+    // Currency the All-Stocks table is filtered to. Quotes are keyed by
+    // (stockId, currency) in MarketDataService, so the table only ever shows
+    // rows whose Currency matches this filter. Defaults to the session's
+    // BaseCurrency so a user lands on what they care about.
+    [ObservableProperty] private CurrencyType _filterCurrency;
+
+    public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } = CurrencyHelper.SupportedCurrencies;
+
     public int PageSize { get; set; } = 20;
     public int TotalPages => Math.Max(1, (int)Math.Ceiling(FilteredStocks.Count / (double)PageSize));
     public bool CanGoPrev => PageNumber > 0;
@@ -39,6 +48,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     private readonly IMarketLookupService _lookup;
     private readonly IMarketDataService _market;
     private readonly ISelectedStockService _selected;
+    private readonly IUserSessionService _session;
     private readonly IDispatcher _dispatcher;
     private readonly ILogger<MarketViewModel> _logger;
 
@@ -53,6 +63,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         IMarketLookupService lookup,
         IMarketDataService market,
         ISelectedStockService selected,
+        IUserSessionService session,
         IDispatcher dispatcher,
         ITrendingService trending,
         TopNavBarViewModel topNavBarVm)
@@ -62,9 +73,12 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         _lookup     = lookup      ?? throw new ArgumentNullException(nameof(lookup));
         _market     = market      ?? throw new ArgumentNullException(nameof(market));
         _selected   = selected    ?? throw new ArgumentNullException(nameof(selected));
+        _session    = session     ?? throw new ArgumentNullException(nameof(session));
         _dispatcher = dispatcher  ?? throw new ArgumentNullException(nameof(dispatcher));
         Trending    = trending    ?? throw new ArgumentNullException(nameof(trending));
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
+
+        _filterCurrency = _session.BaseCurrency;
     }
     #endregion
 
@@ -77,7 +91,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         try
         {
             // Idempotent — already-subscribed books just bump the ref count.
-            await _market.SubscribeAllAsync(CurrencyType.USD, forUi: true).ConfigureAwait(false);
+            await _market.SubscribeAllAsync(FilterCurrency, forUi: true).ConfigureAwait(false);
 
             // Prime the trending lists immediately. Without this the user sees
             // an empty Top Gainers / Top Losers / Most Active panel for up to
@@ -137,7 +151,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     private void Poll()
     {
         var quotes = _market.Quotes.Values
-            .Where(q => q.Currency == CurrencyType.USD)
+            .Where(q => q.Currency == FilterCurrency)
             .OrderBy(q => q.Symbol, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -190,6 +204,21 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         ApplyFilter();
         PageNumber = 0; // reset to first page on filter change
         RebuildPagedStocks();
+    }
+
+    // Currency change tears down the in-memory row map: rows in the previous
+    // currency are no longer relevant to the table, and leaving them in
+    // _byStockId would let Poll's "structureChanged" path miss the wholesale
+    // swap. After clearing we kick a refresh so the new currency's books get
+    // subscribed and the table reflows on the next tick.
+    partial void OnFilterCurrencyChanged(CurrencyType value)
+    {
+        _byStockId.Clear();
+        AllStocks.Clear();
+        FilteredStocks.Clear();
+        PagedStocks.Clear();
+        PageNumber = 0;
+        _ = RefreshAsync();
     }
 
     private void ApplyFilter()

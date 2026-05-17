@@ -122,6 +122,10 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
     // three buttons) so it needs more vertical room than the simple change-* forms.
     [RelayCommand] private void OpenDepositWithdraw() =>
         OpenInWindow<DepositWithdrawPage>("Deposit / Withdraw", width: 520, height: 700);
+    // FX conversion form: two currency pickers + amount + preview, so a touch taller
+    // than the deposit window.
+    [RelayCommand] private void OpenConvertCurrency() =>
+        OpenInWindow<ConvertCurrencyPage>("Convert currency", width: 520, height: 760);
     // Audit-trail companion: lists every Deposit/Withdraw the user has performed.
     [RelayCommand] private void OpenFundHistory() =>
         OpenInWindow<FundTransactionHistoryPage>("Fund history", width: 720, height: 600);

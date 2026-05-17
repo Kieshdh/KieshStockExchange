@@ -151,6 +151,10 @@
                                     Command="{Binding OpenDepositWithdrawCommand}" />
                         </Grid>
 
+                        <Button Text="Convert currency"
+                                Style="{StaticResource SecondaryActionButtonStyle}"
+                                Command="{Binding OpenConvertCurrencyCommand}" />
+
                         <Button Text="Transaction history"
                                 Style="{StaticResource SecondaryActionButtonStyle}"
                                 Command="{Binding OpenFundHistoryCommand}" />

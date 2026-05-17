@@ -200,7 +200,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
-        _decisions = new AiBotDecisionService(market, accounts, books, _sentiment,
+        _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions));
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 

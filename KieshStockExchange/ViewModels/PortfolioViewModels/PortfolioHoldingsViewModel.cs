@@ -101,9 +101,15 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
         {
             if (pos.StockId <= 0) continue;
 
+            // Each position trades in its stock's listed currency, so subscribe
+            // to and read the quote for that (stockId, currency) pair instead of
+            // the USD-only legacy. Falls back to USD if the catalog hasn't loaded.
+            if (!_stocks.TryGetCurrency(pos.StockId, out var ccy))
+                ccy = CurrencyType.USD;
+
             if (_rowsByStockId.TryGetValue(pos.StockId, out var existing))
             {
-                if (_market.Quotes.TryGetValue((pos.StockId, CurrencyType.USD), out var live)
+                if (_market.Quotes.TryGetValue((pos.StockId, ccy), out var live)
                     && !ReferenceEquals(existing.Live, live))
                 {
                     existing.Live = live;
@@ -112,7 +118,7 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
             }
             else
             {
-                var row = CreatePositionRow(pos, CurrencyType.USD);
+                var row = CreatePositionRow(pos, ccy);
                 _rowsByStockId[pos.StockId] = row;
 
                 int idx = 0;

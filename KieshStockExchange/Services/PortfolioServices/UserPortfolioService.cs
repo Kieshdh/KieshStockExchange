@@ -185,6 +185,10 @@ public class UserPortfolioService : IUserPortfolioService
     public async Task<bool> WithdrawAsync(decimal amount, CurrencyType currency, string? note = null,
         int? asUserId = null, CancellationToken ct = default)
         => await DepositOrWithdrawAsync(FundTransaction.Kinds.Withdrawal, amount, currency, note, asUserId, ct);
+
+    public async Task<bool> ConvertAsync(decimal amount, CurrencyType from, CurrencyType to,
+        string? note = null, int? asUserId = null, CancellationToken ct = default)
+        => await ConvertInternalAsync(amount, from, to, note, asUserId, ct);
     #endregion
 
     #region Position Mutations
@@ -296,6 +300,117 @@ public class UserPortfolioService : IUserPortfolioService
         if (success)
         {
             // Refresh outside the DB transaction so the snapshot reflects the new balance.
+            await RefreshAsync(asUserId, ct).ConfigureAwait(false);
+        }
+        return success;
+    }
+
+    /// <summary>
+    /// Audited cash conversion: withdraws from the source fund and deposits the
+    /// rate-converted amount into the target fund inside a single DB transaction.
+    /// Emits paired ConversionOut/ConversionIn FundTransaction rows. Mirrors the
+    /// auth + rollback shape of <see cref="DepositOrWithdrawAsync"/>.
+    /// </summary>
+    private async Task<bool> ConvertInternalAsync(decimal amount, CurrencyType from, CurrencyType to,
+        string? note, int? asUserId, CancellationToken ct)
+    {
+        var targetUserId = GetTargetUserIdOrFail(asUserId, out var authErr);
+        if (authErr != null) { _logger.LogWarning(authErr); return false; }
+        if (!CanModifyPortfolio(targetUserId))
+        {
+            _logger.LogWarning("No permission to convert funds for user {UserId}", targetUserId);
+            return false;
+        }
+        if (amount <= 0)
+        {
+            _logger.LogWarning("Convert amount must be positive. Given: {Amount}", amount);
+            return false;
+        }
+        if (from == to)
+        {
+            _logger.LogWarning("Convert from and to currency must differ ({Currency}).", from);
+            return false;
+        }
+        if (!CurrencyHelper.IsSupported(from) || !CurrencyHelper.IsSupported(to))
+        {
+            _logger.LogWarning("Unsupported currency in convert {From}->{To}", from, to);
+            return false;
+        }
+
+        var converted = CurrencyHelper.RoundMoney(
+            CurrencyHelper.Convert(amount, from, to, CurrencyHelper.DecimalPlaces(to)),
+            to);
+        if (converted <= 0m)
+        {
+            _logger.LogWarning("Convert {Amount} {From}->{To} rounds to zero in target currency.",
+                amount, from, to);
+            return false;
+        }
+
+        // Audit notes carry the rate that was applied so the user can reconcile
+        // later even if the static rate table changes. Trimmed user note appended
+        // for context, if present.
+        var rate = converted / amount; // already-rounded effective rate
+        var trimmedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        var rateTag = $"Convert {from}->{to} @ {rate:0.######}";
+        var outNote = string.IsNullOrEmpty(trimmedNote) ? rateTag : $"{rateTag} | {trimmedNote}";
+        var inNote = outNote;
+
+        var success = false;
+        try
+        {
+            await _db.RunInTransactionAsync(async _ =>
+            {
+                var src = await _db.GetFundByUserIdAndCurrency(targetUserId, from, ct).ConfigureAwait(false);
+                if (src is null || !CurrencyHelper.GreaterOrEqual(src.AvailableBalance, amount, from))
+                {
+                    _logger.LogWarning(
+                        "Insufficient available funds for convert {Amount} {From} (user {UserId}, available={Avail}).",
+                        amount, from, targetUserId, src?.AvailableBalance ?? 0m);
+                    throw new InsufficientFundsException();
+                }
+
+                var dst = await _db.GetFundByUserIdAndCurrency(targetUserId, to, ct).ConfigureAwait(false)
+                    ?? new Fund { UserId = targetUserId, CurrencyType = to, TotalBalance = 0 };
+
+                src.WithdrawFunds(amount);
+                dst.AddFunds(converted);
+
+                await _db.UpsertFund(src, ct).ConfigureAwait(false);
+                await _db.UpsertFund(dst, ct).ConfigureAwait(false);
+
+                var now = TimeHelper.NowUtc();
+                await _db.CreateFundTransaction(new FundTransaction
+                {
+                    UserId = targetUserId,
+                    CurrencyType = from,
+                    Amount = amount,
+                    Kind = FundTransaction.Kinds.ConversionOut,
+                    Note = outNote,
+                    CreatedAt = now
+                }, ct).ConfigureAwait(false);
+                await _db.CreateFundTransaction(new FundTransaction
+                {
+                    UserId = targetUserId,
+                    CurrencyType = to,
+                    Amount = converted,
+                    Kind = FundTransaction.Kinds.ConversionIn,
+                    Note = inNote,
+                    CreatedAt = now
+                }, ct).ConfigureAwait(false);
+                success = true;
+            }, ct).ConfigureAwait(false);
+        }
+        catch (InsufficientFundsException) { return false; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Convert failed for user {UserId} ({Amount} {From}->{To}).",
+                targetUserId, amount, from, to);
+            return false;
+        }
+
+        if (success)
+        {
             await RefreshAsync(asUserId, ct).ConfigureAwait(false);
         }
         return success;

@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
@@ -23,16 +24,18 @@ internal sealed class AiBotDecisionService
     private readonly IMarketDataService _market;
     private readonly IAccountsCache _accounts;
     private readonly IOrderBookCache _books;
+    private readonly IStockService _stocks;
     private readonly BotSentimentService _sentiment;
     private readonly ILogger<AiBotDecisionService> _logger;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
-        IOrderBookCache books, BotSentimentService sentiment,
+        IOrderBookCache books, IStockService stocks, BotSentimentService sentiment,
         ILogger<AiBotDecisionService> logger)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
         _books     = books     ?? throw new ArgumentNullException(nameof(books));
+        _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -56,7 +59,7 @@ internal sealed class AiBotDecisionService
         CurrencyType currency, CancellationToken ct = default)
     {
         var type    = ChooseOrderType(ctx, user, currency);
-        var stockId = ChooseStockId(ctx, user, type);
+        var stockId = ChooseStockId(ctx, user, type, currency);
         if (stockId <= 0) return null;
 
         // When the chosen stock's raw sentiment crosses ±1, force the order
@@ -160,10 +163,18 @@ internal sealed class AiBotDecisionService
                 : OrderType.LimitSell;
     }
 
-    private int ChooseStockId(AiBotContext ctx, AIUser user, OrderType type)
+    private int ChooseStockId(AiBotContext ctx, AIUser user, OrderType type, CurrencyType currency)
     {
         var rng   = ctx.GetRandom(user.AiUserId);
-        var watch = user.Watchlist?.ToList();
+        // Restrict the watchlist to stocks whose listing currency matches the
+        // currency we're considering this tick. CurrenciesToTrade now spans every
+        // supported currency; an unfiltered list would let the bot place an order
+        // for an USD-listed stock against the EUR book, which then fails with
+        // BookCurrencyMismatch in the engine. Falling back to USD (TryGetCurrency
+        // returning false) keeps cold-load behavior matching today's USD-only world.
+        var watch = user.Watchlist?
+            .Where(id => _stocks.TryGetCurrency(id, out var c) ? c == currency : currency == CurrencyType.USD)
+            .ToList();
         if (watch == null || watch.Count == 0) return 0;
 
         if (IsSellOrder(type))

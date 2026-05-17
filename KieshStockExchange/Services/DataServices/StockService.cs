@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 
@@ -127,6 +128,17 @@ public sealed class StockService : IStockService
             return true;
         }
         symbol = string.Empty;
+        return false;
+    }
+
+    public bool TryGetCurrency(int id, out CurrencyType currency)
+    {
+        if (TryGetById(id, out var stock))
+        {
+            currency = stock!.CurrencyType;
+            return true;
+        }
+        currency = CurrencyType.USD;
         return false;
     }
 

@@ -127,21 +127,26 @@
                 Margin="24,0,24,0">
             <Grid RowDefinitions="Auto,Auto,*,Auto">
 
-                <!-- Card head: title + search + refresh -->
+                <!-- Card head: title + currency filter + search + refresh -->
                 <Grid Grid.Row="0"
-                      ColumnDefinitions="*,Auto,Auto"
+                      ColumnDefinitions="*,Auto,Auto,Auto"
                       ColumnSpacing="8"
                       Padding="16,14,16,12">
                     <Label Grid.Column="0"
                            Text="All Stocks"
                            Style="{StaticResource SectionHeaderLabelStyle}"
                            VerticalTextAlignment="Center" />
-                    <Entry Grid.Column="1"
+                    <Picker Grid.Column="1"
+                            ItemsSource="{Binding AvailableCurrencies}"
+                            SelectedItem="{Binding FilterCurrency, Mode=TwoWay}"
+                            Style="{StaticResource ThemePickerStyle}"
+                            WidthRequest="96" />
+                    <Entry Grid.Column="2"
                            Text="{Binding SearchText}"
                            Placeholder="Search symbol..."
                            Style="{StaticResource FormEntryStyle}"
                            WidthRequest="180" />
-                    <Button Grid.Column="2"
+                    <Button Grid.Column="3"
                             Text="Refresh"
                             Command="{Binding RefreshCommand}"
                             Style="{StaticResource SecondaryActionButtonStyle}"

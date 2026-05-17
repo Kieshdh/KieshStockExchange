@@ -29,6 +29,7 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
     private readonly ILogger<PriceSnapshotService> _logger;
     private readonly IDataBaseService _db;
     private readonly IMarketDataService _market;
+    private readonly IStockService _stocks;
 
     // Timer for scheduling snapshots
     private IDispatcherTimer? _timer;
@@ -36,12 +37,14 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
     private TimeSpan Interval = TimeSpan.FromHours(1); // Default 1 hour
 
     public PriceSnapshotService(ILogger<PriceSnapshotService> logger,
-        IDispatcher dispatcher, IDataBaseService db, IMarketDataService market)
+        IDispatcher dispatcher, IDataBaseService db, IMarketDataService market,
+        IStockService stocks)
     {
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _market = market ?? throw new ArgumentNullException(nameof(market));
+        _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
     }
     #endregion
 
@@ -152,9 +155,16 @@ public sealed class PriceSnapshotService : IPriceSnapshotService, IDisposable
         var subs = _market.Subscribed.ToList(); // (stockId, currency) keys
         if (subs.Count == 0)
         {
-            // Option B: fallback to all stocks if nothing is subscribed
+            // Option B: fallback to all stocks if nothing is subscribed. Use each
+            // stock's listed currency so non-USD stocks snapshot against their own
+            // book; TryGetCurrency defaults to USD for stocks the catalog hasn't
+            // loaded yet, preserving today's behavior on a cold start.
             var stocks = await _market.GetAllStocksAsync().ConfigureAwait(false);
-            subs = stocks.Select(s => (s.StockId, CurrencyType.USD)).ToList();
+            subs = stocks.Select(s =>
+            {
+                _stocks.TryGetCurrency(s.StockId, out var ccy);
+                return (s.StockId, ccy);
+            }).ToList();
         }
         return subs;
     }

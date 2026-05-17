@@ -1,6 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
@@ -33,6 +35,17 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     // Always show all orders/positions across stocks. The "Show all" toggle
     // was removed from TradePage; this stays true for the lifetime of the VM.
     [ObservableProperty] private bool _showAll = true;
+
+    // Currency picker bound to the header. Setting it routes to
+    // SelectedStockService.ChangeCurrencyAsync, which already handles
+    // unsubscribing the old book + re-subscribing the new one. We suppress
+    // the partial handler while we snap the picker back to the service's
+    // currency (e.g. when SelectedStock changes) so the user-driven path
+    // and the system-driven path don't collide.
+    public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } = CurrencyHelper.SupportedCurrencies;
+
+    [ObservableProperty] private CurrencyType _selectedCurrency = CurrencyType.USD;
+    private bool _suppressCurrencyChange;
     #endregion
 
     #region ViewModel Properties
@@ -58,10 +71,11 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     private readonly ILogger<TradeViewModel> _logger;
     private readonly IUserSessionService _session;
     private readonly IOrderEditService _editService;
+    private readonly IStockService _stocks;
 
     public TradeViewModel( ISelectedStockService selected, IMarketDataService market,
         ILogger<TradeViewModel> logger, IUserSessionService userSession,
-        IOrderEditService editService,
+        IOrderEditService editService, IStockService stocks,
         PlaceOrderViewModel placingVm, ModifyOrderViewModel modifyingVm,
         TransactionHistoryViewModel historyVm,
         OpenOrdersViewModel openOrdersVm, UserPositionsViewModel positionsVm,
@@ -74,6 +88,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         _selected = selected ?? throw new ArgumentNullException(nameof(selected));
         _session = userSession ?? throw new ArgumentNullException(nameof(userSession));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
+        _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
 
         // Initialize ViewModels
         PlacingVm = placingVm;
@@ -122,7 +137,19 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
                 Stocks.Add(stock);
 
             // Set the selection in the service (this triggers data loading, subscriptions, etc.)
-            await _selected.Set(stock); 
+            await _selected.Set(stock);
+
+            // If the stock is listed in a non-USD currency, switch the active book to
+            // match. _selected.Set defaults to the service's current Currency, so this
+            // is the natural place to align it with Stock.Currency. ChangeCurrencyAsync
+            // is a no-op when the currency is already correct.
+            if (_stocks.TryGetCurrency(stock.StockId, out var listingCurrency)
+                && listingCurrency != _selected.Currency)
+            {
+                await _selected.ChangeCurrencyAsync(listingCurrency);
+            }
+
+            SnapCurrencyPickerToService();
 
             _pickerSelection = stock; // reflect in the picker UI
             OnPropertyChanged(nameof(PickerSelection));
@@ -175,10 +202,33 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
                     match = stock;
                 }
 
-                _pickerSelection = match;  
+                _pickerSelection = match;
                 OnPropertyChanged(nameof(PickerSelection));
+
+                // Snap the currency picker to the new stock's listing currency. Setting
+                // SelectedCurrency before _selected.ChangeCurrencyAsync would loop back
+                // through the partial handler, so suppress the round-trip — the service
+                // itself updates Currency separately.
+                SnapCurrencyPickerToService();
             });
         }
+        else if (e.PropertyName is nameof(ISelectedStockService.Currency))
+        {
+            MainThread.BeginInvokeOnMainThread(SnapCurrencyPickerToService);
+        }
+    }
+
+    private void SnapCurrencyPickerToService()
+    {
+        _suppressCurrencyChange = true;
+        try { SelectedCurrency = _selected.Currency; }
+        finally { _suppressCurrencyChange = false; }
+    }
+
+    partial void OnSelectedCurrencyChanged(CurrencyType value)
+    {
+        if (_suppressCurrencyChange) return;
+        _ = _selected.ChangeCurrencyAsync(value);
     }
 
     [RelayCommand] private async Task LoadStocksAsync()

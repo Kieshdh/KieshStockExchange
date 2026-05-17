@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="KieshStockExchange.Views.AccountPageViews.ConvertCurrencyPage"
+             Title="Convert currency">
+
+    <Grid Style="{StaticResource MainGrid}"
+          Padding="20">
+        <Border Style="{StaticResource DashboardCardStyle}"
+                Padding="22"
+                HorizontalOptions="Fill"
+                VerticalOptions="Start">
+            <VerticalStackLayout Spacing="14">
+
+                <Label Text="Convert currency"
+                       Style="{StaticResource SectionHeaderLabelStyle}" />
+
+                <Label Text="Move cash between two of your funds. The rate shown is the static reference rate; the converted amount is rounded to the target currency."
+                       Style="{StaticResource MutedLabelStyle}" />
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="From"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Picker ItemsSource="{Binding AvailableCurrencies}"
+                            SelectedItem="{Binding FromCurrency, Mode=TwoWay}"
+                            Style="{StaticResource ThemePickerStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="Available balance"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Label Text="{Binding AvailableBalanceDisplay}"
+                           Style="{StaticResource MutedLabelStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="To"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Picker ItemsSource="{Binding AvailableCurrencies}"
+                            SelectedItem="{Binding ToCurrency, Mode=TwoWay}"
+                            Style="{StaticResource ThemePickerStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="Amount"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Entry Text="{Binding AmountString}"
+                           Keyboard="Numeric"
+                           Placeholder="0.00"
+                           Style="{StaticResource FormEntryStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="You receive"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Label Text="{Binding ConvertedAmountDisplay}"
+                           Style="{StaticResource QuotePriceLabel}" />
+                    <Label Text="{Binding RateDisplay}"
+                           Style="{StaticResource MutedLabelStyle}" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="4">
+                    <Label Text="Note (optional)"
+                           Style="{StaticResource FormLabelStyle}" />
+                    <Entry Text="{Binding Note}"
+                           Placeholder="Reason or reference"
+                           Style="{StaticResource FormEntryStyle}" />
+                </VerticalStackLayout>
+
+                <Label Text="{Binding ErrorMessage}"
+                       Style="{StaticResource RegistrationErrorLabel}"
+                       IsVisible="{Binding HasError}" />
+
+                <Grid ColumnDefinitions="*,*"
+                      ColumnSpacing="8"
+                      Margin="0,8,0,0">
+                    <Button Grid.Column="0"
+                            Text="Convert"
+                            Style="{StaticResource PrimaryActionButtonStyle}"
+                            Command="{Binding ConvertCommand}"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}" />
+                    <Button Grid.Column="1"
+                            Text="Cancel"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding CancelCommand}" />
+                </Grid>
+
+            </VerticalStackLayout>
+        </Border>
+    </Grid>
+</ContentPage>

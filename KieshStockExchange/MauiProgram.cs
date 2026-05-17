@@ -54,6 +54,7 @@ public static class MauiProgram
         builder.Services.AddTransient<ChangeEmailPage>();
         builder.Services.AddTransient<ChangeUsernamePage>();
         builder.Services.AddTransient<DepositWithdrawPage>();
+        builder.Services.AddTransient<ConvertCurrencyPage>();
         builder.Services.AddTransient<FundTransactionHistoryPage>();
         builder.Services.AddTransient<RegisterPage>();
         builder.Services.AddTransient<AdminPage>();
@@ -103,6 +104,7 @@ public static class MauiProgram
         builder.Services.AddTransient<ChangeEmailViewModel>();
         builder.Services.AddTransient<ChangeUsernameViewModel>();
         builder.Services.AddTransient<DepositWithdrawViewModel>();
+        builder.Services.AddTransient<ConvertCurrencyViewModel>();
         builder.Services.AddTransient<FundTransactionHistoryViewModel>();
         builder.Services.AddTransient<ModifyOrderViewModel>();
         // - Admin

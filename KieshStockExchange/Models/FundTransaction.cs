@@ -10,6 +10,10 @@ public class FundTransaction : IValidatable
     {
         public const string Deposit = "Deposit";
         public const string Withdrawal = "Withdrawal";
+        // FxService emits a paired ConversionOut row in the source currency and a
+        // ConversionIn row in the target currency for each user-initiated convert.
+        public const string ConversionIn = "ConversionIn";
+        public const string ConversionOut = "ConversionOut";
     }
 
     #region Properties
@@ -65,7 +69,8 @@ public class FundTransaction : IValidatable
         get => _kind;
         set
         {
-            if (value is not (Kinds.Deposit or Kinds.Withdrawal))
+            if (value is not (Kinds.Deposit or Kinds.Withdrawal
+                or Kinds.ConversionIn or Kinds.ConversionOut))
                 throw new ArgumentException($"Unknown FundTransaction Kind: '{value}'.");
             _kind = value;
         }
@@ -88,7 +93,8 @@ public class FundTransaction : IValidatable
 
     public bool IsInvalid => !IsValid();
 
-    private bool IsValidKind() => Kind is Kinds.Deposit or Kinds.Withdrawal;
+    private bool IsValidKind() => Kind is Kinds.Deposit or Kinds.Withdrawal
+        or Kinds.ConversionIn or Kinds.ConversionOut;
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
     private bool IsValidTimestamp() => CreatedAt > DateTime.MinValue && CreatedAt <= TimeHelper.NowUtc();
     #endregion
@@ -96,8 +102,11 @@ public class FundTransaction : IValidatable
     #region Helpers
     [Ignore] public bool IsDeposit => Kind == Kinds.Deposit;
     [Ignore] public bool IsWithdrawal => Kind == Kinds.Withdrawal;
-    /// <summary>Signed amount: positive for Deposit, negative for Withdrawal.</summary>
-    [Ignore] public decimal SignedAmount => IsDeposit ? Amount : -Amount;
+    [Ignore] public bool IsConversionIn => Kind == Kinds.ConversionIn;
+    [Ignore] public bool IsConversionOut => Kind == Kinds.ConversionOut;
+    [Ignore] public bool IsCredit => IsDeposit || IsConversionIn;
+    /// <summary>Signed amount: positive for credits (Deposit/ConversionIn), negative for debits.</summary>
+    [Ignore] public decimal SignedAmount => IsCredit ? Amount : -Amount;
     #endregion
 
     #region Display

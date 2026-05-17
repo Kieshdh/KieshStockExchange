@@ -108,6 +108,19 @@ public interface IUserPortfolioService
     /// </summary>
     Task<IReadOnlyList<FundTransaction>> GetFundTransactionsAsync(int? asUserId = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// User-initiated FX conversion between two of the user's own Fund rows.
+    /// Withdraws <paramref name="amount"/> from the <paramref name="from"/> fund
+    /// and credits the converted amount (via <see cref="CurrencyHelper.Convert"/>)
+    /// to the <paramref name="to"/> fund inside a single DB transaction. Writes
+    /// paired ConversionOut/ConversionIn <see cref="FundTransaction"/> rows so
+    /// the audit trail mirrors the deposit/withdraw flow. Returns false on
+    /// insufficient available balance, same-currency request, or persistence
+    /// failure (the transaction rolls back).
+    /// </summary>
+    Task<bool> ConvertAsync(decimal amount, CurrencyType from, CurrencyType to,
+        string? note = null, int? asUserId = null, CancellationToken ct = default);
     #endregion
 
     #region Mutations (Positions)

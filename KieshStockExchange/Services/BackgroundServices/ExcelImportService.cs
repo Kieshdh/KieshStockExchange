@@ -73,6 +73,12 @@ public class ExcelImportService : IExcelImportService
             }
         }
 
+        // The Excel "Currency" column is optional — older AIUserData.xlsx files
+        // never had it. When absent, every stock falls back to USD which matches
+        // the legacy seed behavior exactly. When present, the seed price column
+        // is read as the value in that currency (no conversion).
+        bool hasCurrencyColumn = StockDataTable!.Columns.Contains("Currency");
+
         // Make all the new instances of the stocks and stockprices
         List<Stock> stocks = new();
         List<StockPrice> stockPrices = new();
@@ -100,12 +106,17 @@ public class ExcelImportService : IExcelImportService
                 continue;
             }
 
+            var listingCurrency = hasCurrencyColumn
+                ? CurrencyHelper.FromIsoCodeOrDefault(row["Currency"]?.ToString(), CurrencyType.USD)
+                : CurrencyType.USD;
+
             // Create new stock
-            Stock stock = new Stock 
-            { 
-                StockId = stockId, 
-                Symbol = symbol, 
-                CompanyName = companyName 
+            Stock stock = new Stock
+            {
+                StockId = stockId,
+                Symbol = symbol,
+                CompanyName = companyName,
+                CurrencyType = listingCurrency,
             };
             if (!stock.IsValid())
             {
@@ -113,12 +124,12 @@ public class ExcelImportService : IExcelImportService
                 continue;
             }
 
-            // Create initial stock price
+            // Create initial stock price in the stock's listing currency
             StockPrice stockPrice = new StockPrice
             {
                 StockId = stockId,
                 Price = price,
-                CurrencyType = CurrencyType.USD,
+                CurrencyType = listingCurrency,
             };
             if (!stockPrice.IsValid())
             {
@@ -342,6 +353,18 @@ public class ExcelImportService : IExcelImportService
             }
         }
 
+        // Map StockId → (listing currency, seed price in that currency). Stocks
+        // were just (re)seeded by AddStocksFromExcelAsync, so the DB already has
+        // the per-stock currency. We use this to (a) seed Fund rows in the
+        // currencies the user actually needs, and (b) avoid one DB call per
+        // position per row.
+        var freshStocks = await _db.GetStocksAsync().ConfigureAwait(false);
+        var freshPrices = await _db.GetStockPricesAsync().ConfigureAwait(false);
+        var stockCcy = freshStocks.ToDictionary(s => s.StockId, s => s.CurrencyType);
+        var stockSeedPrice = new Dictionary<int, decimal>();
+        foreach (var sp in freshPrices)
+            stockSeedPrice[sp.StockId] = sp.Price; // last write wins; one row per stock at seed time
+
         List<Fund> funds = new();
         List<Position> positions = new();
         foreach (DataRow row in HoldingDataTable!.Rows)
@@ -368,17 +391,66 @@ public class ExcelImportService : IExcelImportService
                 }
             }
 
-            // Create new fund
-            Fund fund = new Fund
+            // Compute per-currency exposure in USD-equivalent so we can split
+            // the Balance proportionally across currencies. A user whose stocks
+            // are all USD ends up with one USD Fund row identical to legacy.
+            var usdExposureByCcy = new Dictionary<CurrencyType, decimal>();
+            decimal totalUsdExposure = 0m;
+            for (int i = 1; i <= stockCount; i++)
             {
-                UserId = userId,
-                TotalBalance = balance,
-                CurrencyType = CurrencyType.USD,
-            };
-            if (!fund.IsValid())
+                var qty = stocks[i - 1];
+                if (qty <= 0) continue;
+                if (!stockCcy.TryGetValue(i, out var ccy)) ccy = CurrencyType.USD;
+                if (!stockSeedPrice.TryGetValue(i, out var p) || p <= 0m) continue;
+                var inUsd = CurrencyHelper.Convert(qty * p, ccy, CurrencyType.USD);
+                if (inUsd <= 0m) continue;
+                usdExposureByCcy.TryGetValue(ccy, out var prior);
+                usdExposureByCcy[ccy] = prior + inUsd;
+                totalUsdExposure += inUsd;
+            }
+
+            // No exposure → fall back to a single USD Fund with the entire balance,
+            // matching the legacy behavior for bots that hold nothing yet.
+            if (totalUsdExposure <= 0m)
             {
-                _logger.LogWarning("Failed to register fund for user #{UserId}: {username}.", userId, row["Username"].ToString());
-                continue;
+                usdExposureByCcy[CurrencyType.USD] = 1m;
+                totalUsdExposure = 1m;
+            }
+
+            var userFunds = new List<Fund>(usdExposureByCcy.Count);
+            decimal allocatedUsd = 0m;
+            int seen = 0;
+            int total = usdExposureByCcy.Count;
+            foreach (var kv in usdExposureByCcy)
+            {
+                seen++;
+                // Last currency absorbs rounding residue so the user's total wealth
+                // in USD equals the seeded Balance.
+                decimal usdShare = (seen == total)
+                    ? balance - allocatedUsd
+                    : balance * (kv.Value / totalUsdExposure);
+                allocatedUsd += usdShare;
+                if (usdShare <= 0m) continue;
+
+                var balanceInCcy = CurrencyHelper.RoundMoney(
+                    CurrencyHelper.Convert(usdShare, CurrencyType.USD, kv.Key,
+                        CurrencyHelper.DecimalPlaces(kv.Key)),
+                    kv.Key);
+                if (balanceInCcy <= 0m) continue;
+
+                var fund = new Fund
+                {
+                    UserId = userId,
+                    TotalBalance = balanceInCcy,
+                    CurrencyType = kv.Key,
+                };
+                if (!fund.IsValid())
+                {
+                    _logger.LogWarning(
+                        "Failed to register {Currency} fund for user #{UserId}.", kv.Key, userId);
+                    continue;
+                }
+                userFunds.Add(fund);
             }
 
             // Create new positions
@@ -400,7 +472,7 @@ public class ExcelImportService : IExcelImportService
             }
 
             // Add to the lists
-            funds.Add(fund);
+            funds.AddRange(userFunds);
             positions.AddRange(userPositions);
         }
 

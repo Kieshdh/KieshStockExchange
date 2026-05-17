@@ -22,13 +22,15 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
     protected override async Task<(IReadOnlyList<StockTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        // Small table — load all stocks, prices come from the in-memory registry (O(1) each)
+        // Small table — load all stocks, prices come from the in-memory registry (O(1) each).
+        // Each stock's last price is read in its own listing currency rather than USD so the
+        // admin table shows correct numbers for non-USD-listed instruments.
         var stocks = (await _market.GetAllStocksAsync(ct)).OrderBy(s => s.StockId).ToList();
         var rows = new List<StockTableObject>(stocks.Count);
         foreach (var stock in stocks)
         {
-            var price = await _market.GetLastPriceAsync(stock.StockId, CurrencyType.USD, ct);
-            rows.Add(new StockTableObject(stock, CurrencyType.USD, price));
+            var price = await _market.GetLastPriceAsync(stock.StockId, stock.CurrencyType, ct);
+            rows.Add(new StockTableObject(stock, stock.CurrencyType, price));
         }
         return (rows, rows.Count);
     }

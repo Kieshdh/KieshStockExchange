@@ -1,4 +1,5 @@
-﻿using KieshStockExchange.Models;
+﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 
 namespace KieshStockExchange.Services.DataServices.Interfaces;
 
@@ -46,6 +47,12 @@ public interface IStockService
     /// Try to get a stock symbol by its unique identifier from in-memory snapshot.
     /// </summary>
     bool TryGetSymbol(int id, out string symbol);
+
+    /// <summary>
+    /// Try to get a stock's listing currency by its unique identifier from in-memory
+    /// snapshot. Returns false (currency=USD) if the stock isn't known yet.
+    /// </summary>
+    bool TryGetCurrency(int id, out CurrencyType currency);
 
     /// <summary>Simple symbol/company search.</summary>
     IReadOnlyList<Stock> Search(string? query, int take = 50);
