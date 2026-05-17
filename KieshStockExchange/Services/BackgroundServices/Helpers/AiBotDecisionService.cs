@@ -16,9 +16,9 @@ internal sealed class AiBotDecisionService
 {
     #region Services and Constructor
     // Max nudge applied to buyProb by the clamped sentiment value.
-    private const decimal SentimentMaxBias = 0.20m;
+    private const decimal SentimentMaxBias = 0.10m;
     // Probability of forcing a market order, per unit of |sentiment| > 1.
-    private const decimal OverflowGain     = 0.50m;
+    private const decimal OverflowGain     = 0.25m;
 
     private readonly IMarketDataService _market;
     private readonly IAccountsCache _accounts;
