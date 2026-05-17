@@ -124,6 +124,20 @@ USE_SLIP_SKEW             = 0.5
 # 0.5 so a bot is never more likely to be random than in character.
 EXTREME_RANDOMNESS_SKEW   = 2.0
 
+# Cash injection (3.5): periodic nominal-growth driver. Per-bot knobs are
+# seeded inverse to portfolio value at generation time, so smaller bots
+# inject more often and at a higher % of portfolio. Median bot expectation:
+# 5%/yr nominal. See ../KieshStockExchange/Services/BackgroundServices/Helpers/BotCashInjector.cs
+# for the runtime side.
+CASH_INJECTION_BASE_FREQUENCY = 0.15      # median: 15% chance / 1-hour cycle
+CASH_INJECTION_BASE_AMOUNT    = 0.004     # median: 0.4% of portfolio / hit
+CASH_INJECTION_SIZE_ALPHA     = 0.6       # inverse-size skew strength
+CASH_INJECTION_JITTER         = 0.20      # ±20% per-bot randomness
+CASH_INJECTION_FREQ_FLOOR     = 0.02
+CASH_INJECTION_FREQ_CAP       = 0.45
+CASH_INJECTION_AMOUNT_FLOOR   = 0.0005
+CASH_INJECTION_AMOUNT_CAP     = 0.02
+
 # Buy bias (_order_types).
 BUY_BIAS_BASE             = 0.45
 BUY_BIAS_SLOPE            = 0.10
@@ -227,8 +241,30 @@ def _validate() -> None:
         ("MAX_DAILY_TRADES_FLOOR", MAX_DAILY_TRADES_FLOOR),
         ("MAX_OPEN_ORDERS_FLOOR",  MAX_OPEN_ORDERS_FLOOR),
         ("WATCHLIST_WEIGHT_ALPHA", WATCHLIST_WEIGHT_ALPHA),
+        ("CASH_INJECTION_BASE_FREQUENCY", CASH_INJECTION_BASE_FREQUENCY),
+        ("CASH_INJECTION_BASE_AMOUNT",    CASH_INJECTION_BASE_AMOUNT),
+        ("CASH_INJECTION_SIZE_ALPHA",     CASH_INJECTION_SIZE_ALPHA),
+        ("CASH_INJECTION_JITTER",         CASH_INJECTION_JITTER),
+        ("CASH_INJECTION_FREQ_FLOOR",     CASH_INJECTION_FREQ_FLOOR),
+        ("CASH_INJECTION_FREQ_CAP",       CASH_INJECTION_FREQ_CAP),
+        ("CASH_INJECTION_AMOUNT_FLOOR",   CASH_INJECTION_AMOUNT_FLOOR),
+        ("CASH_INJECTION_AMOUNT_CAP",     CASH_INJECTION_AMOUNT_CAP),
     ]:
         _non_negative(name, value)
+
+    # Cash injection invariants.
+    if not (0.0 < CASH_INJECTION_BASE_FREQUENCY <= 1.0):
+        raise ValueError(f"CASH_INJECTION_BASE_FREQUENCY={CASH_INJECTION_BASE_FREQUENCY} must be in (0, 1]")
+    if not (0.0 < CASH_INJECTION_BASE_AMOUNT <= 1.0):
+        raise ValueError(f"CASH_INJECTION_BASE_AMOUNT={CASH_INJECTION_BASE_AMOUNT} must be in (0, 1]")
+    if not (0.0 < CASH_INJECTION_SIZE_ALPHA):
+        raise ValueError(f"CASH_INJECTION_SIZE_ALPHA={CASH_INJECTION_SIZE_ALPHA} must be > 0")
+    if not (0.0 < CASH_INJECTION_JITTER < 0.5):
+        raise ValueError(f"CASH_INJECTION_JITTER={CASH_INJECTION_JITTER} must be in (0, 0.5)")
+    _ordered("CASH_INJECTION_FREQ_FLOOR",   CASH_INJECTION_FREQ_FLOOR,
+             "CASH_INJECTION_FREQ_CAP",     CASH_INJECTION_FREQ_CAP)
+    _ordered("CASH_INJECTION_AMOUNT_FLOOR", CASH_INJECTION_AMOUNT_FLOOR,
+             "CASH_INJECTION_AMOUNT_CAP",   CASH_INJECTION_AMOUNT_CAP)
 
 
 _validate()

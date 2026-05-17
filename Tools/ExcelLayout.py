@@ -77,6 +77,7 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         "AggressivenessPrc", "MinOpenPositions", "MaxOpenPositions",
         "MaxDailyTrades", "MaxOpenOrders", "WatchlistCsv", "Strategy",
         "ExtremeReactionRandomnessPrc",
+        "CashInjectionFrequencyPrc", "CashInjectionAmountPrc",
     ])
     return ws
 

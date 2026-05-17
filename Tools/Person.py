@@ -29,6 +29,10 @@ def clamp01(x: float) -> float:
     """Clamp a float into [0, 1]."""
     return 0.0 if x < 0.0 else 1.0 if x > 1.0 else x
 
+def clamp(x: float, lo: float, hi: float) -> float:
+    """Clamp a float into [lo, hi]."""
+    return lo if x < lo else hi if x > hi else x
+
 def skewed01(skew: float) -> float:
     """
     Return a value in [0,1] with a simple power-law skew.
@@ -79,6 +83,11 @@ class Person:
         self._portfolio()        # Balance, cash reserves, min/max open positions, watchlist, holdings
         self._order_types()      # Probabilities for market/slippage orders, buy bias
         self._trade_limits()     # Slippage tolerance, limit offsets, per-position max, min/max trade amounts, daily limits
+        # Cash-injection knobs are assigned by a second pass in GenerateAIUsers
+        # once the population median is known. Default to 0 so an un-assigned
+        # Person still passes C# validation (zero frequency = bot never injects).
+        self.cash_injection_frequency_prc = 0.0
+        self.cash_injection_amount_prc = 0.0
 
     def _identity(self):
         self.user_id   = Person.idx
@@ -190,6 +199,24 @@ class Person:
         base_open_orders = int(MAX_OPEN_ORDERS_BASE + MAX_OPEN_ORDERS_SLOPE * self.aggressive)
         self.max_orders = max(MAX_OPEN_ORDERS_FLOOR, int(jitter(base_open_orders, rel=MAX_OPEN_ORDERS_JITTER)))
 
+    def portfolio_value(self) -> float:
+        # Total seeded wealth = remaining cash + market value of initial holdings.
+        return self.balance + sum(qty * STOCKS[sid]["price"]
+                                  for sid, qty in self.holdings.items())
+
+    def assign_cash_injection_knobs(self, reference_portfolio_value: float) -> None:
+        # Smaller bots get higher frequency and higher amount via inverse-size
+        # scaling. Floors/caps protect both ends so extremely small or large
+        # bots stay within the C# validator bounds.
+        size_ratio = self.portfolio_value() / reference_portfolio_value
+        size_factor = (1.0 / max(size_ratio, 0.1)) ** CASH_INJECTION_SIZE_ALPHA
+        self.cash_injection_frequency_prc = clamp(
+            jitter(CASH_INJECTION_BASE_FREQUENCY * size_factor, rel=CASH_INJECTION_JITTER),
+            CASH_INJECTION_FREQ_FLOOR, CASH_INJECTION_FREQ_CAP)
+        self.cash_injection_amount_prc = clamp(
+            jitter(CASH_INJECTION_BASE_AMOUNT * size_factor, rel=CASH_INJECTION_JITTER),
+            CASH_INJECTION_AMOUNT_FLOOR, CASH_INJECTION_AMOUNT_CAP)
+
     def ToIdentityList(self):
         return [
             self.user_id,
@@ -223,7 +250,9 @@ class Person:
             self.max_orders,                                # int: max open orders
             self.watchlist_csv,                             # str: watchlist CSV of stock IDs
             self.strategy,                                  # int: strategy id
-            round(self.extreme_randomness, 4)               # float: extreme-reaction randomness [0, 0.5]
+            round(self.extreme_randomness, 4),              # float: extreme-reaction randomness [0, 0.5]
+            round(self.cash_injection_frequency_prc, 4),    # float: cash-injection frequency / cycle [0, 0.5]
+            round(self.cash_injection_amount_prc, 6)        # float: cash-injection amount % of portfolio [0, 0.025]
         ]
 
     def ToHoldingList(self):

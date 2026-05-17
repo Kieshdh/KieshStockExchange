@@ -1,6 +1,7 @@
 # run_generate_aiusers.py
 
 import random
+import statistics
 from pathlib import Path
 
 from Config import STOCKS
@@ -50,14 +51,18 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
     # Reset class-level state so user_ids start at 1
     Person.reset_state()
 
-    # Generate people and append rows
-    for _ in range(num_people):
-        p = Person()
+    # Two-pass generation: build everyone, then back-fill the cash-injection
+    # knobs using the population median portfolio value as the reference.
+    people = [Person() for _ in range(num_people)]
+    median_pv = statistics.median(p.portfolio_value() for p in people)
+    for p in people:
+        p.assign_cash_injection_knobs(reference_portfolio_value=median_pv)
+    for p in people:
         sheets["Identity"].append(p.ToIdentityList())
         sheets["Holding"].append(p.ToHoldingList())
         sheets["Profile"].append(p.ToProfileList())
 
-    print(f"✅ Generated {num_people} AI users.")
+    print(f"✅ Generated {num_people} AI users (median seeded portfolio value: ${median_pv:,.2f}).")
 
 
     # Apply dark theme and autofit columns
