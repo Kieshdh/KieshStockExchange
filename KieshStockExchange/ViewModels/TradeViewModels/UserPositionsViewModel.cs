@@ -182,7 +182,7 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
     private bool _disposed;
     public int StockId => Pos.StockId;
     public decimal CurrentPrice => Live?.LastPrice ?? 0m;
-    public decimal TotalValue => Pos.Quantity * CurrentPrice >= 0m ? Pos.Quantity * CurrentPrice : 0m;
+    public decimal TotalValue => CurrentPrice > 0m ? CurrencyHelper.Notional(CurrentPrice, Pos.Quantity, Currency) : 0m;
     #endregion
 
     #region Formatted Properties

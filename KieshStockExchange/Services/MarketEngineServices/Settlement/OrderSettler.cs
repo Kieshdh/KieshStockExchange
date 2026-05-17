@@ -53,7 +53,7 @@ internal sealed class OrderSettler
                     $"Order requires {CurrencyHelper.Format(buyReservation, incoming.CurrencyType)}: " +
                     $"no fund row for user {incoming.UserId} in {incoming.CurrencyType}.");
             }
-            if (buyFund.AvailableBalance < buyReservation)
+            if (CurrencyHelper.LessThan(buyFund.AvailableBalance, buyReservation, incoming.CurrencyType))
             {
                 return OrderResultFactory.InsufficientFunds(
                     $"Order requires {CurrencyHelper.Format(buyReservation, incoming.CurrencyType)} " +

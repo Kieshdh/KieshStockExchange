@@ -337,9 +337,7 @@ public class UserPortfolioService : IUserPortfolioService
             return false;
         }
 
-        var converted = CurrencyHelper.RoundMoney(
-            CurrencyHelper.Convert(amount, from, to, CurrencyHelper.DecimalPlaces(to)),
-            to);
+        var converted = CurrencyHelper.ConvertMoney(amount, from, to);
         if (converted <= 0m)
         {
             _logger.LogWarning("Convert {Amount} {From}->{To} rounds to zero in target currency.",

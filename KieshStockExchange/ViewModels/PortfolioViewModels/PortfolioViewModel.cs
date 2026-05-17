@@ -131,11 +131,11 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
             if (!_stocks.TryGetCurrency(pos.StockId, out var ccy)) continue;
             if (!_market.Quotes.TryGetValue((pos.StockId, ccy), out var quote)) continue;
 
-            var posValueLocal = pos.Quantity * quote.LastPrice;
+            var posValueLocal = CurrencyHelper.Notional(quote.LastPrice, pos.Quantity, ccy);
             marketValue += CurrencyHelper.Convert(posValueLocal, ccy, baseCcy);
             if (quote.Open > 0m)
             {
-                var todayDeltaLocal = pos.Quantity * (quote.LastPrice - quote.Open);
+                var todayDeltaLocal = CurrencyHelper.Notional(quote.LastPrice - quote.Open, pos.Quantity, ccy);
                 todayPl += CurrencyHelper.Convert(todayDeltaLocal, ccy, baseCcy);
             }
         }
@@ -176,7 +176,8 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         for (int i = 0; i < sellList.Count; i++)
         {
             var t = sellList[i];
-            sells += CurrencyHelper.Convert(t.Quantity * t.Price, t.CurrencyType, baseCcy);
+            sells += CurrencyHelper.Convert(
+                CurrencyHelper.Notional(t.Price, t.Quantity, t.CurrencyType), t.CurrencyType, baseCcy);
         }
 
         decimal buys = SumBuyNotional(baseCcy);
@@ -192,7 +193,8 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         for (int i = 0; i < buyList.Count; i++)
         {
             var t = buyList[i];
-            total += CurrencyHelper.Convert(t.Quantity * t.Price, t.CurrencyType, baseCcy);
+            total += CurrencyHelper.Convert(
+                CurrencyHelper.Notional(t.Price, t.Quantity, t.CurrencyType), t.CurrencyType, baseCcy);
         }
         return total;
     }

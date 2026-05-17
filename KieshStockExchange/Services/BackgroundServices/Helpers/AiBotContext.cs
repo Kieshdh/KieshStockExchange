@@ -100,7 +100,7 @@ internal sealed class AiBotContext
             var pos = _accounts.GetPosition(userId, stockId);
             if (pos is null || pos.Quantity <= 0) continue;
             if (StockPrices.TryGetValue((stockId, currency), out var price))
-                total += pos.Quantity * price;
+                total += CurrencyHelper.Notional(price, pos.Quantity, currency);
         }
         return total;
     }

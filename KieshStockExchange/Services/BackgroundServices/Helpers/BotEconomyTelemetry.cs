@@ -77,7 +77,7 @@ internal sealed class BotEconomyTelemetry
                 if (pos == null || pos.Quantity <= 0) continue;
                 foreach (var currency in currencies)
                     if (_ctx.StockPrices.TryGetValue((sid, currency), out var price))
-                        totalShares += pos.Quantity * price;
+                        totalShares += CurrencyHelper.Notional(price, pos.Quantity, currency);
             }
         }
 

@@ -129,7 +129,7 @@ public class Transaction : IValidatable
     #endregion
 
     #region Helper variables
-    [Ignore] public decimal TotalAmount => CurrencyHelper.RoundMoney(Price * Quantity, CurrencyType);
+    [Ignore] public decimal TotalAmount => CurrencyHelper.Notional(Price, Quantity, CurrencyType);
     #endregion
 
     #region Helper Methods

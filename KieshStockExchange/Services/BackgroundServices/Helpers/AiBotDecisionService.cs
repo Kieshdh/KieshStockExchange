@@ -76,7 +76,7 @@ internal sealed class AiBotDecisionService
         if (type == OrderType.TrueMarketBuy)
         {
             var mktPrice = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
-            buyBudget = mktPrice > 0m ? CurrencyHelper.RoundMoney(quantity * mktPrice, currency) : null;
+            buyBudget = mktPrice > 0m ? CurrencyHelper.Notional(mktPrice, quantity, currency) : null;
             if (buyBudget is null or <= 0m) return null;
         }
 
@@ -235,7 +235,7 @@ internal sealed class AiBotDecisionService
         var marketPrice = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (marketPrice <= 0m) return 0m;
 
-        if (IsSlippageOrder(type)) return RoundToCurrency(marketPrice, currency);
+        if (IsSlippageOrder(type)) return CurrencyHelper.RoundMoney(marketPrice, currency);
 
         // Limit anchor: midprice when both sides are present, last-trade otherwise.
         // Last-trade ratchets upward whenever buys fill at the ask faster than
@@ -254,7 +254,7 @@ internal sealed class AiBotDecisionService
         if (ctx.Decimal01(user.AiUserId) < 0.30m)
             limitPrice = SnapToRoundNumber(limitPrice);
 
-        return RoundToCurrency(limitPrice, currency);
+        return CurrencyHelper.RoundMoney(limitPrice, currency);
     }
 
     private async Task<decimal?> GetMidPriceAsync(int stockId, CurrencyType currency, CancellationToken ct)
@@ -294,8 +294,8 @@ internal sealed class AiBotDecisionService
         decimal estimatePrice = type switch
         {
             OrderType.TrueMarketBuy or OrderType.TrueMarketSell => marketPrice,
-            OrderType.SlippageMarketBuy  => RoundToCurrency(marketPrice * (1m + user.SlippageTolerancePrc), currency),
-            OrderType.SlippageMarketSell => RoundToCurrency(marketPrice * (1m - user.SlippageTolerancePrc), currency),
+            OrderType.SlippageMarketBuy  => CurrencyHelper.RoundMoney(marketPrice * (1m + user.SlippageTolerancePrc), currency),
+            OrderType.SlippageMarketSell => CurrencyHelper.RoundMoney(marketPrice * (1m - user.SlippageTolerancePrc), currency),
             _                            => marketPrice // limit
         };
         if (estimatePrice <= 0m) return 0;
@@ -303,7 +303,7 @@ internal sealed class AiBotDecisionService
         var fund       = ctx.GetFund(user.UserId, currency);
         var pos        = ctx.GetPosition(user.UserId, stockId);
         var capValue   = user.PerPositionMaxPrc * portfolio;
-        var currentVal = pos.Quantity > 0 ? pos.Quantity * marketPrice : 0m;
+        var currentVal = CurrencyHelper.Notional(marketPrice, pos.Quantity, currency);
         var roomValue  = Math.Max(0m, capValue - currentVal);
         var rawTrade   = tradePrc * portfolio;
 
@@ -338,7 +338,7 @@ internal sealed class AiBotDecisionService
         decimal committed = 0m;
         foreach (var o in orders.Values)
             if (o.IsBuyOrder && o.IsLimitOrder && o.CurrencyType == currency)
-                committed += CurrencyHelper.RoundMoney(o.RemainingAmount, currency);
+                committed += o.RemainingAmount;
         return committed;
     }
 
@@ -490,9 +490,6 @@ internal sealed class AiBotDecisionService
     #endregion
 
     #region Math Helpers
-    private static decimal RoundToCurrency(decimal price, CurrencyType currency) =>
-        CurrencyHelper.RoundMoney(price, currency);
-
     private static decimal Lerp(decimal a, decimal b, decimal t) => a + (b - a) * t;
 
     private static decimal Clamp01(decimal x) => x < 0m ? 0m : x > 1m ? 1m : x;

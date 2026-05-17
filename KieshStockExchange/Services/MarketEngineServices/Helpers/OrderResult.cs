@@ -1,3 +1,4 @@
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
@@ -104,7 +105,7 @@ public class OrderResult
         {
             var tx = _fillTransactions[i];
             totalQty += tx.Quantity;
-            notional += tx.Price * tx.Quantity;
+            notional += CurrencyHelper.Notional(tx.Price, tx.Quantity, tx.CurrencyType);
         }
         TotalFilledQuantity = totalQty;
         AverageFillPrice = totalQty > 0 ? notional / totalQty : 0m;

@@ -372,7 +372,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             : ($"{UserPosition.AvailableQuantity} {Selected.Symbol}");
 
         // Order value preview
-        var total = (PriceForOrder > 0 && Quantity > 0) ? PriceForOrder * Quantity : 0m;
+        var total = PriceForOrder > 0 ? CurrencyHelper.Notional(PriceForOrder, Quantity, Selected.Currency) : 0m;
         OrderValue = total > 0 ? CurrencyHelper.Format(total, Selected.Currency) : "-";
     }
 

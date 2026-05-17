@@ -148,7 +148,7 @@ internal sealed class TradeSettler
             var t = accepted[ti];
 
             var ccy = t.CurrencyType;
-            var notional = Round(t.TotalAmount, ccy);
+            var notional = CurrencyHelper.RoundMoney(t.TotalAmount, ccy);
 
             // Buyer pays from reservation. Limit/Slippage may have over-reserved → unreserve savings.
             var buyerKey = (t.BuyerId, ccy);
@@ -171,7 +171,7 @@ internal sealed class TradeSettler
                 if (perUnitReserved > 0m)
                 {
                     var rawSavings = (perUnitReserved - t.Price) * t.Quantity;
-                    if (rawSavings > 0m) savings = Round(rawSavings, ccy);
+                    if (rawSavings > 0m) savings = CurrencyHelper.RoundMoney(rawSavings, ccy);
                 }
             }
 
@@ -359,7 +359,7 @@ internal sealed class TradeSettler
             if (!ordersById.TryGetValue(t.BuyOrderId, out var o)) continue;
             if (!IsTrueMarketBuy(o) || !o.BuyBudget.HasValue) continue;
 
-            var contribution = Round(t.TotalAmount, t.CurrencyType);
+            var contribution = CurrencyHelper.RoundMoney(t.TotalAmount, t.CurrencyType);
             if (contribution <= 0m) continue;
 
             spendByOrderId ??= new Dictionary<int, decimal>();
@@ -374,7 +374,7 @@ internal sealed class TradeSettler
                 if (!ordersById.TryGetValue(orderId, out var o)) continue;
                 if (!budgetSnapshots.ContainsKey(orderId))
                     budgetSnapshots[orderId] = o.BuyBudget;
-                o.BuyBudget = Math.Max(0m, Round(o.BuyBudget!.Value - spent, o.CurrencyType));
+                o.BuyBudget = Math.Max(0m, CurrencyHelper.RoundMoney(o.BuyBudget!.Value - spent, o.CurrencyType));
 
                 // Filled TrueMarketBuy with leftover budget: release to avoid phantom Reserved
                 if (o.Status == Order.Statuses.Filled && o.BuyBudget > 0m)

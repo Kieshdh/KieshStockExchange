@@ -239,25 +239,25 @@ public class Order : IValidatable
     [Ignore] public bool IsFilled => Status == Statuses.Filled;
     [Ignore] public bool IsCancelled => Status == Statuses.Cancelled;
     [Ignore] public bool IsOpenLimitOrder => IsOpen && IsLimitOrder;
-    [Ignore] public decimal TotalAmount => IsLimitOrder ? Price * Quantity
-        : (IsSlippageOrder && SlippagePercent.HasValue) ? PriceWithSlippage!.Value * Quantity : 0m;
+    [Ignore] public decimal TotalAmount => IsLimitOrder
+        ? CurrencyHelper.Notional(Price, Quantity, CurrencyType)
+        : (IsSlippageOrder && SlippagePercent.HasValue)
+            ? CurrencyHelper.Notional(PriceWithSlippage!.Value, Quantity, CurrencyType)
+            : 0m;
     [Ignore] public int RemainingQuantity => Quantity - AmountFilled;
-    [Ignore] public decimal RemainingAmount => IsLimitOrder ? Price * RemainingQuantity
-        : (IsSlippageOrder && SlippagePercent.HasValue) ? PriceWithSlippage!.Value * RemainingQuantity : 0m;
-    [Ignore] public decimal FilledAmount => IsLimitOrder ? Price * AmountFilled
-        : (IsSlippageOrder && SlippagePercent.HasValue) ? PriceWithSlippage!.Value * AmountFilled : 0m;
-    [Ignore] public decimal? SlippageAmount => 
-        SlippagePercent.HasValue ? (SlippagePercent.Value / 100m) * Price : null;
-    [Ignore] public decimal? PriceWithSlippage
-    {
-        get
-        {
-            if (!SlippageAmount.HasValue) return null;
-            var raw = IsBuyOrder ? Price + SlippageAmount.Value : Price - SlippageAmount.Value;
-            if (raw <= 0m) return 0m;
-            return CurrencyHelper.RoundMoney(raw, CurrencyType);
-        }
-    }
+    [Ignore] public decimal RemainingAmount => IsLimitOrder
+        ? CurrencyHelper.Notional(Price, RemainingQuantity, CurrencyType)
+        : (IsSlippageOrder && SlippagePercent.HasValue)
+            ? CurrencyHelper.Notional(PriceWithSlippage!.Value, RemainingQuantity, CurrencyType)
+            : 0m;
+    [Ignore] public decimal FilledAmount => IsLimitOrder
+        ? CurrencyHelper.Notional(Price, AmountFilled, CurrencyType)
+        : (IsSlippageOrder && SlippagePercent.HasValue)
+            ? CurrencyHelper.Notional(PriceWithSlippage!.Value, AmountFilled, CurrencyType)
+            : 0m;
+    [Ignore] public decimal? PriceWithSlippage => SlippagePercent.HasValue
+        ? CurrencyHelper.ApplySlippagePct(Price, SlippagePercent.Value, IsBuyOrder, CurrencyType)
+        : null;
     [Ignore] public decimal? EffectiveTakerLimit => IsSlippageOrder ? PriceWithSlippage : (IsLimitOrder ? Price : null);
     #endregion
 

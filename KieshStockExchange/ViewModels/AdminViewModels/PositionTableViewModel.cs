@@ -179,7 +179,9 @@ public partial class PositionTableObject : ObservableObject
 
     public decimal? Price => Prices.TryGetValue(CurrentStockId, out var p) ? p : (decimal?)null;
 
-    public decimal? StockValue => Price.HasValue ? Price.Value * Quantity : (decimal?)null;
+    public decimal? StockValue => Price.HasValue
+        ? CurrencyHelper.Notional(Price.Value, Quantity, BaseCurrency)
+        : (decimal?)null;
 
     public decimal TotalValue
     {
@@ -188,7 +190,7 @@ public partial class PositionTableObject : ObservableObject
             decimal total = 0m;
             foreach (var (id, pos) in PosDict)
                 if (Prices.TryGetValue(id, out var p))
-                    total += pos.Quantity * p;
+                    total += CurrencyHelper.Notional(p, pos.Quantity, BaseCurrency);
             return total;
         }
     }

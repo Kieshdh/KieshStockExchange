@@ -8,9 +8,6 @@ public static class ReservationMath
 {
     internal static bool IsTrueMarketBuy(Order o) => o.OrderType == Order.Types.TrueMarketBuy;
 
-    internal static decimal Round(decimal amount, CurrencyType ccy)
-        => CurrencyHelper.RoundMoney(amount, ccy);
-
     /// <summary> Per-unit reservation. 0 for non-buys and TrueMarketBuy (flat budget). </summary>
     internal static decimal ReservationPerUnit(Order o)
     {
@@ -25,7 +22,7 @@ public static class ReservationMath
     {
         if (!o.IsBuyOrder) return 0m;
         if (IsTrueMarketBuy(o)) return o.BuyBudget ?? 0m;
-        return Round(ReservationPerUnit(o) * o.Quantity, o.CurrencyType);
+        return CurrencyHelper.Notional(ReservationPerUnit(o), o.Quantity, o.CurrencyType);
     }
 
     /// <summary> Reservation still held against the unfilled portion. </summary>
@@ -33,7 +30,7 @@ public static class ReservationMath
     {
         if (!o.IsBuyOrder) return 0m;
         if (IsTrueMarketBuy(o)) return o.BuyBudget ?? 0m;
-        return Round(ReservationPerUnit(o) * o.RemainingQuantity, o.CurrencyType);
+        return CurrencyHelper.Notional(ReservationPerUnit(o), o.RemainingQuantity, o.CurrencyType);
     }
 
     /// <summary> RemainingBuyReservation with hypothetical new price/qty. Pass null to keep current. </summary>
@@ -53,6 +50,6 @@ public static class ReservationMath
         var qty = newQty ?? o.Quantity;
         var remainingQty = Math.Max(0, qty - o.AmountFilled);
         if (remainingQty == 0) return 0m;
-        return Round(perUnit * remainingQty, o.CurrencyType);
+        return CurrencyHelper.Notional(perUnit, remainingQty, o.CurrencyType);
     }
 }
