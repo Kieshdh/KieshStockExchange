@@ -12,8 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent
 EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange" / "Resources" / "Raw" / "AIUserData.xlsx"
 NUM_PEOPLE = 20000
 
-# Seeding both `random` and the Faker instance makes the generated Excel
-# byte-identical across runs. Set to None to get a fresh population each run.
+# Seeding both `random` and the Faker instance
 GENERATOR_SEED = 42
 
 
@@ -28,30 +27,27 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
 
     # Load or create workbook
     wb = load_or_create_workbook(str(excel_path))
-    print(f"[OK] Loaded or created workbook at {excel_path}")
+    print(f"✅ Loaded or created workbook at {excel_path}")
 
     # Create/clear sheets and write header rows
     sheets: dict[str, Worksheet] = {}
     # Holding sheet uses ticker symbols as human-readable column headers.
     tickers = [data["ticker"] for data in STOCKS.values()]
 
-    # Sheet creation order matters: C# ExcelImportService reads by sheet
     # index, expecting [Stocks, Identity, Profile, Holding].
     sheets["Stocks"] = prepare_stocks_sheet(wb)
     sheets["Identity"] = prepare_identity_sheet(wb)
     sheets["Profile"] = prepare_profile_sheet(wb)
     sheets["Holding"] = prepare_holding_sheet(wb, tickers)
 
-    print("[OK] Prepared all AIUser sheets.")
+    print("✅ Prepared all AIUser sheets.")
 
 
     # Append stock data
     for stock_id, data in STOCKS.items():
         sheets["Stocks"].append([stock_id, data["ticker"], data["name"], data["price"]])
 
-    # Reset class-level state so user_ids start at 1 and the username pool is
-    # empty for this run (otherwise a second call in the same process would
-    # spin in generate_username trying to find a fresh name).
+    # Reset class-level state so user_ids start at 1
     Person.reset_state()
 
     # Generate people and append rows
@@ -61,7 +57,7 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
         sheets["Holding"].append(p.ToHoldingList())
         sheets["Profile"].append(p.ToProfileList())
 
-    print(f"[OK] Generated {num_people} AI users.")
+    print(f"✅ Generated {num_people} AI users.")
 
 
     # Apply dark theme and autofit columns
@@ -75,7 +71,7 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
 
     # Save file
     wb.save(str(excel_path))
-    print(f"[OK] Applied dark theme and saved all {num_people} AI users.")
+    print(f"✅ Applied dark theme and saved all {num_people} AI users.")
 
 
 if __name__ == "__main__":

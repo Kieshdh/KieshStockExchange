@@ -124,9 +124,8 @@ class Person:
             self.min_stocks = random.randint(*STOCKS_HIGH_MIN_RANGE)
             self.max_stocks = random.randint(*STOCKS_HIGH_MAX_RANGE)
 
-        # Watchlist: composition mildly biased toward big-caps by 1/sid**α
-        # (α = WATCHLIST_WEIGHT_ALPHA, kept low — heavy bias now lives on the
-        # holding-quantity side via HOLDING_WEIGHT_ALPHA below).
+        # Watchlist: composition biased toward big-caps by 1/sid**α
+        # (α = WATCHLIST_WEIGHT_ALPHA). Holdings split equally across picks.
         watchlist_extra = random.randint(WATCHLIST_EXTRA_LO, WATCHLIST_EXTRA_HI)
         watchlist_size = min(len(STOCKS), self.max_stocks + watchlist_extra)
         ids = list(STOCKS)
@@ -134,28 +133,19 @@ class Person:
         watchlist = weighted_sample_no_replace(ids, weights, watchlist_size)
         self.watchlist_csv = ",".join(str(sid) for sid in sorted(watchlist))
 
-        # Allocate the bot's stock budget across n picked stocks, weighted by
-        # 1/sid**HOLDING_WEIGHT_ALPHA so larger-caps end up with more SHARES
-        # (not just more presence). Cash budget = balance × cash_frac with
-        # cash_frac = (2·min_cash + max_cash)/3 (weighted toward min_cash).
+        # Initial holdings: pick stocks from the watchlist, then split the
+        # target stock value equally across them. Cap bias lives in watchlist
+        # selection; sizing is uniform per picked stock.
         n_stocks = random.randint(self.min_stocks, self.max_stocks)
         portfolio = random.sample(watchlist, n_stocks)
         cash_frac = (self.min_cash * 2 + self.max_cash) / 3
         target_stock_value = self.balance * (1 - cash_frac)
 
-        holding_weights = [1.0 / (sid ** HOLDING_WEIGHT_ALPHA) for sid in portfolio]
-        weight_sum = sum(holding_weights)
-        self.holdings = {}
-        for sid, w in zip(portfolio, holding_weights):
-            target_value = target_stock_value * w / weight_sum
-            qty = int(target_value // STOCKS[sid]["price"])
-            if qty > 0:
-                self.holdings[sid] = qty
+        # Adjust quantity to be a whole number of shares.
+        per_stock_value = target_stock_value / len(portfolio)
+        self.holdings = { sid: int(per_stock_value // STOCKS[sid]["price"]) for sid in portfolio }
 
-        # balance is exported as the Excel "Balance" column, which the C#
-        # importer reads as Fund.TotalBalance. Deduct the spent stock value
-        # so the column carries cash only, otherwise the bot would land with
-        # full balance as cash AND the imported positions on top.
+        # Adjust balance to account for the cost of initial holdings
         spent_on_stocks = sum(qty * STOCKS[sid]["price"] for sid, qty in self.holdings.items())
         self.balance -= spent_on_stocks
 
@@ -201,15 +191,12 @@ class Person:
         self.max_orders = max(MAX_OPEN_ORDERS_FLOOR, int(jitter(base_open_orders, rel=MAX_OPEN_ORDERS_JITTER)))
 
     def ToIdentityList(self):
-        # birthdate written as ISO "YYYY-MM-DD" string — keeps the cell a
-        # plain string so the C# importer's DateTime.TryParse works
-        # regardless of the column's number-format.
         return [
             self.user_id,
             self.username,
             self.full_name,
             self.email,
-            self.birthdate.isoformat()
+            self.birthdate.isoformat() # birthdate written as ISO "YYYY-MM-DD" string
         ]
 
     def ToProfileList(self):

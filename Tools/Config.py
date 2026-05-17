@@ -109,13 +109,7 @@ WATCHLIST_EXTRA_HI        = 8
 # names: 0 = uniform, ~0.5 = mild bias, ~1.0 = strong Zipf-style.
 # Kept mild — composition bias has been moved to HOLDING_WEIGHT_ALPHA so that
 # big-caps still dominate by *quantity held*, but watchlists are broader.
-WATCHLIST_WEIGHT_ALPHA    = 0.4
-
-# Holding allocation weight. With portfolio chosen (uniformly) from the
-# watchlist, each stock gets `target_stock_value * 1/sid**alpha / Σ(weights)`.
-# Larger caps end up with more shares per bot — same cap-concentration of
-# notional value as before, just expressed via quantity instead of presence.
-HOLDING_WEIGHT_ALPHA      = 0.9
+WATCHLIST_WEIGHT_ALPHA    = 1.2
 
 # Order types (_order_types).
 USE_MARKET_BASE           = 0.10
@@ -233,7 +227,6 @@ def _validate() -> None:
         ("MAX_DAILY_TRADES_FLOOR", MAX_DAILY_TRADES_FLOOR),
         ("MAX_OPEN_ORDERS_FLOOR",  MAX_OPEN_ORDERS_FLOOR),
         ("WATCHLIST_WEIGHT_ALPHA", WATCHLIST_WEIGHT_ALPHA),
-        ("HOLDING_WEIGHT_ALPHA",   HOLDING_WEIGHT_ALPHA),
     ]:
         _non_negative(name, value)
 

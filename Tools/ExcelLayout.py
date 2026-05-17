@@ -167,16 +167,21 @@ def apply_dark_theme(ws: Worksheet) -> None:
         for c_idx, cell in enumerate(row):
             cell.style = styles[c_idx]
 
-    # Dark margin column past the data — keeps the dark theme bleeding to
-    # the right of the table instead of revealing Excel's default white.
-    # Cell-level style is required: ColumnDimension.style is read-only in
-    # this openpyxl version, so each row needs an explicit empty cell to
-    # carry the kse_dark_margin style.
+    # Dark margin column to the right and dark margin row below the data —
+    # keeps the dark theme bleeding past the table edges. Cell-level style
+    # is required: Column/RowDimension.style is read-only in this openpyxl
+    # version, so each margin cell needs to carry the kse_dark_margin style.
     margin_col_idx = max_used_col + 1
     margin_letter = get_column_letter(margin_col_idx)
+    margin_row_idx = max_used_row + 1
+
     for r in range(1, max_used_row + 1):
         ws.cell(row=r, column=margin_col_idx).style = "kse_dark_margin"
-    ws.column_dimensions[margin_letter].width = 50
+    for c in range(1, margin_col_idx + 1):
+        ws.cell(row=margin_row_idx, column=c).style = "kse_dark_margin"
+
+    ws.column_dimensions[margin_letter].width = 150
+    ws.row_dimensions[margin_row_idx].height = 200
 
 
 def autofit_columns(ws: Worksheet, min_width: float = 8.0, max_width: float = 40.0) -> None:
