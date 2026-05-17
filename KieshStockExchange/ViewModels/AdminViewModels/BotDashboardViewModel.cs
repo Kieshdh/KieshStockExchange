@@ -40,6 +40,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private string _exportFailuresStatusText = string.Empty;
     [ObservableProperty] private string _exportLedgerStatusText = string.Empty;
     [ObservableProperty] private string _exportEconomyStatusText = string.Empty;
+    [ObservableProperty] private string _exportSentimentStatusText = string.Empty;
     #endregion
 
     #region 24h stats fields
@@ -292,6 +293,36 @@ public partial class BotDashboardViewModel : BaseViewModel
         {
             _logger.LogError(ex, "Failed to export bot economy telemetry.");
             ExportEconomyStatusText = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportSentimentAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        try
+        {
+            var path = await PickFailureExportPathAsync(_trade.SuggestedSentimentExportFileName)
+                .ConfigureAwait(false);
+            if (string.IsNullOrEmpty(path))
+            {
+                ExportSentimentStatusText = "Export cancelled.";
+                return;
+            }
+            var savedPath = await _trade.ExportSentimentCsvAsync(path).ConfigureAwait(false);
+            var count = _trade.SentimentSampleCount;
+            ExportSentimentStatusText = $"Exported {count:N0} sentiment rows to {savedPath}";
+            _logger.LogInformation("Bot sentiment CSV exported: {Path}", savedPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to export bot sentiment.");
+            ExportSentimentStatusText = $"Export failed: {ex.Message}";
         }
         finally
         {

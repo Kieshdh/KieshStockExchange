@@ -100,6 +100,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     public Task<string> ExportEconomyCsvAsync(string path, CancellationToken ct = default)
         => _economy.ExportCsvAsync(path, ct);
 
+    // Sentiment telemetry surface delegates to the sentiment service.
+    public int SentimentSampleCount => _sentiment.SampleCount;
+    public string SuggestedSentimentExportFileName => _sentiment.SuggestedExportFileName;
+    public Task<string> ExportSentimentCsvAsync(string path, CancellationToken ct = default)
+        => _sentiment.ExportCsvAsync(path, ct);
+
     public event EventHandler? StatsChanged;
     #endregion
 
@@ -109,9 +115,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private DateTime _nextDailyCheck    = DateTime.MinValue;
     private DateTime _nextAssetReload   = DateTime.MinValue;
     private DateTime _nextPruneTime     = DateTime.MinValue;
-    private DateTime _nextStatsLogTime    = DateTime.MinValue;
-    private DateTime _nextReconcileTime   = DateTime.MinValue;
-    private DateTime _nextEconomyLogTime  = DateTime.MinValue;
+    private DateTime _nextStatsLogTime      = DateTime.MinValue;
+    private DateTime _nextReconcileTime     = DateTime.MinValue;
+    private DateTime _nextEconomyLogTime    = DateTime.MinValue;
+    private DateTime _nextSentimentLogTime  = DateTime.MinValue;
 
     private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(30);
     // Reservation reconcile: 5 minutes is plenty for a passive leak hunter; first
@@ -121,6 +128,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // Economy snapshot: 60s is frequent enough to spot drift trends without the
     // per-call walk (bots × positions) crowding the log.
     private static readonly TimeSpan EconomyLogInterval = TimeSpan.FromSeconds(60);
+    // Sentiment snapshot: matches the economy cadence so the two CSVs can be joined on timestamp.
+    private static readonly TimeSpan SentimentLogInterval = TimeSpan.FromSeconds(60);
 
     private CancellationTokenSource? _cts;
     private Task? _runner;
@@ -282,9 +291,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _failures.Reset();
         _economy.Reset();
         _sentiment.Reset(TimeHelper.NowUtc());
-        _nextStatsLogTime   = TimeHelper.NowUtc() + StatsLogInterval;
-        _nextReconcileTime  = TimeHelper.NowUtc() + ReconcileFirstDelay;
-        _nextEconomyLogTime = TimeHelper.NowUtc() + EconomyLogInterval;
+        _nextStatsLogTime     = TimeHelper.NowUtc() + StatsLogInterval;
+        _nextReconcileTime    = TimeHelper.NowUtc() + ReconcileFirstDelay;
+        _nextEconomyLogTime   = TimeHelper.NowUtc() + EconomyLogInterval;
+        _nextSentimentLogTime = TimeHelper.NowUtc() + SentimentLogInterval;
         LastTradeAtUtc   = null;
         LoopStartedAtUtc = TimeHelper.NowUtc();
     }
@@ -491,6 +501,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         {
             _economy.LogSnapshot(CurrenciesToTrade);
             _nextEconomyLogTime = now + EconomyLogInterval;
+        }
+        if (now >= _nextSentimentLogTime)
+        {
+            _sentiment.LogSnapshot();
+            _nextSentimentLogTime = now + SentimentLogInterval;
         }
         if (now >= _nextReconcileTime)
         {

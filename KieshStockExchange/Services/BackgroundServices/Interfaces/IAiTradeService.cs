@@ -134,6 +134,18 @@ public interface IAiTradeService
     /// </summary>
     Task<string> ExportEconomyCsvAsync(string path, CancellationToken ct = default);
 
+    /// <summary>Rows currently buffered by the sentiment sampler (one per stock per snapshot).</summary>
+    int SentimentSampleCount { get; }
+
+    /// <summary>Suggested file name (without extension) for the sentiment export dialog.</summary>
+    string SuggestedSentimentExportFileName { get; }
+
+    /// <summary>
+    /// Writes every recorded per-stock sentiment snapshot (four per-stock factors
+    /// + two global moods + combined sum) to a CSV at <paramref name="path"/>.
+    /// </summary>
+    Task<string> ExportSentimentCsvAsync(string path, CancellationToken ct = default);
+
     /// <summary>Raised after each trading-loop tick and on lifecycle changes.</summary>
     event EventHandler? StatsChanged;
 
