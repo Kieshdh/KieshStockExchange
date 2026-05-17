@@ -7,6 +7,7 @@ using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Data;
 using System.Globalization;
+using System.Linq;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 namespace KieshStockExchange.Services.BackgroundServices;
@@ -52,7 +53,6 @@ public class ExcelImportService : IExcelImportService
 
     public async Task CheckAndAddDatabases()
     {
-
         await AddStocksFromExcelAsync(true).ConfigureAwait(false);
         await AddUsersFromExcelAsync(true).ConfigureAwait(false);
         await AddAIProfileFromExcelAsync(true).ConfigureAwait(false);
@@ -400,11 +400,7 @@ public class ExcelImportService : IExcelImportService
             positions.AddRange(userPositions);
         }
 
-        // Drop the existing funds + positions tables and reseed. Cascade-reset Orders and
-        // Transactions in the same root tx — old orders/trades reference user/stock combos
-        // whose backing positions were just replaced, so they would be stale after this
-        // reseed. AddUsersFromExcelAsync may already have reset them; ResetTableAsync is
-        // idempotent on an empty table.
+        // Drop the existing funds + positions tables and reseed. 
         await _db.RunInTransactionAsync(async ct =>
         {
             await _db.ResetTableAsync<Order>(ct);
@@ -429,15 +425,16 @@ public class ExcelImportService : IExcelImportService
     {
         if (_dataLoaded) return;
 
-        StockDataTable = ReadExcelFile(EXCEL_FILE_NAME, 0);
-        IdentityDataTable = ReadExcelFile(EXCEL_FILE_NAME, 1);
-        ProfileDataTable = ReadExcelFile(EXCEL_FILE_NAME, 2);
-        HoldingDataTable = ReadExcelFile(EXCEL_FILE_NAME, 3);
+        var ds = ReadAllSheets(EXCEL_FILE_NAME);
+        StockDataTable    = RequireSheet(ds, "Stocks");
+        IdentityDataTable = RequireSheet(ds, "Identity");
+        ProfileDataTable  = RequireSheet(ds, "Profile");
+        HoldingDataTable  = RequireSheet(ds, "Holding");
 
         _dataLoaded = true;
     }
 
-    private static DataTable ReadExcelFile(string filePath, int SheetNumber)
+    private static DataSet ReadAllSheets(string filePath)
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
@@ -448,12 +445,21 @@ public class ExcelImportService : IExcelImportService
         {
             ConfigureDataTable = _ => new ExcelDataTableConfiguration
             {
-                UseHeaderRow = true // ✅ This tells it to use the first row as column names
+                UseHeaderRow = true // First row is the column header.
             }
         };
 
-        var result = reader.AsDataSet(conf);
-        return result.Tables[SheetNumber];
+        return reader.AsDataSet(conf);
+    }
+
+    private static DataTable RequireSheet(DataSet ds, string sheetName)
+    {
+        var table = ds.Tables[sheetName];
+        if (table is null)
+            throw new InvalidDataException(
+                $"Excel sheet '{sheetName}' is missing from '{EXCEL_FILE_NAME}'. " +
+                $"Found sheets: [{string.Join(", ", ds.Tables.Cast<DataTable>().Select(t => t.TableName))}].");
+        return table;
     }
     #endregion
 }
