@@ -67,7 +67,18 @@
       "PowerShell(Get-ChildItem *)",
       "Read(//c/Users/kjden/.claude/**)",
       "Read(//c/Users/kjden/.claude/plugins/**)",
-      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\\\\KieshStockExchange\\\\Views\" -Name -Recurse | Where-Object { $_ -match \"\\(Trade|Chart\\)\" })"
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\\\\KieshStockExchange\\\\Views\" -Name -Recurse | Where-Object { $_ -match \"\\(Trade|Chart\\)\" })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\" -Recurse -Filter \"IOrderCacheService.cs\" | Select-Object -First 1 | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\" -Recurse -Filter \"OrderCacheService.cs\" | Select-Object -First 1 | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\" -Recurse -Filter \"OrderExecutionService.cs\" | Select-Object -First 1 | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\" -Recurse -Filter \"SettlementEngine.cs\" | Select-Object -First 1 | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\" -Recurse -Filter \"AccountsCache.cs\" | Select-Object -First 1 | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\" -Recurse -Filter \"LocalDBService.cs\" | Select-Object -First 1 | ForEach-Object { $_.FullName })",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\" -Recurse -Filter \"LocalDBService.cs\")",
+      "Bash(dir \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\\\\Models\\\\\")",
+      "PowerShell(\\(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\"\\).Count)",
+      "Bash(findstr /n \"PlaceAndMatchBatchAsync\\\\|BuildOrdersById\" KieshStockExchange/Services/MarketEngineServices/OrderExecutionService.cs)",
+      "Bash(Select-Object -First 10)"
     ]
   },
   "outputStyle": "default"

@@ -71,7 +71,7 @@ internal sealed class ReservationAuditor
             mismatches.Count, phantomCount, underCount, phantomTotal);
 
         var sb = new StringBuilder();
-        int sample = Math.Min(30, ordered.Count);
+        int sample = Math.Min(6, ordered.Count);
         for (int i = 0; i < sample; i++)
         {
             var m = ordered[i];

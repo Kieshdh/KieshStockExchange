@@ -67,7 +67,7 @@ public class UserSessionService : IUserSessionService
         _candle = candle ?? throw new ArgumentNullException(nameof(candle));
     }
     #endregion
-
+    
     #region State management
     public void SetAuthenticatedUser(User user, bool keepLoggedIn, CurrencyType? baseCurrency = null,
         CandleResolution? defaultResolution = null)
