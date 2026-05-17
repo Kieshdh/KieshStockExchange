@@ -272,7 +272,9 @@ public class ExcelImportService : IExcelImportService
                 !ParsingHelper.TryToDecimal(row["MinLimitOffsetPrc"].ToString(), out var minLimitOffsetPrc) ||
                 !ParsingHelper.TryToDecimal(row["MaxLimitOffsetPrc"].ToString(), out var maxLimitOffsetPrc) ||
                 !ParsingHelper.TryToDecimal(row["AggressivenessPrc"].ToString(), out var aggressivenessPrc) ||
-                !ParsingHelper.TryToDecimal(row["ExtremeReactionRandomnessPrc"].ToString(), out var extremeRandomnessPrc))
+                !ParsingHelper.TryToDecimal(row["ExtremeReactionRandomnessPrc"].ToString(), out var extremeRandomnessPrc) ||
+                !ParsingHelper.TryToDecimal(row["CashInjectionFrequencyPrc"].ToString(), out var cashInjectionFrequencyPrc) ||
+                !ParsingHelper.TryToDecimal(row["CashInjectionAmountPrc"].ToString(), out var cashInjectionAmountPrc))
             {
                 _logger.LogWarning("Invalid percentage value(s) for User #{UserId}. Skipping.", userId);
                 continue;
@@ -295,7 +297,9 @@ public class ExcelImportService : IExcelImportService
                     AggressivenessPrc = aggressivenessPrc, MinOpenPositions = minOpenPositions,
                     MaxOpenPositions = maxOpenPositions, MaxDailyTrades = maxDailyTrades,
                     MaxOpenOrders = maxOpenOrders, WatchlistCsv = watchlistCsv, StrategyCode = strategyCode,
-                    ExtremeReactionRandomnessPrc = extremeRandomnessPrc
+                    ExtremeReactionRandomnessPrc = extremeRandomnessPrc,
+                    CashInjectionFrequencyPrc = cashInjectionFrequencyPrc,
+                    CashInjectionAmountPrc = cashInjectionAmountPrc
                 };
                 if (!aiUser.IsValid())
                 {

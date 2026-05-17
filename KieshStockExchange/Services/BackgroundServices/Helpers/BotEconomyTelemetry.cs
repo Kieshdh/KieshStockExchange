@@ -27,6 +27,10 @@ internal sealed class BotEconomyTelemetry
 
     private Dictionary<(int StockId, CurrencyType Currency), decimal>? _sessionStartPrices;
     private readonly Queue<EconomySample> _samples = new();
+    // Running total of cash injected by BotCashInjector across the session.
+    // Guarded by lock(_samples); read into each EconomySample so the CSV
+    // carries cumulative growth and per-cycle delta is derivable client-side.
+    private decimal _totalInjectedThisSession;
 
     internal BotEconomyTelemetry(AiBotContext ctx, IAccountsCache accounts,
         IStockService stocks, ILogger<BotEconomyTelemetry> logger)
@@ -42,7 +46,17 @@ internal sealed class BotEconomyTelemetry
     internal void Reset()
     {
         _sessionStartPrices = null;
-        lock (_samples) _samples.Clear();
+        lock (_samples)
+        {
+            _samples.Clear();
+            _totalInjectedThisSession = 0m;
+        }
+    }
+
+    internal void RecordInjection(decimal amount)
+    {
+        if (amount <= 0m) return;
+        lock (_samples) _totalInjectedThisSession += amount;
     }
 
     internal void LogSnapshot(IReadOnlyList<CurrencyType> currencies)
@@ -88,31 +102,33 @@ internal sealed class BotEconomyTelemetry
         var avgDrift = tracked > 0 ? driftSum / tracked : 0m;
         var totalWealth = totalCash + totalShares;
 
+        decimal injectedSnapshot;
+        lock (_samples)
+        {
+            injectedSnapshot = _totalInjectedThisSession;
+            _samples.Enqueue(new EconomySample(
+                TimestampUtc:   TimeHelper.NowUtc(),
+                TotalCash:      totalCash,
+                TotalShares:    totalShares,
+                TrackedStocks:  tracked,
+                AvgDriftPct:    avgDrift,
+                MinDriftPct:    minDrift,
+                MinDriftStockId: minSid,
+                MaxDriftPct:    maxDrift,
+                MaxDriftStockId: maxSid,
+                TotalInjectedThisSession: injectedSnapshot));
+            while (_samples.Count > RecentSamplesMax) _samples.Dequeue();
+        }
+
         _logger.LogInformation(
             "BotEconomy @ {Time}: wealth {Wealth} (cash {Cash} + shares {Shares}), " +
-            "avg drift {Drift:P3} across {Tracked} stocks",
+            "avg drift {Drift:P3} across {Tracked} stocks, injected {Injected}",
             TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"),
             CurrencyHelper.Format(totalWealth, CurrencyType.USD),
             CurrencyHelper.Format(totalCash,   CurrencyType.USD),
             CurrencyHelper.Format(totalShares, CurrencyType.USD),
-            avgDrift, tracked);
-
-        var row = new EconomySample(
-            TimestampUtc:   TimeHelper.NowUtc(),
-            TotalCash:      totalCash,
-            TotalShares:    totalShares,
-            TrackedStocks:  tracked,
-            AvgDriftPct:    avgDrift,
-            MinDriftPct:    minDrift,
-            MinDriftStockId: minSid,
-            MaxDriftPct:    maxDrift,
-            MaxDriftStockId: maxSid);
-
-        lock (_samples)
-        {
-            _samples.Enqueue(row);
-            while (_samples.Count > RecentSamplesMax) _samples.Dequeue();
-        }
+            avgDrift, tracked,
+            CurrencyHelper.Format(injectedSnapshot, CurrencyType.USD));
     }
     #endregion
 
@@ -135,7 +151,8 @@ internal sealed class BotEconomyTelemetry
 
         var sb = new StringBuilder(512 + snapshot.Length * 128);
         sb.AppendLine("TimestampUtc,TotalCash,TotalShares,TotalWealth,TrackedStocks," +
-                      "AvgDriftPct,MinDriftPct,MinDriftStockId,MaxDriftPct,MaxDriftStockId");
+                      "AvgDriftPct,MinDriftPct,MinDriftStockId,MaxDriftPct,MaxDriftStockId," +
+                      "TotalInjectedThisSession");
         var inv = CultureInfo.InvariantCulture;
         for (int i = 0; i < snapshot.Length; i++)
         {
@@ -150,7 +167,8 @@ internal sealed class BotEconomyTelemetry
               .Append(r.MinDriftPct.ToString(inv)).Append(',')
               .Append(r.MinDriftStockId).Append(',')
               .Append(r.MaxDriftPct.ToString(inv)).Append(',')
-              .Append(r.MaxDriftStockId)
+              .Append(r.MaxDriftStockId).Append(',')
+              .Append(r.TotalInjectedThisSession.ToString(inv))
               .Append('\n');
         }
 
@@ -170,4 +188,5 @@ internal readonly record struct EconomySample(
     decimal  MinDriftPct,
     int      MinDriftStockId,
     decimal  MaxDriftPct,
-    int      MaxDriftStockId);
+    int      MaxDriftStockId,
+    decimal  TotalInjectedThisSession);

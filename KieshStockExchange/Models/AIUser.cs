@@ -200,6 +200,38 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
             _extremeReactionRandomnessPrc = value;
         }
     }
+
+    // Probability that this bot receives a periodic cash injection on each
+    // global injection cycle (1 hour). Seeded inverse to portfolio size at
+    // generation time so smaller bots inject more often. See 3.5 plan.
+    private decimal _cashInjectionFrequencyPrc = 0.15m;
+    [Column("CashInjectionFrequencyPrc")] public decimal CashInjectionFrequencyPrc
+    {
+        get => _cashInjectionFrequencyPrc;
+        set
+        {
+            if (value < 0m || value > 0.50m)
+                throw new ArgumentOutOfRangeException(nameof(CashInjectionFrequencyPrc),
+                    "CashInjectionFrequencyPrc must be between 0 and 0.50.");
+            _cashInjectionFrequencyPrc = value;
+        }
+    }
+
+    // Deposit size as a fraction of the bot's current portfolio value when an
+    // injection fires. Inverse-size seeded so smaller bots also receive a
+    // larger percentage per hit.
+    private decimal _cashInjectionAmountPrc = 0.004m;
+    [Column("CashInjectionAmountPrc")] public decimal CashInjectionAmountPrc
+    {
+        get => _cashInjectionAmountPrc;
+        set
+        {
+            if (value < 0m || value > 0.025m)
+                throw new ArgumentOutOfRangeException(nameof(CashInjectionAmountPrc),
+                    "CashInjectionAmountPrc must be between 0 and 0.025.");
+            _cashInjectionAmountPrc = value;
+        }
+    }
     #endregion
 
     #region Trading Strategy Properties
@@ -290,7 +322,9 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     private bool IsValidPercentages() => IsValidPrc(TradeProb) && IsValidPrc(UseMarketProb) &&
         IsValidPrc(MinTradeAmountPrc) && IsValidPrc(MaxTradeAmountPrc) && IsValidPrc(PerPositionMaxPrc) && IsValidPrc(BuyBiasPrc) &&
         IsValidPrc(MinCashReservePrc) && IsValidPrc(MaxCashReservePrc) && IsValidPrc(SlippageTolerancePrc) && IsValidPrc(AggressivenessPrc) &&
-        ExtremeReactionRandomnessPrc >= 0m && ExtremeReactionRandomnessPrc <= 0.5m;
+        ExtremeReactionRandomnessPrc >= 0m && ExtremeReactionRandomnessPrc <= 0.5m &&
+        CashInjectionFrequencyPrc >= 0m && CashInjectionFrequencyPrc <= 0.50m &&
+        CashInjectionAmountPrc    >= 0m && CashInjectionAmountPrc    <= 0.025m;
 
     private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc;
 
