@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
@@ -49,13 +50,16 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     #region Fields & Constructor
     private readonly IMarketDataService _market;
     private readonly IOrderBookCache _books;
+    private readonly IStockService _stocks;
     private readonly ILogger<SelectedStockService> _logger;
 
-    public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger, IOrderBookCache books)
+    public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger,
+        IOrderBookCache books, IStockService stocks)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _books = books ?? throw new ArgumentNullException(nameof(books));
+        _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
 
         // React to live quote pushes from the single source of truth
         _market.QuoteUpdated += OnQuoteUpdated;
@@ -70,40 +74,61 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         await Set(stk, ct);
     }
 
-    // Set by Stock object
-    public async Task Set(Stock stock, CancellationToken ct = default)
+    public Task Set(Stock stock, CancellationToken ct = default)
     {
-        // Validation
         if (stock is null) throw new ArgumentNullException(nameof(stock));
         if (stock.StockId <= 0) throw new ArgumentException("StockId must be positive.", nameof(stock));
-        if (stock.StockId == StockId) return; // No change
 
-        // Set new state
-        await UnsubscribeAsync(); // Stop previous tracking
+        var listings = _stocks.GetListings(stock.StockId);
+        if (listings.Count == 0)
+            throw new InvalidOperationException($"Stock {stock.Symbol} has no listings.");
 
-        // Get the current order book
-        CurrentOrderBook = await _books.GetAsync(stock.StockId, Currency, ct);
+        // Preserve the current Currency if it's still a valid listing; else primary.
+        var targetCurrency = listings.Any(l => l.CurrencyType == Currency)
+            ? Currency
+            : (listings.FirstOrDefault(l => l.IsPrimary)?.CurrencyType
+               ?? listings[0].CurrencyType);
 
-        // Prime quote from history and start streaming ticks for (stock, currency)
-        await _market.SubscribeAsync(stock.StockId, Currency, ct);
-        await _market.BuildFromHistoryAsync(stock.StockId, Currency, ct);
+        return Set(stock, targetCurrency, ct);
+    }
 
-        // Set Stock variables
+    public async Task Set(Stock stock, CurrencyType currency, CancellationToken ct = default)
+    {
+        if (stock is null) throw new ArgumentNullException(nameof(stock));
+        if (stock.StockId <= 0) throw new ArgumentException("StockId must be positive.", nameof(stock));
+        if (!_stocks.IsListedIn(stock.StockId, currency))
+            throw new ArgumentException(
+                $"Stock {stock.Symbol} is not listed in {currency}.", nameof(currency));
+
+        if (stock.StockId == StockId && currency == Currency) return;
+
+        // Currency-only change → cheap path.
+        if (stock.StockId == StockId)
+        {
+            await ChangeCurrencyAsync(currency, ct);
+            return;
+        }
+
+        await UnsubscribeAsync();
+
+        CurrentOrderBook = await _books.GetAsync(stock.StockId, currency, ct);
+        await _market.SubscribeAsync(stock.StockId, currency, ct);
+        await _market.BuildFromHistoryAsync(stock.StockId, currency, ct);
+
         Symbol = stock.Symbol;
         CompanyName = stock.CompanyName;
         SelectedStock = stock;
         StockId = stock.StockId;
+        Currency = currency;
 
-        // Grab the current LiveQuote snapshot so UI has immediate data
         Quote = TryGetQuote();
         await UpdateFromLiveAsync(Quote);
 
-        // Complete first-selection awaiter if needed
         if (!_firstSelectionTcs.Task.IsCompleted)
             _firstSelectionTcs.SetResult(stock);
 
         _logger.LogInformation("SelectedStockService subscribed to {Symbol} #{StockId} in {Currency}.",
-            stock.Symbol, stock.StockId, Currency);
+            stock.Symbol, stock.StockId, currency);
     }
 
     public async Task ChangeCurrencyAsync(CurrencyType currency, CancellationToken ct = default)

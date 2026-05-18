@@ -16,40 +16,60 @@ namespace KieshStockExchange.ViewModels.TradeViewModels;
 public partial class TradeViewModel : BaseViewModel, IDisposable
 {
     #region Selected Stock variables
-    public ISelectedStockService Selected => _selected; // expose for bindings
-    public ObservableCollection<Stock> Stocks { get; } = new();
+    public ISelectedStockService Selected => _selected;
 
-    private Stock? _pickerSelection;
-    public Stock? PickerSelection
+    // One row per (Stock, Currency) listing.
+    public ObservableCollection<TradingPair> TradingPairs { get; } = new();
+
+    private TradingPair? _pickerSelection;
+    public TradingPair? PickerSelection
     {
-        get => _pickerSelection ?? _selected.SelectedStock;
+        get => _pickerSelection;
         set
         {
-            if (value is null || value == _selected.SelectedStock) return;
-            _pickerSelection = value;   // Update the local picker selection
-            _ = _selected.Set(value);   // Update the service selection
-            OnPropertyChanged();        // Notify UI
+            if (value is null) return;
+            if (value.StockId == _selected.StockId && value.Currency == _selected.Currency)
+            {
+                if (!ReferenceEquals(_pickerSelection, value))
+                {
+                    _pickerSelection = value;
+                    OnPropertyChanged();
+                }
+                return;
+            }
+            _pickerSelection = value;
+            OnPropertyChanged();
+            _ = ApplyPickerSelectionAsync(value);
         }
     }
 
-    // Always show all orders/positions across stocks. The "Show all" toggle
-    // was removed from TradePage; this stays true for the lifetime of the VM.
+    private async Task ApplyPickerSelectionAsync(TradingPair pair)
+    {
+        try
+        {
+            if (pair.StockId == _selected.StockId)
+            {
+                await _selected.ChangeCurrencyAsync(pair.Currency);
+                return;
+            }
+
+            var stock = await _market.GetStockAsync(pair.StockId);
+            if (stock is null)
+            {
+                _logger.LogWarning("TradingPair {Symbol} #{StockId} not resolvable on the market.",
+                    pair.Symbol, pair.StockId);
+                return;
+            }
+            await _selected.Set(stock, pair.Currency);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to apply picker selection {Symbol} - {Currency}.",
+                pair.Symbol, pair.Currency);
+        }
+    }
+
     [ObservableProperty] private bool _showAll = true;
-
-    // Currency picker bound to the header. Setting it routes to
-    // SelectedStockService.ChangeCurrencyAsync, which already handles
-    // unsubscribing the old book + re-subscribing the new one. We suppress
-    // the partial handler while we snap the picker back to the service's
-    // currency (e.g. when SelectedStock changes) so the user-driven path
-    // and the system-driven path don't collide.
-    // 3.2 Phase B: AvailableCurrencies is filtered to the listings of the
-    // currently selected stock so cross-listed stocks offer both USD and
-    // EUR, EUR-only stocks offer EUR only, and so on. Rebuilt by
-    // RefreshAvailableCurrencies whenever SelectedStock changes.
-    public ObservableCollection<CurrencyType> AvailableCurrencies { get; } = new();
-
-    [ObservableProperty] private CurrencyType _selectedCurrency = CurrencyType.USD;
-    private bool _suppressCurrencyChange;
     #endregion
 
     #region ViewModel Properties
@@ -94,7 +114,6 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
 
-        // Initialize ViewModels
         PlacingVm = placingVm;
         ModifyingVm = modifyingVm;
         TransactionVm = historyVm;
@@ -105,7 +124,6 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         OrderHistoryVm = orderHistoryVm;
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
-        // Other initialization
         Title = "Trade";
         _selected.PropertyChanged += OnSelectedChanged;
         _editService.PropertyChanged += OnEditServiceChanged;
@@ -129,37 +147,16 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         try
         {
             _logger.LogInformation("TradeViewModel initializing for stock #{StockId}", stockId);
-            // Fill the Stocks picker with the available stocks
-            await LoadStocksAsync();
+            await LoadTradingPairsAsync();
 
-            // Set the initial stock
-            var stock = Stocks.FirstOrDefault(s => s.StockId == stockId)
-                ?? await _market.GetStockAsync(stockId)
+            var stock = await _market.GetStockAsync(stockId)
                 ?? throw new ArgumentException($"Stock with ID {stockId} not found.");
-            // Ensure the stock is in the collection (Should be, but just in case)
-            if (!Stocks.Any(s => s.StockId == stock.StockId))
-                Stocks.Add(stock);
-
-            // Set the selection in the service (this triggers data loading, subscriptions, etc.)
             await _selected.Set(stock);
 
-            // Align the active book with one of the stock's listings. If the
-            // service's current currency is already a valid listing (e.g. EUR
-            // for a cross-listed stock the user clicked from the EUR tab),
-            // leave it alone. Otherwise fall back to the primary listing.
-            if (!_stocks.IsListedIn(stock.StockId, _selected.Currency)
-                && _stocks.TryGetCurrency(stock.StockId, out var primary)
-                && primary != _selected.Currency)
-            {
-                await _selected.ChangeCurrencyAsync(primary);
-            }
-
-            SnapCurrencyPickerToService();
-
-            _pickerSelection = stock; // reflect in the picker UI
+            _pickerSelection = TradingPairs.FirstOrDefault(p =>
+                p.StockId == _selected.StockId && p.Currency == _selected.Currency);
             OnPropertyChanged(nameof(PickerSelection));
 
-            // Refresh child ViewModels
             await OpenOrdersVm.RefreshAsync();
             await TransactionVm.RefreshAsync();
             await PositionsVm.RefreshAsync();
@@ -168,7 +165,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error initializing TradeViewModel for stock ID {StockId}", stockId);
-            throw; // Re-throw the exception to be handled by the caller
+            throw;
         }
         finally { IsBusy = false; }
     }
@@ -187,86 +184,56 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     #region Event Handlers and Commands
     private void OnSelectedChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ISelectedStockService.StockId))
+        if (e.PropertyName is not (nameof(ISelectedStockService.StockId)
+                                  or nameof(ISelectedStockService.Currency)))
+            return;
+
+        var isStockChange = e.PropertyName == nameof(ISelectedStockService.StockId);
+
+        MainThread.BeginInvokeOnMainThread(() =>
         {
-            MainThread.BeginInvokeOnMainThread(() =>
+            var stockId = _selected.StockId;
+            if (stockId is null)
             {
-                var stock = _selected.SelectedStock;  // Service's new selection
-                if (stock is null) // No selection, should not happen
-                {
-                    _pickerSelection = null;
-                    OnPropertyChanged(nameof(PickerSelection));
-                    return;
-                }
-
-                // Ensure the Picker selection points to the instance inside Stocks collection
-                var match = Stocks.FirstOrDefault(s => s.StockId == stock.StockId);
-                if (match is null)
-                {
-                    Stocks.Add(stock);
-                    match = stock;
-                }
-
-                _pickerSelection = match;
+                _pickerSelection = null;
                 OnPropertyChanged(nameof(PickerSelection));
+                return;
+            }
 
-                // Snap the currency picker to the new stock's listing currency. Setting
-                // SelectedCurrency before _selected.ChangeCurrencyAsync would loop back
-                // through the partial handler, so suppress the round-trip — the service
-                // itself updates Currency separately.
-                SnapCurrencyPickerToService();
-            });
-        }
-        else if (e.PropertyName is nameof(ISelectedStockService.Currency))
-        {
-            MainThread.BeginInvokeOnMainThread(SnapCurrencyPickerToService);
-        }
+            var match = TradingPairs.FirstOrDefault(p =>
+                p.StockId == stockId.Value && p.Currency == _selected.Currency);
+            if (match is null)
+            {
+                var stock = _selected.SelectedStock;
+                if (stock is not null)
+                {
+                    match = new TradingPair(stock.StockId, stock.Symbol, _selected.Currency);
+                    TradingPairs.Add(match);
+                }
+            }
+            _pickerSelection = match;
+            OnPropertyChanged(nameof(PickerSelection));
+
+            if (isStockChange) ChartVm.IsYAutoFit = true;
+        });
     }
 
-    private void SnapCurrencyPickerToService()
-    {
-        _suppressCurrencyChange = true;
-        try
-        {
-            RefreshAvailableCurrencies();
-            SelectedCurrency = _selected.Currency;
-        }
-        finally { _suppressCurrencyChange = false; }
-    }
-
-    /// <summary>
-    /// Rebuild <see cref="AvailableCurrencies"/> from the listings of the
-    /// currently selected stock. Cross-listed stocks expose both USD and
-    /// EUR; single-listed stocks expose exactly their listing currency.
-    /// </summary>
-    private void RefreshAvailableCurrencies()
-    {
-        var stockId = _selected.SelectedStock?.StockId;
-        var listings = stockId.HasValue
-            ? _stocks.GetListings(stockId.Value).Select(l => l.CurrencyType).ToList()
-            : new List<CurrencyType>();
-        if (listings.Count == 0) listings.Add(CurrencyType.USD); // safe fallback
-
-        AvailableCurrencies.Clear();
-        foreach (var c in listings.Distinct().OrderBy(c => c.ToString()))
-            AvailableCurrencies.Add(c);
-    }
-
-    partial void OnSelectedCurrencyChanged(CurrencyType value)
-    {
-        if (_suppressCurrencyChange) return;
-        _ = _selected.ChangeCurrencyAsync(value);
-    }
-
-    [RelayCommand] private async Task LoadStocksAsync()
+    [RelayCommand] private async Task LoadTradingPairsAsync()
     {
         IsBusy = true;
         try
         {
             var stocks = await _market.GetAllStocksAsync();
-            Stocks.Clear();
-            foreach (var stock in stocks)
-                Stocks.Add(stock);
+            TradingPairs.Clear();
+            foreach (var stock in stocks.OrderBy(s => s.StockId))
+            {
+                foreach (var listing in _stocks.GetListings(stock.StockId)
+                    .OrderBy(l => l.IsPrimary ? 0 : 1)
+                    .ThenBy(l => l.CurrencyType.ToString()))
+                {
+                    TradingPairs.Add(new TradingPair(stock.StockId, stock.Symbol, listing.CurrencyType));
+                }
+            }
         }
         finally { IsBusy = false; }
     }
@@ -279,4 +246,10 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         PositionsVm.SetShowAll(value);
     }
     #endregion
+}
+
+/// <summary> One row in the Trade page's stock picker: a (Stock, Currency) listing. </summary>
+public sealed record TradingPair(int StockId, string Symbol, CurrencyType Currency)
+{
+    public string Display => $"{Symbol} - {Currency}";
 }

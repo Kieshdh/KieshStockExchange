@@ -25,21 +25,14 @@
             <Border Style="{StaticResource TradeContentOutline}"
                    Grid.Row="1" Grid.Column="0"
                    Margin="0">
-                <Grid ColumnDefinitions="Auto, Auto, Auto, Auto" ColumnSpacing="10">
-                    <!-- Stock Picker -->
-                    <Picker ItemsSource="{Binding Stocks}" Grid.Column="0"
+                <Grid ColumnDefinitions="Auto, Auto, Auto" ColumnSpacing="10">
+                    <Picker ItemsSource="{Binding TradingPairs}" Grid.Column="0"
                             SelectedItem="{Binding PickerSelection, Mode=TwoWay}"
-                            ItemDisplayBinding="{Binding Symbol}"
+                            ItemDisplayBinding="{Binding Display}"
                             Style="{StaticResource StockSelectorPicker}" />
-                    <!-- Currency Picker — drives SelectedStockService.ChangeCurrencyAsync -->
-                    <Picker ItemsSource="{Binding AvailableCurrencies}" Grid.Column="1"
-                            SelectedItem="{Binding SelectedCurrency, Mode=TwoWay}"
-                            Style="{StaticResource StockSelectorPicker}" />
-                    <!-- Stock Price Display -->
-                    <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="2"
+                    <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="1"
                            Style="{StaticResource SelectedStockHeaderLabel}" />
-                    <!-- Stock Company Name Display -->
-                    <Label Text="{Binding Selected.CompanyName}" Grid.Column="3"
+                    <Label Text="{Binding Selected.CompanyName}" Grid.Column="2"
                            Style="{StaticResource SelectedStockHeaderLabel}" />
                 </Grid>
             </Border>

@@ -37,6 +37,9 @@ public interface ISelectedStockService : INotifyPropertyChanged
     /// <summary>Set the selection using a preloaded Stock (avoids refetch).</summary>
     Task Set(Stock stock, CancellationToken ct = default);
 
+    /// <summary> Set stock and listing currency atomically. </summary>
+    Task Set(Stock stock, CurrencyType currency, CancellationToken ct = default);
+
     /// <summary>Change the currency for the current selection (if any).</summary>
     Task ChangeCurrencyAsync(CurrencyType currency, CancellationToken ct = default);
 
