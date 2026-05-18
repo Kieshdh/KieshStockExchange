@@ -34,6 +34,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
     private readonly IMarketDataService          _market;
     private readonly ITransactionService         _transactions;
     private readonly IStockService               _stocks;
+    private readonly IFxRateService              _fxRates;
     private readonly IUserSessionService         _session;
     private readonly ILogger<PortfolioViewModel> _logger;
 
@@ -46,6 +47,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         IMarketDataService             market,
         ITransactionService            transactions,
         IStockService                  stocks,
+        IFxRateService                 fxRates,
         IUserSessionService            session,
         ILogger<PortfolioViewModel>    logger,
         TopNavBarViewModel             topNavBarVm)
@@ -59,6 +61,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         _market        = market         ?? throw new ArgumentNullException(nameof(market));
         _transactions  = transactions   ?? throw new ArgumentNullException(nameof(transactions));
         _stocks        = stocks         ?? throw new ArgumentNullException(nameof(stocks));
+        _fxRates       = fxRates        ?? throw new ArgumentNullException(nameof(fxRates));
         _session       = session        ?? throw new ArgumentNullException(nameof(session));
         _logger        = logger         ?? throw new ArgumentNullException(nameof(logger));
         TopNavBarVm    = topNavBarVm    ?? throw new ArgumentNullException(nameof(topNavBarVm));
@@ -67,6 +70,17 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         _transactions.TransactionsChanged += OnTransactionsChanged;
         _session.SnapshotChanged      += OnSessionChanged;
         RefreshMetrics();
+    }
+
+    // 3.2 Phase B: route P&L cross-currency walks through the live FX mid
+    // instead of the static rate table so the displayed numbers move with
+    // the AR(1) drift. Rounding happens at the target currency's precision
+    // (mirrors CurrencyHelper.ConvertMoney).
+    private decimal ConvertViaFx(decimal amount, CurrencyType from, CurrencyType to)
+    {
+        if (from == to) return CurrencyHelper.RoundMoney(amount, to);
+        var mid = _fxRates.GetMidRate(from, to);
+        return CurrencyHelper.RoundMoney(amount * mid, to);
     }
 
     private void OnSessionChanged(object? sender, SessionSnapshot e) =>
@@ -119,7 +133,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         // so each row is converted into the session's BaseCurrency before summing.
         decimal cash = 0m;
         foreach (var f in _portfolio.GetFunds())
-            cash += CurrencyHelper.Convert(f.AvailableBalance, f.CurrencyType, baseCcy);
+            cash += ConvertViaFx(f.AvailableBalance, f.CurrencyType, baseCcy);
 
         var positions = _portfolio.GetPositions();
 
@@ -132,11 +146,11 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
             if (!_market.Quotes.TryGetValue((pos.StockId, ccy), out var quote)) continue;
 
             var posValueLocal = CurrencyHelper.Notional(quote.LastPrice, pos.Quantity, ccy);
-            marketValue += CurrencyHelper.Convert(posValueLocal, ccy, baseCcy);
+            marketValue += ConvertViaFx(posValueLocal, ccy, baseCcy);
             if (quote.Open > 0m)
             {
                 var todayDeltaLocal = CurrencyHelper.Notional(quote.LastPrice - quote.Open, pos.Quantity, ccy);
-                todayPl += CurrencyHelper.Convert(todayDeltaLocal, ccy, baseCcy);
+                todayPl += ConvertViaFx(todayDeltaLocal, ccy, baseCcy);
             }
         }
 
@@ -176,7 +190,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         for (int i = 0; i < sellList.Count; i++)
         {
             var t = sellList[i];
-            sells += CurrencyHelper.Convert(
+            sells += ConvertViaFx(
                 CurrencyHelper.Notional(t.Price, t.Quantity, t.CurrencyType), t.CurrencyType, baseCcy);
         }
 
@@ -193,7 +207,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         for (int i = 0; i < buyList.Count; i++)
         {
             var t = buyList[i];
-            total += CurrencyHelper.Convert(
+            total += ConvertViaFx(
                 CurrencyHelper.Notional(t.Price, t.Quantity, t.CurrencyType), t.CurrencyType, baseCcy);
         }
         return total;

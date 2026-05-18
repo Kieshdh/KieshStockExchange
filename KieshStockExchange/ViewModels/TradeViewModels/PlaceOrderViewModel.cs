@@ -29,6 +29,15 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
 
     [ObservableProperty] private string _submitButtonText = "Buy"; // Buy="Buy {Symbol}", Sell="Sell {Symbol}"
     [ObservableProperty] private Color _submitButtonColor = Colors.ForestGreen; // Buy=ForestGreen, Sell=OrangeRed
+
+    // 3.2 Phase B: shown next to the Available chip when the user has no
+    // Fund in the active trading currency (e.g. trying to buy an EUR-only
+    // stock with USD-only cash). Empty string when there's nothing to say.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasHint))]
+    private string _hintText = string.Empty;
+
+    public bool HasHint => !string.IsNullOrEmpty(HintText);
     #endregion
 
     #region Helpers properties
@@ -374,6 +383,13 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         // Order value preview
         var total = PriceForOrder > 0 ? CurrencyHelper.Notional(PriceForOrder, Quantity, Selected.Currency) : 0m;
         OrderValue = total > 0 ? CurrencyHelper.Format(total, Selected.Currency) : "-";
+
+        // 3.2 Phase B: hint the user when they have no Fund in the active
+        // trading currency. Sells don't need a hint (cash isn't required).
+        var hasFund = _portfolio?.GetFundByCurrency(Selected.Currency)?.AvailableBalance > 0;
+        HintText = (IsBuySelected && Selected.HasSelectedStock && !hasFund)
+            ? $"Convert cash to {Selected.Currency} first."
+            : string.Empty;
     }
 
     private bool ValidateInputs()

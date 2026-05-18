@@ -53,6 +53,14 @@
                        VerticalTextAlignment="Center" />
             </Grid>
 
+            <!-- "Convert cash first" hint when the user has no Fund in the
+                 selected stock's currency (3.2 Phase B). -->
+            <Label Text="{Binding HintText}"
+                   IsVisible="{Binding HasHint}"
+                   Style="{StaticResource MutedLabelStyle}"
+                   TextColor="{DynamicResource SellRed}"
+                   Margin="0,2,0,0" />
+
             <!-- Limit price (Limit mode only) -->
             <VerticalStackLayout Spacing="0"
                                  IsVisible="{Binding IsLimitSelected}">

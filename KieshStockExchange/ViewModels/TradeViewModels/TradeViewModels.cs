@@ -42,7 +42,11 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     // the partial handler while we snap the picker back to the service's
     // currency (e.g. when SelectedStock changes) so the user-driven path
     // and the system-driven path don't collide.
-    public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } = CurrencyHelper.SupportedCurrencies;
+    // 3.2 Phase B: AvailableCurrencies is filtered to the listings of the
+    // currently selected stock so cross-listed stocks offer both USD and
+    // EUR, EUR-only stocks offer EUR only, and so on. Rebuilt by
+    // RefreshAvailableCurrencies whenever SelectedStock changes.
+    public ObservableCollection<CurrencyType> AvailableCurrencies { get; } = new();
 
     [ObservableProperty] private CurrencyType _selectedCurrency = CurrencyType.USD;
     private bool _suppressCurrencyChange;
@@ -139,14 +143,15 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
             // Set the selection in the service (this triggers data loading, subscriptions, etc.)
             await _selected.Set(stock);
 
-            // If the stock is listed in a non-USD currency, switch the active book to
-            // match. _selected.Set defaults to the service's current Currency, so this
-            // is the natural place to align it with Stock.Currency. ChangeCurrencyAsync
-            // is a no-op when the currency is already correct.
-            if (_stocks.TryGetCurrency(stock.StockId, out var listingCurrency)
-                && listingCurrency != _selected.Currency)
+            // Align the active book with one of the stock's listings. If the
+            // service's current currency is already a valid listing (e.g. EUR
+            // for a cross-listed stock the user clicked from the EUR tab),
+            // leave it alone. Otherwise fall back to the primary listing.
+            if (!_stocks.IsListedIn(stock.StockId, _selected.Currency)
+                && _stocks.TryGetCurrency(stock.StockId, out var primary)
+                && primary != _selected.Currency)
             {
-                await _selected.ChangeCurrencyAsync(listingCurrency);
+                await _selected.ChangeCurrencyAsync(primary);
             }
 
             SnapCurrencyPickerToService();
@@ -221,8 +226,30 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     private void SnapCurrencyPickerToService()
     {
         _suppressCurrencyChange = true;
-        try { SelectedCurrency = _selected.Currency; }
+        try
+        {
+            RefreshAvailableCurrencies();
+            SelectedCurrency = _selected.Currency;
+        }
         finally { _suppressCurrencyChange = false; }
+    }
+
+    /// <summary>
+    /// Rebuild <see cref="AvailableCurrencies"/> from the listings of the
+    /// currently selected stock. Cross-listed stocks expose both USD and
+    /// EUR; single-listed stocks expose exactly their listing currency.
+    /// </summary>
+    private void RefreshAvailableCurrencies()
+    {
+        var stockId = _selected.SelectedStock?.StockId;
+        var listings = stockId.HasValue
+            ? _stocks.GetListings(stockId.Value).Select(l => l.CurrencyType).ToList()
+            : new List<CurrencyType>();
+        if (listings.Count == 0) listings.Add(CurrencyType.USD); // safe fallback
+
+        AvailableCurrencies.Clear();
+        foreach (var c in listings.Distinct().OrderBy(c => c.ToString()))
+            AvailableCurrencies.Add(c);
     }
 
     partial void OnSelectedCurrencyChanged(CurrencyType value)

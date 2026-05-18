@@ -127,7 +127,7 @@
                 Margin="24,0,24,0">
             <Grid RowDefinitions="Auto,Auto,*,Auto">
 
-                <!-- Card head: title + currency filter + search + refresh -->
+                <!-- Card head: title + currency tab strip + search + refresh -->
                 <Grid Grid.Row="0"
                       ColumnDefinitions="*,Auto,Auto,Auto"
                       ColumnSpacing="8"
@@ -136,11 +136,57 @@
                            Text="All Stocks"
                            Style="{StaticResource SectionHeaderLabelStyle}"
                            VerticalTextAlignment="Center" />
-                    <Picker Grid.Column="1"
-                            ItemsSource="{Binding AvailableCurrencies}"
-                            SelectedItem="{Binding FilterCurrency, Mode=TwoWay}"
-                            Style="{StaticResource ThemePickerStyle}"
-                            WidthRequest="96" />
+                    <!-- USD / EUR / All segmented pill (3.2 Phase B) -->
+                    <Border Grid.Column="1"
+                            Style="{StaticResource SegmentedPillContainerStyle}">
+                        <HorizontalStackLayout Spacing="0">
+                            <Button Text="USD"
+                                    Command="{Binding SelectCurrencyTabCommand}"
+                                    CommandParameter="USD">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource UnselectedSegmentButtonStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger TargetType="Button" Binding="{Binding IsUsdTabActive}" Value="True">
+                                                <Setter Property="BackgroundColor" Value="{DynamicResource SelectedTabBg}" />
+                                                <Setter Property="TextColor"       Value="{DynamicResource SelectedTabFg}" />
+                                                <Setter Property="BorderColor"     Value="{DynamicResource Divider}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                            <Button Text="EUR"
+                                    Command="{Binding SelectCurrencyTabCommand}"
+                                    CommandParameter="EUR">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource UnselectedSegmentButtonStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger TargetType="Button" Binding="{Binding IsEurTabActive}" Value="True">
+                                                <Setter Property="BackgroundColor" Value="{DynamicResource SelectedTabBg}" />
+                                                <Setter Property="TextColor"       Value="{DynamicResource SelectedTabFg}" />
+                                                <Setter Property="BorderColor"     Value="{DynamicResource Divider}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                            <Button Text="All"
+                                    Command="{Binding SelectCurrencyTabCommand}"
+                                    CommandParameter="All">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource UnselectedSegmentButtonStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger TargetType="Button" Binding="{Binding IsAllTabActive}" Value="True">
+                                                <Setter Property="BackgroundColor" Value="{DynamicResource SelectedTabBg}" />
+                                                <Setter Property="TextColor"       Value="{DynamicResource SelectedTabFg}" />
+                                                <Setter Property="BorderColor"     Value="{DynamicResource Divider}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </HorizontalStackLayout>
+                    </Border>
                     <Entry Grid.Column="2"
                            Text="{Binding SearchText}"
                            Placeholder="Search symbol..."

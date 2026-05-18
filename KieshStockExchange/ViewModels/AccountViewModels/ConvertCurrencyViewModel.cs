@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
@@ -10,16 +11,18 @@ namespace KieshStockExchange.ViewModels.AccountViewModels;
 
 /// <summary>
 /// Companion to <see cref="DepositWithdrawViewModel"/>: moves cash between two
-/// of the user's own Fund rows using the static rate table in
-/// <see cref="CurrencyHelper"/>. Conversion is atomic on the service side
-/// (see <see cref="IUserPortfolioService.ConvertAsync"/>) and writes paired
-/// ConversionOut/ConversionIn audit rows.
+/// of the user's own Fund rows using the live <see cref="IFxRateService"/>
+/// quote (AR(1) drift + 0.2% spread). Conversion is atomic on the service
+/// side (<see cref="IUserPortfolioService.ConvertAsync"/>) and writes paired
+/// ConversionOut/ConversionIn audit rows tagged with the effective rate.
 /// </summary>
-public partial class ConvertCurrencyViewModel : BaseViewModel
+public partial class ConvertCurrencyViewModel : BaseViewModel, IDisposable
 {
     private readonly IUserPortfolioService _portfolio;
     private readonly IUserSessionService _session;
+    private readonly IFxRateService _fxRates;
     private readonly ILogger<ConvertCurrencyViewModel> _logger;
+    private bool _disposed;
 
     public event EventHandler? CloseRequested;
 
@@ -42,19 +45,37 @@ public partial class ConvertCurrencyViewModel : BaseViewModel
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
     public ConvertCurrencyViewModel(IUserPortfolioService portfolio, IUserSessionService session,
-        ILogger<ConvertCurrencyViewModel> logger)
+        IFxRateService fxRates, ILogger<ConvertCurrencyViewModel> logger)
     {
         Title = "Convert currency";
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _fxRates = fxRates ?? throw new ArgumentNullException(nameof(fxRates));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // Defaults: From = user's base currency, To = the first different supported currency.
         _fromCurrency = _session.BaseCurrency;
         _toCurrency = AvailableCurrencies.FirstOrDefault(c => c != _fromCurrency);
 
+        // Live rate updates: FxRateService rerolls every 60s on the bot loop
+        // thread; marshal the preview refresh back to the UI thread.
+        _fxRates.RateUpdated += OnFxRateUpdated;
+
         RefreshAvailableBalance();
         RefreshPreview();
+    }
+
+    private void OnFxRateUpdated(object? sender, FxRateUpdatedEventArgs e)
+    {
+        if (_disposed) return;
+        MainThread.BeginInvokeOnMainThread(RefreshPreview);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _fxRates.RateUpdated -= OnFxRateUpdated;
     }
 
     partial void OnFromCurrencyChanged(CurrencyType value)
@@ -92,16 +113,21 @@ public partial class ConvertCurrencyViewModel : BaseViewModel
             return;
         }
 
-        // Quote the live rate for the user even when they haven't typed anything yet.
-        var one = CurrencyHelper.Convert(1m, FromCurrency, ToCurrency, CurrencyHelper.DecimalPlaces(ToCurrency) + 4);
-        RateDisplay = $"1 {FromCurrency} = {CurrencyHelper.Format(one, ToCurrency)}";
+        // Quote the live bid/ask so the 0.2% Convert spread is visible. The
+        // user sells `from` to the desk so they receive at the bid rate;
+        // ask is shown so the spread is obvious in the UI.
+        var (bid, ask) = _fxRates.GetBidAsk(FromCurrency, ToCurrency);
+        var bidDisplay = bid.ToString("0.######");
+        var askDisplay = ask.ToString("0.######");
+        RateDisplay = $"1 {FromCurrency} = {bidDisplay} / {askDisplay} {ToCurrency} (bid / ask)";
 
         if (!ParsingHelper.TryToDecimal(AmountString, out var amount) || amount <= 0m)
         {
             ConvertedAmountDisplay = "-";
             return;
         }
-        ConvertedAmountDisplay = CurrencyHelper.FormatConverted(amount, FromCurrency, ToCurrency);
+        var converted = CurrencyHelper.RoundMoney(amount * bid, ToCurrency);
+        ConvertedAmountDisplay = CurrencyHelper.Format(converted, ToCurrency);
     }
 
     [RelayCommand]

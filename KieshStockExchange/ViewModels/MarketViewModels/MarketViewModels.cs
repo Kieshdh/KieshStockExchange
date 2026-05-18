@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -30,9 +31,28 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     // (stockId, currency) in MarketDataService, so the table only ever shows
     // rows whose Currency matches this filter. Defaults to the session's
     // BaseCurrency so a user lands on what they care about.
-    [ObservableProperty] private CurrencyType _filterCurrency;
+    // 3.2 Phase B: replaced the Picker with a USD / EUR / All tab strip.
+    // _showAllCurrencies = true bypasses the FilterCurrency match.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsUsdTabActive))]
+    [NotifyPropertyChangedFor(nameof(IsEurTabActive))]
+    [NotifyPropertyChangedFor(nameof(IsAllTabActive))]
+    private CurrencyType _filterCurrency;
 
-    public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } = CurrencyHelper.SupportedCurrencies;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsUsdTabActive))]
+    [NotifyPropertyChangedFor(nameof(IsEurTabActive))]
+    [NotifyPropertyChangedFor(nameof(IsAllTabActive))]
+    private bool _showAllCurrencies;
+
+    public bool IsUsdTabActive => !ShowAllCurrencies && FilterCurrency == CurrencyType.USD;
+    public bool IsEurTabActive => !ShowAllCurrencies && FilterCurrency == CurrencyType.EUR;
+    public bool IsAllTabActive => ShowAllCurrencies;
+
+    // 3.2 Phase B: limited to currencies that actually trade at runtime so
+    // the "All" tab doesn't fan out subscriptions to unlisted currencies.
+    public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } =
+        new[] { CurrencyType.USD, CurrencyType.EUR };
 
     public int PageSize { get; set; } = 20;
     public int TotalPages => Math.Max(1, (int)Math.Ceiling(FilteredStocks.Count / (double)PageSize));
@@ -52,7 +72,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     private readonly IDispatcher _dispatcher;
     private readonly ILogger<MarketViewModel> _logger;
 
-    private readonly Dictionary<int, MarketRow> _byStockId = new();
+    private readonly Dictionary<(int StockId, CurrencyType Currency), MarketRow> _byStockId = new();
     private IDispatcherTimer? _pollTimer;
     private bool _disposed;
 
@@ -91,7 +111,15 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         try
         {
             // Idempotent — already-subscribed books just bump the ref count.
-            await _market.SubscribeAllAsync(FilterCurrency, forUi: true).ConfigureAwait(false);
+            if (ShowAllCurrencies)
+            {
+                foreach (var ccy in AvailableCurrencies)
+                    await _market.SubscribeAllAsync(ccy, forUi: true).ConfigureAwait(false);
+            }
+            else
+            {
+                await _market.SubscribeAllAsync(FilterCurrency, forUi: true).ConfigureAwait(false);
+            }
 
             // Prime the trending lists immediately. Without this the user sees
             // an empty Top Gainers / Top Losers / Most Active panel for up to
@@ -120,6 +148,10 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         try
         {
             await _selected.Set(row.StockId).ConfigureAwait(false);
+            // Carry the row's currency over — clicking MSFT in the EUR tab
+            // lands on the EUR book, not the primary USD one.
+            if (_selected.Currency != row.Currency)
+                await _selected.ChangeCurrencyAsync(row.Currency).ConfigureAwait(false);
             await MainThread.InvokeOnMainThreadAsync(() =>
                 Shell.Current.GoToAsync("///TradePage"));
         }
@@ -150,9 +182,14 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     /// </summary>
     private void Poll()
     {
-        var quotes = _market.Quotes.Values
-            .Where(q => q.Currency == FilterCurrency)
+        // "All" tab shows every live quote (cross-listed stocks appear once
+        // per currency they trade in). A currency tab restricts to that book.
+        IEnumerable<LiveQuote> source = _market.Quotes.Values;
+        if (!ShowAllCurrencies)
+            source = source.Where(q => q.Currency == FilterCurrency);
+        var quotes = source
             .OrderBy(q => q.Symbol, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(q => q.Currency)
             .ToList();
 
         bool structureChanged = false;
@@ -160,27 +197,28 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         // Update existing rows in place; add rows for new stocks.
         foreach (var q in quotes)
         {
-            if (_byStockId.TryGetValue(q.StockId, out var existing))
+            var key = (q.StockId, q.Currency);
+            if (_byStockId.TryGetValue(key, out var existing))
             {
                 existing.UpdateFrom(q);
             }
             else
             {
                 var row = MarketRow.FromQuote(q);
-                _byStockId[q.StockId] = row;
+                _byStockId[key] = row;
                 AllStocks.Add(row);
                 structureChanged = true;
             }
         }
 
-        // Drop rows whose stock disappeared.
+        // Drop rows whose (stock, currency) disappeared.
         if (_byStockId.Count != quotes.Count)
         {
-            var present = quotes.Select(q => q.StockId).ToHashSet();
-            var stale = _byStockId.Keys.Where(id => !present.Contains(id)).ToList();
-            foreach (var id in stale)
+            var present = quotes.Select(q => (q.StockId, q.Currency)).ToHashSet();
+            var stale = _byStockId.Keys.Where(k => !present.Contains(k)).ToList();
+            foreach (var key in stale)
             {
-                if (_byStockId.Remove(id, out var row))
+                if (_byStockId.Remove(key, out var row))
                 {
                     AllStocks.Remove(row);
                     structureChanged = true;
@@ -213,12 +251,44 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     // subscribed and the table reflows on the next tick.
     partial void OnFilterCurrencyChanged(CurrencyType value)
     {
+        ResetRowMap();
+        _ = RefreshAsync();
+    }
+
+    partial void OnShowAllCurrenciesChanged(bool value)
+    {
+        ResetRowMap();
+        _ = RefreshAsync();
+    }
+
+    private void ResetRowMap()
+    {
         _byStockId.Clear();
         AllStocks.Clear();
         FilteredStocks.Clear();
         PagedStocks.Clear();
         PageNumber = 0;
-        _ = RefreshAsync();
+    }
+
+    /// <summary>
+    /// Tab strip handler. <paramref name="tag"/> is one of "USD", "EUR", "All".
+    /// "All" sets <see cref="ShowAllCurrencies"/>; the currency variants flip
+    /// it off and set <see cref="FilterCurrency"/>.
+    /// </summary>
+    [RelayCommand]
+    private void SelectCurrencyTab(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return;
+        if (string.Equals(tag, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!ShowAllCurrencies) ShowAllCurrencies = true;
+            return;
+        }
+        if (CurrencyHelper.TryFromIsoCode(tag, out var ccy))
+        {
+            if (ShowAllCurrencies) ShowAllCurrencies = false;
+            if (FilterCurrency != ccy) FilterCurrency = ccy;
+        }
     }
 
     private void ApplyFilter()
@@ -340,6 +410,10 @@ public partial class MarketRow : ObservableObject
     public required int StockId { get; init; }
     public required string Symbol { get; init; }
     public required string CompanyName { get; init; }
+    // 3.2 Phase B: a cross-listed stock appears once per currency in the
+    // All tab, so the row identity is (StockId, Currency) rather than just
+    // StockId.
+    public required CurrencyType Currency { get; init; }
 
     [ObservableProperty] private string _lastPriceDisplay = "-";
 
@@ -360,6 +434,7 @@ public partial class MarketRow : ObservableObject
         StockId          = q.StockId,
         Symbol           = q.Symbol,
         CompanyName      = q.CompanyName,
+        Currency         = q.Currency,
         LastPriceDisplay = q.LastPriceDisplay,
         ChangePct        = q.ChangePct,
         ChangePctDisplay = q.ChangePctDisplay,

@@ -26,4 +26,14 @@ public partial class ConvertCurrencyPage : ContentPage
                 Application.Current?.CloseWindow(win);
         });
     }
+
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        // 3.2 Phase B: the VM subscribes to IFxRateService.RateUpdated for
+        // live bid/ask previews. Unsubscribe so the singleton service
+        // doesn't pin transient VMs in memory.
+        _vm.CloseRequested -= OnCloseRequested;
+        _vm.Dispose();
+    }
 }
