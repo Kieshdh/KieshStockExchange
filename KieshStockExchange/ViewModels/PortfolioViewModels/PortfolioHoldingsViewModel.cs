@@ -148,6 +148,7 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
             Currency = currency,
             Live     = live,
             Pos      = pos,
+            TradeCommand = TradeCommand,
         };
     }
 

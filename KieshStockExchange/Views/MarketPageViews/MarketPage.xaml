@@ -299,8 +299,7 @@
                                             Text="Trade"
                                             Style="{StaticResource TableActionButton}"
                                             HorizontalOptions="End"
-                                            Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}},
-                                                      Path=BindingContext.TradeCommand}"
+                                            Command="{Binding TradeCommand}"
                                             CommandParameter="{Binding .}" />
                                 </Grid>
                             </DataTemplate>

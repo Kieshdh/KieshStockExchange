@@ -183,8 +183,15 @@ public partial class ChartViewModel : StockAwareViewModel
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
 
         // Repaint whenever the user adds, removes, toggles, or edits an MA.
+        // Also stamp RemoveCommand on each default row so the per-row ✕ button
+        // can bind {Binding RemoveCommand} (field initializers can't reach the
+        // generated RemoveMaCommand property -- it doesn't exist until now).
         MaSeries.CollectionChanged += OnMaSeriesCollectionChanged;
-        foreach (var cfg in MaSeries) cfg.PropertyChanged += OnMaConfigPropertyChanged;
+        foreach (var cfg in MaSeries)
+        {
+            cfg.RemoveCommand = RemoveMaCommand;
+            cfg.PropertyChanged += OnMaConfigPropertyChanged;
+        }
 
         Markers.CollectionChanged += (_, __) => RequestRedraw();
         OpenOrderLines.CollectionChanged += (_, __) => RequestRedraw();
@@ -328,6 +335,7 @@ public partial class ChartViewModel : StockAwareViewModel
             Kind = MaKind.Sma,
             ColorKey = key,
             Enabled = true,
+            RemoveCommand = RemoveMaCommand,
         });
     }
 

@@ -89,13 +89,11 @@
                                                    VerticalOptions="Center">
                                 <Button Text="✎"
                                         Style="{StaticResource TradeTableButton}"
-                                        Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}},
-                                                  Path=BindingContext.OpenOrdersVm.ModifyCommand}"
+                                        Command="{Binding ModifyCommand}"
                                         CommandParameter="{Binding Order}" />
                                 <Button Text="✕"
                                         Style="{StaticResource TradeTableButton}"
-                                        Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}},
-                                                  Path=BindingContext.OpenOrdersVm.CancelCommand}"
+                                        Command="{Binding CancelCommand}"
                                         CommandParameter="{Binding Order}" />
                             </HorizontalStackLayout>
                         </Grid>

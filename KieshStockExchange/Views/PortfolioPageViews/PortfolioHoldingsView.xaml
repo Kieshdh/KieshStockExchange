@@ -44,7 +44,7 @@
 
                             <Button Grid.Column="6" Text="Trade"
                                     Style="{StaticResource TableActionButton}"
-                                    Command="{Binding Source={x:Reference PortfolioHoldingsRoot}, Path=BindingContext.TradeCommand}"
+                                    Command="{Binding TradeCommand}"
                                     CommandParameter="{Binding .}" />
                         </Grid>
                     </DataTemplate>

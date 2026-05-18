@@ -8,6 +8,7 @@ using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
+using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.MarketViewModels;
 
@@ -178,7 +179,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             }
             else
             {
-                var row = MarketRow.FromQuote(q);
+                var row = MarketRow.FromQuote(q, TradeCommand);
                 _byStockId[key] = row;
                 AllStocks.Add(row);
                 structureChanged = true;
@@ -357,6 +358,9 @@ public partial class MarketRow : ObservableObject
     public required string Symbol { get; init; }
     public required string CompanyName { get; init; }
     public required CurrencyType Currency { get; init; }
+    // Injected by MarketViewModel so the row's Trade button can bind directly
+    // without {Binding Source=...} -- compiles cleanly under x:DataType=MarketRow.
+    public required ICommand TradeCommand { get; init; }
 
     [ObservableProperty] private string _lastPriceDisplay = "-";
 
@@ -372,7 +376,7 @@ public partial class MarketRow : ObservableObject
     public bool IsBullish => ChangePct > 0m;
     public bool IsBearish => ChangePct < 0m;
 
-    public static MarketRow FromQuote(LiveQuote q) => new()
+    public static MarketRow FromQuote(LiveQuote q, ICommand tradeCommand) => new()
     {
         StockId          = q.StockId,
         Symbol           = q.Symbol,
@@ -382,6 +386,7 @@ public partial class MarketRow : ObservableObject
         ChangePct        = q.ChangePct,
         ChangePctDisplay = q.ChangePctDisplay,
         DollarVolumeDisplay = q.DollarVolumeDisplay,
+        TradeCommand     = tradeCommand,
     };
 
     public void UpdateFrom(LiveQuote q)

@@ -14,6 +14,12 @@ public interface ILazyTab
     Task RefreshAsync();
 }
 
+// Pager item used by VisiblePageNumbers. Holds both the page number and the
+// command, so the pager DataTemplate can bind directly under
+// x:DataType=PageButton instead of escaping to the parent VM via
+// {Binding Source={x:Reference Root}}.
+public sealed record PageButton(int Page, ICommand GoToCommand);
+
 public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTab
 {
     #region Page Properties
@@ -25,7 +31,7 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
 
     public int TotalPages => (int)Math.Ceiling((double)_total / PageSize);
 
-    public List<int> VisiblePageNumbers
+    public List<PageButton> VisiblePageNumbers
     {
         get
         {
@@ -40,7 +46,9 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
                 if (i > 1 && i < total)
                     pages.Add(i);
 
-            return pages.OrderBy(x => x).ToList();
+            return pages.OrderBy(x => x)
+                        .Select(p => new PageButton(p, GoToPageCommand))
+                        .ToList();
         }
     }
     #endregion

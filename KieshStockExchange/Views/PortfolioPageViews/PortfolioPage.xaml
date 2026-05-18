@@ -109,29 +109,25 @@
 
                     <other:SegmentedTabItem Header="Holdings">
                         <other:SegmentedTabItem.Content>
-                            <views:PortfolioHoldingsView BindingContext="{Binding Source={x:Reference PortfolioPageRoot},
-                                                         Path=BindingContext.HoldingsVm}" />
+                            <views:PortfolioHoldingsView BindingContext="{Binding HoldingsVm}" />
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 
                     <other:SegmentedTabItem Header="Open Orders">
                         <other:SegmentedTabItem.Content>
-                            <views:PortfolioOpenOrdersView BindingContext="{Binding Source={x:Reference PortfolioPageRoot},
-                                                           Path=BindingContext.OpenOrdersVm}" />
+                            <views:PortfolioOpenOrdersView BindingContext="{Binding OpenOrdersVm}" />
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 
                     <other:SegmentedTabItem Header="Order History">
                         <other:SegmentedTabItem.Content>
-                            <views:PortfolioOrderHistoryView BindingContext="{Binding Source={x:Reference PortfolioPageRoot},
-                                                             Path=BindingContext.OrderHistoryVm}" />
+                            <views:PortfolioOrderHistoryView BindingContext="{Binding OrderHistoryVm}" />
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 
                     <other:SegmentedTabItem Header="Transactions">
                         <other:SegmentedTabItem.Content>
-                            <views:PortfolioTransactionHistoryView BindingContext="{Binding Source={x:Reference PortfolioPageRoot},
-                                                                   Path=BindingContext.TransactionVm}" />
+                            <views:PortfolioTransactionHistoryView BindingContext="{Binding TransactionVm}" />
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 

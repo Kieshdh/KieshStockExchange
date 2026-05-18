@@ -10,6 +10,7 @@ using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.ComponentModel;
+using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -157,6 +158,7 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
             Currency = currency,
             Live = live,
             Pos = pos,
+            TradeCommand = TradeCommand,
         };
     }
 
@@ -174,6 +176,9 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
     public required Position Pos { get; init; }
     public required string Symbol { get; init; }
     public required CurrencyType Currency { get; init; }
+    // Injected by the owning VM so the row's Trade button can bind directly
+    // without {Binding Source=...} -- compiles cleanly under x:DataType=PositionRow.
+    public required ICommand TradeCommand { get; init; }
     #endregion
 
     #region Live Data Property

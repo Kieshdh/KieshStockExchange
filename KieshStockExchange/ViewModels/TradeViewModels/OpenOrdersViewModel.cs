@@ -8,6 +8,7 @@ using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -130,7 +131,13 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
     {
         if (!_stocks.TryGetSymbol(order.StockId, out string symbol))
             symbol = "-";
-        return new OpenOrderRow { Order = order, Symbol = symbol };
+        return new OpenOrderRow
+        {
+            Order = order,
+            Symbol = symbol,
+            ModifyCommand = ModifyCommand,
+            CancelCommand = CancelCommand,
+        };
     }
 
     private void OnOrdersChanged(object? s, EventArgs e)
@@ -145,6 +152,11 @@ public sealed class OpenOrderRow : ISideRow
 {
     public required Order Order { get; init; }
     public required string Symbol { get; init; }
+    // ModifyCommand/CancelCommand are injected by the owning VM so the row's
+    // ✎ / ✕ buttons can bind directly without escaping to the page via
+    // {Binding Source=...}. Lets the bindings compile under x:DataType=OpenOrderRow.
+    public required ICommand ModifyCommand { get; init; }
+    public required ICommand CancelCommand { get; init; }
     public string When => Order.CreatedDateShort;
     public string Side => Order.SideDisplay;
     public string Type => Order.TypeDisplay;

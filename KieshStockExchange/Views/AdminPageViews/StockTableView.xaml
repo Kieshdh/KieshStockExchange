@@ -67,11 +67,11 @@
         <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}"
                       BindableLayout.ItemsSource="{Binding VisiblePageNumbers}">
             <BindableLayout.ItemTemplate>
-                <DataTemplate x:DataType="x:Int32">
-                    <Button Text="{Binding .}"
-                            Command="{Binding Source={x:Reference StockTableRoot}, Path=BindingContext.GoToPageCommand}"
-                            CommandParameter="{Binding .}"
-                            Style="{StaticResource PageNumberButton}" />      
+                <DataTemplate x:DataType="vm:PageButton">
+                    <Button Text="{Binding Page}"
+                            Command="{Binding GoToCommand}"
+                            CommandParameter="{Binding Page}"
+                            Style="{StaticResource PageNumberButton}" />
                 </DataTemplate>
             </BindableLayout.ItemTemplate>
         </HorizontalStackLayout>

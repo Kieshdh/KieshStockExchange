@@ -1,19 +1,29 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              x:Class="KieshStockExchange.Views.OtherViews.SegmentedTabView"
              x:Name="Root">
     <Grid RowDefinitions="Auto,*" ColumnDefinitions="*,Auto">
         <!-- Header strip -->
         <Border x:Name="HeaderPill"
                 Style="{StaticResource SegmentedPillContainerStyle}"
-                HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContainerHorizontalOptions}"
                 VerticalOptions="Start">
+            <Border.HorizontalOptions>
+                <Binding Source="{x:Reference Root}"
+                         Path="HeaderContainerHorizontalOptions"
+                         x:DataType="other:SegmentedTabView" />
+            </Border.HorizontalOptions>
 
             <!-- The header buttons are injected here from code-behind -->
             <HorizontalStackLayout x:Name="HeaderStrip"
-                Spacing="6" Padding="0" VerticalOptions="Center"
-                HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContentHorizontalOptions}" />
+                Spacing="6" Padding="0" VerticalOptions="Center">
+                <HorizontalStackLayout.HorizontalOptions>
+                    <Binding Source="{x:Reference Root}"
+                             Path="HeaderContentHorizontalOptions"
+                             x:DataType="other:SegmentedTabView" />
+                </HorizontalStackLayout.HorizontalOptions>
+            </HorizontalStackLayout>
         </Border>
 
         <!-- Right of the Header pill -->

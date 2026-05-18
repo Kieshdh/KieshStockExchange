@@ -118,7 +118,13 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
     {
         if (!_stocks.TryGetSymbol(order.StockId, out string symbol))
             symbol = "-";
-        return new OpenOrderRow { Order = order, Symbol = symbol };
+        return new OpenOrderRow
+        {
+            Order = order,
+            Symbol = symbol,
+            ModifyCommand = ModifyCommand,
+            CancelCommand = CancelCommand,
+        };
     }
 
     private void OnOrdersChanged(object? s, EventArgs e)

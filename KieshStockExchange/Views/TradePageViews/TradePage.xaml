@@ -53,17 +53,23 @@
                  cell, only one is visible at a time. Default is PlaceOrderView;
                  swaps to ModifyOrderView while IOrderEditService.IsEditing flips
                  true (driven by chart-drag or the ✎ button on the open-orders
-                 table). The placing VM keeps its state — no rebinds, no rebuild. -->
-            <views:PlaceOrderView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
-                                  WidthRequest="260"
-                                  IsVisible="{Binding Source={x:Reference TradePageRoot},
-                                                      Path=BindingContext.IsPlacing}"
-                                  BindingContext="{Binding PlacingVm}"/>
-            <views:ModifyOrderView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
-                                   WidthRequest="260"
-                                   IsVisible="{Binding Source={x:Reference TradePageRoot},
-                                                       Path=BindingContext.IsModifying}"
-                                   BindingContext="{Binding ModifyingVm}"/>
+                 table). The placing VM keeps its state — no rebinds, no rebuild.
+
+                 Each panel is wrapped in a ContentView that inherits the page's
+                 TradeViewModel BindingContext (so IsVisible can read IsPlacing /
+                 IsModifying directly), then the inner panel swaps its own
+                 BindingContext to the sub-VM. Avoids {Binding Source=...} and
+                 lets these bindings compile under x:DataType=TradeViewModel. -->
+            <ContentView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
+                         WidthRequest="260"
+                         IsVisible="{Binding IsPlacing}">
+                <views:PlaceOrderView BindingContext="{Binding PlacingVm}" />
+            </ContentView>
+            <ContentView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
+                         WidthRequest="260"
+                         IsVisible="{Binding IsModifying}">
+                <views:ModifyOrderView BindingContext="{Binding ModifyingVm}" />
+            </ContentView>
 
             <!-- Shows the current orders, order history and current positions.
                  Spans all 3 columns so the table is as wide as the page. -->
@@ -81,32 +87,28 @@
                         <!-- Open Orders Table-->
                         <other:SegmentedTabItem Header="Open Orders">
                             <other:SegmentedTabItem.Content>
-                                <views:OpenOrdersView BindingContext="{Binding Source=
-                                    {x:Reference TradePageRoot}, Path=BindingContext.OpenOrdersVm}" />
+                                <views:OpenOrdersView BindingContext="{Binding OpenOrdersVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 
                         <!-- Order History Table-->
                         <other:SegmentedTabItem Header="Order History">
                             <other:SegmentedTabItem.Content>
-                                <views:OrderHistoryView BindingContext="{Binding Source=
-                                    {x:Reference TradePageRoot}, Path=BindingContext.OrderHistoryVm}" />
+                                <views:OrderHistoryView BindingContext="{Binding OrderHistoryVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 
                         <!-- Transaction History Table-->
                         <other:SegmentedTabItem Header="Transaction History">
                             <other:SegmentedTabItem.Content>
-                                <views:TransactionHistoryView BindingContext="{Binding Source=
-                                    {x:Reference TradePageRoot}, Path=BindingContext.TransactionVm}" />
+                                <views:TransactionHistoryView BindingContext="{Binding TransactionVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
-                        
+
                         <!-- Current Positions Table -->
                         <other:SegmentedTabItem Header="Positions">
                             <other:SegmentedTabItem.Content>
-                                <views:UserPositionsView BindingContext="{Binding Source=
-                                    {x:Reference TradePageRoot}, Path=BindingContext.PositionsVm}" />
+                                <views:UserPositionsView BindingContext="{Binding PositionsVm}" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
                     </other:SegmentedTabView.Tabs>

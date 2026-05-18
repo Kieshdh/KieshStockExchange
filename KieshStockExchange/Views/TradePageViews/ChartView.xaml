@@ -263,11 +263,11 @@
                                 <Entry Grid.Column="2" Text="{Binding Period}" Keyboard="Numeric"
                                        FontSize="12" />
                                 <Picker Grid.Column="3"
-                                        ItemsSource="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.MaKinds}"
+                                        ItemsSource="{Binding MaKinds}"
                                         SelectedItem="{Binding Kind}"
                                         FontSize="12" />
                                 <Picker Grid.Column="4"
-                                        ItemsSource="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.MaColorOptions}"
+                                        ItemsSource="{Binding MaColorOptions}"
                                         SelectedItem="{Binding SelectedColorOption}"
                                         FontSize="12">
                                     <Picker.ItemDisplayBinding>
@@ -276,7 +276,7 @@
                                 </Picker>
                                 <Button Grid.Column="5" Text="✕"
                                         Style="{StaticResource ChartIconButton}"
-                                        Command="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.RemoveMaCommand}"
+                                        Command="{Binding RemoveCommand}"
                                         CommandParameter="{Binding .}" />
                             </Grid>
                         </DataTemplate>
