@@ -135,10 +135,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         if (row is null) return;
         try
         {
-            await _selected.Set(row.StockId).ConfigureAwait(false);
-            // Carry the row's currency over so MSFT-EUR doesn't land on the USD book.
-            if (_selected.Currency != row.Currency)
-                await _selected.ChangeCurrencyAsync(row.Currency).ConfigureAwait(false);
+            await _selected.Set(row.StockId, row.Currency).ConfigureAwait(false);
             await MainThread.InvokeOnMainThreadAsync(() =>
                 Shell.Current.GoToAsync("///TradePage"));
         }

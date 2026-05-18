@@ -20,6 +20,8 @@ internal sealed class AiBotDecisionService
     private const decimal SentimentMaxBias = 0.10m;
     // Probability of forcing a market order, per unit of |sentiment| > 1.
     private const decimal OverflowGain     = 0.25m;
+    // Cash kept un-spent on every buy so tiny rounding/race gaps don't trip Phase 1.6.
+    private const decimal BuySafetyBuffer  = 5m;
 
     private readonly IMarketDataService _market;
     private readonly IAccountsCache _accounts;
@@ -299,7 +301,9 @@ internal sealed class AiBotDecisionService
             // an order that's doomed at Phase 1.6 — same defence as the sell branch below.
             var engineFreeBalance = _accounts.GetFund(user.UserId, currency)?.AvailableBalance ?? 0m;
             var freeBalance       = Math.Min(ctxFreeBalance, engineFreeBalance);
-            var allowedBalance    = Math.Min(Math.Min(freeBalance, rawTrade), roomValue);
+            // Always leave at least BuySafetyBuffer un-reserved in the user's currency.
+            var spendableBalance  = Math.Max(0m, freeBalance - BuySafetyBuffer);
+            var allowedBalance    = Math.Min(Math.Min(spendableBalance, rawTrade), roomValue);
             var qty = (int)Math.Floor(allowedBalance / estimatePrice);
             return qty > 0 ? qty : 0;
         }

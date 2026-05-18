@@ -83,8 +83,7 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
     [RelayCommand] public async Task TradeAsync(PositionRow? row)
     {
         if (row is null) return;
-        await Selected.Set(row.StockId);
-        await Selected.ChangeCurrencyAsync(row.Currency);
+        await Selected.Set(row.StockId, row.Currency);
     }
     #endregion
 

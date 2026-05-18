@@ -66,8 +66,7 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
     public async Task TradeAsync(PositionRow? row)
     {
         if (row is null) return;
-        await _selected.Set(row.StockId);
-        await _selected.ChangeCurrencyAsync(row.Currency);
+        await _selected.Set(row.StockId, row.Currency);
         await Shell.Current.GoToAsync("///TradePage");
     }
 

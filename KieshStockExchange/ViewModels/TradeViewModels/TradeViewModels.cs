@@ -47,12 +47,6 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     {
         try
         {
-            if (pair.StockId == _selected.StockId)
-            {
-                await _selected.ChangeCurrencyAsync(pair.Currency);
-                return;
-            }
-
             var stock = await _market.GetStockAsync(pair.StockId);
             if (stock is null)
             {

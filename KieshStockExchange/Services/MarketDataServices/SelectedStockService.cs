@@ -74,6 +74,13 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         await Set(stk, ct);
     }
 
+    public async Task Set(int stockId, CurrencyType currency, CancellationToken ct = default)
+    {
+        var stk = await _market.GetStockAsync(stockId, ct)
+            ?? throw new InvalidOperationException($"Stock {stockId} not found.");
+        await Set(stk, currency, ct);
+    }
+
     public Task Set(Stock stock, CancellationToken ct = default)
     {
         if (stock is null) throw new ArgumentNullException(nameof(stock));
@@ -102,13 +109,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
         if (stock.StockId == StockId && currency == Currency) return;
 
-        // Currency-only change → cheap path.
-        if (stock.StockId == StockId)
-        {
-            await ChangeCurrencyAsync(currency, ct);
-            return;
-        }
-
         await UnsubscribeAsync();
 
         CurrentOrderBook = await _books.GetAsync(stock.StockId, currency, ct);
@@ -129,29 +129,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
         _logger.LogInformation("SelectedStockService subscribed to {Symbol} #{StockId} in {Currency}.",
             stock.Symbol, stock.StockId, currency);
-    }
-
-    public async Task ChangeCurrencyAsync(CurrencyType currency, CancellationToken ct = default)
-    {
-        if (StockId is null || currency == Currency) return;
-
-        var stockId = StockId.Value;
-        var prevCurrency = Currency; // For logging
-        await UnsubscribeAsync(); // Stop previous tracking
-
-        await _market.SubscribeAsync(stockId, currency, ct);
-        await _market.BuildFromHistoryAsync(stockId, currency, ct);
-
-        Quote = TryGetQuote();
-        await UpdateFromLiveAsync(Quote);
-
-        // Get the current order book
-        CurrentOrderBook = await _books.GetAsync(stockId, currency, ct);
-
-        Currency = currency;
-
-        _logger.LogInformation("SelectedStockService changed currency for {Symbol} #{StockId} from {PrevCurrency} to {NewCurrency}.",
-            Symbol, stockId, prevCurrency, currency);
     }
 
     public async Task Reset(CancellationToken ct = default)

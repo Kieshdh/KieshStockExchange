@@ -93,8 +93,7 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
         if (_editService.IsEditing) return;
         try
         {
-            await _selected.Set(order.StockId).ConfigureAwait(false);
-            await _selected.ChangeCurrencyAsync(order.CurrencyType).ConfigureAwait(false);
+            await _selected.Set(order.StockId, order.CurrencyType).ConfigureAwait(false);
             await Shell.Current.GoToAsync("///TradePage").ConfigureAwait(false);
             _editService.BeginEdit(order);
         }

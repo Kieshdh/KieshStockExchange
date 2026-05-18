@@ -34,14 +34,14 @@ public interface ISelectedStockService : INotifyPropertyChanged
     /// <summary>Set the selection by StockId (loads the stock).</summary>
     Task Set(int stockId, CancellationToken ct = default);
 
+    /// <summary>Set the selection by StockId with an explicit listing currency.</summary>
+    Task Set(int stockId, CurrencyType currency, CancellationToken ct = default);
+
     /// <summary>Set the selection using a preloaded Stock (avoids refetch).</summary>
     Task Set(Stock stock, CancellationToken ct = default);
 
     /// <summary> Set stock and listing currency atomically. </summary>
     Task Set(Stock stock, CurrencyType currency, CancellationToken ct = default);
-
-    /// <summary>Change the currency for the current selection (if any).</summary>
-    Task ChangeCurrencyAsync(CurrencyType currency, CancellationToken ct = default);
 
     /// <summary>Clear the current selection and live price.</summary>
     Task Reset(CancellationToken ct = default);
