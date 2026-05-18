@@ -2,7 +2,10 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AccountViewModels"
+             xmlns:theme="clr-namespace:KieshStockExchange.Services.OtherServices.Interfaces"
              x:Class="KieshStockExchange.Views.AccountPageViews.AccountPage"
+             x:DataType="vm:AccountViewModel"
              Title="Account">
 
     <Grid Style="{StaticResource MainGrid}"
@@ -174,8 +177,12 @@
                             <Label Text="Theme"
                                    Style="{StaticResource FormLabelStyle}" />
                             <Picker x:Name="ThemePicker"
-                                    Style="{StaticResource ThemePickerStyle}"
-                                    ItemDisplayBinding="{Binding DisplayName}" />
+                                    Style="{StaticResource ThemePickerStyle}">
+                                <Picker.ItemDisplayBinding>
+                                    <Binding Path="DisplayName"
+                                             x:DataType="theme:ThemeOption" />
+                                </Picker.ItemDisplayBinding>
+                            </Picker>
                         </VerticalStackLayout>
 
                         <VerticalStackLayout Spacing="4">

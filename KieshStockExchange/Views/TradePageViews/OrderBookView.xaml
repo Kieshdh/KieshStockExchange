@@ -19,9 +19,12 @@
                        VerticalOptions="Center" />
                 <Picker Grid.Column="1"
                         ItemsSource="{Binding AvailableBucketSizes}"
-                        ItemDisplayBinding="{Binding Label}"
                         SelectedItem="{Binding SelectedBucketSize, Mode=TwoWay}"
-                        Style="{StaticResource StockSelectorPicker}" />
+                        Style="{StaticResource StockSelectorPicker}">
+                    <Picker.ItemDisplayBinding>
+                        <Binding Path="Label" x:DataType="vm:BucketSizeOption" />
+                    </Picker.ItemDisplayBinding>
+                </Picker>
             </Grid>
 
             <!-- Column headers: PRICE | QTY | TOTAL (uppercase tracked) -->

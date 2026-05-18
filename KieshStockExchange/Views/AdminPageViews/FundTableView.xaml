@@ -2,8 +2,10 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
-             x:Class="KieshStockExchange.Views.AdminPageViews.FundTableView" 
-             x:Name="FundTableRoot">
+             xmlns:sys="clr-namespace:System;assembly=netstandard"
+             x:Class="KieshStockExchange.Views.AdminPageViews.FundTableView"
+             x:Name="FundTableRoot"
+             x:DataType="vm:FundTableViewModel">
     <Grid RowDefinitions="Auto,Auto,*,Auto">
 
         <!-- Labels -->
@@ -182,9 +184,9 @@
         <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}" Grid.Row="3" 
                     BindableLayout.ItemsSource="{Binding VisiblePageNumbers}" >
             <BindableLayout.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="sys:Int32">
                     <Button Text="{Binding .}"
-                            Command="{Binding Source={x:Reference FundTableRoot}, 
+                            Command="{Binding Source={x:Reference FundTableRoot},
                             Path=BindingContext.GoToPageCommand}"
                             CommandParameter="{Binding .}"
                             Style="{StaticResource PageNumberButton}"/>
