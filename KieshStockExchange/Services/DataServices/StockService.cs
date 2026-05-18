@@ -18,6 +18,14 @@ public sealed class StockService : IStockService
     private IReadOnlyDictionary<string, Stock> _bySymbol = new ReadOnlyDictionary<string, Stock>(new Dictionary<string, Stock>(StringComparer.OrdinalIgnoreCase));
     public IReadOnlyDictionary<string, Stock> BySymbol => _bySymbol;
 
+    // Listings keyed by StockId. The "primary" currency lookup uses a separate
+    // dict so TryGetCurrency stays O(1) without re-scanning the listings list.
+    private IReadOnlyDictionary<int, IReadOnlyList<StockListing>> _listingsByStockId =
+        new ReadOnlyDictionary<int, IReadOnlyList<StockListing>>(new Dictionary<int, IReadOnlyList<StockListing>>());
+
+    private IReadOnlyDictionary<int, CurrencyType> _primaryCurrencyByStockId =
+        new ReadOnlyDictionary<int, CurrencyType>(new Dictionary<int, CurrencyType>());
+
     public event EventHandler? CatalogChanged;
 
     private static readonly IEqualityComparer<string> SymbolComparer = StringComparer.OrdinalIgnoreCase;
@@ -57,8 +65,12 @@ public sealed class StockService : IStockService
     {
         try
         {
-            // Load all stocks from the DB.
-            var stocks = await _db.GetStocksAsync(ct).ConfigureAwait(false);
+            // Load all stocks + listings from the DB in parallel.
+            var stocksTask = _db.GetStocksAsync(ct);
+            var listingsTask = _db.GetStockListingsAsync(ct);
+            await Task.WhenAll(stocksTask, listingsTask).ConfigureAwait(false);
+            var stocks = stocksTask.Result;
+            var listings = listingsTask.Result;
 
             // Build fresh maps.
             var byId = new Dictionary<int, Stock>(stocks.Count);
@@ -73,6 +85,20 @@ public sealed class StockService : IStockService
                 bySymbol[stock.Symbol] = stock;
             }
 
+            // Group listings by StockId. Discard listings whose StockId isn't
+            // in the byId map (cleaned-up rows from a previous run could
+            // otherwise leak into the snapshot).
+            var listingsByStockId = new Dictionary<int, IReadOnlyList<StockListing>>();
+            var primaryByStockId = new Dictionary<int, CurrencyType>();
+            foreach (var grp in listings.Where(l => l.IsValid() && byId.ContainsKey(l.StockId))
+                                        .GroupBy(l => l.StockId))
+            {
+                var list = grp.ToList();
+                listingsByStockId[grp.Key] = list;
+                var primary = list.FirstOrDefault(l => l.IsPrimary) ?? list[0];
+                primaryByStockId[grp.Key] = primary.CurrencyType;
+            }
+
             // Sort the list purely for prettier UI binding.
             var all = byId.Values.OrderBy(s => s.Symbol).ToList();
 
@@ -82,6 +108,8 @@ public sealed class StockService : IStockService
                 _all = all;
                 _byId = new ReadOnlyDictionary<int, Stock>(byId);
                 _bySymbol = new ReadOnlyDictionary<string, Stock>(bySymbol);
+                _listingsByStockId = new ReadOnlyDictionary<int, IReadOnlyList<StockListing>>(listingsByStockId);
+                _primaryCurrencyByStockId = new ReadOnlyDictionary<int, CurrencyType>(primaryByStockId);
             }
 
             // Notify listeners.
@@ -133,12 +161,25 @@ public sealed class StockService : IStockService
 
     public bool TryGetCurrency(int id, out CurrencyType currency)
     {
-        if (TryGetById(id, out var stock))
+        if (_primaryCurrencyByStockId.TryGetValue(id, out var ccy))
         {
-            currency = stock!.CurrencyType;
+            currency = ccy;
             return true;
         }
         currency = CurrencyType.USD;
+        return false;
+    }
+
+    public IReadOnlyList<StockListing> GetListings(int stockId) =>
+        _listingsByStockId.TryGetValue(stockId, out var list)
+            ? list
+            : Array.Empty<StockListing>();
+
+    public bool IsListedIn(int stockId, CurrencyType currency)
+    {
+        if (!_listingsByStockId.TryGetValue(stockId, out var list)) return false;
+        for (int i = 0; i < list.Count; i++)
+            if (list[i].CurrencyType == currency) return true;
         return false;
     }
 

@@ -11,26 +11,29 @@ namespace KieshStockExchange.ViewModels.AdminViewModels;
 public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
 {
     private readonly IMarketDataService _market;
+    private readonly IStockService _stocks;
 
     public StockTableViewModel(IDataBaseService dbService, IMarketDataService market,
-        ILogger<StockTableViewModel> logger) : base(dbService, logger)
+        IStockService stocks, ILogger<StockTableViewModel> logger) : base(dbService, logger)
     {
         Title = "Stocks";
         _market = market ?? throw new ArgumentNullException(nameof(market));
+        _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
     }
 
     protected override async Task<(IReadOnlyList<StockTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
         // Small table — load all stocks, prices come from the in-memory registry (O(1) each).
-        // Each stock's last price is read in its own listing currency rather than USD so the
-        // admin table shows correct numbers for non-USD-listed instruments.
+        // For cross-listed stocks the primary listing's currency is used in the table view;
+        // the dedicated tab on the Market page surfaces the EUR side separately.
         var stocks = (await _market.GetAllStocksAsync(ct)).OrderBy(s => s.StockId).ToList();
         var rows = new List<StockTableObject>(stocks.Count);
         foreach (var stock in stocks)
         {
-            var price = await _market.GetLastPriceAsync(stock.StockId, stock.CurrencyType, ct);
-            rows.Add(new StockTableObject(stock, stock.CurrencyType, price));
+            _stocks.TryGetCurrency(stock.StockId, out var ccy);
+            var price = await _market.GetLastPriceAsync(stock.StockId, ccy, ct);
+            rows.Add(new StockTableObject(stock, ccy, price));
         }
         return (rows, rows.Count);
     }

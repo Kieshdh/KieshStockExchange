@@ -2,6 +2,7 @@ using ExcelDataReader;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
+using KieshStockExchange.Services.DataServices.Helpers;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -17,6 +18,7 @@ public class ExcelImportService : IExcelImportService
     #region Fields, properties, and constructor
     private const string EXCEL_FILE_NAME = "AiUserData.xlsx";
     private DataTable? StockDataTable = null;
+    private DataTable? ListingDataTable = null; // optional — falls back to StockListingSeed
     private DataTable? IdentityDataTable = null;
     private DataTable? ProfileDataTable = null;
     private DataTable? HoldingDataTable = null;
@@ -46,6 +48,7 @@ public class ExcelImportService : IExcelImportService
         await _db.ResetTableAsync<Message>().ConfigureAwait(false);
         await _db.ResetTableAsync<Candle>().ConfigureAwait(false);
         await AddStocksFromExcelAsync(false).ConfigureAwait(false);
+        await AddStockListingsFromExcelAsync(false).ConfigureAwait(false);
         await AddUsersFromExcelAsync(false).ConfigureAwait(false);
         await AddAIProfileFromExcelAsync(false).ConfigureAwait(false);
         await AddHoldingsFromExcelAsync(false).ConfigureAwait(false);
@@ -54,6 +57,7 @@ public class ExcelImportService : IExcelImportService
     public async Task CheckAndAddDatabases()
     {
         await AddStocksFromExcelAsync(true).ConfigureAwait(false);
+        await AddStockListingsFromExcelAsync(true).ConfigureAwait(false);
         await AddUsersFromExcelAsync(true).ConfigureAwait(false);
         await AddAIProfileFromExcelAsync(true).ConfigureAwait(false);
         await AddHoldingsFromExcelAsync(true).ConfigureAwait(false);
@@ -73,11 +77,11 @@ public class ExcelImportService : IExcelImportService
             }
         }
 
-        // The Excel "Currency" column is optional — older AIUserData.xlsx files
-        // never had it. When absent, every stock falls back to USD which matches
-        // the legacy seed behavior exactly. When present, the seed price column
-        // is read as the value in that currency (no conversion).
-        bool hasCurrencyColumn = StockDataTable!.Columns.Contains("Currency");
+        // Currency moved from Stock to StockListing in 3.2 Phase B. The
+        // Stocks sheet still carries a USD reference price ("Price (USD)")
+        // used both to seed the initial StockPrice for the primary listing
+        // and as the source for the EUR seed price on cross-listed names
+        // (computed by AddStockListingsFromExcelAsync).
 
         // Make all the new instances of the stocks and stockprices
         List<Stock> stocks = new();
@@ -106,17 +110,12 @@ public class ExcelImportService : IExcelImportService
                 continue;
             }
 
-            var listingCurrency = hasCurrencyColumn
-                ? CurrencyHelper.FromIsoCodeOrDefault(row["Currency"]?.ToString(), CurrencyType.USD)
-                : CurrencyType.USD;
-
             // Create new stock
             Stock stock = new Stock
             {
                 StockId = stockId,
                 Symbol = symbol,
                 CompanyName = companyName,
-                CurrencyType = listingCurrency,
             };
             if (!stock.IsValid())
             {
@@ -124,33 +123,148 @@ public class ExcelImportService : IExcelImportService
                 continue;
             }
 
-            // Create initial stock price in the stock's listing currency
-            StockPrice stockPrice = new StockPrice
+            // Initial StockPrice rows for the primary listings are written by
+            // AddStockListingsFromExcelAsync (one StockPrice per listing). The
+            // Stocks sheet's "Price (USD)" is just the upstream input — track
+            // it here so the listing step can read it without re-parsing.
+            stockPrices.Add(new StockPrice
             {
                 StockId = stockId,
                 Price = price,
-                CurrencyType = listingCurrency,
-            };
-            if (!stockPrice.IsValid())
-            {
-                _logger.LogWarning("Failed to register stock price for stock #{StockId}: {Symbol} at price {Price}.", stockId, symbol, price);
-                continue;
-            }
+                CurrencyType = CurrencyType.USD,
+            });
 
             stocks.Add(stock);
-            stockPrices.Add(stockPrice);
         }
 
-        // Drop the existing stocks and sp tables and insert the new stocks 
+        // Drop the existing stocks and sp tables and insert the new stocks.
+        // StockListings is reset by AddStockListingsFromExcelAsync immediately
+        // after this so listings stay consistent with the Stocks set.
         await _db.RunInTransactionAsync(async ct =>
         {
             await _db.ResetTableAsync<Stock>(ct);
             await _db.ResetTableAsync<StockPrice>(ct);
             await _db.InsertAllAsync(stocks, ct);
+            // Stash the raw USD prices in StockPrices for the listings pass
+            // to read; AddStockListingsFromExcelAsync rebuilds StockPrice
+            // properly for every listing currency.
             await _db.InsertAllAsync(stockPrices, ct);
         }).ConfigureAwait(false);
-        
-        _logger.LogInformation("Loaded in total {StockCount} stocks with initial stockprice.", stocks.Count);
+
+        _logger.LogInformation("Loaded in total {StockCount} stocks.", stocks.Count);
+    }
+
+    private async Task AddStockListingsFromExcelAsync(bool checkDataLoaded = true)
+    {
+        LoadDataTables();
+
+        // Skip if the listings already cover every stock (a no-op on warm boots).
+        if (checkDataLoaded)
+        {
+            int existing = (await _db.GetStockListingsAsync().ConfigureAwait(false)).Count;
+            int stockCount = (await _db.GetStocksAsync().ConfigureAwait(false)).Count;
+            if (stockCount > 0 && existing >= stockCount)
+            {
+                _logger.LogInformation("StockListings data already imported. Skipping import.");
+                return;
+            }
+        }
+
+        var usdPrices = await ReadUsdSeedPricesAsync().ConfigureAwait(false);
+
+        // Prefer the explicit Listings sheet when present; otherwise derive
+        // from the StockListingSeed constants (back-compat for older xlsx
+        // files that don't carry the sheet yet).
+        IReadOnlyList<StockListing> listings;
+        if (ListingDataTable is not null && ListingDataTable.Rows.Count > 0)
+            listings = ReadListingsFromSheet(ListingDataTable, usdPrices);
+        else
+        {
+            _logger.LogInformation(
+                "No Listings sheet in {File}; falling back to StockListingSeed.", EXCEL_FILE_NAME);
+            listings = StockListingSeed.BuildFor(usdPrices);
+        }
+
+        // One StockPrice row per (StockId, Currency) so the engine has
+        // an initial last-price for every listing it'll trade.
+        var prices = listings
+            .Where(l => l.SeedPrice > 0m)
+            .Select(l => new StockPrice
+            {
+                StockId = l.StockId,
+                CurrencyType = l.CurrencyType,
+                Price = l.SeedPrice,
+            })
+            .Where(sp => sp.IsValid())
+            .ToList();
+
+        await _db.RunInTransactionAsync(async ct =>
+        {
+            await _db.ResetTableAsync<StockListing>(ct);
+            await _db.ResetTableAsync<StockPrice>(ct);
+            foreach (var listing in listings)
+                if (listing.IsValid())
+                    await _db.CreateStockListing(listing, ct).ConfigureAwait(false);
+            await _db.InsertAllAsync(prices, ct);
+        }).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Loaded {Listings} listings across {Currencies} currencies, with {Prices} initial prices.",
+            listings.Count,
+            listings.Select(l => l.CurrencyType).Distinct().Count(),
+            prices.Count);
+    }
+
+    private async Task<Dictionary<int, decimal>> ReadUsdSeedPricesAsync()
+    {
+        // Stocks sheet's "Price (USD)" was just stashed into StockPrices by
+        // AddStocksFromExcelAsync; read it back so this method works whether
+        // called directly or after a full ResetAndAdd cycle.
+        var rows = await _db.GetStockPricesAsync().ConfigureAwait(false);
+        var dict = new Dictionary<int, decimal>(rows.Count);
+        foreach (var sp in rows)
+            dict[sp.StockId] = sp.Price; // last write wins; expected one row per stock
+        return dict;
+    }
+
+    private static IReadOnlyList<StockListing> ReadListingsFromSheet(
+        DataTable sheet, IReadOnlyDictionary<int, decimal> usdPrices)
+    {
+        var rows = new List<StockListing>(sheet.Rows.Count);
+        foreach (DataRow row in sheet.Rows)
+        {
+            if (!ParsingHelper.TryToInt(row["StockId"]?.ToString(), out var stockId)) continue;
+
+            var ccy = CurrencyHelper.FromIsoCodeOrDefault(row["Currency"]?.ToString(), CurrencyType.USD);
+
+            bool isPrimary = false;
+            var primaryRaw = row["IsPrimary"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(primaryRaw))
+            {
+                if (bool.TryParse(primaryRaw, out var bv)) isPrimary = bv;
+                else if (int.TryParse(primaryRaw, out var iv)) isPrimary = iv != 0;
+            }
+
+            decimal seedPrice;
+            if (!ParsingHelper.TryToDecimal(row["SeedPrice"]?.ToString(), out seedPrice) || seedPrice <= 0m)
+            {
+                // Fall back to the Stocks-sheet USD price for the primary listing,
+                // and the EUR-converted equivalent for an EUR row missing a price.
+                usdPrices.TryGetValue(stockId, out var usd);
+                seedPrice = ccy == CurrencyType.EUR
+                    ? CurrencyHelper.RoundMoney(usd * StockListingSeed.EurPerUsd, CurrencyType.EUR)
+                    : CurrencyHelper.RoundMoney(usd, ccy);
+            }
+
+            rows.Add(new StockListing
+            {
+                StockId = stockId,
+                CurrencyType = ccy,
+                IsPrimary = isPrimary,
+                SeedPrice = seedPrice,
+            });
+        }
+        return rows;
     }
 
     private async Task AddUsersFromExcelAsync(bool checkDataLoaded = true)
@@ -293,6 +407,17 @@ public class ExcelImportService : IExcelImportService
 
             var watchlistCsv = row["WatchlistCsv"]?.ToString() ?? string.Empty;
 
+            // HomeCurrency is optional — older xlsx files without the column
+            // default every bot to USD, matching the legacy single-currency
+            // behaviour exactly.
+            string homeCurrency = "USD";
+            if (ProfileDataTable!.Columns.Contains("HomeCurrency"))
+            {
+                var raw = row["HomeCurrency"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(raw) && CurrencyHelper.IsSupported(raw))
+                    homeCurrency = raw.Trim().ToUpperInvariant();
+            }
+
             // Create new AI user profile
             try
             {
@@ -310,7 +435,8 @@ public class ExcelImportService : IExcelImportService
                     MaxOpenOrders = maxOpenOrders, WatchlistCsv = watchlistCsv, StrategyCode = strategyCode,
                     ExtremeReactionRandomnessPrc = extremeRandomnessPrc,
                     CashInjectionFrequencyPrc = cashInjectionFrequencyPrc,
-                    CashInjectionAmountPrc = cashInjectionAmountPrc
+                    CashInjectionAmountPrc = cashInjectionAmountPrc,
+                    HomeCurrency = homeCurrency,
                 };
                 if (!aiUser.IsValid())
                 {
@@ -353,17 +479,11 @@ public class ExcelImportService : IExcelImportService
             }
         }
 
-        // Map StockId → (listing currency, seed price in that currency). Stocks
-        // were just (re)seeded by AddStocksFromExcelAsync, so the DB already has
-        // the per-stock currency. We use this to (a) seed Fund rows in the
-        // currencies the user actually needs, and (b) avoid one DB call per
-        // position per row.
-        var freshStocks = await _db.GetStocksAsync().ConfigureAwait(false);
-        var freshPrices = await _db.GetStockPricesAsync().ConfigureAwait(false);
-        var stockCcy = freshStocks.ToDictionary(s => s.StockId, s => s.CurrencyType);
-        var stockSeedPrice = new Dictionary<int, decimal>();
-        foreach (var sp in freshPrices)
-            stockSeedPrice[sp.StockId] = sp.Price; // last write wins; one row per stock at seed time
+        // Per-bot home currency is the only Fund currency in v1 (multi-currency
+        // bots are out of scope). Read the Profile rows once to map UserId →
+        // HomeCurrency; bots without a row default to USD.
+        var profiles = await _db.GetAIUsersAsync().ConfigureAwait(false);
+        var homeCurrencyByUserId = profiles.ToDictionary(p => p.UserId, p => p.HomeCurrencyType);
 
         List<Fund> funds = new();
         List<Position> positions = new();
@@ -391,66 +511,25 @@ public class ExcelImportService : IExcelImportService
                 }
             }
 
-            // Compute per-currency exposure in USD-equivalent so we can split
-            // the Balance proportionally across currencies. A user whose stocks
-            // are all USD ends up with one USD Fund row identical to legacy.
-            var usdExposureByCcy = new Dictionary<CurrencyType, decimal>();
-            decimal totalUsdExposure = 0m;
-            for (int i = 1; i <= stockCount; i++)
+            // The Balance column is already in the bot's home currency (Person.py
+            // converts USD seed prices into EUR when the bot is EUR-home, so the
+            // resulting balance + holdings figure is denominated in the home
+            // currency). One Fund row per bot, in the home currency only.
+            var homeCcy = homeCurrencyByUserId.TryGetValue(userId, out var ccy) ? ccy : CurrencyType.USD;
+            var balanceInCcy = CurrencyHelper.RoundMoney(balance, homeCcy);
+            if (balanceInCcy > 0m)
             {
-                var qty = stocks[i - 1];
-                if (qty <= 0) continue;
-                if (!stockCcy.TryGetValue(i, out var ccy)) ccy = CurrencyType.USD;
-                if (!stockSeedPrice.TryGetValue(i, out var p) || p <= 0m) continue;
-                var inUsd = CurrencyHelper.Convert(qty * p, ccy, CurrencyType.USD);
-                if (inUsd <= 0m) continue;
-                usdExposureByCcy.TryGetValue(ccy, out var prior);
-                usdExposureByCcy[ccy] = prior + inUsd;
-                totalUsdExposure += inUsd;
-            }
-
-            // No exposure → fall back to a single USD Fund with the entire balance,
-            // matching the legacy behavior for bots that hold nothing yet.
-            if (totalUsdExposure <= 0m)
-            {
-                usdExposureByCcy[CurrencyType.USD] = 1m;
-                totalUsdExposure = 1m;
-            }
-
-            var userFunds = new List<Fund>(usdExposureByCcy.Count);
-            decimal allocatedUsd = 0m;
-            int seen = 0;
-            int total = usdExposureByCcy.Count;
-            foreach (var kv in usdExposureByCcy)
-            {
-                seen++;
-                // Last currency absorbs rounding residue so the user's total wealth
-                // in USD equals the seeded Balance.
-                decimal usdShare = (seen == total)
-                    ? balance - allocatedUsd
-                    : balance * (kv.Value / totalUsdExposure);
-                allocatedUsd += usdShare;
-                if (usdShare <= 0m) continue;
-
-                var balanceInCcy = CurrencyHelper.RoundMoney(
-                    CurrencyHelper.Convert(usdShare, CurrencyType.USD, kv.Key,
-                        CurrencyHelper.DecimalPlaces(kv.Key)),
-                    kv.Key);
-                if (balanceInCcy <= 0m) continue;
-
                 var fund = new Fund
                 {
                     UserId = userId,
                     TotalBalance = balanceInCcy,
-                    CurrencyType = kv.Key,
+                    CurrencyType = homeCcy,
                 };
-                if (!fund.IsValid())
-                {
+                if (fund.IsValid())
+                    funds.Add(fund);
+                else
                     _logger.LogWarning(
-                        "Failed to register {Currency} fund for user #{UserId}.", kv.Key, userId);
-                    continue;
-                }
-                userFunds.Add(fund);
+                        "Failed to register {Currency} fund for user #{UserId}.", homeCcy, userId);
             }
 
             // Create new positions
@@ -472,7 +551,6 @@ public class ExcelImportService : IExcelImportService
             }
 
             // Add to the lists
-            funds.AddRange(userFunds);
             positions.AddRange(userPositions);
         }
 
@@ -506,6 +584,10 @@ public class ExcelImportService : IExcelImportService
         IdentityDataTable = RequireSheet(ds, "Identity");
         ProfileDataTable  = RequireSheet(ds, "Profile");
         HoldingDataTable  = RequireSheet(ds, "Holding");
+        // Optional — back-compat for xlsx files generated before 3.2 Phase B.
+        // AddStockListingsFromExcelAsync falls back to StockListingSeed when
+        // this is null.
+        ListingDataTable  = ds.Tables["Listings"];
 
         _dataLoaded = true;
     }

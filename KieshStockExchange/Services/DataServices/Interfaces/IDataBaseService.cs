@@ -41,6 +41,12 @@ public interface IDataBaseService
     Task DeleteStock(Stock stock, CancellationToken ct = default);
     #endregion
 
+    #region StockListing operations
+    Task<List<StockListing>> GetStockListingsAsync(CancellationToken ct = default);
+    Task<List<StockListing>> GetStockListingsByStockId(int stockId, CancellationToken ct = default);
+    Task CreateStockListing(StockListing listing, CancellationToken ct = default);
+    #endregion
+
     #region StockPrice operations
     Task<List<StockPrice>> GetStockPricesAsync(CancellationToken ct = default);
     Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken ct = default);

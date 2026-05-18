@@ -4,7 +4,10 @@ import random
 import statistics
 from pathlib import Path
 
-from Config import STOCKS
+from Config import (
+    STOCKS, CROSS_LISTED_STOCK_IDS, EUR_ONLY_STOCK_IDS,
+    FX_BASE_RATES, LISTING_PRICE_JITTER,
+)
 from Person import Person, fake
 from ExcelLayout import *
 
@@ -35,8 +38,9 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
     # Holding sheet uses ticker symbols as human-readable column headers.
     tickers = [data["ticker"] for data in STOCKS.values()]
 
-    # index, expecting [Stocks, Identity, Profile, Holding].
+    # index, expecting [Stocks, Listings, Identity, Profile, Holding].
     sheets["Stocks"] = prepare_stocks_sheet(wb)
+    sheets["Listings"] = prepare_listings_sheet(wb)
     sheets["Identity"] = prepare_identity_sheet(wb)
     sheets["Profile"] = prepare_profile_sheet(wb)
     sheets["Holding"] = prepare_holding_sheet(wb, tickers)
@@ -47,6 +51,26 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
     # Append stock data
     for stock_id, data in STOCKS.items():
         sheets["Stocks"].append([stock_id, data["ticker"], data["name"], data["price"]])
+
+    # Append listings data. Cross-listed → USD primary + EUR row at usd/fx_rate
+    # ± LISTING_PRICE_JITTER. USD-only → single USD row. EUR-only → single
+    # EUR row at usd/fx_rate. Matches StockListingSeed in the C# fall-back.
+    cross_set = set(CROSS_LISTED_STOCK_IDS)
+    eur_only_set = set(EUR_ONLY_STOCK_IDS)
+    eur_per_usd = 1.0 / FX_BASE_RATES["EUR/USD"]
+
+    def _jittered(value: float) -> float:
+        return value * (1.0 + random.uniform(-LISTING_PRICE_JITTER, LISTING_PRICE_JITTER))
+
+    for stock_id, data in STOCKS.items():
+        usd = data["price"]
+        if stock_id in cross_set:
+            sheets["Listings"].append([stock_id, "USD", True, round(usd, 2)])
+            sheets["Listings"].append([stock_id, "EUR", False, round(_jittered(usd * eur_per_usd), 2)])
+        elif stock_id in eur_only_set:
+            sheets["Listings"].append([stock_id, "EUR", True, round(usd * eur_per_usd, 2)])
+        else:
+            sheets["Listings"].append([stock_id, "USD", True, round(usd, 2)])
 
     # Reset class-level state so user_ids start at 1
     Person.reset_state()

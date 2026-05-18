@@ -78,19 +78,30 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         "MaxDailyTrades", "MaxOpenOrders", "WatchlistCsv", "Strategy",
         "ExtremeReactionRandomnessPrc",
         "CashInjectionFrequencyPrc", "CashInjectionAmountPrc",
+        "HomeCurrency",
     ])
+    return ws
+
+
+def prepare_listings_sheet(wb: Workbook) -> Worksheet:
+    """Create/reset the Listings sheet and write its header row.
+    One row per (StockId, Currency) the stock trades in. See 3.2 Phase B."""
+    ws = reset_or_create_sheet(wb, "Listings")
+    ws.append(["StockId", "Currency", "IsPrimary", "SeedPrice"])
     return ws
 
 
 def prepare_aiuser_sheets(wb: Workbook, tickers) -> Dict[str, Worksheet]:
     """Create/reset all needed AIUser sheets via dedicated helpers and return them."""
     ws_stocks = prepare_stocks_sheet(wb)
+    ws_listings = prepare_listings_sheet(wb)
     ws_identity = prepare_identity_sheet(wb)
     ws_holding = prepare_holding_sheet(wb, tickers)
     ws_profile = prepare_profile_sheet(wb)
 
     return {
         "Stocks": ws_stocks,
+        "Listings": ws_listings,
         "Identity": ws_identity,
         "Holding": ws_holding,
         "Profile": ws_profile,

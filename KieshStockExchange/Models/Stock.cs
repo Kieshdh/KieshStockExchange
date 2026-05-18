@@ -20,7 +20,7 @@ public class Stock : IValidatable
 
     private string _symbol = string.Empty;
     [Indexed(Unique = true)]
-    [Column("Symbol")] public string Symbol { 
+    [Column("Symbol")] public string Symbol {
         get => _symbol;
         set => _symbol = value?.Trim().ToUpperInvariant() ?? string.Empty;
     }
@@ -31,16 +31,9 @@ public class Stock : IValidatable
         set => _companyName = value?.Trim() ?? string.Empty;
     }
 
-    // Listing currency. The engine keys order books by (StockId, CurrencyType),
-    // so a stock's "listed in" currency is the only book that should ever trade
-    // for that stock. Defaults to USD via FromIsoCodeOrDefault so DBs created
-    // before this column existed read back as USD.
-    [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
-    [Column("Currency")] public string Currency
-    {
-        get => CurrencyType.ToString();
-        set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
-    }
+    // Listing currency moved to StockListing (cross-listing support). Callers
+    // that still need "the currency" of a stock go through IStockService
+    // (TryGetCurrency returns the primary listing).
 
     private DateTime _createdAt = TimeHelper.NowUtc();
     [Column("CreatedAt")] public DateTime CreatedAt {
@@ -50,7 +43,7 @@ public class Stock : IValidatable
     #endregion
 
     #region IValidatable Implementation
-    public bool IsValid() => IsValidSymbol() && IsValidCompanyName() && IsValidCurrency();
+    public bool IsValid() => IsValidSymbol() && IsValidCompanyName();
 
     public bool IsInvalid => !IsValid();
 
@@ -70,8 +63,6 @@ public class Stock : IValidatable
         // Company name must be between 1 to 100 characters
         return CompanyName.Length > 0 && CompanyName.Length <= 100;
     }
-
-    private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
     #endregion
 
     #region String Representations

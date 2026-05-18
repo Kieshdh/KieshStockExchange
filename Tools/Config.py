@@ -1,6 +1,9 @@
 # ─────────────────────────────── Stock universe ──────────────────────────────
 
-# Ordered roughly by market cap descending (largest first)
+# Ordered roughly by market cap descending (largest first). All "price" values
+# are USD references — Person.py converts to EUR for EUR-home bots, and the
+# Listings sheet writer in GenerateAIUsers.py derives the EUR seed price for
+# cross-listed stocks via FX_BASE_RATES.
 STOCKS = {
     # Mega-cap tech (top 10 by market cap)
      1: {"ticker": "MSFT",  "name": "Microsoft Corporation",                "price":  513.71},
@@ -12,7 +15,8 @@ STOCKS = {
      7: {"ticker": "AVGO",  "name": "Broadcom Inc.",                        "price":  290.18},
      8: {"ticker": "TSLA",  "name": "Tesla, Inc.",                          "price":  316.06},
      9: {"ticker": "TSM",   "name": "Taiwan Semiconductor Manufacturing",   "price":  245.60},
-    10: {"ticker": "BRK.B", "name": "Berkshire Hathaway Inc.",              "price":  478.50},
+    # Slot 10: European-domiciled (NESN) replaces BRK.B per 3.2 Phase B.
+    10: {"ticker": "NESN",  "name": "Nestle S.A.",                          "price":  102.50},
     # Mega-cap mixed (11-20)
     11: {"ticker": "LLY",   "name": "Eli Lilly & Co",                       "price":  812.69},
     12: {"ticker": "WMT",   "name": "Walmart Inc.",                         "price":   97.47},
@@ -22,7 +26,8 @@ STOCKS = {
     16: {"ticker": "MA",    "name": "Mastercard Incorporated",              "price":  568.22},
     17: {"ticker": "XOM",   "name": "Exxon Mobil Corporation",              "price":  115.00},
     18: {"ticker": "UNH",   "name": "UnitedHealth Group Incorporated",      "price":  580.00},
-    19: {"ticker": "JNJ",   "name": "Johnson & Johnson",                    "price":  165.00},
+    # Slot 19: European-domiciled (LVMH) replaces JNJ.
+    19: {"ticker": "LVMH",  "name": "LVMH Moet Hennessy Louis Vuitton SE",  "price":  790.00},
     20: {"ticker": "COST",  "name": "Costco Wholesale Corporation",         "price":  950.00},
     # Large-cap (21-30)
     21: {"ticker": "NFLX",  "name": "Netflix, Inc.",                        "price": 1180.49},
@@ -31,6 +36,7 @@ STOCKS = {
     24: {"ticker": "BAC",   "name": "Bank of America Corporation",          "price":   48.45},
     25: {"ticker": "ABBV",  "name": "AbbVie Inc.",                          "price":  215.00},
     26: {"ticker": "CRM",   "name": "Salesforce, Inc.",                     "price":  305.00},
+    # Slot 27: ASML (already European-domiciled, becomes EUR-only).
     27: {"ticker": "ASML",  "name": "ASML Holding N.V.",                    "price":  711.25},
     28: {"ticker": "CVX",   "name": "Chevron Corporation",                  "price":  165.00},
     29: {"ticker": "KO",    "name": "The Coca-Cola Company",                "price":   69.17},
@@ -42,6 +48,7 @@ STOCKS = {
     34: {"ticker": "MCD",   "name": "McDonald's Corporation",               "price":  298.47},
     35: {"ticker": "TMO",   "name": "Thermo Fisher Scientific Inc.",        "price":  545.00},
     36: {"ticker": "ACN",   "name": "Accenture plc",                        "price":  345.00},
+    # Slot 37: Linde plc reclassified as EUR-only for this simulation.
     37: {"ticker": "LIN",   "name": "Linde plc",                            "price":  470.00},
     38: {"ticker": "CSCO",  "name": "Cisco Systems, Inc.",                  "price":   76.00},
     39: {"ticker": "ABT",   "name": "Abbott Laboratories",                  "price":  130.00},
@@ -50,14 +57,58 @@ STOCKS = {
     41: {"ticker": "AMD",   "name": "Advanced Micro Devices, Inc.",         "price":  166.47},
     42: {"ticker": "IBM",   "name": "International Business Machines Corporation", "price": 268.00},
     43: {"ticker": "INTU",  "name": "Intuit Inc.",                          "price":  645.00},
-    44: {"ticker": "DHR",   "name": "Danaher Corporation",                  "price":  215.00},
+    # Slot 44: European-domiciled (NOVO) replaces DHR.
+    44: {"ticker": "NOVO",  "name": "Novo Nordisk A/S",                     "price":   78.00},
     45: {"ticker": "TXN",   "name": "Texas Instruments Incorporated",       "price":  195.00},
-    46: {"ticker": "NKE",   "name": "NIKE, Inc.",                           "price":   72.00},
-    47: {"ticker": "QCOM",  "name": "QUALCOMM Incorporated",                "price":  165.00},
-    48: {"ticker": "DIS",   "name": "The Walt Disney Company",              "price":  105.00},
-    49: {"ticker": "VZ",    "name": "Verizon Communications Inc.",          "price":   44.00},
-    50: {"ticker": "PFE",   "name": "Pfizer Inc.",                          "price":   28.00},
+    # Slot 46: European-domiciled (SAP) replaces NKE.
+    46: {"ticker": "SAP",   "name": "SAP SE",                               "price":  245.00},
+    # Slot 47: European-domiciled (OR) replaces QCOM.
+    47: {"ticker": "OR",    "name": "L'Oreal S.A.",                         "price":  385.00},
+    # Slot 48: European-domiciled (SIE) replaces DIS.
+    48: {"ticker": "SIE",   "name": "Siemens AG",                           "price":  205.00},
+    # Slot 49: European-domiciled (AZN) replaces VZ.
+    49: {"ticker": "AZN",   "name": "AstraZeneca PLC",                      "price":   72.00},
+    # Slot 50: European-domiciled (ALV) replaces PFE.
+    50: {"ticker": "ALV",   "name": "Allianz SE",                           "price":  365.00},
 }
+
+# ────────────────────────── Multi-currency tunables ──────────────────────────
+
+# Supported currencies for trading + Funds. GBP/JPY stay in the C# enum but
+# aren't listed at runtime in v1.
+SUPPORTED_CURRENCIES = ["USD", "EUR"]
+
+# FX base rates. Key is "FROM/TO" reading "1 FROM = X TO".
+FX_BASE_RATES = {
+    "EUR/USD": 1.08,
+}
+
+# Per-bot home-currency draw weights. Must sum to 1.
+HOME_CURRENCY_WEIGHTS = {
+    "USD": 0.70,
+    "EUR": 0.30,
+}
+
+# Stocks that trade on both USD and EUR books. Cap-diverse — 5 each from
+# id ranges 1-10, 11-20, 21-30, 31-50.
+CROSS_LISTED_STOCK_IDS = [
+    1, 3, 4, 5, 6, 7, 8, 9, 14, 16, 20,
+    23, 25, 28, 32, 33, 36, 38, 42, 45,
+]
+
+# Stocks that trade only on the EUR book.
+EUR_ONLY_STOCK_IDS = [10, 19, 27, 37, 44, 46, 47, 48, 49, 50]
+
+# Random jitter applied to the derived EUR seed price for cross-listed stocks.
+LISTING_PRICE_JITTER = 0.005   # ±0.5%
+
+# FX drift tunables (documentation; the runtime values live in C# constants
+# inside FxRateService — keep in sync with this block).
+FX_TICK_INTERVAL_SECONDS = 60
+FX_AR1_ALPHA             = 0.92
+FX_AR1_AMPLITUDE         = 0.005
+FX_CONVERT_SPREAD        = 0.001   # ±0.1% around mid = 0.2% spread
+FX_RATE_BAND             = 0.20    # mid clamped to base ±20%
 
 # ─────────────────────────── Distribution tunables ───────────────────────────
 
@@ -265,6 +316,30 @@ def _validate() -> None:
              "CASH_INJECTION_FREQ_CAP",     CASH_INJECTION_FREQ_CAP)
     _ordered("CASH_INJECTION_AMOUNT_FLOOR", CASH_INJECTION_AMOUNT_FLOOR,
              "CASH_INJECTION_AMOUNT_CAP",   CASH_INJECTION_AMOUNT_CAP)
+
+    # Multi-currency invariants (3.2 Phase B).
+    if not SUPPORTED_CURRENCIES:
+        raise ValueError("SUPPORTED_CURRENCIES must not be empty")
+    total_weight = sum(HOME_CURRENCY_WEIGHTS.values())
+    if abs(total_weight - 1.0) > 1e-6:
+        raise ValueError(
+            f"HOME_CURRENCY_WEIGHTS must sum to 1 (got {total_weight}).")
+    for ccy in HOME_CURRENCY_WEIGHTS:
+        if ccy not in SUPPORTED_CURRENCIES:
+            raise ValueError(
+                f"HOME_CURRENCY_WEIGHTS key {ccy} not in SUPPORTED_CURRENCIES.")
+    for pair in FX_BASE_RATES:
+        a, _, b = pair.partition("/")
+        if a not in SUPPORTED_CURRENCIES or b not in SUPPORTED_CURRENCIES:
+            raise ValueError(
+                f"FX_BASE_RATES pair {pair} references unsupported currency.")
+    overlap = set(CROSS_LISTED_STOCK_IDS) & set(EUR_ONLY_STOCK_IDS)
+    if overlap:
+        raise ValueError(
+            f"CROSS_LISTED_STOCK_IDS and EUR_ONLY_STOCK_IDS overlap: {sorted(overlap)}.")
+    if not (0.0 <= LISTING_PRICE_JITTER < 0.5):
+        raise ValueError(
+            f"LISTING_PRICE_JITTER={LISTING_PRICE_JITTER} must be in [0, 0.5).")
 
 
 _validate()

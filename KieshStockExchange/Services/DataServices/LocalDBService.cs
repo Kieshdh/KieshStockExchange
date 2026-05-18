@@ -407,6 +407,29 @@ public class LocalDBService: IDataBaseService, IDisposable
     }
     #endregion
 
+    #region StockListing operations
+    public async Task<List<StockListing>> GetStockListingsAsync(CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() => _db.Table<StockListing>().ToListAsync(), ct);
+    }
+
+    public async Task<List<StockListing>> GetStockListingsByStockId(int stockId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<StockListing>().Where(l => l.StockId == stockId).ToListAsync(), ct);
+    }
+
+    public async Task CreateStockListing(StockListing listing, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!listing.IsValid())
+            throw new ArgumentException("StockListing entity is not valid", nameof(listing));
+        await RunDbAsync(() => _db.InsertAsync(listing), ct);
+    }
+    #endregion
+
     #region StockPrice operations
     public async Task<List<StockPrice>> GetStockPricesAsync(CancellationToken ct = default)
     {
@@ -1331,6 +1354,7 @@ public class LocalDBService: IDataBaseService, IDisposable
 
             await _db.CreateTableAsync<User>();
             await _db.CreateTableAsync<Stock>();
+            await _db.CreateTableAsync<StockListing>();
             await _db.CreateTableAsync<StockPrice>();
             await _db.CreateTableAsync<Order>();
             await _db.CreateTableAsync<Transaction>();

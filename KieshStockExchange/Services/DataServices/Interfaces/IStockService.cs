@@ -49,10 +49,25 @@ public interface IStockService
     bool TryGetSymbol(int id, out string symbol);
 
     /// <summary>
-    /// Try to get a stock's listing currency by its unique identifier from in-memory
-    /// snapshot. Returns false (currency=USD) if the stock isn't known yet.
+    /// Try to get a stock's <em>primary</em> listing currency by its unique
+    /// identifier from in-memory snapshot. Returns false (currency=USD) if
+    /// the stock isn't known yet. Use <see cref="GetListings"/> /
+    /// <see cref="IsListedIn"/> for full multi-currency awareness.
     /// </summary>
     bool TryGetCurrency(int id, out CurrencyType currency);
+
+    /// <summary>
+    /// All listings (one per currency the stock trades in) for the given
+    /// stock id. Empty if the stock is unknown or has no listings loaded.
+    /// </summary>
+    IReadOnlyList<StockListing> GetListings(int stockId);
+
+    /// <summary>
+    /// True when the given stock has a listing in the given currency.
+    /// Cross-listed stocks return true for every listed currency; a
+    /// USD-only stock returns false for EUR, etc.
+    /// </summary>
+    bool IsListedIn(int stockId, CurrencyType currency);
 
     /// <summary>Simple symbol/company search.</summary>
     IReadOnlyList<Stock> Search(string? query, int take = 50);

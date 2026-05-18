@@ -64,6 +64,19 @@ def weighted_sample_no_replace(items, weights, k):
     keyed = sorted((random.random() ** (1.0 / w), x) for x, w in zip(items, weights))
     return [x for _, x in keyed[-k:]]
 
+def weighted_choice(weights_dict):
+    """Pick a single key from a {key: weight} dict where weights sum to 1.
+    Used by Person._identity to draw a home currency from HOME_CURRENCY_WEIGHTS."""
+    r = random.random()
+    cum = 0.0
+    last_key = None
+    for key, w in weights_dict.items():
+        cum += w
+        last_key = key
+        if r <= cum:
+            return key
+    return last_key  # floating-point residue — return the last key
+
 class Person:
     idx = 1  # Class variable to assign unique user IDs
     usernames = set()  # Class variable to track used usernames
@@ -96,6 +109,9 @@ class Person:
         self.username  = generate_username()    # Generate valid username
         self.email     = f"{self.username}@{fake.free_email_domain()}"
         self.birthdate = fake.date_of_birth(minimum_age=18, maximum_age=80)
+        # 3.2 Phase B: each bot has a single home currency drawn from the
+        # 70/30 USD/EUR weights. Watchlist + Fund seeding key off this.
+        self.home_currency = weighted_choice(HOME_CURRENCY_WEIGHTS)
 
     def _trade_properties(self):
         # Slight bias towards lower aggressiveness (more conservative bots).
@@ -150,12 +166,22 @@ class Person:
         cash_frac = (self.min_cash * 2 + self.max_cash) / 3
         target_stock_value = self.balance * (1 - cash_frac)
 
+        # EUR-home bots see every USD reference price scaled by 1 / (EUR per
+        # USD) so the sizing math (balance ÷ price) lands sensible quantities
+        # in EUR units. USD-home bots use the USD prices unchanged.
+        eur_per_usd = 1.0 / FX_BASE_RATES["EUR/USD"]
+        price_scale = eur_per_usd if self.home_currency == "EUR" else 1.0
+
         # Adjust quantity to be a whole number of shares.
         per_stock_value = target_stock_value / len(portfolio)
-        self.holdings = { sid: int(per_stock_value // STOCKS[sid]["price"]) for sid in portfolio }
+        self.holdings = {
+            sid: int(per_stock_value // (STOCKS[sid]["price"] * price_scale))
+            for sid in portfolio
+        }
 
         # Adjust balance to account for the cost of initial holdings
-        spent_on_stocks = sum(qty * STOCKS[sid]["price"] for sid, qty in self.holdings.items())
+        spent_on_stocks = sum(qty * STOCKS[sid]["price"] * price_scale
+                              for sid, qty in self.holdings.items())
         self.balance -= spent_on_stocks
 
     def _order_types(self):
@@ -252,7 +278,8 @@ class Person:
             self.strategy,                                  # int: strategy id
             round(self.extreme_randomness, 4),              # float: extreme-reaction randomness [0, 0.5]
             round(self.cash_injection_frequency_prc, 4),    # float: cash-injection frequency / cycle [0, 0.5]
-            round(self.cash_injection_amount_prc, 6)        # float: cash-injection amount % of portfolio [0, 0.025]
+            round(self.cash_injection_amount_prc, 6),       # float: cash-injection amount % of portfolio [0, 0.025]
+            self.home_currency,                             # str: home currency ISO code (USD/EUR)
         ]
 
     def ToHoldingList(self):

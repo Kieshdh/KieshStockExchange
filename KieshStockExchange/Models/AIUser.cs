@@ -285,6 +285,17 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         set => _maxOpenOrders = value < 0 ? 0 : value;
     }
 
+    // Home currency for this bot. Drawn at seed time from
+    // Tools/Config.py::HOME_CURRENCY_WEIGHTS (70% USD, 30% EUR in v1).
+    // Restricts the engine watchlist filter and Fund seeding to this
+    // currency. See 3.2 Phase B plan.
+    [Ignore] public CurrencyType HomeCurrencyType { get; set; } = CurrencyType.USD;
+    [Column("HomeCurrency")] public string HomeCurrency
+    {
+        get => HomeCurrencyType.ToString();
+        set => HomeCurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
+    }
+
     // Trading strategy used by the AI
     [Ignore] public AiStrategy Strategy { get; private set; } = AiStrategy.Random;
 
@@ -314,7 +325,8 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     #region IValidatable Implementation
     public bool IsValid() => UserId > 0 && Seed > 0 && DecisionIntervalSeconds > 0 && MaxDailyTrades >= 0 && MaxOpenOrders >= 0 &&
-        IsValidPercentages() && ValidateSizing() && ValidatePositions() && IsValidWatchlist() && IsValidTimestamps();
+        IsValidPercentages() && ValidateSizing() && ValidatePositions() && IsValidWatchlist() && IsValidTimestamps() &&
+        CurrencyHelper.IsSupported(HomeCurrency);
 
     public bool IsInvalid => !IsValid();
 
