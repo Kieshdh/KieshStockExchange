@@ -1,6 +1,7 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
@@ -12,6 +13,8 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// Periodic snapshot of aggregate bot wealth + average price drift since
 /// session start. Each <see cref="LogSnapshot"/> call records a row in the
 /// bounded ring so the Bot Dashboard can export the full series to CSV.
+/// 3.2 Phase B: cash / shares aggregated per currency, with a USD-converted
+/// headline column using the live FX mid for the rolling-total chart.
 /// </summary>
 internal sealed class BotEconomyTelemetry
 {
@@ -23,6 +26,7 @@ internal sealed class BotEconomyTelemetry
     private readonly AiBotContext _ctx;
     private readonly IAccountsCache _accounts;
     private readonly IStockService _stocks;
+    private readonly IFxRateService _fxRates;
     private readonly ILogger<BotEconomyTelemetry> _logger;
 
     private Dictionary<(int StockId, CurrencyType Currency), decimal>? _sessionStartPrices;
@@ -33,11 +37,12 @@ internal sealed class BotEconomyTelemetry
     private decimal _totalInjectedThisSession;
 
     internal BotEconomyTelemetry(AiBotContext ctx, IAccountsCache accounts,
-        IStockService stocks, ILogger<BotEconomyTelemetry> logger)
+        IStockService stocks, IFxRateService fxRates, ILogger<BotEconomyTelemetry> logger)
     {
         _ctx      = ctx      ?? throw new ArgumentNullException(nameof(ctx));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
+        _fxRates  = fxRates  ?? throw new ArgumentNullException(nameof(fxRates));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -61,15 +66,22 @@ internal sealed class BotEconomyTelemetry
 
     internal void LogSnapshot(IReadOnlyList<CurrencyType> currencies)
     {
-        decimal totalCash = 0m, totalShares = 0m;
-        // Iterate the engine's authoritative stock list. _ctx.StocksByUser is a
-        // 60s-refreshed index and would race this sampler.
+        // Per-currency aggregation. The headline TotalWealthUsd is the sum of
+        // these across currencies, converted to USD via live FX mid.
+        var cashByCurrency   = new Dictionary<CurrencyType, decimal>();
+        var sharesByCurrency = new Dictionary<CurrencyType, decimal>();
+        foreach (var c in currencies)
+        {
+            cashByCurrency[c] = 0m;
+            sharesByCurrency[c] = 0m;
+        }
+
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
             foreach (var currency in currencies)
             {
                 var fund = _accounts.GetFund(user.UserId, currency);
-                if (fund != null) totalCash += fund.TotalBalance;
+                if (fund != null) cashByCurrency[currency] += fund.TotalBalance;
             }
             foreach (var sid in _stocks.ById.Keys)
             {
@@ -77,7 +89,7 @@ internal sealed class BotEconomyTelemetry
                 if (pos == null || pos.Quantity <= 0) continue;
                 foreach (var currency in currencies)
                     if (_ctx.StockPrices.TryGetValue((sid, currency), out var price))
-                        totalShares += CurrencyHelper.Notional(price, pos.Quantity, currency);
+                        sharesByCurrency[currency] += CurrencyHelper.Notional(price, pos.Quantity, currency);
             }
         }
 
@@ -100,7 +112,17 @@ internal sealed class BotEconomyTelemetry
             }
         }
         var avgDrift = tracked > 0 ? driftSum / tracked : 0m;
-        var totalWealth = totalCash + totalShares;
+
+        // Headline USD wealth: sum cash + shares per currency, converted to
+        // USD at the live FX mid. Used by the dashboard's rolling chart.
+        decimal totalCashUsd = 0m, totalSharesUsd = 0m;
+        foreach (var c in currencies)
+        {
+            var mid = _fxRates.GetMidRate(c, CurrencyType.USD);
+            totalCashUsd   += CurrencyHelper.RoundMoney(cashByCurrency[c]   * mid, CurrencyType.USD);
+            totalSharesUsd += CurrencyHelper.RoundMoney(sharesByCurrency[c] * mid, CurrencyType.USD);
+        }
+        var totalWealthUsd = totalCashUsd + totalSharesUsd;
 
         decimal injectedSnapshot;
         lock (_samples)
@@ -108,8 +130,10 @@ internal sealed class BotEconomyTelemetry
             injectedSnapshot = _totalInjectedThisSession;
             _samples.Enqueue(new EconomySample(
                 TimestampUtc:   TimeHelper.NowUtc(),
-                TotalCash:      totalCash,
-                TotalShares:    totalShares,
+                TotalCashUsd:   totalCashUsd,
+                TotalSharesUsd: totalSharesUsd,
+                CashByCurrency:   new Dictionary<CurrencyType, decimal>(cashByCurrency),
+                SharesByCurrency: new Dictionary<CurrencyType, decimal>(sharesByCurrency),
                 TrackedStocks:  tracked,
                 AvgDriftPct:    avgDrift,
                 MinDriftPct:    minDrift,
@@ -124,9 +148,9 @@ internal sealed class BotEconomyTelemetry
             "BotEconomy @ {Time}: wealth {Wealth} (cash {Cash} + shares {Shares}), " +
             "avg drift {Drift:P3} across {Tracked} stocks, injected {Injected}",
             TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"),
-            CurrencyHelper.Format(totalWealth, CurrencyType.USD),
-            CurrencyHelper.Format(totalCash,   CurrencyType.USD),
-            CurrencyHelper.Format(totalShares, CurrencyType.USD),
+            CurrencyHelper.Format(totalWealthUsd, CurrencyType.USD),
+            CurrencyHelper.Format(totalCashUsd,   CurrencyType.USD),
+            CurrencyHelper.Format(totalSharesUsd, CurrencyType.USD),
             avgDrift, tracked,
             CurrencyHelper.Format(injectedSnapshot, CurrencyType.USD));
     }
@@ -149,27 +173,50 @@ internal sealed class BotEconomyTelemetry
         EconomySample[] snapshot;
         lock (_samples) snapshot = _samples.ToArray();
 
-        var sb = new StringBuilder(512 + snapshot.Length * 128);
-        sb.AppendLine("TimestampUtc,TotalCash,TotalShares,TotalWealth,TrackedStocks," +
-                      "AvgDriftPct,MinDriftPct,MinDriftStockId,MaxDriftPct,MaxDriftStockId," +
-                      "TotalInjectedThisSession");
+        // CSV columns: one TotalCash_/TotalShares_ pair per currency seen in
+        // the snapshot, plus the headline USD totals. Reads on a fixed
+        // currency-set known up front would be tighter, but Person.py +
+        // FxRateService both pin the runtime currencies to USD/EUR, so the
+        // header is stable across exports.
+        var seenCurrencies = new SortedSet<CurrencyType>();
+        foreach (var s in snapshot)
+        {
+            foreach (var c in s.CashByCurrency.Keys) seenCurrencies.Add(c);
+            foreach (var c in s.SharesByCurrency.Keys) seenCurrencies.Add(c);
+        }
+
+        var sb = new StringBuilder(512 + snapshot.Length * 160);
+        sb.Append("TimestampUtc,TotalCashUsd,TotalSharesUsd,TotalWealthUsd,TrackedStocks,")
+          .Append("AvgDriftPct,MinDriftPct,MinDriftStockId,MaxDriftPct,MaxDriftStockId,")
+          .Append("TotalInjectedThisSession");
+        foreach (var c in seenCurrencies)
+            sb.Append(",TotalCash_").Append(c).Append(",TotalShares_").Append(c);
+        sb.Append('\n');
+
         var inv = CultureInfo.InvariantCulture;
         for (int i = 0; i < snapshot.Length; i++)
         {
             ct.ThrowIfCancellationRequested();
             var r = snapshot[i];
             sb.Append(r.TimestampUtc.ToString("O", inv)).Append(',')
-              .Append(r.TotalCash.ToString(inv)).Append(',')
-              .Append(r.TotalShares.ToString(inv)).Append(',')
-              .Append((r.TotalCash + r.TotalShares).ToString(inv)).Append(',')
+              .Append(r.TotalCashUsd.ToString(inv)).Append(',')
+              .Append(r.TotalSharesUsd.ToString(inv)).Append(',')
+              .Append((r.TotalCashUsd + r.TotalSharesUsd).ToString(inv)).Append(',')
               .Append(r.TrackedStocks).Append(',')
               .Append(r.AvgDriftPct.ToString(inv)).Append(',')
               .Append(r.MinDriftPct.ToString(inv)).Append(',')
               .Append(r.MinDriftStockId).Append(',')
               .Append(r.MaxDriftPct.ToString(inv)).Append(',')
               .Append(r.MaxDriftStockId).Append(',')
-              .Append(r.TotalInjectedThisSession.ToString(inv))
-              .Append('\n');
+              .Append(r.TotalInjectedThisSession.ToString(inv));
+            foreach (var c in seenCurrencies)
+            {
+                r.CashByCurrency.TryGetValue(c, out var cash);
+                r.SharesByCurrency.TryGetValue(c, out var shares);
+                sb.Append(',').Append(cash.ToString(inv))
+                  .Append(',').Append(shares.ToString(inv));
+            }
+            sb.Append('\n');
         }
 
         await File.WriteAllTextAsync(path, sb.ToString(), ct).ConfigureAwait(false);
@@ -179,10 +226,12 @@ internal sealed class BotEconomyTelemetry
     #endregion
 }
 
-internal readonly record struct EconomySample(
+internal sealed record EconomySample(
     DateTime TimestampUtc,
-    decimal  TotalCash,
-    decimal  TotalShares,
+    decimal  TotalCashUsd,
+    decimal  TotalSharesUsd,
+    IReadOnlyDictionary<CurrencyType, decimal> CashByCurrency,
+    IReadOnlyDictionary<CurrencyType, decimal> SharesByCurrency,
     int      TrackedStocks,
     decimal  AvgDriftPct,
     decimal  MinDriftPct,

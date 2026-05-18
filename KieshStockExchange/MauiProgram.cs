@@ -69,6 +69,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IAuthService, AuthService>();
         builder.Services.AddSingleton<IMarketLookupService, MarketLookupService>();
         builder.Services.AddSingleton<IMarketDataService, MarketDataService>();
+        builder.Services.AddSingleton<IFxRateService, FxRateService>();
         builder.Services.AddSingleton<IOrderCacheService, OrderCacheService>();
         builder.Services.AddSingleton<ISelectedStockService, SelectedStockService>();
         builder.Services.AddSingleton<IUserPortfolioService, UserPortfolioService>();

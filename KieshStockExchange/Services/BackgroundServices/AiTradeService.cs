@@ -27,8 +27,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     public TimeSpan ReloadAssetsInterval { get; private set; } = TimeSpan.FromMinutes(1);
     public TimeSpan PruneInterval        { get; private set; } = TimeSpan.FromSeconds(30);
 
+    // Every currency a bot might trade in. Bots now decide in their own
+    // HomeCurrency only; this list still drives the engine's book
+    // subscriptions and the per-currency walks in BotEconomyTelemetry.
     public IReadOnlyList<CurrencyType> CurrenciesToTrade { get; private set; } =
-        new[] { CurrencyType.USD };
+        new[] { CurrencyType.USD, CurrencyType.EUR };
 
     public int LoadedBotCount => _ctx.AiUsersByAiUserId.Count;
 
@@ -163,6 +166,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly IMarketDataService     _market;
     private readonly IStockService          _stocks;
     private readonly IAccountsCache         _accounts;
+    private readonly IFxRateService         _fxRates;
     private readonly ILogger<AiTradeService> _logger;
 
     public AiTradeService(
@@ -174,6 +178,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IReservationLedger ledger,
         IOrderBookCache books,
         IUserPortfolioService portfolio,
+        IFxRateService fxRates,
         ILogger<AiTradeService> logger,
         ILoggerFactory loggerFactory,
         IOptions<SeparatorLoggerOptions> loggerOptions)
@@ -182,6 +187,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _market       = market       ?? throw new ArgumentNullException(nameof(market));
         _stocks       = stocks       ?? throw new ArgumentNullException(nameof(stocks));
         _accounts     = accounts     ?? throw new ArgumentNullException(nameof(accounts));
+        _fxRates      = fxRates      ?? throw new ArgumentNullException(nameof(fxRates));
         _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
         if (db          is null) throw new ArgumentNullException(nameof(db));
         if (ledger      is null) throw new ArgumentNullException(nameof(ledger));
@@ -194,7 +200,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions));
-        _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
+        _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, fxRates, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
         _sentiment = new BotSentimentService(stocks, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions));
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
@@ -300,6 +306,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _failures.Reset();
         _economy.Reset();
         _sentiment.Reset(TimeHelper.NowUtc());
+        _fxRates.Reset();
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
@@ -383,11 +390,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             user.RecordDecision(now);
             if (_ctx.Decimal01(user.AiUserId) > effectiveTradeProb) continue;
 
-            foreach (var currency in CurrenciesToTrade)
-            {
-                var order = await _decisions.ComputeOrderAsync(_ctx, user, currency, ct).ConfigureAwait(false);
-                if (order is not null) pending.Add((user, order));
-            }
+            // 3.2 Phase B: a bot decides in its home currency only. The book
+            // subscription loop above (CurrenciesToTrade) keeps both USD and
+            // EUR books ticking; the per-tick decision picks one.
+            var order = await _decisions.ComputeOrderAsync(_ctx, user, user.HomeCurrencyType, ct).ConfigureAwait(false);
+            if (order is not null) pending.Add((user, order));
         }
         return pending;
     }
@@ -486,6 +493,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     #region Timers
     private async Task CheckTimers(DateTime now, CancellationToken ct)
     {
+        // FX before sentiment: nothing reads FX inside Tick today, but keeping
+        // it first matches the "advance external state before consumers" rule.
+        _fxRates.Tick(now);
         _sentiment.Tick(now);
         if (now >= _nextDailyCheck)
         {

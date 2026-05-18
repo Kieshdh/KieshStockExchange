@@ -166,14 +166,11 @@ internal sealed class AiBotDecisionService
     private int ChooseStockId(AiBotContext ctx, AIUser user, OrderType type, CurrencyType currency)
     {
         var rng   = ctx.GetRandom(user.AiUserId);
-        // Restrict the watchlist to stocks whose listing currency matches the
-        // currency we're considering this tick. CurrenciesToTrade now spans every
-        // supported currency; an unfiltered list would let the bot place an order
-        // for an USD-listed stock against the EUR book, which then fails with
-        // BookCurrencyMismatch in the engine. Falling back to USD (TryGetCurrency
-        // returning false) keeps cold-load behavior matching today's USD-only world.
+        // 3.2 Phase B: restrict the watchlist to stocks listed in the current
+        // decision currency. Cross-listed stocks pass this filter on both
+        // sides; USD-only and EUR-only stocks pass on exactly one side.
         var watch = user.Watchlist?
-            .Where(id => _stocks.TryGetCurrency(id, out var c) ? c == currency : currency == CurrencyType.USD)
+            .Where(id => _stocks.IsListedIn(id, currency))
             .ToList();
         if (watch == null || watch.Count == 0) return 0;
 

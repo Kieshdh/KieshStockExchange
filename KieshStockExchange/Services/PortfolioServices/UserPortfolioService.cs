@@ -6,6 +6,7 @@ using System;
 using System.Threading;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.UserServices;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
@@ -16,13 +17,16 @@ public class UserPortfolioService : IUserPortfolioService
 {
     #region Constructor & Fields
     private readonly IDataBaseService _db;
+    private readonly IFxRateService _fxRates;
     private readonly ILogger<UserPortfolioService> _logger;
     private readonly IAuthService _auth;
     private readonly AsyncLocal<int> _systemScopeDepth = new();
 
-    public UserPortfolioService(IAuthService auth, IDataBaseService db, ILogger<UserPortfolioService> logger)
+    public UserPortfolioService(IAuthService auth, IDataBaseService db,
+        IFxRateService fxRates, ILogger<UserPortfolioService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _fxRates = fxRates ?? throw new ArgumentNullException(nameof(fxRates));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
     }
@@ -337,7 +341,11 @@ public class UserPortfolioService : IUserPortfolioService
             return false;
         }
 
-        var converted = CurrencyHelper.ConvertMoney(amount, from, to);
+        // FX bid/ask: the user is selling `from` to the desk, so they get
+        // the bid rate (the worse-for-them side of the spread). For a
+        // round-trip from→to→from the user loses approximately 0.2%.
+        var (bid, _) = _fxRates.GetBidAsk(from, to);
+        var converted = CurrencyHelper.RoundMoney(amount * bid, to);
         if (converted <= 0m)
         {
             _logger.LogWarning("Convert {Amount} {From}->{To} rounds to zero in target currency.",
@@ -346,8 +354,7 @@ public class UserPortfolioService : IUserPortfolioService
         }
 
         // Audit notes carry the rate that was applied so the user can reconcile
-        // later even if the static rate table changes. Trimmed user note appended
-        // for context, if present.
+        // later even if FX rates drift. Trimmed user note appended for context.
         var rate = converted / amount; // already-rounded effective rate
         var trimmedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
         var rateTag = $"Convert {from}->{to} @ {rate:0.######}";

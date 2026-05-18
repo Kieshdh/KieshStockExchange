@@ -45,7 +45,7 @@ public sealed class OrderValidator : IOrderValidator
     #endregion
 
     #region Validation Methods
-    public OrderResult? ValidateInput(int userId, int stockId, int quantity, decimal price, CurrencyType currency, 
+    public OrderResult? ValidateInput(int userId, int stockId, int quantity, decimal price, CurrencyType currency,
         bool buyOrder, bool limitOrder, decimal? slippagePercent = null, decimal? buyBudget = null)
     {
         if (userId <= 0)
@@ -58,6 +58,13 @@ public sealed class OrderValidator : IOrderValidator
             return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
         if (!CurrencyHelper.IsSupported(currency))
             return OrderResultFactory.InvalidParams("Unsupported currency.");
+        // 3.2 Phase B: reject phantom (StockId, Currency) books. Without this
+        // a user (or bot) could place an order against a book the stock is
+        // not listed in — the matching engine would then create a fresh
+        // empty book with no counterparties.
+        if (!_stock.IsListedIn(stockId, currency))
+            return OrderResultFactory.InvalidParams(
+                $"Stock {stockId} is not listed in {currency}.");
 
         // Limit order: must have positive price and no slippage.
         if (limitOrder)
@@ -100,6 +107,10 @@ public sealed class OrderValidator : IOrderValidator
             return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
         if (!_stock.TryGetById(order.StockId, out _))
             return OrderResultFactory.InvalidParams("Invalid stock ID.");
+        // 3.2 Phase B phantom-book guard (mirrors ValidateInput).
+        if (!_stock.IsListedIn(order.StockId, order.CurrencyType))
+            return OrderResultFactory.InvalidParams(
+                $"Stock {order.StockId} is not listed in {order.CurrencyType}.");
 
         // Limit order: Price must be positive and cannot have slippage.
         if (order.IsLimitOrder)
