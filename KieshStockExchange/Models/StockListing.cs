@@ -3,13 +3,7 @@ using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
-/// <summary>
-/// A single (StockId, Currency) listing. One stock can have multiple
-/// listings — the order book engine keys by (StockId, Currency), so each
-/// listing is its own book. Exactly one listing per stock is flagged
-/// <see cref="IsPrimary"/> = the legacy "Stock.Currency" value used as a
-/// back-compat fall-back where the codebase still asks for "the" currency.
-/// </summary>
+/// <summary> A single (StockId, Currency) listing. </summary>
 [Table("StockListings")]
 public class StockListing : IValidatable
 {

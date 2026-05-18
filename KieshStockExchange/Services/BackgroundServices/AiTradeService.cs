@@ -390,9 +390,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             user.RecordDecision(now);
             if (_ctx.Decimal01(user.AiUserId) > effectiveTradeProb) continue;
 
-            // 3.2 Phase B: a bot decides in its home currency only. The book
-            // subscription loop above (CurrenciesToTrade) keeps both USD and
-            // EUR books ticking; the per-tick decision picks one.
+            // Bot decides in its home currency only.
             var order = await _decisions.ComputeOrderAsync(_ctx, user, user.HomeCurrencyType, ct).ConfigureAwait(false);
             if (order is not null) pending.Add((user, order));
         }

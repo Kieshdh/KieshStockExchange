@@ -72,10 +72,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         RefreshMetrics();
     }
 
-    // 3.2 Phase B: route P&L cross-currency walks through the live FX mid
-    // instead of the static rate table so the displayed numbers move with
-    // the AR(1) drift. Rounding happens at the target currency's precision
-    // (mirrors CurrencyHelper.ConvertMoney).
+    // Live-FX walk for cross-currency display values. Rounds at the target precision.
     private decimal ConvertViaFx(decimal amount, CurrencyType from, CurrencyType to)
     {
         if (from == to) return CurrencyHelper.RoundMoney(amount, to);
@@ -129,8 +126,6 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
     {
         var baseCcy = _session.BaseCurrency;
 
-        // Aggregate cash across all fund rows. Funds live in the user's own currencies,
-        // so each row is converted into the session's BaseCurrency before summing.
         decimal cash = 0m;
         foreach (var f in _portfolio.GetFunds())
             cash += ConvertViaFx(f.AvailableBalance, f.CurrencyType, baseCcy);
@@ -157,10 +152,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         var totalEquity = cash + marketValue;
         var count       = positions.Count;
 
-        // All-time net trading P&L: if you liquidated today at last prices, your net cash
-        // position would be marketValue + (cash received from sells) - (cash paid for buys).
-        // That removes the need for a separate "deposits" ledger and matches what brokerages
-        // call "total return" for the trading account in isolation.
+        // Liquidation-equivalent: sells already received + current value of holdings - buys paid.
         var allTimePl = ComputeAllTimePl(marketValue, baseCcy);
 
         TotalEquityDisplay       = CurrencyHelper.Format(totalEquity, baseCcy);
@@ -169,14 +161,14 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         PositionCountDisplay     = count == 1 ? "1 position" : $"{count} positions";
 
         TodayPlDisplay = FormatSigned(todayPl, baseCcy);
-        // Today P/L percent is relative to yesterday's equity (today's open value).
+        // Today P/L % is relative to yesterday's equity (today's open value).
         var todayBase = totalEquity - todayPl;
         TodayPlSubDisplay = todayBase != 0m
             ? FormatSignedPct(todayPl / todayBase * 100m)
             : "—";
 
         AllTimePlDisplay = FormatSigned(allTimePl, baseCcy);
-        // All-time P/L percent is relative to the gross capital deployed (sum of buys).
+        // All-time P/L % is relative to the gross capital deployed (sum of buys).
         var grossDeployed = SumBuyNotional(baseCcy);
         AllTimePlSubDisplay = grossDeployed > 0m
             ? FormatSignedPct(allTimePl / grossDeployed * 100m)
@@ -195,8 +187,6 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         }
 
         decimal buys = SumBuyNotional(baseCcy);
-
-        // Liquidation-equivalent: sells already received + current value of holdings - buys paid.
         return sells + marketValue - buys;
     }
 

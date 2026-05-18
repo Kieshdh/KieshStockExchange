@@ -53,8 +53,7 @@
                        VerticalTextAlignment="Center" />
             </Grid>
 
-            <!-- "Convert cash first" hint when the user has no Fund in the
-                 selected stock's currency (3.2 Phase B). -->
+            <!-- "Convert cash first" hint when the user has no Fund in the selected currency. -->
             <Label Text="{Binding HintText}"
                    IsVisible="{Binding HasHint}"
                    Style="{StaticResource MutedLabelStyle}"

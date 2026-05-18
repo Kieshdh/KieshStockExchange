@@ -15,7 +15,6 @@ STOCKS = {
      7: {"ticker": "AVGO",  "name": "Broadcom Inc.",                        "price":  290.18},
      8: {"ticker": "TSLA",  "name": "Tesla, Inc.",                          "price":  316.06},
      9: {"ticker": "TSM",   "name": "Taiwan Semiconductor Manufacturing",   "price":  245.60},
-    # Slot 10: European-domiciled (NESN) replaces BRK.B per 3.2 Phase B.
     10: {"ticker": "NESN",  "name": "Nestle S.A.",                          "price":  102.50},
     # Mega-cap mixed (11-20)
     11: {"ticker": "LLY",   "name": "Eli Lilly & Co",                       "price":  812.69},
@@ -74,8 +73,7 @@ STOCKS = {
 
 # ────────────────────────── Multi-currency tunables ──────────────────────────
 
-# Supported currencies for trading + Funds. GBP/JPY stay in the C# enum but
-# aren't listed at runtime in v1.
+# Supported currencies for trading + Funds.
 SUPPORTED_CURRENCIES = ["USD", "EUR"]
 
 # FX base rates. Key is "FROM/TO" reading "1 FROM = X TO".
@@ -131,8 +129,8 @@ TRADE_PROB_JITTER         = 0.15
 STRATEGY_CHOICES          = (1, 2, 3, 4)
 
 # Starting balance (_portfolio): log-distributed.
-BALANCE_MIN               = 10_000.0
-BALANCE_MAX_FACTOR        = 50.0
+BALANCE_MIN               = 50_000.0
+BALANCE_MAX_FACTOR        = 20.0
 
 # Cash reserves (_portfolio): aggressive bots keep less cash.
 MAX_CASH_BASE             = 0.50
@@ -175,11 +173,7 @@ USE_SLIP_SKEW             = 0.5
 # 0.5 so a bot is never more likely to be random than in character.
 EXTREME_RANDOMNESS_SKEW   = 2.0
 
-# Cash injection (3.5): periodic nominal-growth driver. Per-bot knobs are
-# seeded inverse to portfolio value at generation time, so smaller bots
-# inject more often and at a higher % of portfolio. Median bot expectation:
-# 5%/yr nominal. See ../KieshStockExchange/Services/BackgroundServices/Helpers/BotCashInjector.cs
-# for the runtime side.
+# Cash-injection knobs. Seeded inverse to portfolio value; median bot ≈ 5%/yr nominal.
 CASH_INJECTION_BASE_FREQUENCY = 0.15      # median: 15% chance / 1-hour cycle
 CASH_INJECTION_BASE_AMOUNT    = 0.004     # median: 0.4% of portfolio / hit
 CASH_INJECTION_SIZE_ALPHA     = 0.6       # inverse-size skew strength
@@ -317,7 +311,7 @@ def _validate() -> None:
     _ordered("CASH_INJECTION_AMOUNT_FLOOR", CASH_INJECTION_AMOUNT_FLOOR,
              "CASH_INJECTION_AMOUNT_CAP",   CASH_INJECTION_AMOUNT_CAP)
 
-    # Multi-currency invariants (3.2 Phase B).
+    # Multi-currency invariants.
     if not SUPPORTED_CURRENCIES:
         raise ValueError("SUPPORTED_CURRENCIES must not be empty")
     total_weight = sum(HOME_CURRENCY_WEIGHTS.values())

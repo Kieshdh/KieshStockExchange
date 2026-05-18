@@ -9,13 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AccountViewModels;
 
-/// <summary>
-/// Companion to <see cref="DepositWithdrawViewModel"/>: moves cash between two
-/// of the user's own Fund rows using the live <see cref="IFxRateService"/>
-/// quote (AR(1) drift + 0.2% spread). Conversion is atomic on the service
-/// side (<see cref="IUserPortfolioService.ConvertAsync"/>) and writes paired
-/// ConversionOut/ConversionIn audit rows tagged with the effective rate.
-/// </summary>
+/// <summary> Moves cash between two of the user's Fund rows at the live FX rate. </summary>
 public partial class ConvertCurrencyViewModel : BaseViewModel, IDisposable
 {
     private readonly IUserPortfolioService _portfolio;
@@ -53,12 +47,9 @@ public partial class ConvertCurrencyViewModel : BaseViewModel, IDisposable
         _fxRates = fxRates ?? throw new ArgumentNullException(nameof(fxRates));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        // Defaults: From = user's base currency, To = the first different supported currency.
         _fromCurrency = _session.BaseCurrency;
         _toCurrency = AvailableCurrencies.FirstOrDefault(c => c != _fromCurrency);
 
-        // Live rate updates: FxRateService rerolls every 60s on the bot loop
-        // thread; marshal the preview refresh back to the UI thread.
         _fxRates.RateUpdated += OnFxRateUpdated;
 
         RefreshAvailableBalance();
@@ -80,7 +71,6 @@ public partial class ConvertCurrencyViewModel : BaseViewModel, IDisposable
 
     partial void OnFromCurrencyChanged(CurrencyType value)
     {
-        // Same-currency conversions are a no-op; nudge ToCurrency off if it collides.
         if (value == ToCurrency)
             ToCurrency = AvailableCurrencies.FirstOrDefault(c => c != value);
         RefreshAvailableBalance();
@@ -113,9 +103,7 @@ public partial class ConvertCurrencyViewModel : BaseViewModel, IDisposable
             return;
         }
 
-        // Quote the live bid/ask so the 0.2% Convert spread is visible. The
-        // user sells `from` to the desk so they receive at the bid rate;
-        // ask is shown so the spread is obvious in the UI.
+        // User sells FROM to the desk, so they receive at the bid rate.
         var (bid, ask) = _fxRates.GetBidAsk(FromCurrency, ToCurrency);
         var bidDisplay = bid.ToString("0.######");
         var askDisplay = ask.ToString("0.######");
@@ -152,7 +140,7 @@ public partial class ConvertCurrencyViewModel : BaseViewModel, IDisposable
             return;
         }
 
-        // Friendly pre-flight; the service rechecks under the DB transaction.
+        // Pre-flight; the service rechecks under the DB transaction.
         var src = _portfolio.GetFundByCurrency(FromCurrency);
         var available = src?.AvailableBalance ?? 0m;
         if (!CurrencyHelper.GreaterOrEqual(available, amount, FromCurrency))

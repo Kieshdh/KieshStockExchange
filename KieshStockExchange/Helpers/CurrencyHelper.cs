@@ -139,11 +139,7 @@ public static class CurrencyHelper
         return Math.Round(result, decimals, rounding);
     }
 
-    /// <summary>
-    /// Converts a monetary amount between currencies and rounds once, in the target
-    /// currency's precision. Prefer this over <see cref="Convert"/> + <see cref="RoundMoney"/>,
-    /// which double-rounds.
-    /// </summary>
+    /// <summary> Convert and round once at the target currency's precision. </summary>
     public static decimal ConvertMoney(decimal amount, CurrencyType from, CurrencyType to,
         MidpointRounding rounding = MidpointRounding.AwayFromZero)
         => Convert(amount, from, to, DecimalPlaces(to), rounding);
@@ -175,22 +171,12 @@ public static class CurrencyHelper
         MidpointRounding mode = MidpointRounding.AwayFromZero)
         => Math.Round(amount, DecimalPlaces(currency), mode);
 
-    /// <summary>
-    /// Rounded <c>unitPrice * quantity</c> in the given currency. The canonical way
-    /// to compute an order/transaction notional — use this instead of hand-written
-    /// <c>price * qty</c> arithmetic so rounding is consistent across the codebase.
-    /// Returns 0 for non-positive quantity.
-    /// </summary>
+    /// <summary> Rounded <c>unitPrice * quantity</c>. Returns 0 for non-positive quantity. </summary>
     public static decimal Notional(decimal unitPrice, int quantity, CurrencyType currency,
         MidpointRounding mode = MidpointRounding.AwayFromZero)
         => quantity <= 0 ? 0m : RoundMoney(unitPrice * quantity, currency, mode);
 
-    /// <summary>
-    /// Applies a slippage percentage to an anchor price: buys round up to a cap above
-    /// the anchor, sells round down to a floor below it. <paramref name="slippagePercent"/>
-    /// is expressed as a percent (e.g. 1.5m for 1.5%), not a fraction. Result is clamped
-    /// to <c>&gt;= 0</c> and rounded to the currency's precision.
-    /// </summary>
+    /// <summary> Apply a slippage percent (e.g. 1.5m for 1.5%) to an anchor price. Clamped to &gt;= 0. </summary>
     public static decimal ApplySlippagePct(decimal anchor, decimal slippagePercent, bool isBuy,
         CurrencyType currency, MidpointRounding mode = MidpointRounding.AwayFromZero)
     {
@@ -211,11 +197,7 @@ public static class CurrencyHelper
     public static bool GreaterOrEqual(decimal a, decimal b, CurrencyType currency)
         => a >= b || Math.Abs(a - b) < Epsilon(currency);
 
-    /// <summary>
-    /// Epsilon-aware strict less-than: returns true only when <paramref name="a"/> is
-    /// meaningfully less than <paramref name="b"/> (i.e. the gap exceeds the currency
-    /// epsilon). Mirrors <see cref="GreaterOrEqual"/> for the opposite side of the compare.
-    /// </summary>
+    /// <summary> Epsilon-aware strict less-than. </summary>
     public static bool LessThan(decimal a, decimal b, CurrencyType currency)
         => !GreaterOrEqual(a, b, currency);
 

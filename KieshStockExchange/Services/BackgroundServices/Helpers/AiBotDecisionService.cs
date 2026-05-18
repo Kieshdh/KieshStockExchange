@@ -166,9 +166,6 @@ internal sealed class AiBotDecisionService
     private int ChooseStockId(AiBotContext ctx, AIUser user, OrderType type, CurrencyType currency)
     {
         var rng   = ctx.GetRandom(user.AiUserId);
-        // 3.2 Phase B: restrict the watchlist to stocks listed in the current
-        // decision currency. Cross-listed stocks pass this filter on both
-        // sides; USD-only and EUR-only stocks pass on exactly one side.
         var watch = user.Watchlist?
             .Where(id => _stocks.IsListedIn(id, currency))
             .ToList();
@@ -182,12 +179,8 @@ internal sealed class AiBotDecisionService
                 var pos       = ctx.GetPosition(user.UserId, id);
                 var committed = ComputeCommittedSellShares(ctx, user.UserId, id);
                 var ctxAvail  = pos.Quantity - committed;
-                // Plan B: cross-check against the engine's authoritative AvailableQuantity
-                // (= Quantity − ReservedQuantity). If the engine has reservations the bot's
-                // ctx doesn't know about (a leak elsewhere, a refresh race, etc.) the bot
-                // would otherwise generate orders that fail Phase 1.5 with InsufficientShares.
-                // Take the minimum so the candidate set never includes a stock the engine
-                // would reject.
+                // Cross-check against the engine's AvailableQuantity to avoid
+                // generating orders that would fail Phase 1.5 on stale ctx.
                 var enginePos   = _accounts.GetPosition(user.UserId, id);
                 var engineAvail = enginePos?.AvailableQuantity ?? 0;
                 if (Math.Min(ctxAvail, engineAvail) > 0) candidates.Add(id);
@@ -198,13 +191,7 @@ internal sealed class AiBotDecisionService
         return WeightedPick(watch, rng);
     }
 
-    /// <summary>
-    /// Roulette-wheel pick weighted by 1/StockId^alpha. STOCKS are ordered by
-    /// market cap descending in the seed (id 1 = largest), so lower ids carry
-    /// higher weight — bigger names trade more often. Applied on top of the
-    /// already-biased watchlist, so alpha is mild (0.7 here vs 1.2 at seed
-    /// time) to avoid over-concentrating on the top 5.
-    /// </summary>
+    /// <summary> Roulette-wheel pick weighted by 1/StockId^alpha (lower ids = bigger cap = more weight). </summary>
     private static int WeightedPick(IList<int> stockIds, Random rng)
     {
         double total = 0;

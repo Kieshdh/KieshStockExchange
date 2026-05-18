@@ -9,18 +9,11 @@ using System.Text;
 
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
-/// <summary>
-/// Periodic snapshot of aggregate bot wealth + average price drift since
-/// session start. Each <see cref="LogSnapshot"/> call records a row in the
-/// bounded ring so the Bot Dashboard can export the full series to CSV.
-/// 3.2 Phase B: cash / shares aggregated per currency, with a USD-converted
-/// headline column using the live FX mid for the rolling-total chart.
-/// </summary>
+/// <summary> Periodic snapshot of aggregate bot wealth + average price drift since session start. </summary>
 internal sealed class BotEconomyTelemetry
 {
     #region Services and Constructor
-    // 60s sampling × 10000 rows ≈ 7 days. Plenty of runway for a diagnostic
-    // window; each row is small so the memory cost is negligible.
+    // 60s × 10000 ≈ 7 days of samples.
     private const int RecentSamplesMax = 10000;
 
     private readonly AiBotContext _ctx;
@@ -31,9 +24,7 @@ internal sealed class BotEconomyTelemetry
 
     private Dictionary<(int StockId, CurrencyType Currency), decimal>? _sessionStartPrices;
     private readonly Queue<EconomySample> _samples = new();
-    // Running total of cash injected by BotCashInjector across the session.
-    // Guarded by lock(_samples); read into each EconomySample so the CSV
-    // carries cumulative growth and per-cycle delta is derivable client-side.
+    // Guarded by lock(_samples).
     private decimal _totalInjectedThisSession;
 
     internal BotEconomyTelemetry(AiBotContext ctx, IAccountsCache accounts,
@@ -66,8 +57,6 @@ internal sealed class BotEconomyTelemetry
 
     internal void LogSnapshot(IReadOnlyList<CurrencyType> currencies)
     {
-        // Per-currency aggregation. The headline TotalWealthUsd is the sum of
-        // these across currencies, converted to USD via live FX mid.
         var cashByCurrency   = new Dictionary<CurrencyType, decimal>();
         var sharesByCurrency = new Dictionary<CurrencyType, decimal>();
         foreach (var c in currencies)
@@ -93,7 +82,7 @@ internal sealed class BotEconomyTelemetry
             }
         }
 
-        // Anchor lazily so we don't capture an all-zero snapshot before quotes arrive.
+        // Anchor lazily so we don't capture an all-zero snapshot.
         if (_sessionStartPrices is null && _ctx.StockPrices.Count > 0)
             _sessionStartPrices = new Dictionary<(int, CurrencyType), decimal>(_ctx.StockPrices);
 
@@ -113,8 +102,7 @@ internal sealed class BotEconomyTelemetry
         }
         var avgDrift = tracked > 0 ? driftSum / tracked : 0m;
 
-        // Headline USD wealth: sum cash + shares per currency, converted to
-        // USD at the live FX mid. Used by the dashboard's rolling chart.
+        // Headline USD wealth via live FX mid.
         decimal totalCashUsd = 0m, totalSharesUsd = 0m;
         foreach (var c in currencies)
         {

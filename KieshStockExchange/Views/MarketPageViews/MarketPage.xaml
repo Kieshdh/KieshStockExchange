@@ -136,7 +136,7 @@
                            Text="All Stocks"
                            Style="{StaticResource SectionHeaderLabelStyle}"
                            VerticalTextAlignment="Center" />
-                    <!-- USD / EUR / All segmented pill (3.2 Phase B) -->
+                    <!-- USD / EUR / All currency tabs -->
                     <Border Grid.Column="1"
                             Style="{StaticResource SegmentedPillContainerStyle}">
                         <HorizontalStackLayout Spacing="0">

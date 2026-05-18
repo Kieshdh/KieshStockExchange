@@ -16,9 +16,7 @@ public partial class ConvertCurrencyPage : ContentPage
 
     private void OnCloseRequested(object? sender, EventArgs e)
     {
-        // ConvertAsync awaits the DB call with ConfigureAwait(false), so the
-        // CloseRequested continuation can fire off the UI thread. Window.CloseWindow
-        // is a WinUI call that must run on the UI thread.
+        // CloseWindow must run on the UI thread.
         MainThread.BeginInvokeOnMainThread(() =>
         {
             var win = this.Window;
@@ -30,9 +28,6 @@ public partial class ConvertCurrencyPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
-        // 3.2 Phase B: the VM subscribes to IFxRateService.RateUpdated for
-        // live bid/ask previews. Unsubscribe so the singleton service
-        // doesn't pin transient VMs in memory.
         _vm.CloseRequested -= OnCloseRequested;
         _vm.Dispose();
     }

@@ -183,11 +183,8 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         set => _aggressivenessPrc = RequiredPrc(value, nameof(AggressivenessPrc));
     }
 
-    // Probability that the bot acts out-of-character at an extreme-sentiment
-    // event — picks a random reaction style instead of the AiStrategy-derived
-    // default. Range [0, 0.5] so a bot is never more likely to be erratic than
-    // in character. Distribution at seed time is skewed toward 0 (most bots
-    // are "very in character"; small tail are "erratic"). See 3.4 plan.
+    // Probability of acting out-of-character at an extreme-sentiment event.
+    // Range [0, 0.5]; seed-time distribution skewed toward 0.
     private decimal _extremeReactionRandomnessPrc = 0.10m;
     [Column("ExtremeReactionRandomnessPrc")] public decimal ExtremeReactionRandomnessPrc
     {
@@ -201,9 +198,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         }
     }
 
-    // Probability that this bot receives a periodic cash injection on each
-    // global injection cycle (1 hour). Seeded inverse to portfolio size at
-    // generation time so smaller bots inject more often. See 3.5 plan.
+    // Per-cycle (1h) cash-injection roll. Seeded inverse to portfolio size.
     private decimal _cashInjectionFrequencyPrc = 0.15m;
     [Column("CashInjectionFrequencyPrc")] public decimal CashInjectionFrequencyPrc
     {
@@ -285,10 +280,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         set => _maxOpenOrders = value < 0 ? 0 : value;
     }
 
-    // Home currency for this bot. Drawn at seed time from
-    // Tools/Config.py::HOME_CURRENCY_WEIGHTS (70% USD, 30% EUR in v1).
-    // Restricts the engine watchlist filter and Fund seeding to this
-    // currency. See 3.2 Phase B plan.
+    // Drawn from Tools/Config.py::HOME_CURRENCY_WEIGHTS at seed time.
     [Ignore] public CurrencyType HomeCurrencyType { get; set; } = CurrencyType.USD;
     [Column("HomeCurrency")] public string HomeCurrency
     {

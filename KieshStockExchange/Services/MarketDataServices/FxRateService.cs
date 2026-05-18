@@ -4,41 +4,22 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
-/// <summary>
-/// AR(1) mid-rate walker with a fixed spread. Shape mirrors
-/// <c>BotSentimentService</c>: single seeded RNG, deterministic across
-/// runs, all state lives in memory. <see cref="Tick"/> runs on the bot
-/// loop thread so no locking is needed for reads from that thread; the
-/// Convert preview reads through the same dictionary and accepts the
-/// brief inconsistency window between mid update and event dispatch.
-/// </summary>
+/// <summary> AR(1) mid-rate walker with a fixed spread. Deterministic across runs. </summary>
 public sealed class FxRateService : IFxRateService
 {
     #region Tunables (mirror Tools/Config.py FX_* constants)
-    // Re-roll cadence. Matches Tools/Config.py::FX_TICK_INTERVAL_SECONDS.
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(60);
 
-    // AR(1) momentum: x_new = alpha*x_old + (1-alpha)*base + amp*base*U(-1,+1).
-    // Higher alpha → slower mean reversion (0.92 keeps 92% of the prior value).
+    // x_new = Alpha*x_old + (1-Alpha)*base + Amplitude*base*U(-1,+1)
     private const decimal Alpha = 0.92m;
     private const decimal Amplitude = 0.005m;
-
-    // Convert spread: 0.001 = ±0.1% around mid = 0.2% round-trip cost.
-    private const decimal ConvertSpread = 0.001m;
-
-    // Hard clamp: mid stays within ±20% of the base rate so the AR(1)
-    // can't run away under an unlucky string of draws.
-    private const decimal RateBand = 0.20m;
-
-    // Deterministic seed so reruns are reproducible.
+    private const decimal ConvertSpread = 0.001m;  // 0.2% round-trip
+    private const decimal RateBand = 0.20m;        // clamp to base ± 20%
     private const int RngSeed = 47;
     #endregion
 
     #region Base rates (mirror Tools/Config.py::FX_BASE_RATES)
-    // Key is (from, to) reading "1 from = X to". Same shape as
-    // CurrencyHelper.RatesPerBase but only carries the live pairs.
-    // Reverse pairs are computed by GetMidRate as 1 / mid, so we only
-    // store one direction per pair to avoid drift between the two sides.
+    // Only one direction per pair; the reverse is 1 / mid.
     private static readonly IReadOnlyDictionary<(CurrencyType, CurrencyType), decimal> BaseMidRates =
         new Dictionary<(CurrencyType, CurrencyType), decimal>
         {
@@ -67,8 +48,7 @@ public sealed class FxRateService : IFxRateService
         if (from == to) return 1m;
         if (_mids.TryGetValue((from, to), out var mid) && mid > 0m) return mid;
         if (_mids.TryGetValue((to, from), out var inverse) && inverse > 0m) return 1m / inverse;
-        // Cold path before Reset / before a pair is loaded — fall back to the
-        // static table so callers don't crash on a startup race.
+        // Cold path before Reset or before a pair is loaded.
         return CurrencyHelper.Convert(1m, from, to, decimals: 6);
     }
 
@@ -94,9 +74,6 @@ public sealed class FxRateService : IFxRateService
 
     public void Tick(DateTime now)
     {
-        // Snapshot keys so the loop can mutate _mids in place without
-        // CollectionModified surprises if a pair is added/removed mid-loop
-        // (only Reset does that today, but stay defensive).
         var pairs = _nextTick.Keys.ToArray();
         foreach (var pair in pairs)
         {
@@ -121,11 +98,9 @@ public sealed class FxRateService : IFxRateService
     #region AR(1) step
     private decimal StepAr1(decimal prev, decimal baseMid)
     {
-        // x_new = alpha*prev + (1-alpha)*base + amp*base*U(-1,+1)
         var noise = (decimal)(_rng.NextDouble() * 2.0 - 1.0);
         var raw = Alpha * prev + (1m - Alpha) * baseMid + Amplitude * baseMid * noise;
 
-        // Clamp to base ± RateBand so an unlucky walk can't drift away.
         var lo = baseMid * (1m - RateBand);
         var hi = baseMid * (1m + RateBand);
         if (raw < lo) raw = lo;

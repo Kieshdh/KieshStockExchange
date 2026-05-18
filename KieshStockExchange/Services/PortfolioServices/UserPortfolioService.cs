@@ -309,12 +309,7 @@ public class UserPortfolioService : IUserPortfolioService
         return success;
     }
 
-    /// <summary>
-    /// Audited cash conversion: withdraws from the source fund and deposits the
-    /// rate-converted amount into the target fund inside a single DB transaction.
-    /// Emits paired ConversionOut/ConversionIn FundTransaction rows. Mirrors the
-    /// auth + rollback shape of <see cref="DepositOrWithdrawAsync"/>.
-    /// </summary>
+    /// <summary> Atomic FX convert: writes paired ConversionOut/ConversionIn audit rows. </summary>
     private async Task<bool> ConvertInternalAsync(decimal amount, CurrencyType from, CurrencyType to,
         string? note, int? asUserId, CancellationToken ct)
     {
@@ -341,9 +336,7 @@ public class UserPortfolioService : IUserPortfolioService
             return false;
         }
 
-        // FX bid/ask: the user is selling `from` to the desk, so they get
-        // the bid rate (the worse-for-them side of the spread). For a
-        // round-trip from→to→from the user loses approximately 0.2%.
+        // User sells FROM to the desk → receives at bid rate.
         var (bid, _) = _fxRates.GetBidAsk(from, to);
         var converted = CurrencyHelper.RoundMoney(amount * bid, to);
         if (converted <= 0m)
@@ -353,9 +346,8 @@ public class UserPortfolioService : IUserPortfolioService
             return false;
         }
 
-        // Audit notes carry the rate that was applied so the user can reconcile
-        // later even if FX rates drift. Trimmed user note appended for context.
-        var rate = converted / amount; // already-rounded effective rate
+        // Note tag carries the effective rate for reconciliation.
+        var rate = converted / amount;
         var trimmedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
         var rateTag = $"Convert {from}->{to} @ {rate:0.######}";
         var outNote = string.IsNullOrEmpty(trimmedNote) ? rateTag : $"{rateTag} | {trimmedNote}";

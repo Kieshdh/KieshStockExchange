@@ -77,13 +77,8 @@ public class ExcelImportService : IExcelImportService
             }
         }
 
-        // Currency moved from Stock to StockListing in 3.2 Phase B. The
-        // Stocks sheet still carries a USD reference price ("Price (USD)")
-        // used both to seed the initial StockPrice for the primary listing
-        // and as the source for the EUR seed price on cross-listed names
-        // (computed by AddStockListingsFromExcelAsync).
-
-        // Make all the new instances of the stocks and stockprices
+        // Stocks sheet carries a USD reference price; cross-listed EUR
+        // seed prices are derived by AddStockListingsFromExcelAsync.
         List<Stock> stocks = new();
         List<StockPrice> stockPrices = new();
         foreach (DataRow row in StockDataTable!.Rows)
@@ -479,9 +474,7 @@ public class ExcelImportService : IExcelImportService
             }
         }
 
-        // Per-bot home currency is the only Fund currency in v1 (multi-currency
-        // bots are out of scope). Read the Profile rows once to map UserId →
-        // HomeCurrency; bots without a row default to USD.
+        // Map UserId → HomeCurrency once; bots without a profile row default to USD.
         var profiles = await _db.GetAIUsersAsync().ConfigureAwait(false);
         var homeCurrencyByUserId = profiles.ToDictionary(p => p.UserId, p => p.HomeCurrencyType);
 
@@ -584,9 +577,7 @@ public class ExcelImportService : IExcelImportService
         IdentityDataTable = RequireSheet(ds, "Identity");
         ProfileDataTable  = RequireSheet(ds, "Profile");
         HoldingDataTable  = RequireSheet(ds, "Holding");
-        // Optional — back-compat for xlsx files generated before 3.2 Phase B.
-        // AddStockListingsFromExcelAsync falls back to StockListingSeed when
-        // this is null.
+        // Optional — AddStockListingsFromExcelAsync falls back to StockListingSeed when null.
         ListingDataTable  = ds.Tables["Listings"];
 
         _dataLoaded = true;

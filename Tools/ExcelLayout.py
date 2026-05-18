@@ -84,8 +84,7 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
 
 
 def prepare_listings_sheet(wb: Workbook) -> Worksheet:
-    """Create/reset the Listings sheet and write its header row.
-    One row per (StockId, Currency) the stock trades in. See 3.2 Phase B."""
+    """Create/reset the Listings sheet. One row per (StockId, Currency)."""
     ws = reset_or_create_sheet(wb, "Listings")
     ws.append(["StockId", "Currency", "IsPrimary", "SeedPrice"])
     return ws

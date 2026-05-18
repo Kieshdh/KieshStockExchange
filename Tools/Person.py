@@ -109,8 +109,6 @@ class Person:
         self.username  = generate_username()    # Generate valid username
         self.email     = f"{self.username}@{fake.free_email_domain()}"
         self.birthdate = fake.date_of_birth(minimum_age=18, maximum_age=80)
-        # 3.2 Phase B: each bot has a single home currency drawn from the
-        # 70/30 USD/EUR weights. Watchlist + Fund seeding key off this.
         self.home_currency = weighted_choice(HOME_CURRENCY_WEIGHTS)
 
     def _trade_properties(self):

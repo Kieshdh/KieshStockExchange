@@ -27,12 +27,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     [NotifyPropertyChangedFor(nameof(PageDisplay))]
     private int _pageNumber; // 0-based
 
-    // Currency the All-Stocks table is filtered to. Quotes are keyed by
-    // (stockId, currency) in MarketDataService, so the table only ever shows
-    // rows whose Currency matches this filter. Defaults to the session's
-    // BaseCurrency so a user lands on what they care about.
-    // 3.2 Phase B: replaced the Picker with a USD / EUR / All tab strip.
-    // _showAllCurrencies = true bypasses the FilterCurrency match.
+    // USD / EUR / All tab strip. ShowAllCurrencies = true bypasses FilterCurrency.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsUsdTabActive))]
     [NotifyPropertyChangedFor(nameof(IsEurTabActive))]
@@ -49,8 +44,6 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     public bool IsEurTabActive => !ShowAllCurrencies && FilterCurrency == CurrencyType.EUR;
     public bool IsAllTabActive => ShowAllCurrencies;
 
-    // 3.2 Phase B: limited to currencies that actually trade at runtime so
-    // the "All" tab doesn't fan out subscriptions to unlisted currencies.
     public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } =
         new[] { CurrencyType.USD, CurrencyType.EUR };
 
@@ -110,7 +103,6 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         IsBusy = true;
         try
         {
-            // Idempotent — already-subscribed books just bump the ref count.
             if (ShowAllCurrencies)
             {
                 foreach (var ccy in AvailableCurrencies)
@@ -121,13 +113,9 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
                 await _market.SubscribeAllAsync(FilterCurrency, forUi: true).ConfigureAwait(false);
             }
 
-            // Prime the trending lists immediately. Without this the user sees
-            // an empty Top Gainers / Top Losers / Most Active panel for up to
-            // 5s while waiting for TrendingService's periodic timer.
+            // Prime trending so the panel isn't empty until the next timer tick.
             await Trending.RecomputeMoversAsync().ConfigureAwait(false);
 
-            // Force an immediate poll then start the 5-second cadence so the
-            // table rows refresh on a budget instead of on every tick.
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
                 Poll();
@@ -148,8 +136,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         try
         {
             await _selected.Set(row.StockId).ConfigureAwait(false);
-            // Carry the row's currency over — clicking MSFT in the EUR tab
-            // lands on the EUR book, not the primary USD one.
+            // Carry the row's currency over so MSFT-EUR doesn't land on the USD book.
             if (_selected.Currency != row.Currency)
                 await _selected.ChangeCurrencyAsync(row.Currency).ConfigureAwait(false);
             await MainThread.InvokeOnMainThreadAsync(() =>
@@ -172,18 +159,9 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         _pollTimer.Start();
     }
 
-    /// <summary>
-    /// Snapshot the current LiveQuote state into MarketRow instances. Existing
-    /// rows get updated in place via observable properties so the CollectionView
-    /// only re-paints the changed cells. We only touch the AllStocks /
-    /// FilteredStocks collections when a stock is actually added or removed,
-    /// otherwise the CollectionView would tear down and rebuild every row each
-    /// poll (visible as a brief text flicker).
-    /// </summary>
+    /// <summary> Snapshot LiveQuotes into MarketRow. Updates in place to avoid CollectionView flicker. </summary>
     private void Poll()
     {
-        // "All" tab shows every live quote (cross-listed stocks appear once
-        // per currency they trade in). A currency tab restricts to that book.
         IEnumerable<LiveQuote> source = _market.Quotes.Values;
         if (!ShowAllCurrencies)
             source = source.Where(q => q.Currency == FilterCurrency);
@@ -194,7 +172,6 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
 
         bool structureChanged = false;
 
-        // Update existing rows in place; add rows for new stocks.
         foreach (var q in quotes)
         {
             var key = (q.StockId, q.Currency);
@@ -211,7 +188,6 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             }
         }
 
-        // Drop rows whose (stock, currency) disappeared.
         if (_byStockId.Count != quotes.Count)
         {
             var present = quotes.Select(q => (q.StockId, q.Currency)).ToHashSet();
@@ -226,8 +202,6 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             }
         }
 
-        // Only rebuild FilteredStocks when the underlying set actually changed
-        // (or when the search text changes - that path is in OnSearchTextChanged).
         if (structureChanged)
         {
             ApplyFilter();
@@ -244,11 +218,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         RebuildPagedStocks();
     }
 
-    // Currency change tears down the in-memory row map: rows in the previous
-    // currency are no longer relevant to the table, and leaving them in
-    // _byStockId would let Poll's "structureChanged" path miss the wholesale
-    // swap. After clearing we kick a refresh so the new currency's books get
-    // subscribed and the table reflows on the next tick.
+    // Tab swap: drop the row map so the new currency's books reflow on next Poll.
     partial void OnFilterCurrencyChanged(CurrencyType value)
     {
         ResetRowMap();
@@ -270,11 +240,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         PageNumber = 0;
     }
 
-    /// <summary>
-    /// Tab strip handler. <paramref name="tag"/> is one of "USD", "EUR", "All".
-    /// "All" sets <see cref="ShowAllCurrencies"/>; the currency variants flip
-    /// it off and set <see cref="FilterCurrency"/>.
-    /// </summary>
+    /// <summary> Tab strip handler. <paramref name="tag"/> is "USD", "EUR", or "All". </summary>
     [RelayCommand]
     private void SelectCurrencyTab(string? tag)
     {
@@ -293,10 +259,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
 
     private void ApplyFilter()
     {
-        // Build the desired filtered list as a plain List, then sync it into
-        // FilteredStocks in place. Clear-and-Add raised a Reset event each
-        // time which forced the bound CollectionView to tear down all rows
-        // (visible flash on every refresh).
+        // Sync in place — Clear+Add would force CollectionView Reset and flash.
         var desired = new List<MarketRow>(AllStocks.Count);
         if (string.IsNullOrWhiteSpace(SearchText))
         {
@@ -335,12 +298,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         RebuildPagedStocks();
     }
 
-    /// <summary>
-    /// Rebuilds <see cref="PagedStocks"/> with the slice of <see cref="FilteredStocks"/>
-    /// for the current page. Clamps <see cref="PageNumber"/> if the filter shrank the set.
-    /// Sync is in place to avoid the Clear+Add Reset event that would otherwise
-    /// flash the bound All Stocks table on every refresh.
-    /// </summary>
+    /// <summary> Slice FilteredStocks into PagedStocks for the current page. </summary>
     private void RebuildPagedStocks()
     {
         var totalPages = TotalPages;
@@ -361,12 +319,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         NextPageCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>
-    /// Sync <paramref name="target"/> to match <paramref name="desired"/> using
-    /// only Move / Insert / Add / Remove events. CollectionView keeps existing
-    /// row visuals where possible; bindings stay attached to their reused rows
-    /// so values never go stale.
-    /// </summary>
+    /// <summary> Sync target to desired with Move/Insert/Remove, no Reset. </summary>
     private static void SyncRows(ObservableCollection<MarketRow> target, IList<MarketRow> desired)
     {
         for (int i = 0; i < desired.Count; i++)
@@ -400,19 +353,12 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     }
 }
 
-/// <summary>
-/// Snapshot row bound by the All-Stocks table. Refreshed in place every poll
-/// tick so the collection identity stays stable and the CollectionView
-/// preserves scroll/selection between updates.
-/// </summary>
+/// <summary> Row bound by the All-Stocks table. Identity is (StockId, Currency). </summary>
 public partial class MarketRow : ObservableObject
 {
     public required int StockId { get; init; }
     public required string Symbol { get; init; }
     public required string CompanyName { get; init; }
-    // 3.2 Phase B: a cross-listed stock appears once per currency in the
-    // All tab, so the row identity is (StockId, Currency) rather than just
-    // StockId.
     public required CurrencyType Currency { get; init; }
 
     [ObservableProperty] private string _lastPriceDisplay = "-";

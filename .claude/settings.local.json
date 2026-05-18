@@ -78,7 +78,14 @@
       "Bash(dir \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\\\\Models\\\\\")",
       "PowerShell(\\(Get-ChildItem -Path \"C:\\\\Users\\\\kjden\\\\source\\\\repos\\\\Kieshdh\\\\KieshStockExchange\"\\).Count)",
       "Bash(findstr /n \"PlaceAndMatchBatchAsync\\\\|BuildOrdersById\" KieshStockExchange/Services/MarketEngineServices/OrderExecutionService.cs)",
-      "Bash(Select-Object -First 10)"
+      "Bash(Select-Object -First 10)",
+      "Bash(git bundle *)",
+      "Bash(git fetch *)",
+      "Bash(git merge *)",
+      "Bash(git branch *)",
+      "Bash(PYTHONIOENCODING=utf-8 python Tools/GenerateAIUsers.py)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   },
   "outputStyle": "default"
