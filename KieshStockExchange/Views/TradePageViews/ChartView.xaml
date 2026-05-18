@@ -3,8 +3,10 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:models="clr-namespace:KieshStockExchange.Models"
              xmlns:helpers="clr-namespace:KieshStockExchange.Services.MarketDataServices.Helpers"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartView"
-             x:Name="ChartRoot">
+             x:Name="ChartRoot"
+             x:DataType="vm:ChartViewModel">
 
     <Border BackgroundColor="{DynamicResource ChartBg}"
             Stroke="{DynamicResource Divider}"
@@ -250,7 +252,7 @@
                 <Label Text="Moving averages" Style="{StaticResource ChartOhlcValue}" />
                 <CollectionView ItemsSource="{Binding MaSeries}" SelectionMode="None">
                     <CollectionView.ItemTemplate>
-                        <DataTemplate>
+                        <DataTemplate x:DataType="vm:MaConfig">
                             <Grid ColumnDefinitions="Auto,60,60,80,80,28"
                                   ColumnSpacing="8" Padding="0,4"
                                   HorizontalOptions="Fill">
@@ -266,9 +268,12 @@
                                         FontSize="12" />
                                 <Picker Grid.Column="4"
                                         ItemsSource="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.MaColorOptions}"
-                                        ItemDisplayBinding="{Binding Name}"
                                         SelectedItem="{Binding SelectedColorOption}"
-                                        FontSize="12" />
+                                        FontSize="12">
+                                    <Picker.ItemDisplayBinding>
+                                        <Binding Path="Name" x:DataType="helpers:MaColorOption" />
+                                    </Picker.ItemDisplayBinding>
+                                </Picker>
                                 <Button Grid.Column="5" Text="✕"
                                         Style="{StaticResource ChartIconButton}"
                                         Command="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.RemoveMaCommand}"
@@ -291,9 +296,12 @@
                            VerticalOptions="Center" />
                     <Picker Grid.Column="1"
                             ItemsSource="{Binding MaColorOptions}"
-                            ItemDisplayBinding="{Binding Name}"
                             SelectedItem="{Binding BuyOrderColorOption}"
-                            FontSize="12" />
+                            FontSize="12">
+                        <Picker.ItemDisplayBinding>
+                            <Binding Path="Name" x:DataType="helpers:MaColorOption" />
+                        </Picker.ItemDisplayBinding>
+                    </Picker>
                 </Grid>
                 <Grid ColumnDefinitions="80,*" ColumnSpacing="8" Padding="0,2">
                     <Label Grid.Column="0" Text="Sell"
@@ -301,9 +309,12 @@
                            VerticalOptions="Center" />
                     <Picker Grid.Column="1"
                             ItemsSource="{Binding MaColorOptions}"
-                            ItemDisplayBinding="{Binding Name}"
                             SelectedItem="{Binding SellOrderColorOption}"
-                            FontSize="12" />
+                            FontSize="12">
+                        <Picker.ItemDisplayBinding>
+                            <Binding Path="Name" x:DataType="helpers:MaColorOption" />
+                        </Picker.ItemDisplayBinding>
+                    </Picker>
                 </Grid>
             </VerticalStackLayout>
         </Border>

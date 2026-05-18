@@ -2,8 +2,10 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:tradeVm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.PortfolioViewModels"
              x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioOpenOrdersView"
-             x:Name="PortfolioOpenOrdersRoot">
+             x:Name="PortfolioOpenOrdersRoot"
+             x:DataType="vm:PortfolioOpenOrdersViewModel">
 
     <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
 

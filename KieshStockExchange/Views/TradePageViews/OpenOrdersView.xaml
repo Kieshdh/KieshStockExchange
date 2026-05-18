@@ -3,7 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              x:Class="KieshStockExchange.Views.TradePageViews.OpenOrdersView"
-             x:Name="OpenOrdersRoot">
+             x:Name="OpenOrdersRoot"
+             x:DataType="vm:OpenOrdersViewModel">
 
     <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
 

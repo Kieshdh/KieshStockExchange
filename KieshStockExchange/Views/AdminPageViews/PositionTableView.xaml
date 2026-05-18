@@ -2,8 +2,10 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
-             x:Class="KieshStockExchange.Views.AdminPageViews.PositionTableView" 
-             x:Name="PositionTableRoot" >
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             x:Class="KieshStockExchange.Views.AdminPageViews.PositionTableView"
+             x:Name="PositionTableRoot"
+             x:DataType="vm:PositionTableViewModel">
     <Grid RowDefinitions="Auto,*,Auto">
 
         <!-- Labels -->
@@ -29,9 +31,13 @@
             <!-- Filters and Sorting -->
             <Entry Grid.Row="1" Grid.Column="0" Placeholder="Type ID…"
                    Text="{Binding IdFilter, Mode=TwoWay}" Keyboard="Numeric"/>
-            <Picker ItemsSource="{Binding PickerStocks}" Grid.Column="1" 
-                    ItemDisplayBinding="{Binding Symbol}" Grid.Row="1"
-                    SelectedItem="{Binding PickerSelection, Mode=TwoWay}" />
+            <Picker ItemsSource="{Binding PickerStocks}" Grid.Column="1"
+                    Grid.Row="1"
+                    SelectedItem="{Binding PickerSelection, Mode=TwoWay}">
+                <Picker.ItemDisplayBinding>
+                    <Binding Path="Symbol" x:DataType="models:Stock" />
+                </Picker.ItemDisplayBinding>
+            </Picker>
             <HorizontalStackLayout Grid.Row="1" Grid.Column="2" Style="{StaticResource SortingStackLayout}">
                 <Button Text="↓" Command="{Binding SetSortDescCommand}"
                         Style="{StaticResource TableSortingButton}"
@@ -119,9 +125,9 @@
         <HorizontalStackLayout Style="{StaticResource PageNumberStackLayout}" Grid.Row="2" 
                     BindableLayout.ItemsSource="{Binding VisiblePageNumbers}" >
             <BindableLayout.ItemTemplate>
-                <DataTemplate>
+                <DataTemplate x:DataType="x:Int32">
                     <Button Text="{Binding .}"
-                            Command="{Binding Source={x:Reference PositionTableRoot}, 
+                            Command="{Binding Source={x:Reference PositionTableRoot},
                             Path=BindingContext.GoToPageCommand}"
                             CommandParameter="{Binding .}"
                             Style="{StaticResource PageNumberButton}"/>

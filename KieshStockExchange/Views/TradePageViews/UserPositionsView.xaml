@@ -3,7 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              x:Class="KieshStockExchange.Views.TradePageViews.UserPositionsView"
-             x:Name="PositionRoot">
+             x:Name="PositionRoot"
+             x:DataType="vm:UserPositionsViewModel">
 
     <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
 

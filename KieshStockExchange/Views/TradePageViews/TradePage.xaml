@@ -2,11 +2,12 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="KieshStockExchange.Views.TradePageViews.TradePage"
-             x:Name="TradePageRoot" 
+             x:Name="TradePageRoot"
              xmlns:local="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:views="clr-namespace:KieshStockExchange.Views.TradePageViews"
              xmlns:models="clr-namespace:KieshStockExchange.Models"
+             x:DataType="local:TradeViewModel"
              Title="TradePage" >
     <ScrollView>
         <Grid Style="{StaticResource MainGrid}"
@@ -28,8 +29,11 @@
                 <Grid ColumnDefinitions="Auto, Auto, Auto" ColumnSpacing="10">
                     <Picker ItemsSource="{Binding TradingPairs}" Grid.Column="0"
                             SelectedItem="{Binding PickerSelection, Mode=TwoWay}"
-                            ItemDisplayBinding="{Binding Display}"
-                            Style="{StaticResource StockSelectorPicker}" />
+                            Style="{StaticResource StockSelectorPicker}">
+                        <Picker.ItemDisplayBinding>
+                            <Binding Path="Display" x:DataType="local:TradingPair" />
+                        </Picker.ItemDisplayBinding>
+                    </Picker>
                     <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="1"
                            Style="{StaticResource SelectedStockHeaderLabel}" />
                     <Label Text="{Binding Selected.CompanyName}" Grid.Column="2"

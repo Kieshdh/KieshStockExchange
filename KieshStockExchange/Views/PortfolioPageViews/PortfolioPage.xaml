@@ -4,8 +4,10 @@
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:views="clr-namespace:KieshStockExchange.Views.PortfolioPageViews"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.PortfolioViewModels"
              x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioPage"
              x:Name="PortfolioPageRoot"
+             x:DataType="vm:PortfolioViewModel"
              Title="Portfolio">
 
     <Grid Style="{StaticResource MainGrid}"

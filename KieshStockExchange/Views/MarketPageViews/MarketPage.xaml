@@ -5,6 +5,7 @@
              xmlns:helpers="clr-namespace:KieshStockExchange.Services.MarketDataServices.Helpers"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
              x:Class="KieshStockExchange.Views.MarketPageViews.MarketPage"
+             x:DataType="vm:MarketViewModel"
              Title="Market">
 
     <Grid Style="{StaticResource MainGrid}"
