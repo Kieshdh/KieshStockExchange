@@ -400,6 +400,10 @@ internal sealed class FakeDb : IDataBaseService
     public Task UpsertStock(Stock stock, CancellationToken ct = default) => throw new NotImplementedException();
     public Task DeleteStock(Stock stock, CancellationToken ct = default) => throw new NotImplementedException();
 
+    public Task<List<StockListing>> GetStockListingsAsync(CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<List<StockListing>> GetStockListingsByStockId(int stockId, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task CreateStockListing(StockListing listing, CancellationToken ct = default) => throw new NotImplementedException();
+
     public Task<List<StockPrice>> GetStockPricesAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken ct = default) => throw new NotImplementedException();
