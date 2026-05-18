@@ -141,7 +141,7 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
     #endregion
 }
 
-public sealed class OpenOrderRow
+public sealed class OpenOrderRow : ISideRow
 {
     public required Order Order { get; init; }
     public required string Symbol { get; init; }

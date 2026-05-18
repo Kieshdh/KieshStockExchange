@@ -98,7 +98,7 @@ public partial class OrderHistoryViewModel : TradeTableViewModelBase<ClosedOrder
     #endregion
 }
 
-public sealed class ClosedOrderRow
+public sealed class ClosedOrderRow : ISideRow
 {
     public required Order Order { get; init; }
     public required string Symbol { get; init; }

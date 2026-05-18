@@ -103,7 +103,7 @@ public partial class TransactionHistoryViewModel : TradeTableViewModelBase<Trans
     #endregion
 }
 
-public sealed class TransactionRow
+public sealed class TransactionRow : ISideRow
 {
     public required Transaction Tx { get; init; }
     public required string Symbol { get; init; }
