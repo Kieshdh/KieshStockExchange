@@ -182,10 +182,7 @@ public partial class ChartViewModel : StockAwareViewModel
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
 
-        // Repaint whenever the user adds, removes, toggles, or edits an MA.
-        // Also stamp RemoveCommand on each default row so the per-row ✕ button
-        // can bind {Binding RemoveCommand} (field initializers can't reach the
-        // generated RemoveMaCommand property -- it doesn't exist until now).
+        // Repaint on any MA edit; stamp RemoveCommand on each default row.
         MaSeries.CollectionChanged += OnMaSeriesCollectionChanged;
         foreach (var cfg in MaSeries)
         {

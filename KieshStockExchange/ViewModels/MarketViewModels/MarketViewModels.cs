@@ -358,8 +358,7 @@ public partial class MarketRow : ObservableObject
     public required string Symbol { get; init; }
     public required string CompanyName { get; init; }
     public required CurrencyType Currency { get; init; }
-    // Injected by MarketViewModel so the row's Trade button can bind directly
-    // without {Binding Source=...} -- compiles cleanly under x:DataType=MarketRow.
+    // Injected by owner VM so Trade button binds directly.
     public required ICommand TradeCommand { get; init; }
 
     [ObservableProperty] private string _lastPriceDisplay = "-";

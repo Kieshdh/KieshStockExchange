@@ -176,8 +176,7 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
     public required Position Pos { get; init; }
     public required string Symbol { get; init; }
     public required CurrencyType Currency { get; init; }
-    // Injected by the owning VM so the row's Trade button can bind directly
-    // without {Binding Source=...} -- compiles cleanly under x:DataType=PositionRow.
+    // Injected by owner VM so Trade button binds directly.
     public required ICommand TradeCommand { get; init; }
     #endregion
 

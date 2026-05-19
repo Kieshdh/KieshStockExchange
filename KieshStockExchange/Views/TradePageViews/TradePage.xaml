@@ -49,17 +49,10 @@
             <views:OrderBookView Grid.Row="1" Grid.Column="1" Grid.RowSpan="2"
                                  BindingContext="{Binding OrderBookVm}"/>
 
-            <!-- Right-hand trade panel — two sibling cards share the same Grid
-                 cell, only one is visible at a time. Default is PlaceOrderView;
-                 swaps to ModifyOrderView while IOrderEditService.IsEditing flips
-                 true (driven by chart-drag or the ✎ button on the open-orders
-                 table). The placing VM keeps its state — no rebinds, no rebuild.
-
-                 Each panel is wrapped in a ContentView that inherits the page's
-                 TradeViewModel BindingContext (so IsVisible can read IsPlacing /
-                 IsModifying directly), then the inner panel swaps its own
-                 BindingContext to the sub-VM. Avoids {Binding Source=...} and
-                 lets these bindings compile under x:DataType=TradeViewModel. -->
+            <!-- Right-hand panel: PlaceOrderView and ModifyOrderView share the
+                 cell, IsPlacing/IsModifying toggles which is visible. Outer
+                 ContentView keeps the page's BindingContext for IsVisible;
+                 inner panel swaps to its sub-VM. -->
             <ContentView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
                          WidthRequest="260"
                          IsVisible="{Binding IsPlacing}">
@@ -82,36 +75,33 @@
                         UnselectedButtonStyle="{StaticResource RailSegmentUnselected}"
                         ShowUnderline="True" >
 
-                    <!-- Content. Each tab uses Source={x:Reference TradePageRoot} instead of
-                         relying on inherited BindingContext because SegmentedTabView eagerly
-                         attaches tab 0 from its ctor, before the page-level BindingContext
-                         has propagated. -->
+                    <!-- Tab BindingContexts wired in code-behind. -->
                     <other:SegmentedTabView.Tabs>
                         <!-- Open Orders Table-->
                         <other:SegmentedTabItem Header="Open Orders">
                             <other:SegmentedTabItem.Content>
-                                <views:OpenOrdersView BindingContext="{Binding Source={x:Reference TradePageRoot}, Path=BindingContext.OpenOrdersVm}" />
+                                <views:OpenOrdersView x:Name="OpenOrdersTab" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 
                         <!-- Order History Table-->
                         <other:SegmentedTabItem Header="Order History">
                             <other:SegmentedTabItem.Content>
-                                <views:OrderHistoryView BindingContext="{Binding Source={x:Reference TradePageRoot}, Path=BindingContext.OrderHistoryVm}" />
+                                <views:OrderHistoryView x:Name="OrderHistoryTab" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 
                         <!-- Transaction History Table-->
                         <other:SegmentedTabItem Header="Transaction History">
                             <other:SegmentedTabItem.Content>
-                                <views:TransactionHistoryView BindingContext="{Binding Source={x:Reference TradePageRoot}, Path=BindingContext.TransactionVm}" />
+                                <views:TransactionHistoryView x:Name="TransactionHistoryTab" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 
                         <!-- Current Positions Table -->
                         <other:SegmentedTabItem Header="Positions">
                             <other:SegmentedTabItem.Content>
-                                <views:UserPositionsView BindingContext="{Binding Source={x:Reference TradePageRoot}, Path=BindingContext.PositionsVm}" />
+                                <views:UserPositionsView x:Name="PositionsTab" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
                     </other:SegmentedTabView.Tabs>

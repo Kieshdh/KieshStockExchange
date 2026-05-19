@@ -14,10 +14,7 @@ public interface ILazyTab
     Task RefreshAsync();
 }
 
-// Pager item used by VisiblePageNumbers. Holds both the page number and the
-// command, so the pager DataTemplate can bind directly under
-// x:DataType=PageButton instead of escaping to the parent VM via
-// {Binding Source={x:Reference Root}}.
+// Pager item; carries the command so the DataTemplate binds directly.
 public sealed record PageButton(int Page, ICommand GoToCommand);
 
 public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTab

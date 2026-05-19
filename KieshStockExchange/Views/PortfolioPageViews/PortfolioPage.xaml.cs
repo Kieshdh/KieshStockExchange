@@ -11,6 +11,12 @@ public partial class PortfolioPage : ContentPage
         InitializeComponent();
         _vm = vm ?? throw new ArgumentNullException(nameof(vm));
         BindingContext = _vm;
+
+        // SegmentedTabView attaches tab 0 before BindingContext propagates.
+        HoldingsTab.BindingContext     = _vm.HoldingsVm;
+        OpenOrdersTab.BindingContext   = _vm.OpenOrdersVm;
+        OrderHistoryTab.BindingContext = _vm.OrderHistoryVm;
+        TransactionsTab.BindingContext = _vm.TransactionVm;
     }
 
     protected override async void OnAppearing()

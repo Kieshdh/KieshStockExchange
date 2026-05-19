@@ -10,6 +10,12 @@ public partial class TradePage : ContentPage
         InitializeComponent();
         _vm = vm;
         BindingContext = _vm;
+
+        // SegmentedTabView attaches tab 0 before BindingContext propagates.
+        OpenOrdersTab.BindingContext         = vm.OpenOrdersVm;
+        OrderHistoryTab.BindingContext       = vm.OrderHistoryVm;
+        TransactionHistoryTab.BindingContext = vm.TransactionVm;
+        PositionsTab.BindingContext          = vm.PositionsVm;
     }
 
     protected override async void OnAppearing()

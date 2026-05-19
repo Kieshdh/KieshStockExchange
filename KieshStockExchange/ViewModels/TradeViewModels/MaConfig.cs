@@ -26,11 +26,8 @@ public partial class MaConfig : ObservableObject
     [ObservableProperty] private string _colorKey = "ChartMaColor1";
     [ObservableProperty] private MaColorOption _selectedColorOption;
 
-    // Static picker lists + parent remove command, surfaced on the row so the
-    // MA settings DataTemplate can bind directly without {Binding Source=...}
-    // and compile under x:DataType=MaConfig. RemoveCommand is set by
-    // ChartViewModel after row construction (field initializers can't reach
-    // the parent VM's generated RelayCommand).
+    // Surfaced on the row so the MA settings DataTemplate binds directly.
+    // RemoveCommand is stamped by ChartViewModel after construction.
     public IReadOnlyList<MaKind> MaKinds { get; } = new[] { MaKind.Sma, MaKind.Ema };
     public IReadOnlyList<MaColorOption> MaColorOptions => MaColorOption.All;
     public ICommand? RemoveCommand { get; set; }

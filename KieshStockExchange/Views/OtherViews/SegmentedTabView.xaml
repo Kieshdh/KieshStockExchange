@@ -4,16 +4,14 @@
              x:Class="KieshStockExchange.Views.OtherViews.SegmentedTabView"
              x:Name="Root">
     <Grid RowDefinitions="Auto,*" ColumnDefinitions="*,Auto">
-        <!-- Header strip -->
+        <!-- HorizontalOptions wired in code-behind (Source= here is XC0025 noise). -->
         <Border x:Name="HeaderPill"
                 Style="{StaticResource SegmentedPillContainerStyle}"
-                HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContainerHorizontalOptions}"
                 VerticalOptions="Start">
 
             <!-- The header buttons are injected here from code-behind -->
             <HorizontalStackLayout x:Name="HeaderStrip"
-                Spacing="6" Padding="0" VerticalOptions="Center"
-                HorizontalOptions="{Binding Source={x:Reference Root}, Path=HeaderContentHorizontalOptions}" />
+                Spacing="6" Padding="0" VerticalOptions="Center" />
         </Border>
 
         <!-- Right of the Header pill -->

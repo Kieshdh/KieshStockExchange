@@ -170,6 +170,10 @@ public partial class SegmentedTabView : ContentView
     {
         InitializeComponent();
 
+        // Seed from defaults; OnHeaderLayoutChanged syncs later changes.
+        HeaderPill.HorizontalOptions = HeaderContainerHorizontalOptions;
+        HeaderStrip.HorizontalOptions = HeaderContentHorizontalOptions;
+
         Tabs.CollectionChanged += Tabs_CollectionChanged;
 
         // Always start on first tab if available

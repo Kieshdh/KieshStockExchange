@@ -152,9 +152,7 @@ public sealed class OpenOrderRow : ISideRow
 {
     public required Order Order { get; init; }
     public required string Symbol { get; init; }
-    // ModifyCommand/CancelCommand are injected by the owning VM so the row's
-    // ✎ / ✕ buttons can bind directly without escaping to the page via
-    // {Binding Source=...}. Lets the bindings compile under x:DataType=OpenOrderRow.
+    // Injected by owner VM so ✎/✕ bind directly.
     public required ICommand ModifyCommand { get; init; }
     public required ICommand CancelCommand { get; init; }
     public string When => Order.CreatedDateShort;

@@ -11,6 +11,15 @@ public partial class AdminPage : ContentPage
         InitializeComponent();
         _vm = vm;
         BindingContext = vm;
+
+        // SegmentedTabView attaches tab 0 before BindingContext propagates.
+        UsersTab.BindingContext        = vm.UsersVm;
+        StocksTab.BindingContext       = vm.StocksVm;
+        OrdersTab.BindingContext       = vm.OrdersVm;
+        TransactionsTab.BindingContext = vm.TransactionsVm;
+        FundsTab.BindingContext        = vm.FundsVm;
+        PositionsTab.BindingContext    = vm.PositionsVm;
+        RefreshButton.Command          = vm.RefreshActiveTabCommand;
     }
 
     protected override async void OnAppearing()
