@@ -19,7 +19,6 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
     private readonly HashSet<(int StockId, CurrencyType Currency)> _subscriptions = new();
 
     #region Services and Constructor
-    private readonly ILogger<UserPositionsViewModel> _logger;
     private readonly IStockService _stocks;
     private readonly IUserPortfolioService _portfolio;
     private readonly IMarketDataService _market;
@@ -30,7 +29,6 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
         ISelectedStockService selected, INotificationService notification)
         : base(selected, notification, logger)
     {
-        _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
@@ -212,15 +210,15 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
     }
 
     #region Live Quote Change Handler and Disposal
-    partial void OnLiveChanged(LiveQuote? oldQuote, LiveQuote? newQuote)
+    partial void OnLiveChanged(LiveQuote? oldValue, LiveQuote? newValue)
     {
         if (_disposed) return;
-        if (oldQuote == newQuote) return;
+        if (oldValue == newValue) return;
 
-        if (oldQuote is not null)
-            oldQuote.PropertyChanged -= OnLivePropertyChanged;
-        if (newQuote is not null)
-            newQuote.PropertyChanged += OnLivePropertyChanged;
+        if (oldValue is not null)
+            oldValue.PropertyChanged -= OnLivePropertyChanged;
+        if (newValue is not null)
+            newValue.PropertyChanged += OnLivePropertyChanged;
 
         OnPropertyChanged(nameof(Price));
         OnPropertyChanged(nameof(Total));

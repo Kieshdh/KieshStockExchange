@@ -10,7 +10,6 @@ using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
-using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 
@@ -160,7 +159,6 @@ public partial class ChartViewModel : StockAwareViewModel
 
     #region Services and Constructor
     private readonly ICandleService _candles;
-    private readonly ILogger<ChartViewModel> _logger;
     private readonly IMarketDataService _market;
     private readonly IOrderCacheService _orderCache;
     private readonly IAuthService _auth;
@@ -175,7 +173,6 @@ public partial class ChartViewModel : StockAwareViewModel
         ISelectedStockService selected, INotificationService notification)
         : base(selected, notification, logger)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));

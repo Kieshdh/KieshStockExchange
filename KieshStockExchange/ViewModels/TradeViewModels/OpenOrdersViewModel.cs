@@ -19,7 +19,6 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
     private readonly IOrderEntryService _orders;
     private readonly IUserPortfolioService _portfolio;
     private readonly IStockService _stocks;
-    private readonly ILogger<OpenOrdersViewModel> _logger;
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
 
@@ -32,7 +31,6 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
         _cache       = cache       ?? throw new ArgumentNullException(nameof(cache));
         _orders      = orders      ?? throw new ArgumentNullException(nameof(orders));
         _portfolio   = portfolio   ?? throw new ArgumentNullException(nameof(portfolio));
-        _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
         _stocks      = stocks      ?? throw new ArgumentNullException(nameof(stocks));
         _auth        = auth        ?? throw new ArgumentNullException(nameof(auth));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));

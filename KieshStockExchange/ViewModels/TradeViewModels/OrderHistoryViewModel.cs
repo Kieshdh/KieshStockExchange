@@ -13,7 +13,6 @@ namespace KieshStockExchange.ViewModels.TradeViewModels;
 public partial class OrderHistoryViewModel : TradeTableViewModelBase<ClosedOrderRow>
 {
     #region Services and Constructor
-    private readonly ILogger<OrderHistoryViewModel> _logger;
     private readonly IOrderCacheService _cache;
     private readonly IStockService _stocks;
     private readonly IAuthService _auth;
@@ -23,7 +22,6 @@ public partial class OrderHistoryViewModel : TradeTableViewModelBase<ClosedOrder
         ISelectedStockService selected, INotificationService notification)
         : base(selected, notification, logger)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _cache  = cache  ?? throw new ArgumentNullException(nameof(cache));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _auth   = auth   ?? throw new ArgumentNullException(nameof(auth));

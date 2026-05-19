@@ -132,14 +132,10 @@ public partial class OrderBookViewModel : StockAwareViewModel
     #endregion
 
     #region Services and Constructor
-    private readonly ILogger<OrderBookViewModel> _logger;
-
     public OrderBookViewModel(ILogger<OrderBookViewModel> logger,
         ISelectedStockService selected, INotificationService notification)
         : base(selected, notification, logger)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
         InitializeSelection();
 
         PriceTextColour = ColorNeutral;

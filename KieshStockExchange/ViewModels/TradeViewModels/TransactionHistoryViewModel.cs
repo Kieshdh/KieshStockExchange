@@ -14,7 +14,6 @@ public partial class TransactionHistoryViewModel : TradeTableViewModelBase<Trans
 {
     #region Services and Constructor
     private readonly IStockService _stocks;
-    private readonly ILogger<TransactionHistoryViewModel> _logger;
     private readonly ITransactionService _tx;
     private readonly IAuthService _auth;
 
@@ -23,7 +22,6 @@ public partial class TransactionHistoryViewModel : TradeTableViewModelBase<Trans
         ISelectedStockService selected, INotificationService notification)
         : base(selected, notification, logger)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tx     = tx     ?? throw new ArgumentNullException(nameof(tx));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _auth   = auth   ?? throw new ArgumentNullException(nameof(auth));

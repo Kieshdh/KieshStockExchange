@@ -96,7 +96,6 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     private readonly IOrderEntryService _orders;
     private readonly IOrderCacheService _cache;
     private readonly IAuthService _auth;
-    private readonly ILogger<PlaceOrderViewModel> _logger;
     private readonly IDispatcher _dispatcher;
 
     public PlaceOrderViewModel(ILogger<PlaceOrderViewModel> logger,
@@ -109,7 +108,6 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _dispatcher = disp ?? throw new ArgumentNullException(nameof(disp));
 
         InitializeSelection();
