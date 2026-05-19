@@ -107,27 +107,30 @@
 
                 <other:SegmentedTabView.Tabs>
 
+                    <!-- Tab content uses Source={x:Reference PortfolioPageRoot} instead of relying on
+                         inherited BindingContext because SegmentedTabView eagerly attaches tab 0
+                         from its ctor, before the page-level BindingContext has propagated. -->
                     <other:SegmentedTabItem Header="Holdings">
                         <other:SegmentedTabItem.Content>
-                            <views:PortfolioHoldingsView BindingContext="{Binding HoldingsVm}" />
+                            <views:PortfolioHoldingsView BindingContext="{Binding Source={x:Reference PortfolioPageRoot}, Path=BindingContext.HoldingsVm}" />
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 
                     <other:SegmentedTabItem Header="Open Orders">
                         <other:SegmentedTabItem.Content>
-                            <views:PortfolioOpenOrdersView BindingContext="{Binding OpenOrdersVm}" />
+                            <views:PortfolioOpenOrdersView BindingContext="{Binding Source={x:Reference PortfolioPageRoot}, Path=BindingContext.OpenOrdersVm}" />
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 
                     <other:SegmentedTabItem Header="Order History">
                         <other:SegmentedTabItem.Content>
-                            <views:PortfolioOrderHistoryView BindingContext="{Binding OrderHistoryVm}" />
+                            <views:PortfolioOrderHistoryView BindingContext="{Binding Source={x:Reference PortfolioPageRoot}, Path=BindingContext.OrderHistoryVm}" />
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 
                     <other:SegmentedTabItem Header="Transactions">
                         <other:SegmentedTabItem.Content>
-                            <views:PortfolioTransactionHistoryView BindingContext="{Binding TransactionVm}" />
+                            <views:PortfolioTransactionHistoryView BindingContext="{Binding Source={x:Reference PortfolioPageRoot}, Path=BindingContext.TransactionVm}" />
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 
