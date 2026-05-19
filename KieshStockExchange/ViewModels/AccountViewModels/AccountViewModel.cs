@@ -7,7 +7,6 @@ using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Views.AccountPageViews;
 using Microsoft.Extensions.DependencyInjection;
-using System.Globalization;
 
 namespace KieshStockExchange.ViewModels.AccountViewModels;
 
@@ -58,8 +57,10 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
 
     public void Refresh() => RefreshAll();
 
+    // Base-currency switch needs RefreshFunds too -- the funds card formats
+    // against the session's base currency.
     private void OnSessionChanged(object? sender, SessionSnapshot e) =>
-        MainThread.BeginInvokeOnMainThread(RefreshSession);
+        MainThread.BeginInvokeOnMainThread(RefreshAll);
 
     private void OnPortfolioChanged(object? sender, EventArgs e) =>
         MainThread.BeginInvokeOnMainThread(RefreshFunds);
@@ -89,10 +90,14 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
 
     private void RefreshFunds()
     {
-        var fund = _portfolio.GetBaseFund();
+        // Look up the fund for the session's current base currency directly --
+        // _portfolio.GetBaseFund() reads a stale internal copy that's only
+        // updated on portfolio refresh, not on session BaseCurrency changes.
+        var currency = _session.BaseCurrency;
+        var fund = _portfolio.GetFundByCurrency(currency);
         FundsDisplay = fund == null
-            ? "$ —"
-            : $"$ {fund.AvailableBalance.ToString("N2", CultureInfo.InvariantCulture)}";
+            ? CurrencyHelper.Format(0m, currency)
+            : CurrencyHelper.Format(fund.AvailableBalance, currency);
     }
 
     partial void OnSelectedBaseCurrencyChanged(CurrencyType value)

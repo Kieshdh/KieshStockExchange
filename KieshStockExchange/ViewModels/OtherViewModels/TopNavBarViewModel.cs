@@ -1,8 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
-using System.Globalization;
 
 namespace KieshStockExchange.ViewModels.OtherViewModels;
 
@@ -25,6 +25,7 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
         _session   = session   ?? throw new ArgumentNullException(nameof(session));
 
         _portfolio.SnapshotChanged += OnPortfolioChanged;
+        _session.SnapshotChanged   += OnSessionChanged;
         UpdateFundsDisplay();
     }
     #endregion
@@ -33,12 +34,16 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
     private void OnPortfolioChanged(object? sender, EventArgs e) =>
         MainThread.BeginInvokeOnMainThread(UpdateFundsDisplay);
 
+    private void OnSessionChanged(object? sender, SessionSnapshot e) =>
+        MainThread.BeginInvokeOnMainThread(UpdateFundsDisplay);
+
     private void UpdateFundsDisplay()
     {
-        var fund = _portfolio.GetBaseFund();
+        var currency = _session.BaseCurrency;
+        var fund = _portfolio.GetFundByCurrency(currency);
         FundsDisplay = fund == null
-            ? "$ —"
-            : $"$ {fund.AvailableBalance.ToString("N2", CultureInfo.InvariantCulture)}";
+            ? CurrencyHelper.Format(0m, currency)
+            : CurrencyHelper.Format(fund.AvailableBalance, currency);
     }
     #endregion
 
@@ -56,6 +61,7 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
     {
         if (_disposed) return;
         _portfolio.SnapshotChanged -= OnPortfolioChanged;
+        _session.SnapshotChanged   -= OnSessionChanged;
         _disposed = true;
         GC.SuppressFinalize(this);
     }
