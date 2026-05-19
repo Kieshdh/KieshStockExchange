@@ -423,7 +423,7 @@ public partial class SegmentedTabView : ContentView
         }
     }
 
-    void OnHeaderButtonClicked(object sender, EventArgs e)
+    void OnHeaderButtonClicked(object? sender, EventArgs e)
     {
         if (sender is Button b && b.BindingContext is int index)
             SelectedIndex = index;

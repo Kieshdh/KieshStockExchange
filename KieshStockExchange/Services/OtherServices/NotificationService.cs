@@ -71,18 +71,19 @@ public sealed class NotificationService : INotificationService
 
             _logger.LogInformation("Push: {Title} - {Message}", title, message);
 
-            // Always show on UI thread. If no page yet, just log.
-            if (Application.Current?.MainPage is null)
+            // Always show on UI thread. If no window/page yet, just log.
+            var page = Application.Current?.Windows?.FirstOrDefault()?.Page;
+            if (page is null)
             {
-                _logger.LogWarning("No MainPage; skipping notification: {Title}", title);
+                _logger.LogWarning("No active page; skipping notification: {Title}", title);
                 return;
             }
 
             if (MainThread.IsMainThread)
-                await Application.Current.MainPage.DisplayAlert(title, message, "OK");
+                await page.DisplayAlert(title, message, "OK");
             else
                 await MainThread.InvokeOnMainThreadAsync(() =>
-                    Application.Current!.MainPage!.DisplayAlert(title, message, "OK")
+                    page.DisplayAlert(title, message, "OK")
                 );
         }
         catch (Exception ex) { _logger.LogError(ex, "Failed to show notification."); }

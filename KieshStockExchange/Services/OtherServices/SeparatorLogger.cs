@@ -27,7 +27,7 @@ public sealed class SeparatorLogger<T> : ILogger<T>
     #endregion
 
     #region ILogger Implementation
-    public IDisposable? BeginScope<TState>(TState state) => _inner.BeginScope(state);
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => _inner.BeginScope(state);
     public bool IsEnabled(LogLevel logLevel) => _inner.IsEnabled(logLevel);
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,

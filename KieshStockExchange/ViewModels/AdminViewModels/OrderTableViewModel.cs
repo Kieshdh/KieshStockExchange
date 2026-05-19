@@ -67,21 +67,21 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
     }
 
     [RelayCommand]
-    private async Task SetLast7Days()
+    private void SetLast7Days()
     {
         FromDate = DateTime.UtcNow.Date.AddDays(-7);
         ToDate = DateTime.UtcNow.Date.AddDays(1);
     }
 
     [RelayCommand]
-    private async Task SetLast30Days()
+    private void SetLast30Days()
     {
         FromDate = DateTime.UtcNow.Date.AddDays(-30);
         ToDate = DateTime.UtcNow.Date.AddDays(1);
     }
 
     [RelayCommand]
-    private async Task SetAllTime()
+    private void SetAllTime()
     {
         FromDate = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         ToDate = DateTime.UtcNow.Date.AddDays(1);

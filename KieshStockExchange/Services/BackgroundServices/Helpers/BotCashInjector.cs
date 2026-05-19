@@ -41,6 +41,7 @@ internal sealed class BotCashInjector
     {
         if (!Enabled) return;
 
+#pragma warning disable CS0162 // kill-switch; flip Enabled to activate
         int injectedCount = 0;
         decimal injectedTotal = 0m;
 
@@ -74,6 +75,7 @@ internal sealed class BotCashInjector
         _logger.LogInformation(
             "Cash injection cycle: {Count} bots, total {Total}",
             injectedCount, CurrencyHelper.Format(injectedTotal, InjectionCurrency));
+#pragma warning restore CS0162
     }
     #endregion
 }

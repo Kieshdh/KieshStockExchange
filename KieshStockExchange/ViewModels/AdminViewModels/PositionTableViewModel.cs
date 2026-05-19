@@ -216,10 +216,11 @@ public partial class PositionTableObject : ObservableObject
         get => ReservedQuantity == 0 ? "-" : ReservedQuantity.ToString();
         set
         {
-            if (CurrentPosition is null) return;
-            if (ParsingHelper.TryToInt(value, out var qty) && qty >= 0 && qty <= (CurrentPosition?.Quantity ?? 0))
+            var pos = CurrentPosition;
+            if (pos is null) return;
+            if (ParsingHelper.TryToInt(value, out var qty) && qty >= 0 && qty <= pos.Quantity)
             {
-                CurrentPosition.ReservedQuantity = qty;
+                pos.ReservedQuantity = qty;
                 NotifyAllProperties();
             }
         }

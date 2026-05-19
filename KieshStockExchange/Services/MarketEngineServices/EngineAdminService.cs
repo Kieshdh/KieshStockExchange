@@ -9,8 +9,6 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 
 public sealed class EngineAdminService : IEngineAdminService
 {
-    private readonly bool DebugMode = false;
-
     #region Services and Constructor
     private readonly IOrderBookCache _books;
     private readonly ILogger<EngineAdminService> _logger;
