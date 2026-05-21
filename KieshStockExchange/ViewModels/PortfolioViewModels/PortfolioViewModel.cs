@@ -128,7 +128,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
 
         decimal cash = 0m;
         foreach (var f in _portfolio.GetFunds())
-            cash += ConvertViaFx(f.AvailableBalance, f.CurrencyType, baseCcy);
+            cash += ConvertViaFx(f.TotalBalance, f.CurrencyType, baseCcy);
 
         var positions = _portfolio.GetPositions();
 

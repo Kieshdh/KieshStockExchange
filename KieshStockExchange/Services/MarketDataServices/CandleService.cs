@@ -193,11 +193,17 @@ public sealed class CandleService : ICandleService, IDisposable
                     stream.Writer.TryWrite(live);
             }
 
-            // Then stream everything from the channel:
-            // - live snapshots on every tick (from OnTransactionTickAsync)
-            // - closed candles (from OnTransactionTickAsync + FlushLoopAsync)
-            await foreach (var candle in stream.Reader.ReadAllAsync(ct).ConfigureAwait(false))
-                yield return candle;
+            // Drain via WaitToReadAsync + TryRead so cancellation exits the loop
+            // with yield break instead of throwing OCE through the iterator.
+            while (await stream.Reader.WaitToReadAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                if (ct.IsCancellationRequested) yield break;
+                while (stream.Reader.TryRead(out var candle))
+                {
+                    if (ct.IsCancellationRequested) yield break;
+                    yield return candle;
+                }
+            }
         }
         finally 
         {

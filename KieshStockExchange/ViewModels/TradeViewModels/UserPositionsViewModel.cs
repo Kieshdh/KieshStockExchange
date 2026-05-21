@@ -226,11 +226,18 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
 
     private void OnLivePropertyChanged(object? s, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(LiveQuote.LastPrice))
+        if (e.PropertyName is not nameof(LiveQuote.LastPrice)) return;
+
+        // LiveQuote raises PropertyChanged from TickPipeline.ApplyTick, which
+        // runs on a thread-pool reader thread when the book has no UI
+        // subscribers. Without this marshal, our own OnPropertyChanged would
+        // propagate on the bg thread and crash any UI binding on Price/Total.
+        MainThread.BeginInvokeOnMainThread(() =>
         {
+            if (_disposed) return;
             OnPropertyChanged(nameof(Price));
             OnPropertyChanged(nameof(Total));
-        }
+        });
     }
 
     public void Dispose()
