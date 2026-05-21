@@ -44,14 +44,14 @@ Sequence chosen to (a) finish what's already started, (b) land cheap UX wins, (c
 
 ### Wave 4 — Economy expansion (2–3 weeks)
 13. Expand stock universe + realistic market caps (3.1) ✅ DONE
-14. Multi-currency trading (3.2) — engine already keys by `(StockId, CurrencyType)`
+14. Multi-currency trading (3.2) — engine already keys by `(StockId, CurrencyType)` ✅ DONE
 15. Investigate steady price drift — bot economy balance (3.3) ✅ DONE
 16. Multi-timescale bot sentiment + rare-event shocks (3.4) ✅ DONE
-17. Periodic bot cash injections — nominal-growth driver (3.5)
+17. Periodic bot cash injections — nominal-growth driver (3.5) ✅ DONE
 
 ### Wave 5 — Watchlist + notifications (1 week)
 15. Watchlist (1.3)
-16. NotificationService UI surface (1.2) — implement in-process; hub-push transport comes free in migration Phase 4
+16. NotificationService UI surface (1.2) — implement in-process; hub-push transport comes free in migration Phase 4 ✅ DONE
 
 ### Wave 6 — Admin + responsive layout (1 week, slottable earlier as a break)
 17. Admin tables: column improvements + new FundTransactions and AIUser tables (4.9)
@@ -104,12 +104,12 @@ Hidden costs: domain (~$10–15/year, optional), self-host ops time (~1–2 hrs/
   under the Funds card. Opens in a 720×600 child window.
 - Data path: `IUserPortfolioService.GetFundTransactionsAsync()`.
 
-### 1.2 NotificationService implementation
-- `INotificationService` / `NotificationService` already exist but the UI is silent.
-- Pick a UX: toast (transient overlay) vs. inbox (persistent list) vs. both.
-- Hook into: order fills, order rejections, deposits/withdrawals, bot start/stop errors, settlement failures.
-- Surface in `TopNavBarView` (badge + dropdown) so it's visible from every page.
-- Decide: persistent across sessions (new `Notifications` table) or in-memory only.
+### 1.2 NotificationService implementation ✅ DONE
+- UX: toast overlay (`ToastHostView` + `ToastHostViewModel`, 3 concurrent, 4s auto-dismiss) + persistent in-memory inbox (50-item ring buffer in `NotificationService`).
+- Bell + unread badge in `TopNavBarView`; clicking opens `InboxPopup` (CommunityToolkit.Maui `Popup`, taps-outside dismiss + X close).
+- Hooked into: order fills (via `NotificationBridgeService` diffing `OrderCacheService.OrdersChanged`), order placements/rejections (`PlaceOrderViewModel`, `ModifyOrderViewModel`), deposits/withdrawals (`DepositWithdrawViewModel`).
+- In-memory only — no `Notifications` table. Hub-push transport will swap in during migration Phase 4.
+- Follow-on: migrated Account modals (Change Email/Password/Username, Deposit/Withdraw, Convert Currency, Fund Transaction History) from `Application.Current.OpenWindow` to `toolkit:Popup` via `AccountViewModel.ShowAccountPopupAsync<TPopup>`.
 
 ### 1.3 Watchlist
 - Per-user list of favorited stocks. Likely a star toggle on the Market page rows + a "Watchlist" filter/tab.
@@ -239,12 +239,29 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - ⏭ Excel needs regenerating (`python Tools/GenerateAIUsers.py`) for the
   new universe to land in the running app.
 
-### 3.2 Multi-currency trading
-- Currencies exist (`CurrencyType`, `CurrencyHelper`) but only USD actually trades.
-- Pick a subset of stocks to list in EUR / GBP / etc. (`Stock.Currency` + per-currency order book — `MarketEngineServices` already keys by `(StockId, CurrencyType)`).
-- Bots should pick currency based on user preference / starting fund mix.
-- Add an FX conversion path so users can move cash between funds (likely a new `FxService` + a "Convert" button on the new Deposit/Withdraw page or its own page).
-- `UserPreferences.BaseCurrency` already in the model — wire it through valuation / P&L displays.
+### 3.2 Multi-currency trading ✅ DONE
+- Landed: `StockListing` model (per-currency listings per stock) +
+  `StockListingSeed` for initial population. `IStockService.GetListings` /
+  `IsListedIn` consumed by `SelectedStockService.Set` and the
+  `TradingPair` picker on the Trade page.
+- `FxRateService` (`Services/MarketDataServices/FxRateService.cs`) +
+  `ConvertCurrencyPage` / `ConvertCurrencyViewModel` give users an explicit
+  FX path between funds. `IUserPortfolioService.GetFundByCurrency` is the
+  canonical lookup for per-currency balances.
+- Bots trade every supported currency — `UserSessionService.InitializeBackgroundServicesAsync`
+  passes `CurrencyHelper.SupportedCurrencies` to `AiTradeService.Configure`,
+  and `AiBotDecisionService.ChooseStockId` filters each bot's watchlist to
+  stocks listed in the currency being considered.
+- `UserPreferences.BaseCurrency` wired through:
+  `AccountViewModel` + `TopNavBarViewModel` subscribe to
+  `IUserSessionService.SnapshotChanged` and re-read funds via
+  `GetFundByCurrency(session.BaseCurrency)`.
+- Verified by 2026-05-19 overnight run: USD + EUR both active, EUR is ~42%
+  of reservation-ledger rows (13,358 / 31,868 currency-tagged entries) and
+  ~31% of total session wealth ($465M cash + $2.76B shares EUR vs $1.05B +
+  $4.27B USD). GBP/JPY/CHF/AUD plumbed through `CurrencyType` /
+  `CurrencyHelper` but currently zero listings — flip a listing on if/when
+  that universe expansion is wanted.
 
 ### 3.3 Investigate steady price drift in bot-driven economy ✅ DONE
 - Resolution summary: drift slope reduced from ~9.2%/hr (baseline) to
@@ -360,7 +377,20 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
   hosts both layers; rare events just add to the current factor sum
   instead of replacing it.
 
-### 3.5 Periodic bot cash injections — nominal-growth driver
+### 3.5 Periodic bot cash injections — nominal-growth driver ✅ DONE
+- Landed: `BotCashInjector` (`Services/BackgroundServices/Helpers/BotCashInjector.cs`),
+  per-bot `CashInjectionFrequencyPrc` + `CashInjectionAmountPrc` knobs seeded
+  inverse to portfolio value, hourly cycle driven from `AiTradeService.CheckTimers`,
+  deposits through `IUserPortfolioService.AddFundsAsync` so the reservation
+  ledger stays consistent. `BotEconomyTelemetry.RecordInjection` +
+  `TotalInjectedThisSession` column in the economy CSV.
+- Master `Enabled` switch flipped on 2026-05-19 after the overnight dry run.
+  Verified via 2026-05-19 02:54–08:45 UTC CSVs: 6 cycles fired exactly hourly
+  (03:54–07:54), per-cycle range $446k → $923k, session total $3.64M.
+  Wealth conserved at the cash level (injected cash deployed into shares the
+  same hour); reservation ledger had zero negative-balance rows; no failure
+  category change beyond the existing rounding-grade InsufficientFunds.
+- Original design notes (kept for reference):
 - After 3.3 lands, the trading mechanics are symmetric and the bots
   random-walk prices around a flat level (no drift up or down on
   average). That matches a closed market with no inflows. Real
@@ -420,7 +450,7 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 - Touches `CandleChartDrawable` — render volume bars first with low alpha + a separate y-axis scaled to the bottom ~20% of the chart area.
 - Keep volume axis hidden by default (TradingView-style).
 
-### 4.10 Open orders as price lines on chart (Wave 2 follow-on)
+### 4.10 Open orders as price lines on chart (Wave 2 follow-on) ✅ DONE
 - The user's open limit orders for the selected stock+currency render as dashed
   horizontal lines on the chart (green for buy, red for sell) with a side+qty
   tag in the right gutter.
@@ -428,7 +458,7 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
   the collection from `IOrderCacheService.OrdersChanged`; the drawable's
   `DrawOpenOrderLines` runs before the live-price line.
 
-### 4.11 Drag-to-modify open orders on chart
+### 4.11 Drag-to-modify open orders on chart ✅ DONE
 - Binance and TradingView both let you grab an open-order line on the chart,
   drag it to a new price, and confirm. We already render the lines (4.10) and
   already have the marker-drag pattern in `CandleChartDrawable.HitMarker` /
@@ -482,20 +512,13 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
   book), it's worth adding a "Match: 0 fills, best opposite = X" diagnostic
   log line in the no-match branch so the absence of a fill becomes visible.
 
-### 4.12 Portfolio page: equity + cash values look wrong
-- Suspected bug: reserved funds may be getting subtracted from the equity figure
-  (or otherwise double-counted) so the displayed totals don't match the actual
-  account state.
-- To verify: place a few resting limit orders that reserve fund + position,
-  compare Portfolio page equity/cash against the Admin Funds + Positions tables
-  (DB-truth) and the AccountPage Funds card. Note divergence direction.
-- Likely culprit: equity/cash computation in `PortfolioViewModel` /
-  `PortfolioHoldingsViewModel` (or their helpers) using `AvailableBalance`
-  where it should use `TotalBalance`, or summing position value at
-  `AvailableQuantity * Price` instead of `Quantity * Price`.
-- Fix once observed: equity = `Σ(Position.Quantity × LivePrice) + Σ(Fund.TotalBalance)`;
-  cash = `Σ(Fund.TotalBalance)`. Reserved amounts are still owned by the user —
-  they shouldn't reduce equity.
+### 4.12 Portfolio page: equity + cash values look wrong ✅ DONE
+- Root cause confirmed: `PortfolioViewModel.RecomputeSummary` was summing
+  `f.AvailableBalance` instead of `f.TotalBalance` for the cash figure,
+  so resting limit-buy reservations subtracted from the displayed
+  cash + equity. Position side was already correct (`pos.Quantity *
+  LivePrice`); only the fund side needed the swap.
+- Fix: `PortfolioViewModel.cs:131` — `AvailableBalance` → `TotalBalance`.
 
 ---
 
