@@ -1,8 +1,9 @@
+using CommunityToolkit.Maui.Views;
 using KieshStockExchange.ViewModels.AccountViewModels;
 
 namespace KieshStockExchange.Views.AccountPageViews;
 
-public partial class FundTransactionHistoryPage : ContentPage
+public partial class FundTransactionHistoryPage : Popup
 {
     private readonly FundTransactionHistoryViewModel _vm;
 
@@ -14,15 +15,6 @@ public partial class FundTransactionHistoryPage : ContentPage
         _vm.CloseRequested += OnCloseRequested;
     }
 
-    private void OnCloseRequested(object? sender, EventArgs e)
-    {
-        // Window.CloseWindow is a WinUI call that must run on the UI thread; the VM
-        // may fire CloseRequested from a background continuation, so marshal explicitly.
-        MainThread.BeginInvokeOnMainThread(() =>
-        {
-            var win = this.Window;
-            if (win != null)
-                Application.Current?.CloseWindow(win);
-        });
-    }
+    private void OnCloseRequested(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(async () => await CloseAsync());
 }

@@ -1,8 +1,9 @@
+using CommunityToolkit.Maui.Views;
 using KieshStockExchange.ViewModels.AccountViewModels;
 
 namespace KieshStockExchange.Views.AccountPageViews;
 
-public partial class ChangePasswordPage : ContentPage
+public partial class ChangePasswordPage : Popup
 {
     private readonly ChangePasswordViewModel _vm;
 
@@ -14,15 +15,6 @@ public partial class ChangePasswordPage : ContentPage
         _vm.CloseRequested += OnCloseRequested;
     }
 
-    private void OnCloseRequested(object? sender, EventArgs e)
-    {
-        // CloseWindow is a WinUI call that requires the UI thread; the VM may fire this
-        // event from a background continuation (ConfigureAwait(false) on the DB call).
-        MainThread.BeginInvokeOnMainThread(() =>
-        {
-            var win = this.Window;
-            if (win != null)
-                Application.Current?.CloseWindow(win);
-        });
-    }
+    private void OnCloseRequested(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(async () => await CloseAsync());
 }

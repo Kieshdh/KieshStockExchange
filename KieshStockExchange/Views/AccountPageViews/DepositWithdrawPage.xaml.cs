@@ -1,8 +1,9 @@
+using CommunityToolkit.Maui.Views;
 using KieshStockExchange.ViewModels.AccountViewModels;
 
 namespace KieshStockExchange.Views.AccountPageViews;
 
-public partial class DepositWithdrawPage : ContentPage
+public partial class DepositWithdrawPage : Popup
 {
     private readonly DepositWithdrawViewModel _vm;
 
@@ -14,17 +15,6 @@ public partial class DepositWithdrawPage : ContentPage
         _vm.CloseRequested += OnCloseRequested;
     }
 
-    private void OnCloseRequested(object? sender, EventArgs e)
-    {
-        // The VM's command runs the deposit on a background thread (ConfigureAwait(false)),
-        // so the continuation that fires CloseRequested often lands off the UI thread.
-        // Window.CloseWindow is a WinUI call that MUST run on the UI thread or it throws
-        // COMException (RPC_E_WRONG_THREAD). Marshal explicitly.
-        MainThread.BeginInvokeOnMainThread(() =>
-        {
-            var win = this.Window;
-            if (win != null)
-                Application.Current?.CloseWindow(win);
-        });
-    }
+    private void OnCloseRequested(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(async () => await CloseAsync());
 }

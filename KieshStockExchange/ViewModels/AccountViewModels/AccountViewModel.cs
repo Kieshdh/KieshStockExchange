@@ -1,9 +1,12 @@
+using CommunityToolkit.Maui.Views;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
+// IWatchlistService is resolved at logout (and only there) via _services, so we
+// don't add another constructor dependency just for the teardown call.
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Views.AccountPageViews;
 using Microsoft.Extensions.DependencyInjection;
@@ -117,36 +120,28 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
 
         await _auth.LogoutAsync().ConfigureAwait(false);
         _session.ClearSession();
+        _services.GetService<IWatchlistService>()?.Clear();
         await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.GoToAsync("///LoginPage"));
     }
 
-    [RelayCommand] private void ChangeEmail()        => OpenInWindow<ChangeEmailPage>("Change Email");
-    [RelayCommand] private void ChangePassword()     => OpenInWindow<ChangePasswordPage>("Change Password");
-    [RelayCommand] private void ChangeUsername()     => OpenInWindow<ChangeUsernamePage>("Change Username");
-    // The deposit/withdraw form has more rows (currency picker, balance, amount, note,
-    // three buttons) so it needs more vertical room than the simple change-* forms.
-    [RelayCommand] private void OpenDepositWithdraw() =>
-        OpenInWindow<DepositWithdrawPage>("Deposit / Withdraw", width: 520, height: 700);
-    // FX conversion form: two currency pickers + amount + preview, so a touch taller
-    // than the deposit window.
-    [RelayCommand] private void OpenConvertCurrency() =>
-        OpenInWindow<ConvertCurrencyPage>("Convert currency", width: 520, height: 760);
-    // Audit-trail companion: lists every Deposit/Withdraw the user has performed.
-    [RelayCommand] private void OpenFundHistory() =>
-        OpenInWindow<FundTransactionHistoryPage>("Fund history", width: 720, height: 600);
+    [RelayCommand] private Task ChangeEmail()         => ShowAccountPopupAsync<ChangeEmailPage>();
+    [RelayCommand] private Task ChangePassword()      => ShowAccountPopupAsync<ChangePasswordPage>();
+    [RelayCommand] private Task ChangeUsername()      => ShowAccountPopupAsync<ChangeUsernamePage>();
+    [RelayCommand] private Task OpenDepositWithdraw() => ShowAccountPopupAsync<DepositWithdrawPage>();
+    [RelayCommand] private Task OpenConvertCurrency() => ShowAccountPopupAsync<ConvertCurrencyPage>();
+    [RelayCommand] private Task OpenFundHistory()     => ShowAccountPopupAsync<FundTransactionHistoryPage>();
 
-    private void OpenInWindow<TPage>(string title, double width = 480, double height = 520)
-        where TPage : ContentPage
+    private async Task ShowAccountPopupAsync<TPopup>() where TPopup : Popup
     {
-        var page = _services.GetRequiredService<TPage>();
-        var window = new Window(page)
-        {
-            Title  = title,
-            Width  = width,
-            Height = height
-        };
-        window.Destroying += (_, __) => MainThread.BeginInvokeOnMainThread(RefreshAll);
-        Application.Current?.OpenWindow(window);
+        var popup = _services.GetRequiredService<TPopup>();
+        var page = Shell.Current?.CurrentPage
+            ?? Application.Current?.Windows?.FirstOrDefault()?.Page;
+        if (page is null) return;
+
+        // ShowPopupAsync awaits until the popup is dismissed — same close-then-refresh
+        // contract the old Window.Destroying handler provided.
+        await page.ShowPopupAsync(popup);
+        RefreshAll();
     }
 
     public void Dispose()

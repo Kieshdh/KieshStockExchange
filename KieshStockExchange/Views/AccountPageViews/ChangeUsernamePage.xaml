@@ -1,61 +1,59 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AccountViewModels"
-             x:Class="KieshStockExchange.Views.AccountPageViews.ChangeUsernamePage"
-             x:DataType="vm:ChangeUsernameViewModel"
-             Title="Change Username">
+<toolkit:Popup xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+               xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+               xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+               xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AccountViewModels"
+               x:Class="KieshStockExchange.Views.AccountPageViews.ChangeUsernamePage"
+               x:DataType="vm:ChangeUsernameViewModel"
+               Color="Transparent"
+               CanBeDismissedByTappingOutsideOfPopup="True">
 
-    <Grid Style="{StaticResource MainGrid}"
-          Padding="20">
-        <Border Style="{StaticResource DashboardCardStyle}"
-                Padding="22"
-                HorizontalOptions="Fill"
-                VerticalOptions="Start">
-            <VerticalStackLayout Spacing="14">
+    <Border Style="{StaticResource DashboardCardStyle}"
+            Padding="22"
+            WidthRequest="480">
+        <VerticalStackLayout Spacing="14">
 
-                <Label Text="Change Username"
-                       Style="{StaticResource SectionHeaderLabelStyle}" />
+            <Label Text="Change Username"
+                   Style="{StaticResource SectionHeaderLabelStyle}" />
 
-                <Label Text="Pick a new username (5-20 letters or digits) and confirm with your password."
-                       Style="{StaticResource MutedLabelStyle}" />
+            <Label Text="Pick a new username (5-20 letters or digits) and confirm with your password."
+                   Style="{StaticResource MutedLabelStyle}" />
 
-                <VerticalStackLayout Spacing="4">
-                    <Label Text="New username"
-                           Style="{StaticResource FormLabelStyle}" />
-                    <Entry Text="{Binding NewUsername}"
-                           Placeholder="Enter new username"
-                           Style="{StaticResource FormEntryStyle}" />
-                </VerticalStackLayout>
-
-                <VerticalStackLayout Spacing="4">
-                    <Label Text="Current password"
-                           Style="{StaticResource FormLabelStyle}" />
-                    <Entry Text="{Binding CurrentPassword}"
-                           IsPassword="True"
-                           Placeholder="Confirm with your password"
-                           Style="{StaticResource FormEntryStyle}" />
-                </VerticalStackLayout>
-
-                <Label Text="{Binding ErrorMessage}"
-                       Style="{StaticResource RegistrationErrorLabel}"
-                       IsVisible="{Binding HasError}" />
-
-                <Grid ColumnDefinitions="*,*"
-                      ColumnSpacing="8"
-                      Margin="0,8,0,0">
-                    <Button Grid.Column="0"
-                            Text="Save"
-                            Style="{StaticResource PrimaryActionButtonStyle}"
-                            Command="{Binding SaveCommand}"
-                            IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}" />
-                    <Button Grid.Column="1"
-                            Text="Cancel"
-                            Style="{StaticResource SecondaryActionButtonStyle}"
-                            Command="{Binding CancelCommand}" />
-                </Grid>
-
+            <VerticalStackLayout Spacing="4">
+                <Label Text="New username"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding NewUsername}"
+                       Placeholder="Enter new username"
+                       Style="{StaticResource FormEntryStyle}" />
             </VerticalStackLayout>
-        </Border>
-    </Grid>
-</ContentPage>
+
+            <VerticalStackLayout Spacing="4">
+                <Label Text="Current password"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding CurrentPassword}"
+                       IsPassword="True"
+                       Placeholder="Confirm with your password"
+                       Style="{StaticResource FormEntryStyle}" />
+            </VerticalStackLayout>
+
+            <Label Text="{Binding ErrorMessage}"
+                   Style="{StaticResource RegistrationErrorLabel}"
+                   IsVisible="{Binding HasError}" />
+
+            <Grid ColumnDefinitions="*,*"
+                  ColumnSpacing="8"
+                  Margin="0,8,0,0">
+                <Button Grid.Column="0"
+                        Text="Save"
+                        Style="{StaticResource PrimaryActionButtonStyle}"
+                        Command="{Binding SaveCommand}"
+                        IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}" />
+                <Button Grid.Column="1"
+                        Text="Cancel"
+                        Style="{StaticResource SecondaryActionButtonStyle}"
+                        Command="{Binding CancelCommand}" />
+            </Grid>
+
+        </VerticalStackLayout>
+    </Border>
+</toolkit:Popup>

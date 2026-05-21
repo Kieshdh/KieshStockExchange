@@ -1,8 +1,10 @@
+using CommunityToolkit.Maui.Core;
+using CommunityToolkit.Maui.Views;
 using KieshStockExchange.ViewModels.AccountViewModels;
 
 namespace KieshStockExchange.Views.AccountPageViews;
 
-public partial class ConvertCurrencyPage : ContentPage
+public partial class ConvertCurrencyPage : Popup
 {
     private readonly ConvertCurrencyViewModel _vm;
 
@@ -12,23 +14,16 @@ public partial class ConvertCurrencyPage : ContentPage
         _vm = vm ?? throw new ArgumentNullException(nameof(vm));
         BindingContext = _vm;
         _vm.CloseRequested += OnCloseRequested;
+        Closed += OnPopupClosed;
     }
 
-    private void OnCloseRequested(object? sender, EventArgs e)
-    {
-        // CloseWindow must run on the UI thread.
-        MainThread.BeginInvokeOnMainThread(() =>
-        {
-            var win = this.Window;
-            if (win != null)
-                Application.Current?.CloseWindow(win);
-        });
-    }
+    private void OnCloseRequested(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(async () => await CloseAsync());
 
-    protected override void OnDisappearing()
+    private void OnPopupClosed(object? sender, PopupClosedEventArgs e)
     {
-        base.OnDisappearing();
         _vm.CloseRequested -= OnCloseRequested;
+        Closed -= OnPopupClosed;
         _vm.Dispose();
     }
 }

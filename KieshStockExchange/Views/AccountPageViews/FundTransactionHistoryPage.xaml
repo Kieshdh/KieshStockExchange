@@ -1,71 +1,69 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AccountViewModels"
-             xmlns:models="clr-namespace:KieshStockExchange.Models"
-             x:Class="KieshStockExchange.Views.AccountPageViews.FundTransactionHistoryPage"
-             x:DataType="vm:FundTransactionHistoryViewModel"
-             Title="Fund history">
+<toolkit:Popup xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+               xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+               xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+               xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AccountViewModels"
+               xmlns:models="clr-namespace:KieshStockExchange.Models"
+               x:Class="KieshStockExchange.Views.AccountPageViews.FundTransactionHistoryPage"
+               x:DataType="vm:FundTransactionHistoryViewModel"
+               Color="Transparent"
+               CanBeDismissedByTappingOutsideOfPopup="True">
 
-    <Grid Style="{StaticResource MainGrid}"
-          Padding="20"
-          RowDefinitions="*,Auto"
-          RowSpacing="12">
+    <Border Style="{StaticResource DashboardCardStyle}"
+            Padding="22"
+            WidthRequest="720">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+              RowSpacing="10">
 
-        <Border Grid.Row="0"
-                Style="{StaticResource DashboardCardStyle}"
-                Padding="22">
-            <Grid RowDefinitions="Auto,Auto,Auto,*"
-                  RowSpacing="10">
+            <Label Grid.Row="0"
+                   Text="Fund transaction history"
+                   Style="{StaticResource SectionHeaderLabelStyle}" />
 
-                <Label Grid.Row="0"
-                       Text="Fund transaction history"
-                       Style="{StaticResource SectionHeaderLabelStyle}" />
+            <Label Grid.Row="1"
+                   Text="Deposits and withdrawals for the active account, newest first."
+                   Style="{StaticResource MutedLabelStyle}" />
 
-                <Label Grid.Row="1"
-                       Text="Deposits and withdrawals for the active account, newest first."
-                       Style="{StaticResource MutedLabelStyle}" />
-
-                <Grid Grid.Row="2"
-                      ColumnDefinitions="2*,*,*,3*"
-                      Style="{StaticResource TradeTableHeaderGrid}">
-                    <Label Grid.Column="0" Text="Date"   Style="{StaticResource TradeTableHeaderLabel}" />
-                    <Label Grid.Column="1" Text="Kind"   Style="{StaticResource TradeTableHeaderLabel}" />
-                    <Label Grid.Column="2" Text="Amount" Style="{StaticResource TradeTableHeaderLabel}" />
-                    <Label Grid.Column="3" Text="Note"   Style="{StaticResource TradeTableHeaderLabel}" />
-                </Grid>
-
-                <RefreshView Grid.Row="3"
-                             Command="{Binding RefreshCommand}"
-                             IsRefreshing="{Binding IsBusy}">
-                    <CollectionView ItemsSource="{Binding CurrentView}"
-                                    SelectionMode="None">
-                        <CollectionView.EmptyView>
-                            <StackLayout Padding="12" Spacing="4">
-                                <Label Text="No deposits or withdrawals yet." Opacity="0.7" />
-                            </StackLayout>
-                        </CollectionView.EmptyView>
-
-                        <CollectionView.ItemTemplate>
-                            <DataTemplate x:DataType="models:FundTransaction">
-                                <Grid ColumnDefinitions="2*,*,*,3*"
-                                      Style="{StaticResource TradeTableRowGrid}">
-                                    <Label Grid.Column="0" Text="{Binding CreatedAtDisplay}"     Style="{StaticResource TradeTableRowLabel}" />
-                                    <Label Grid.Column="1" Text="{Binding Kind}"                 Style="{StaticResource TradeTableKindLabel}" />
-                                    <Label Grid.Column="2" Text="{Binding SignedAmountDisplay}"  Style="{StaticResource TradeTableRowLabel}" />
-                                    <Label Grid.Column="3" Text="{Binding Note}"                 Style="{StaticResource TradeTableRowLabel}" />
-                                </Grid>
-                            </DataTemplate>
-                        </CollectionView.ItemTemplate>
-                    </CollectionView>
-                </RefreshView>
+            <Grid Grid.Row="2"
+                  ColumnDefinitions="2*,*,*,3*"
+                  Style="{StaticResource TradeTableHeaderGrid}">
+                <Label Grid.Column="0" Text="Date"   Style="{StaticResource TradeTableHeaderLabel}" />
+                <Label Grid.Column="1" Text="Kind"   Style="{StaticResource TradeTableHeaderLabel}" />
+                <Label Grid.Column="2" Text="Amount" Style="{StaticResource TradeTableHeaderLabel}" />
+                <Label Grid.Column="3" Text="Note"   Style="{StaticResource TradeTableHeaderLabel}" />
             </Grid>
-        </Border>
 
-        <Button Grid.Row="1"
-                Text="Close"
-                Style="{StaticResource SecondaryActionButtonStyle}"
-                Command="{Binding CloseCommand}"
-                HorizontalOptions="End" />
-    </Grid>
-</ContentPage>
+            <RefreshView Grid.Row="3"
+                         Command="{Binding RefreshCommand}"
+                         IsRefreshing="{Binding IsBusy}"
+                         MinimumHeightRequest="240"
+                         MaximumHeightRequest="500">
+                <CollectionView ItemsSource="{Binding CurrentView}"
+                                SelectionMode="None">
+                    <CollectionView.EmptyView>
+                        <StackLayout Padding="12" Spacing="4">
+                            <Label Text="No deposits or withdrawals yet." Opacity="0.7" />
+                        </StackLayout>
+                    </CollectionView.EmptyView>
+
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="models:FundTransaction">
+                            <Grid ColumnDefinitions="2*,*,*,3*"
+                                  Style="{StaticResource TradeTableRowGrid}">
+                                <Label Grid.Column="0" Text="{Binding CreatedAtDisplay}"     Style="{StaticResource TradeTableRowLabel}" />
+                                <Label Grid.Column="1" Text="{Binding Kind}"                 Style="{StaticResource TradeTableKindLabel}" />
+                                <Label Grid.Column="2" Text="{Binding SignedAmountDisplay}"  Style="{StaticResource TradeTableRowLabel}" />
+                                <Label Grid.Column="3" Text="{Binding Note}"                 Style="{StaticResource TradeTableRowLabel}" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </RefreshView>
+
+            <Button Grid.Row="4"
+                    Text="Close"
+                    Style="{StaticResource SecondaryActionButtonStyle}"
+                    Command="{Binding CloseCommand}"
+                    HorizontalOptions="End" />
+        </Grid>
+    </Border>
+</toolkit:Popup>

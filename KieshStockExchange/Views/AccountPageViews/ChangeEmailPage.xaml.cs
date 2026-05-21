@@ -1,8 +1,9 @@
+using CommunityToolkit.Maui.Views;
 using KieshStockExchange.ViewModels.AccountViewModels;
 
 namespace KieshStockExchange.Views.AccountPageViews;
 
-public partial class ChangeEmailPage : ContentPage
+public partial class ChangeEmailPage : Popup
 {
     private readonly ChangeEmailViewModel _vm;
 
@@ -16,13 +17,9 @@ public partial class ChangeEmailPage : ContentPage
 
     private void OnCloseRequested(object? sender, EventArgs e)
     {
-        // CloseWindow is a WinUI call that requires the UI thread; the VM may fire this
-        // event from a background continuation (ConfigureAwait(false) on the DB call).
-        MainThread.BeginInvokeOnMainThread(() =>
-        {
-            var win = this.Window;
-            if (win != null)
-                Application.Current?.CloseWindow(win);
-        });
+        // Popup.CloseAsync hops to the UI thread internally, but VM may fire from a
+        // background continuation — keep the explicit marshal so we never call into
+        // the dispatcher off-thread.
+        MainThread.BeginInvokeOnMainThread(async () => await CloseAsync());
     }
 }
