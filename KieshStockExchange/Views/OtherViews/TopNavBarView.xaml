@@ -2,11 +2,13 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.OtherViewModels"
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
              x:Class="KieshStockExchange.Views.OtherViews.TopNavBarView"
              x:DataType="vm:TopNavBarViewModel">
 
     <Grid Style="{StaticResource TopNavBarStyle}"
-          ColumnDefinitions="Auto,*,Auto">
+          ColumnDefinitions="Auto,*,Auto"
+          IsClippedToBounds="False">
 
         <!-- Brand cluster -->
         <HorizontalStackLayout Grid.Column="0"
@@ -51,20 +53,37 @@
                     Style="{StaticResource NavLinkButton}" />
         </HorizontalStackLayout>
 
-        <!-- Right cluster: Funds chip -->
-        <Border Grid.Column="2"
-                Style="{StaticResource FundsChipBorder}"
-                VerticalOptions="Center">
-            <HorizontalStackLayout Spacing="6"
-                                   VerticalOptions="Center">
-                <Label Text="Funds"
-                       Style="{StaticResource FundsChipKeyLabel}"
-                       VerticalTextAlignment="Center" />
-                <Label Text="{Binding FundsDisplay}"
-                       Style="{StaticResource FundsChipValueLabel}"
-                       VerticalTextAlignment="Center" />
-            </HorizontalStackLayout>
-        </Border>
+        <!-- Right cluster: Bell + Funds chip -->
+        <HorizontalStackLayout Grid.Column="2"
+                               Spacing="8"
+                               VerticalOptions="Center">
+
+            <!-- Bell button with unread badge overlay -->
+            <Grid WidthRequest="40" HeightRequest="36">
+                <Button Text="&#x1F514;"
+                        Command="{Binding ShowInboxCommand}"
+                        Style="{StaticResource BellButton}" />
+                <Border Style="{StaticResource BellBadgeBorder}"
+                        IsVisible="{Binding HasUnread}">
+                    <Label Text="{Binding UnreadCount}"
+                           Style="{StaticResource BellBadgeLabel}" />
+                </Border>
+            </Grid>
+
+            <!-- Funds chip -->
+            <Border Style="{StaticResource FundsChipBorder}"
+                    VerticalOptions="Center">
+                <HorizontalStackLayout Spacing="6"
+                                       VerticalOptions="Center">
+                    <Label Text="Funds"
+                           Style="{StaticResource FundsChipKeyLabel}"
+                           VerticalTextAlignment="Center" />
+                    <Label Text="{Binding FundsDisplay}"
+                           Style="{StaticResource FundsChipValueLabel}"
+                           VerticalTextAlignment="Center" />
+                </HorizontalStackLayout>
+            </Border>
+        </HorizontalStackLayout>
 
         <!-- 1 px divider at the bottom of the nav bar -->
         <BoxView Style="{StaticResource TopNavBarBottomBorder}"

@@ -26,11 +26,13 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
     private readonly IUserPortfolioService _portfolio;
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
+    private readonly INotificationService _notify;
     private readonly ILogger<ModifyOrderViewModel> _logger;
 
     public ModifyOrderViewModel(IOrderEntryService orders, IOrderCacheService cache,
         IUserPortfolioService portfolio,
         IAuthService auth, IOrderEditService editService,
+        INotificationService notify,
         ILogger<ModifyOrderViewModel> logger)
     {
         Title = "Modify order";
@@ -39,6 +41,7 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         _portfolio   = portfolio   ?? throw new ArgumentNullException(nameof(portfolio));
         _auth        = auth        ?? throw new ArgumentNullException(nameof(auth));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
+        _notify      = notify      ?? throw new ArgumentNullException(nameof(notify));
         _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
 
         _editService.PropertyChanged += OnEditServiceChanged;
@@ -151,6 +154,8 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
             _logger.LogInformation("Modify order #{OrderId}: {Status}",
                 TargetOrder.OrderId, result.Status);
 
+            await _notify.NotifyOrderResultAsync(result).ConfigureAwait(false);
+
             await _cache.RefreshAsync(_auth.CurrentUserId).ConfigureAwait(false);
             // Re-pull funds + positions so the AccountPage Funds card and any
             // portfolio-driven UI see the new reservation. Without this the
@@ -163,6 +168,12 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         {
             _logger.LogError(ex, "Modify order failed for #{OrderId}", TargetOrder.OrderId);
             ErrorMessage = ex.Message;
+            try
+            {
+                await _notify.PushNotificationAsync("Modify failed", ex.Message,
+                    NotificationSeverity.Error).ConfigureAwait(false);
+            }
+            catch (Exception inner) { _logger.LogError(inner, "Modify-failure notification push threw."); }
         }
         finally { IsBusy = false; }
     }

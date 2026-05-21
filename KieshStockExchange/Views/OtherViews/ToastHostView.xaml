@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.OtherViewModels"
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             x:Class="KieshStockExchange.Views.OtherViews.ToastHostView"
+             x:DataType="vm:ToastHostViewModel">
+
+    <!-- The host is content-sized: when there are no toasts the CollectionView
+         collapses to 0x0 and clicks pass through automatically. Individual
+         toast borders carry their own TapGestureRecognizer for click-to-dismiss. -->
+    <CollectionView ItemsSource="{Binding Toasts}"
+                    SelectionMode="None"
+                    HorizontalOptions="End"
+                    VerticalOptions="Start"
+                    WidthRequest="320">
+        <CollectionView.ItemsLayout>
+            <LinearItemsLayout Orientation="Vertical" ItemSpacing="6" />
+        </CollectionView.ItemsLayout>
+
+        <CollectionView.ItemTemplate>
+            <DataTemplate x:DataType="models:Notification">
+                <Border Style="{StaticResource ToastBorder}">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer
+                            Command="{Binding Source={RelativeSource AncestorType={x:Type vm:ToastHostViewModel}}, Path=DismissCommand}"
+                            CommandParameter="{Binding .}" />
+                    </Border.GestureRecognizers>
+                    <Grid ColumnDefinitions="4,*" ColumnSpacing="10">
+                        <BoxView Grid.Column="0"
+                                 Style="{StaticResource ToastAccentBar}" />
+                        <VerticalStackLayout Grid.Column="1" Spacing="2" Padding="0,6,10,6">
+                            <Label Text="{Binding Title}"  Style="{StaticResource ToastTitleLabel}" />
+                            <Label Text="{Binding Message}" Style="{StaticResource ToastMessageLabel}" />
+                        </VerticalStackLayout>
+                    </Grid>
+                </Border>
+            </DataTemplate>
+        </CollectionView.ItemTemplate>
+    </CollectionView>
+</ContentView>

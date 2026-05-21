@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ public partial class DepositWithdrawViewModel : BaseViewModel
 {
     private readonly IUserPortfolioService _portfolio;
     private readonly IUserSessionService _session;
+    private readonly INotificationService _notify;
     private readonly ILogger<DepositWithdrawViewModel> _logger;
 
     public event EventHandler? CloseRequested;
@@ -33,11 +35,12 @@ public partial class DepositWithdrawViewModel : BaseViewModel
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
     public DepositWithdrawViewModel(IUserPortfolioService portfolio, IUserSessionService session,
-        ILogger<DepositWithdrawViewModel> logger)
+        INotificationService notify, ILogger<DepositWithdrawViewModel> logger)
     {
         Title = "Deposit / Withdraw";
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _notify = notify ?? throw new ArgumentNullException(nameof(notify));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // Default the picker to the user's session base currency.
@@ -119,8 +122,17 @@ public partial class DepositWithdrawViewModel : BaseViewModel
             ErrorMessage = isDeposit
                 ? "Deposit could not be completed. Please try again."
                 : "Withdrawal could not be completed. Check your available balance and try again.";
+            await _notify.PushNotificationAsync(
+                isDeposit ? "Deposit failed" : "Withdrawal failed",
+                ErrorMessage,
+                NotificationSeverity.Error).ConfigureAwait(false);
             return;
         }
+
+        await _notify.PushNotificationAsync(
+            isDeposit ? "Deposit completed" : "Withdrawal completed",
+            $"{CurrencyHelper.Format(amount, SelectedCurrency)} {(isDeposit ? "deposited" : "withdrawn")}.",
+            NotificationSeverity.Success).ConfigureAwait(false);
 
         CloseRequested?.Invoke(this, EventArgs.Empty);
     }

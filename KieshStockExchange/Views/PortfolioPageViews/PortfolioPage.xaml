@@ -19,6 +19,12 @@
         <navbar:TopNavBarView Grid.Row="0"
                               BindingContext="{Binding TopNavBarVm}" />
 
+        <!-- Toast overlay (top-right of content area; passes clicks through empty space) -->
+        <other:ToastHostView Grid.Row="1" Grid.RowSpan="5"
+                             VerticalOptions="Start" HorizontalOptions="End"
+                             Margin="0,8,16,0"
+                             ZIndex="200" />
+
         <!-- Page heading -->
         <Grid Grid.Row="1"
               Style="{StaticResource PageHeadingGrid}">

@@ -1,3 +1,4 @@
+using CommunityToolkit.Maui;
 using KieshStockExchange.Services.BackgroundServices;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices;
@@ -41,6 +42,7 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         builder
             .UseMauiApp<App>()
+            .UseMauiCommunityToolkit()
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
@@ -82,6 +84,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IAccountsCache, AccountsCache>();
         builder.Services.AddSingleton<IReservationLedger, ReservationLedger>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
+        builder.Services.AddSingleton<NotificationBridgeService>();
         builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
         builder.Services.AddSingleton<IThemeService, ThemeService>();
         builder.Services.AddSingleton<IProfileService, ProfileService>();
@@ -135,11 +138,19 @@ public static class MauiProgram
         builder.Services.AddTransient<OrderHistoryViewModel>();
         // - Other
         builder.Services.AddTransient<TopNavBarViewModel>();
+        builder.Services.AddSingleton<ToastHostViewModel>();
 
 #if DEBUG
         builder.Logging.AddDebug();
 #endif
 
-        return builder.Build();
+        var app = builder.Build();
+
+        // Eagerly resolve the bridge so its ctor wires up the OrdersChanged
+        // subscription — DI would otherwise defer construction until something
+        // injects it, which nothing does (it's a side-effect-only service).
+        _ = app.Services.GetRequiredService<NotificationBridgeService>();
+
+        return app;
     }
 }

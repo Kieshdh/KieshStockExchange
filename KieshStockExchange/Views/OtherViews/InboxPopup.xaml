@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<toolkit:Popup xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+               xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+               xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+               xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.OtherViewModels"
+               xmlns:models="clr-namespace:KieshStockExchange.Models"
+               x:Class="KieshStockExchange.Views.OtherViews.InboxPopup"
+               x:DataType="vm:TopNavBarViewModel"
+               Color="Transparent"
+               CanBeDismissedByTappingOutsideOfPopup="True">
+
+    <Border Style="{StaticResource InboxDropdownBorder}"
+            WidthRequest="360"
+            HeightRequest="500">
+        <Grid RowDefinitions="Auto,*"
+              Padding="12,10,12,12"
+              RowSpacing="6">
+
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                <Label Grid.Column="0"
+                       Text="Notifications"
+                       Style="{StaticResource InboxHeaderLabel}" />
+                <Button Grid.Column="1"
+                        Text="Clear"
+                        Command="{Binding ClearInboxCommand}"
+                        Style="{StaticResource InboxFooterButton}" />
+                <Button Grid.Column="2"
+                        Text="&#x2715;"
+                        Clicked="OnCloseClicked"
+                        Style="{StaticResource InboxCloseButton}" />
+            </Grid>
+
+            <CollectionView Grid.Row="1"
+                            ItemsSource="{Binding Inbox}"
+                            SelectionMode="None"
+                            EmptyView="No notifications yet.">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="models:Notification">
+                        <Grid Padding="0,8" ColumnDefinitions="4,*">
+                            <BoxView Grid.Column="0" Style="{StaticResource InboxRowAccent}" />
+                            <VerticalStackLayout Grid.Column="1" Padding="10,0,0,0" Spacing="2">
+                                <Label Text="{Binding Title}"   Style="{StaticResource InboxRowTitleLabel}" />
+                                <Label Text="{Binding Message}" Style="{StaticResource InboxRowMessageLabel}" />
+                            </VerticalStackLayout>
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+        </Grid>
+    </Border>
+</toolkit:Popup>

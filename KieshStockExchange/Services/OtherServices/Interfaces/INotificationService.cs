@@ -6,6 +6,12 @@ namespace KieshStockExchange.Services.OtherServices.Interfaces;
 
 public interface INotificationService
 {
+    /// <summary> Raised when a new Notification is appended to the ring buffer. </summary>
+    event EventHandler<Notification>? NotificationAdded;
+
+    /// <summary> Snapshot of the most recent notifications (newest first). </summary>
+    IReadOnlyList<Notification> Recent { get; }
+
     /// <summary>
     /// Route an OrderResult to a human-friendly notification
     /// (placed, on-book, partial, filled, or failed).
@@ -19,7 +25,12 @@ public interface INotificationService
     Task NotifyFillAsync(Order orderAfterFill, Transaction fill, CancellationToken ct = default);
 
     /// <summary>
-    /// Generic "push" (UI alert). Internally synchronized by a gate so alerts never overlap.
+    /// Push a custom notification with caller-specified severity.
     /// </summary>
-    Task PushNotificationAsync(string title, string message, CancellationToken ct = default);
+    Task PushNotificationAsync(string title, string message,
+        NotificationSeverity severity = NotificationSeverity.Info,
+        CancellationToken ct = default);
+
+    /// <summary> Clear the inbox ring buffer. </summary>
+    void Clear();
 }

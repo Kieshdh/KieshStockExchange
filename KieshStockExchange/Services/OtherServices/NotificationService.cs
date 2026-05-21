@@ -4,17 +4,34 @@ using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
-using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 
 namespace KieshStockExchange.Services.OtherServices;
 
 public sealed class NotificationService : INotificationService
 {
     #region Fields and constructor
+    private const int MaxBuffered = 50;
+
     private readonly ILogger<NotificationService> _logger;
     private readonly IStockService _stock;
-    private readonly SemaphoreSlim _notifyGate = new(1, 1);
+
+    // Newest first. ConcurrentQueue would reverse-order; a lock + LinkedList
+    // keeps Recent ordering trivial and bounded.
+    private readonly LinkedList<Notification> _ring = new();
+    private readonly object _ringLock = new();
+
+    public event EventHandler<Notification>? NotificationAdded;
+
+    public IReadOnlyList<Notification> Recent
+    {
+        get
+        {
+            lock (_ringLock) return _ring.ToArray();
+        }
+    }
 
     public NotificationService(ILogger<NotificationService> logger, IStockService stock)
     {
@@ -28,88 +45,92 @@ public sealed class NotificationService : INotificationService
     {
         if (result is null)
         {
-            await PushNotificationAsync("Order", "Unknown result.", ct).ConfigureAwait(false);
+            await PushNotificationAsync("Order", "Unknown result.", NotificationSeverity.Warning, ct).ConfigureAwait(false);
             return;
         }
 
-        // Build notification
-        var (title, message) = await BuildFromOrderResultAsync(result, ct).ConfigureAwait(false);
-
-        // Show notification
-        await PushNotificationAsync(title, message, ct).ConfigureAwait(false);
+        var (title, message, severity) = await BuildFromOrderResultAsync(result, ct).ConfigureAwait(false);
+        await PushNotificationAsync(title, message, severity, ct).ConfigureAwait(false);
     }
 
     public async Task NotifyFillAsync(Order orderAfterFill, Transaction fill, CancellationToken ct = default)
     {
         if (orderAfterFill is null || fill is null)
         {
-            await PushNotificationAsync("Order Update", "Invalid fill data.", ct).ConfigureAwait(false);
+            await PushNotificationAsync("Order Update", "Invalid fill data.", NotificationSeverity.Warning, ct).ConfigureAwait(false);
             return;
         }
 
-        // Build notification
-        var (title, message) = await BuildFromFillAsync(orderAfterFill, fill, ct).ConfigureAwait(false);
-
-        // Show notification
-        await PushNotificationAsync(title, message, ct).ConfigureAwait(false);
+        var (title, message, severity) = await BuildFromFillAsync(orderAfterFill, fill, ct).ConfigureAwait(false);
+        await PushNotificationAsync(title, message, severity, ct).ConfigureAwait(false);
     }
 
-    public async Task PushNotificationAsync(string title, string message, CancellationToken ct = default)
+    public Task PushNotificationAsync(string title, string message,
+        NotificationSeverity severity = NotificationSeverity.Info,
+        CancellationToken ct = default)
     {
-        // Acquire the gate unless canceled
-        try { await _notifyGate.WaitAsync(ct).ConfigureAwait(false); }
-        catch (OperationCanceledException)
+        title = string.IsNullOrWhiteSpace(title) ? "Notice" : title.Trim();
+        message = string.IsNullOrWhiteSpace(message) ? "—" : message.Trim();
+
+        var note = new Notification
         {
-            _logger.LogDebug("Notification canceled before showing: {Title}", title);
-            return; // nothing acquired, nothing to release
-        }
+            Title = title,
+            Message = message,
+            Severity = severity
+        };
 
-        try
+        Notification? evicted = null;
+        lock (_ringLock)
         {
-            title = string.IsNullOrWhiteSpace(title) ? "Notice" : title.Trim();
-            message = string.IsNullOrWhiteSpace(message) ? "—" : message.Trim();
-
-            _logger.LogInformation("Push: {Title} - {Message}", title, message);
-
-            // Always show on UI thread. If no window/page yet, just log.
-            var page = Application.Current?.Windows?.FirstOrDefault()?.Page;
-            if (page is null)
+            _ring.AddFirst(note);
+            if (_ring.Count > MaxBuffered)
             {
-                _logger.LogWarning("No active page; skipping notification: {Title}", title);
-                return;
+                evicted = _ring.Last!.Value;
+                _ring.RemoveLast();
             }
-
-            if (MainThread.IsMainThread)
-                await page.DisplayAlert(title, message, "OK");
-            else
-                await MainThread.InvokeOnMainThreadAsync(() =>
-                    page.DisplayAlert(title, message, "OK")
-                );
         }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to show notification."); }
-        finally { _notifyGate.Release(); }
+
+        _logger.LogInformation("Notify [{Severity}]: {Title} - {Message}", severity, title, message);
+        if (evicted is not null)
+            _logger.LogDebug("Notification ring evicted oldest: {EvictedTitle}", evicted.Title);
+
+        // Raise on the UI thread so subscribers (ToastHost, TopNavBar inbox)
+        // can mutate ObservableCollections without dispatcher gymnastics.
+        var handler = NotificationAdded;
+        if (handler is not null)
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                try { handler.Invoke(this, note); }
+                catch (Exception ex) { _logger.LogError(ex, "NotificationAdded handler threw."); }
+            });
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Clear()
+    {
+        lock (_ringLock) _ring.Clear();
     }
     #endregion
 
     #region Private helpers
-    private async Task<(string title, string message)> BuildFromOrderResultAsync(OrderResult r, CancellationToken ct)
+    private async Task<(string Title, string Message, NotificationSeverity Severity)>
+        BuildFromOrderResultAsync(OrderResult r, CancellationToken ct)
     {
         var o = r.PlacedOrder;
         var symbol = o is null ? "Order" : await TryGetSymbolAsync(o.StockId, ct).ConfigureAwait(false);
 
-        // Failure path
         if (!r.PlacedSuccessfully)
         {
-            // Failure/edge reasons
             var reason = string.IsNullOrWhiteSpace(r.ErrorMessage) ? r.Status.ToString() : r.ErrorMessage;
-            return ($"{symbol}: {r.Status}", reason);
+            return ($"{symbol}: {r.Status}", reason, NotificationSeverity.Error);
         }
 
-        // Should not happen, but just in case
         if (o is null)
-            return ($"{symbol}: Order update", "Order details unavailable.");
+            return ($"{symbol}: Order update", "Order details unavailable.", NotificationSeverity.Info);
 
-        // Success paths (placed / partial / filled / on-book)
         var type = o.OrderType;
         var qty = o.Quantity;
         var avg = CurrencyHelper.Format(r.AverageFillPrice, o.CurrencyType);
@@ -117,38 +138,39 @@ public sealed class NotificationService : INotificationService
 
         switch (r.Status)
         {
-            case OrderStatus.Filled: // Fully filled now
+            case OrderStatus.Filled:
                 return ($"{symbol}: Order #{o.OrderId} filled",
-                    $"{type} {qty} {symbol} @ {avg} (avg)\n" +
-                    $"Order #{o.OrderId} completed.");
+                    $"{type} {qty} {symbol} @ {avg} (avg)\nOrder #{o.OrderId} completed.",
+                    NotificationSeverity.Success);
 
-            case OrderStatus.PartialFill: // Some filled right now
+            case OrderStatus.PartialFill:
                 return ($"{symbol}: Order #{o.OrderId} partially filled",
-                    $"{type} {r.TotalFilledQuantity}/{qty} {symbol} @ {avg} (avg) - Remaining: {rem}.");
+                    $"{type} {r.TotalFilledQuantity}/{qty} {symbol} @ {avg} (avg) - Remaining: {rem}.",
+                    NotificationSeverity.Info);
 
-            case OrderStatus.PlacedOnBook: // Resting limit, nothing filled yet
+            case OrderStatus.PlacedOnBook:
                 return ($"{symbol}: Order #{o.OrderId} placed on book",
-                    $"{type} {qty} {symbol} @ {o.PriceDisplay}\n" +
-                    $"Order #{o.OrderId} is resting. We’ll notify you on fills.");
+                    $"{type} {qty} {symbol} @ {o.PriceDisplay}\nOrder #{o.OrderId} is resting. We'll notify you on fills.",
+                    NotificationSeverity.Info);
 
-            default: // ‘Success’ status from market path
-                return ($"{symbol}: Order update", r.SuccessMessage);
+            default:
+                return ($"{symbol}: Order update", r.SuccessMessage, NotificationSeverity.Info);
         }
     }
 
-    private async Task<(string title, string message)> BuildFromFillAsync(Order o, Transaction tx, CancellationToken ct)
+    private async Task<(string Title, string Message, NotificationSeverity Severity)>
+        BuildFromFillAsync(Order o, Transaction tx, CancellationToken ct)
     {
-        // tx.Price is the maker’s price; show exact fill and the new remaining.
         var symbol = await TryGetSymbolAsync(o.StockId, ct).ConfigureAwait(false);
         var side = o.IsBuyOrder ? "Buy" : "Sell";
 
         return o.IsOpen
-            ? ($"{symbol}: Partial fill", // Still open
-                $"{side} {tx.Quantity} {symbol} @ {tx.PriceDisplay}\n" +
-                $"Filled: {o.AmountFilled}/{o.Quantity} • Remaining: {o.RemainingQuantity}.")
-            : ($"{symbol}: Order filled", // Closed = fully filled
-                $"{side} {tx.Quantity} {symbol} @ {tx.PriceDisplay}\n" +
-                $"Order #{o.OrderId} is now complete.");
+            ? ($"{symbol}: Partial fill",
+                $"{side} {tx.Quantity} {symbol} @ {tx.PriceDisplay}\nFilled: {o.AmountFilled}/{o.Quantity} • Remaining: {o.RemainingQuantity}.",
+                NotificationSeverity.Info)
+            : ($"{symbol}: Order filled",
+                $"{side} {tx.Quantity} {symbol} @ {tx.PriceDisplay}\nOrder #{o.OrderId} is now complete.",
+                NotificationSeverity.Success);
     }
 
     private async Task<string> TryGetSymbolAsync(int stockId, CancellationToken ct)
@@ -157,17 +179,14 @@ public sealed class NotificationService : INotificationService
         {
             if (stockId <= 0) return "Stock";
 
-            // First try from in-memory snapshot
             await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
             if (_stock.TryGetById(stockId, out var stock))
-                 return stock!.Symbol;
+                return stock!.Symbol;
 
-            // Try reloading once more, since it might be a new stock
             await _stock.RefreshAsync(ct).ConfigureAwait(false);
             if (_stock.TryGetById(stockId, out stock))
-                 return stock!.Symbol;
+                return stock!.Symbol;
 
-            // Fallback
             return $"Stock #{stockId}";
         }
         catch { return $"Stock #{stockId}"; }

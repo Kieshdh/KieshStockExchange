@@ -278,6 +278,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                 await _notification.PushNotificationAsync(
                     "Order failed",
                     "An unexpected error stopped your order. Please try again.",
+                    NotificationSeverity.Error,
                     CancellationToken.None);
             }
             catch (Exception inner)
