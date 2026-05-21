@@ -1,4 +1,5 @@
 using CommunityToolkit.Maui;
+using Microsoft.Maui.LifecycleEvents;
 using KieshStockExchange.Services.BackgroundServices;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices;
@@ -47,7 +48,21 @@ public static class MauiProgram
             {
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
                 fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
-            });
+            })
+#if WINDOWS
+            .ConfigureLifecycleEvents(events =>
+            {
+                events.AddWindows(windows => windows.OnWindowCreated(window =>
+                {
+                    var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
+                    var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+                    var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
+                    if (appWindow?.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+                        presenter.Maximize();
+                }));
+            })
+#endif
+            ;
 
         // Pages
         builder.Services.AddTransient<LoginPage>();
