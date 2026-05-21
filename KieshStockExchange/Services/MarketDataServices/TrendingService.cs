@@ -43,7 +43,7 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
     private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(SecondsBetweenUpdates));
     private readonly CancellationTokenSource _cts = new();
 
-    private const int MaxMovers = 5;
+    private const int MaxMovers = 3;
     private const int SecondsBetweenUpdates = 5;
 
     public CurrencyType Currency { get; set; } = CurrencyType.USD;
@@ -79,16 +79,25 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
     public Task RecomputeMoversAsync()
     {
+        // Snapshot LiveQuote fields into immutable records on the timer thread
+        // BEFORE handing them to the dispatcher. TickPipeline may be writing
+        // LiveQuote.LastPriceDisplay et al. concurrently on a different bg
+        // thread; capturing live references in the dispatch lambda would
+        // produce wrong-thread PropertyChanged propagation through MoverRow's
+        // setters once the UI thread reads them. Records are by-value frozen.
         var snap = _market.Quotes.Values.ToList();
 
-        var gainers = snap.Where(q => q.Open > 0m)
-            .OrderByDescending(q => q.ChangePct).Take(MaxMovers).ToList();
+        var gainers = snap.Where(q => q.Open > 0m && q.ChangePct > 0m)
+            .OrderByDescending(q => q.ChangePct).Take(MaxMovers)
+            .Select(ToSnapshot).ToList();
 
-        var losers = snap.Where(q => q.Open > 0m)
-            .OrderBy(q => q.ChangePct).Take(MaxMovers).ToList();
+        var losers = snap.Where(q => q.Open > 0m && q.ChangePct < 0m)
+            .OrderBy(q => q.ChangePct).Take(MaxMovers)
+            .Select(ToSnapshot).ToList();
 
         var actives = snap.Where(q => q.Volume > 0)
-            .OrderByDescending(q => q.Volume).Take(MaxMovers).ToList();
+            .OrderByDescending(q => q.Volume).Take(MaxMovers)
+            .Select(ToSnapshot).ToList();
 
         _dispatcher.Dispatch(() =>
         {
@@ -100,8 +109,11 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
         return Task.CompletedTask;
     }
 
+    private static MoverSnapshot ToSnapshot(LiveQuote q) =>
+        new(q.Symbol, q.LastPriceDisplay, q.ChangePctDisplay, q.ChangePct);
+
     /// <summary>
-    /// Project the ranked LiveQuote list into <paramref name="target"/>:
+    /// Project the ranked snapshot list into <paramref name="target"/>:
     ///   - Reuse a MoverRow instance if its symbol is still present (calling
     ///     UpdateFrom so the row's bound cells refresh in place).
     ///   - Move existing rows into their new ranking position.
@@ -111,24 +123,24 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
     /// always shows the data of the symbol it claims to.
     /// </summary>
     private static void SyncList(ObservableCollection<MoverRow> target,
-        IList<LiveQuote> src, Dictionary<string, MoverRow> rowsBySymbol)
+        IList<MoverSnapshot> src, Dictionary<string, MoverRow> rowsBySymbol)
     {
         // Build the desired-order MoverRow list, reusing existing instances by
         // symbol so unchanged entries keep the same reference (and CollectionView
         // keeps the same visual row).
         var desired = new List<MoverRow>(src.Count);
         var presentSymbols = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var q in src)
+        foreach (var s in src)
         {
-            presentSymbols.Add(q.Symbol);
-            if (rowsBySymbol.TryGetValue(q.Symbol, out var row))
+            presentSymbols.Add(s.Symbol);
+            if (rowsBySymbol.TryGetValue(s.Symbol, out var row))
             {
-                row.UpdateFrom(q);
+                row.UpdateFrom(s);
             }
             else
             {
-                row = new MoverRow(q);
-                rowsBySymbol[q.Symbol] = row;
+                row = new MoverRow(s);
+                rowsBySymbol[s.Symbol] = row;
             }
             desired.Add(row);
         }

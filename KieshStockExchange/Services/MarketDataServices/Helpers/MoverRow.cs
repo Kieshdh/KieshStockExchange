@@ -3,9 +3,20 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace KieshStockExchange.Services.MarketDataServices.Helpers;
 
 /// <summary>
+/// Immutable snapshot of the LiveQuote fields MoverRow needs. Constructed on
+/// the timer thread so the dispatched UI lambda never reads from a LiveQuote
+/// that the tick pipeline may be writing concurrently.
+/// </summary>
+public sealed record MoverSnapshot(
+    string Symbol,
+    string LastPriceDisplay,
+    string ChangePctDisplay,
+    decimal ChangePct);
+
+/// <summary>
 /// Stable, observable row backing the Top Gainers / Top Losers / Most Active
-/// lists. Symbol identifies the row across recomputes; values are pulled from
-/// the underlying <see cref="LiveQuote"/> via <see cref="UpdateFrom"/>.
+/// lists. Symbol identifies the row across recomputes; values are applied from
+/// a <see cref="MoverSnapshot"/> built off the underlying LiveQuote.
 ///
 /// Rationale for not binding LiveQuote directly: MAUI's CollectionView did not
 /// reliably rebind row content when the bound ObservableCollection raised
@@ -28,16 +39,16 @@ public sealed partial class MoverRow : ObservableObject
     public bool IsBullish => ChangePct > 0m;
     public bool IsBearish => ChangePct < 0m;
 
-    public MoverRow(LiveQuote q)
+    public MoverRow(MoverSnapshot s)
     {
-        Symbol = q.Symbol;
-        UpdateFrom(q);
+        Symbol = s.Symbol;
+        UpdateFrom(s);
     }
 
-    public void UpdateFrom(LiveQuote q)
+    public void UpdateFrom(MoverSnapshot s)
     {
-        LastPriceDisplay = q.LastPriceDisplay;
-        ChangePctDisplay = q.ChangePctDisplay;
-        ChangePct = q.ChangePct;
+        LastPriceDisplay = s.LastPriceDisplay;
+        ChangePctDisplay = s.ChangePctDisplay;
+        ChangePct = s.ChangePct;
     }
 }
