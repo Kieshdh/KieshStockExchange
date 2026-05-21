@@ -14,9 +14,11 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 internal sealed class BotCashInjector
 {
     #region Services and Constructor
-    // Master off-switch. Leave false until a dry run confirms the cycle
-    // timer fires without depositing; flip to true to activate income.
-    private const bool Enabled = false;
+    // Master off-switch. Flip to false to suspend the injection cycle.
+    // static readonly (not const) so the runtime `if (!Enabled)` branch
+    // stays live and the compiler doesn't flag the rest of the method as
+    // unreachable code when the switch is on.
+    private static readonly bool Enabled = true;
 
     // v1 deposits into USD only; multi-currency revisits via 3.2.
     private static readonly CurrencyType InjectionCurrency = CurrencyType.USD;
@@ -41,7 +43,6 @@ internal sealed class BotCashInjector
     {
         if (!Enabled) return;
 
-#pragma warning disable CS0162 // kill-switch; flip Enabled to activate
         int injectedCount = 0;
         decimal injectedTotal = 0m;
 
@@ -75,7 +76,6 @@ internal sealed class BotCashInjector
         _logger.LogInformation(
             "Cash injection cycle: {Count} bots, total {Total}",
             injectedCount, CurrencyHelper.Format(injectedTotal, InjectionCurrency));
-#pragma warning restore CS0162
     }
     #endregion
 }
