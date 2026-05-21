@@ -36,7 +36,7 @@
             <Border Style="{StaticResource TradeContentOutline}"
                    Grid.Row="1" Grid.Column="0"
                    Margin="0">
-                <Grid ColumnDefinitions="Auto, Auto, Auto" ColumnSpacing="10">
+                <Grid ColumnDefinitions="Auto, Auto, Auto, Auto" ColumnSpacing="10">
                     <Picker ItemsSource="{Binding TradingPairs}" Grid.Column="0"
                             SelectedItem="{Binding PickerSelection, Mode=TwoWay}"
                             Style="{StaticResource StockSelectorPicker}">
@@ -44,9 +44,24 @@
                             <Binding Path="Display" x:DataType="local:TradingPair" />
                         </Picker.ItemDisplayBinding>
                     </Picker>
-                    <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="1"
+                    <!-- Star toggle: ★ when watched, ☆ otherwise. -->
+                    <Button Grid.Column="1"
+                            Command="{Binding ToggleSelectedWatchCommand}"
+                            Style="{StaticResource WatchStarButton}">
+                        <Button.Triggers>
+                            <DataTrigger TargetType="Button" Binding="{Binding IsSelectedWatched}" Value="True">
+                                <Setter Property="Text"      Value="&#x2605;" />
+                                <Setter Property="TextColor" Value="{DynamicResource BuyGreen}" />
+                            </DataTrigger>
+                            <DataTrigger TargetType="Button" Binding="{Binding IsSelectedWatched}" Value="False">
+                                <Setter Property="Text"      Value="&#x2606;" />
+                                <Setter Property="TextColor" Value="{DynamicResource TextMuted}" />
+                            </DataTrigger>
+                        </Button.Triggers>
+                    </Button>
+                    <Label Text="{Binding Selected.CurrentPriceDisplay}" Grid.Column="2"
                            Style="{StaticResource SelectedStockHeaderLabel}" />
-                    <Label Text="{Binding Selected.CompanyName}" Grid.Column="2"
+                    <Label Text="{Binding Selected.CompanyName}" Grid.Column="3"
                            Style="{StaticResource SelectedStockHeaderLabel}" />
                 </Grid>
             </Border>

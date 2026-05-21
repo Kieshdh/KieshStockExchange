@@ -5,17 +5,24 @@
              xmlns:helpers="clr-namespace:KieshStockExchange.Services.MarketDataServices.Helpers"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
              x:Class="KieshStockExchange.Views.MarketPageViews.MarketPage"
+             x:Name="MarketPageRoot"
              x:DataType="vm:MarketViewModel"
              Title="Market">
 
     <Grid Style="{StaticResource MainGrid}"
-          RowDefinitions="Auto,Auto,Auto,*"
+          RowDefinitions="Auto,Auto,Auto,Auto,*"
           RowSpacing="8"
           Padding="0,0,0,8">
 
         <!-- Top nav -->
         <navbar:TopNavBarView Grid.Row="0"
                               BindingContext="{Binding TopNavBarVm}" />
+
+        <!-- Toast overlay (top-right of content area; passes clicks through empty space) -->
+        <navbar:ToastHostView Grid.Row="1" Grid.RowSpan="5"
+                              VerticalOptions="Start" HorizontalOptions="End"
+                              Margin="0,8,16,0"
+                              ZIndex="200" />
 
         <!-- Page heading -->
         <Grid Grid.Row="1"
@@ -28,8 +35,100 @@
                    Style="{StaticResource PageHeadingSub}" />
         </Grid>
 
+        <!-- ============== MY WATCHLIST CARD ============== -->
+        <Border Grid.Row="2"
+                Style="{StaticResource DashboardCardStyle}"
+                Padding="0"
+                Margin="24,0,24,0"
+                IsVisible="{Binding HasWatchlist}">
+            <Grid RowDefinitions="Auto,Auto,*">
+                <Label Grid.Row="0"
+                       Text="My Watchlist"
+                       Style="{StaticResource SectionHeaderLabelStyle}"
+                       Padding="16,14,16,8" />
+
+                <Grid Grid.Row="1"
+                      Style="{StaticResource TableHeaderGridStyle}"
+                      ColumnDefinitions="*,*,*,Auto,Auto,Auto,Auto"
+                      ColumnSpacing="8"
+                      Padding="16,8">
+                    <Label Grid.Column="0" Text="SYMBOL" Style="{StaticResource TableHeaderLabelStyle}" HorizontalTextAlignment="Start" />
+                    <Label Grid.Column="1" Text="LAST"   Style="{StaticResource TableHeaderLabelStyle}" HorizontalTextAlignment="End" />
+                    <Label Grid.Column="2" Text="CHANGE" Style="{StaticResource TableHeaderLabelStyle}" HorizontalTextAlignment="End" />
+                    <Label Grid.Column="3" Text=""       Style="{StaticResource TableHeaderLabelStyle}" WidthRequest="36" />
+                    <Label Grid.Column="4" Text=""       Style="{StaticResource TableHeaderLabelStyle}" WidthRequest="36" />
+                    <Label Grid.Column="5" Text=""       Style="{StaticResource TableHeaderLabelStyle}" WidthRequest="64" />
+                    <Label Grid.Column="6" Text=""       Style="{StaticResource TableHeaderLabelStyle}" WidthRequest="28" />
+                </Grid>
+
+                <CollectionView Grid.Row="2"
+                                ItemsSource="{Binding Watchlist}"
+                                SelectionMode="None">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:MarketRow">
+                            <Grid ColumnDefinitions="*,*,*,Auto,Auto,Auto,Auto"
+                                  ColumnSpacing="8"
+                                  Padding="16,6">
+                                <Label Grid.Column="0"
+                                       Text="{Binding Symbol}"
+                                       Style="{StaticResource TradeTableSymbolLabel}"
+                                       VerticalTextAlignment="Center" />
+                                <Label Grid.Column="1"
+                                       Text="{Binding LastPriceDisplay}"
+                                       Style="{StaticResource TradeTableRowLabel}"
+                                       HorizontalTextAlignment="End"
+                                       VerticalTextAlignment="Center" />
+                                <Label Grid.Column="2"
+                                       Text="{Binding ChangePctDisplay}"
+                                       HorizontalTextAlignment="End"
+                                       VerticalTextAlignment="Center">
+                                    <Label.Style>
+                                        <Style TargetType="Label" BasedOn="{StaticResource TradeTableRowLabel}">
+                                            <Style.Triggers>
+                                                <DataTrigger TargetType="Label" Binding="{Binding IsBullish}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource BuyGreen}" />
+                                                </DataTrigger>
+                                                <DataTrigger TargetType="Label" Binding="{Binding IsBearish}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource SellRed}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Label.Style>
+                                </Label>
+                                <Button Grid.Column="3"
+                                        Text="&#x25B2;"
+                                        Style="{StaticResource WatchStarButton}"
+                                        WidthRequest="32"
+                                        FontSize="12"
+                                        Command="{Binding Source={x:Reference MarketPageRoot}, Path=BindingContext.MoveWatchUpCommand, x:DataType=vm:MarketViewModel}"
+                                        CommandParameter="{Binding .}" />
+                                <Button Grid.Column="4"
+                                        Text="&#x25BC;"
+                                        Style="{StaticResource WatchStarButton}"
+                                        WidthRequest="32"
+                                        FontSize="12"
+                                        Command="{Binding Source={x:Reference MarketPageRoot}, Path=BindingContext.MoveWatchDownCommand, x:DataType=vm:MarketViewModel}"
+                                        CommandParameter="{Binding .}" />
+                                <Button Grid.Column="5"
+                                        Text="Trade"
+                                        Style="{StaticResource TableActionButton}"
+                                        Command="{Binding TradeCommand}"
+                                        CommandParameter="{Binding .}" />
+                                <Button Grid.Column="6"
+                                        Text="&#x2605;"
+                                        Style="{StaticResource WatchStarButton}"
+                                        TextColor="{DynamicResource BuyGreen}"
+                                        Command="{Binding ToggleWatchCommand}"
+                                        CommandParameter="{Binding .}" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </Grid>
+        </Border>
+
         <!-- ============== TOP STRIP: Top Gainers + Top Losers ============== -->
-        <Grid Grid.Row="2"
+        <Grid Grid.Row="3"
               ColumnDefinitions="*,*"
               ColumnSpacing="12"
               Padding="24,0,24,0">
@@ -122,7 +221,7 @@
         </Grid>
 
         <!-- ============== BOTTOM: All Stocks ============== -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Style="{StaticResource DashboardCardStyle}"
                 Padding="0"
                 Margin="24,0,24,0">
@@ -171,13 +270,13 @@
                                     </Style>
                                 </Button.Style>
                             </Button>
-                            <Button Text="All"
+                            <Button Text="&#x2605;"
                                     Command="{Binding SelectCurrencyTabCommand}"
-                                    CommandParameter="All">
+                                    CommandParameter="Watchlist">
                                 <Button.Style>
                                     <Style TargetType="Button" BasedOn="{StaticResource UnselectedSegmentButtonStyle}">
                                         <Style.Triggers>
-                                            <DataTrigger TargetType="Button" Binding="{Binding IsAllTabActive}" Value="True">
+                                            <DataTrigger TargetType="Button" Binding="{Binding IsWatchlistTabActive}" Value="True">
                                                 <Setter Property="BackgroundColor" Value="{DynamicResource SelectedTabBg}" />
                                                 <Setter Property="TextColor"       Value="{DynamicResource SelectedTabFg}" />
                                                 <Setter Property="BorderColor"     Value="{DynamicResource Divider}" />
@@ -205,30 +304,34 @@
                 <!-- Column headers -->
                 <Grid Grid.Row="1"
                       Style="{StaticResource TableHeaderGridStyle}"
-                      ColumnDefinitions="*,2*,*,*,*,Auto"
+                      ColumnDefinitions="Auto,*,2*,*,*,*,Auto"
                       ColumnSpacing="8"
                       Padding="16,8">
                     <Label Grid.Column="0"
+                           Text=""
+                           Style="{StaticResource TableHeaderLabelStyle}"
+                           WidthRequest="28" />
+                    <Label Grid.Column="1"
                            Text="SYMBOL"
                            Style="{StaticResource TableHeaderLabelStyle}"
                            HorizontalTextAlignment="Start" />
-                    <Label Grid.Column="1"
+                    <Label Grid.Column="2"
                            Text="NAME"
                            Style="{StaticResource TableHeaderLabelStyle}"
                            HorizontalTextAlignment="Start" />
-                    <Label Grid.Column="2"
+                    <Label Grid.Column="3"
                            Text="LAST"
                            Style="{StaticResource TableHeaderLabelStyle}"
                            HorizontalTextAlignment="End" />
-                    <Label Grid.Column="3"
+                    <Label Grid.Column="4"
                            Text="CHANGE"
                            Style="{StaticResource TableHeaderLabelStyle}"
                            HorizontalTextAlignment="End" />
-                    <Label Grid.Column="4"
+                    <Label Grid.Column="5"
                            Text="VOLUME"
                            Style="{StaticResource TableHeaderLabelStyle}"
                            HorizontalTextAlignment="End" />
-                    <Label Grid.Column="5"
+                    <Label Grid.Column="6"
                            Text=""
                            Style="{StaticResource TableHeaderLabelStyle}"
                            WidthRequest="64" />
@@ -250,27 +353,45 @@
 
                         <CollectionView.ItemTemplate>
                             <DataTemplate x:DataType="vm:MarketRow">
-                                <Grid ColumnDefinitions="*,2*,*,*,*,Auto"
+                                <Grid ColumnDefinitions="Auto,*,2*,*,*,*,Auto"
                                       ColumnSpacing="8"
                                       Padding="16,8">
-                                    <Label Grid.Column="0"
+
+                                    <!-- Star toggle: ★ when watched, ☆ otherwise. Swap via DataTrigger. -->
+                                    <Button Grid.Column="0"
+                                            Command="{Binding ToggleWatchCommand}"
+                                            CommandParameter="{Binding .}"
+                                            Style="{StaticResource WatchStarButton}">
+                                        <Button.Triggers>
+                                            <DataTrigger TargetType="Button" Binding="{Binding IsWatched}" Value="True">
+                                                <Setter Property="Text"      Value="&#x2605;" />
+                                                <Setter Property="TextColor" Value="{DynamicResource BuyGreen}" />
+                                            </DataTrigger>
+                                            <DataTrigger TargetType="Button" Binding="{Binding IsWatched}" Value="False">
+                                                <Setter Property="Text"      Value="&#x2606;" />
+                                                <Setter Property="TextColor" Value="{DynamicResource TextMuted}" />
+                                            </DataTrigger>
+                                        </Button.Triggers>
+                                    </Button>
+
+                                    <Label Grid.Column="1"
                                            Text="{Binding Symbol}"
                                            Style="{StaticResource TradeTableSymbolLabel}"
                                            HorizontalTextAlignment="Start"
                                            VerticalTextAlignment="Center" />
-                                    <Label Grid.Column="1"
+                                    <Label Grid.Column="2"
                                            Text="{Binding CompanyName}"
                                            Style="{StaticResource TradeTableRowLabel}"
                                            HorizontalTextAlignment="Start"
                                            VerticalTextAlignment="Center" />
-                                    <Label Grid.Column="2"
+                                    <Label Grid.Column="3"
                                            Text="{Binding LastPriceDisplay}"
                                            Style="{StaticResource TradeTableRowLabel}"
                                            HorizontalTextAlignment="End"
                                            VerticalTextAlignment="Center" />
 
                                     <!-- Daily change: green when bullish, red when bearish, default otherwise -->
-                                    <Label Grid.Column="3"
+                                    <Label Grid.Column="4"
                                            Text="{Binding ChangePctDisplay}"
                                            HorizontalTextAlignment="End"
                                            VerticalTextAlignment="Center">
@@ -289,13 +410,13 @@
                                     </Label>
 
                                     <!-- Daily dollar volume (sum of price*shares for the session) -->
-                                    <Label Grid.Column="4"
+                                    <Label Grid.Column="5"
                                            Text="{Binding DollarVolumeDisplay}"
                                            Style="{StaticResource TradeTableRowLabel}"
                                            HorizontalTextAlignment="End"
                                            VerticalTextAlignment="Center" />
 
-                                    <Button Grid.Column="5"
+                                    <Button Grid.Column="6"
                                             Text="Trade"
                                             Style="{StaticResource TableActionButton}"
                                             HorizontalOptions="End"

@@ -4,6 +4,7 @@ using KieshStockExchange.Helpers;
 using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -23,16 +24,18 @@ public partial class LoginViewModel : BaseViewModel
     private readonly IAuthService _auth;
     private readonly IUserSessionService _session;
     private readonly IProfileService _profile;
+    private readonly IWatchlistService _watchlist;
     private readonly ILogger<LoginViewModel> _logger;
     private readonly Task _initTask;
 
     public LoginViewModel(IAuthService auth, IUserSessionService session,
-        IProfileService profile, ILogger<LoginViewModel> logger)
+        IProfileService profile, IWatchlistService watchlist, ILogger<LoginViewModel> logger)
     {
         Title = "Login";
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _profile = profile ?? throw new ArgumentNullException(nameof(profile));
+        _watchlist = watchlist ?? throw new ArgumentNullException(nameof(watchlist));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         LoginCommand = new AsyncRelayCommand(ExecuteLogin);
 
@@ -87,9 +90,10 @@ public partial class LoginViewModel : BaseViewModel
                 CandleResolution.Default);
 
             // Restore persisted user preferences (theme, base currency, candle resolution)
-            // before navigating, so the destination page paints with the user's choices
-            // already applied. Failures are swallowed inside LoadPreferencesAsync.
             await _profile.LoadPreferencesAsync(_auth.CurrentUserId);
+
+            try { await _watchlist.RefreshAsync(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Watchlist refresh on login failed."); }
 
             await _session.StartBotsAsync();
             await Shell.Current.GoToAsync("//TradePage");

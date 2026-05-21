@@ -1277,6 +1277,65 @@ public class LocalDBService: IDataBaseService, IDisposable
     }
     #endregion
 
+    #region UserWatchlist operations
+    public async Task<List<UserWatchlistEntry>> GetWatchlistByUserId(int userId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<UserWatchlistEntry>()
+               .Where(w => w.UserId == userId)
+               .OrderBy(w => w.SortOrder)
+               .ToListAsync(),
+            ct);
+    }
+
+    public async Task UpsertWatchlistEntry(UserWatchlistEntry entry, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (!entry.IsValid())
+            throw new ArgumentException("UserWatchlistEntry is not valid", nameof(entry));
+
+        // Id is AutoIncrement: Id=0 inserts new (composite unique index on (UserId, StockId)
+        // protects against duplicates), Id>0 updates that row (used for SortOrder edits).
+        await RunDbAsync(() => _db.InsertOrReplaceAsync(entry), ct);
+    }
+
+    public async Task<bool> DeleteWatchlistEntry(int userId, int stockId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        var rows = await RunDbAsync(() => _db.ExecuteAsync(
+            "DELETE FROM UserWatchlist WHERE UserId = ? AND StockId = ?", userId, stockId), ct);
+        return rows > 0;
+    }
+
+    public async Task ReplaceWatchlistAsync(int userId, IReadOnlyList<UserWatchlistEntry> entries, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        if (entries is null) throw new ArgumentNullException(nameof(entries));
+
+        await RunInTransactionAsync(async _ =>
+        {
+            await _db.ExecuteAsync("DELETE FROM UserWatchlist WHERE UserId = ?", userId);
+            foreach (var e in entries)
+            {
+                if (e.UserId != userId)
+                    throw new ArgumentException($"Entry UserId {e.UserId} does not match caller {userId}.", nameof(entries));
+                if (!e.IsValid())
+                    throw new ArgumentException("UserWatchlistEntry is not valid.", nameof(entries));
+                // Force a fresh Id so the unique index isn't tripped by a stale value.
+                var insert = new UserWatchlistEntry
+                {
+                    UserId = e.UserId,
+                    StockId = e.StockId,
+                    SortOrder = e.SortOrder,
+                    AddedAt = e.AddedAt
+                };
+                await _db.InsertAsync(insert);
+            }
+        }, ct);
+    }
+    #endregion
+
     #region AIUser operations
     public async Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default)
     {
@@ -1362,6 +1421,7 @@ public class LocalDBService: IDataBaseService, IDisposable
             await _db.CreateTableAsync<Fund>();
             await _db.CreateTableAsync<FundTransaction>();
             await _db.CreateTableAsync<UserPreferences>();
+            await _db.CreateTableAsync<UserWatchlistEntry>();
             await _db.CreateTableAsync<Candle>();
             await _db.CreateTableAsync<Message>();
             await _db.CreateTableAsync<AIUser>();

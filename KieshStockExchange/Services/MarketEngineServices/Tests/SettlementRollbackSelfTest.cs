@@ -467,6 +467,11 @@ internal sealed class FakeDb : IDataBaseService
     public Task<UserPreferences?> GetUserPreferencesByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default) => throw new NotImplementedException();
 
+    public Task<List<UserWatchlistEntry>> GetWatchlistByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task UpsertWatchlistEntry(UserWatchlistEntry entry, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<bool> DeleteWatchlistEntry(int userId, int stockId, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task ReplaceWatchlistAsync(int userId, IReadOnlyList<UserWatchlistEntry> entries, CancellationToken ct = default) => throw new NotImplementedException();
+
     public Task<List<Candle>> GetCandlesAsync(CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Candle?> GetCandleById(int candleId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken ct = default) => throw new NotImplementedException();

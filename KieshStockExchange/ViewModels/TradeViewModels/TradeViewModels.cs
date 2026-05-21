@@ -6,6 +6,7 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
@@ -64,6 +65,9 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     }
 
     [ObservableProperty] private bool _showAll = true;
+
+    /// <summary>Whether the currently selected stock is on the user's watchlist.</summary>
+    [ObservableProperty] private bool _isSelectedWatched;
     #endregion
 
     #region ViewModel Properties
@@ -90,10 +94,11 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     private readonly IUserSessionService _session;
     private readonly IOrderEditService _editService;
     private readonly IStockService _stocks;
+    private readonly IWatchlistService _watchlist;
 
     public TradeViewModel( ISelectedStockService selected, IMarketDataService market,
         ILogger<TradeViewModel> logger, IUserSessionService userSession,
-        IOrderEditService editService, IStockService stocks,
+        IOrderEditService editService, IStockService stocks, IWatchlistService watchlist,
         PlaceOrderViewModel placingVm, ModifyOrderViewModel modifyingVm,
         TransactionHistoryViewModel historyVm,
         OpenOrdersViewModel openOrdersVm, UserPositionsViewModel positionsVm,
@@ -107,6 +112,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         _session = userSession ?? throw new ArgumentNullException(nameof(userSession));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
+        _watchlist = watchlist ?? throw new ArgumentNullException(nameof(watchlist));
 
         PlacingVm = placingVm;
         ModifyingVm = modifyingVm;
@@ -121,6 +127,26 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         Title = "Trade";
         _selected.PropertyChanged += OnSelectedChanged;
         _editService.PropertyChanged += OnEditServiceChanged;
+        _watchlist.Changed += OnWatchlistChanged;
+        RefreshIsSelectedWatched();
+    }
+
+    private void OnWatchlistChanged(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(RefreshIsSelectedWatched);
+
+    private void RefreshIsSelectedWatched()
+    {
+        var sid = _selected.StockId;
+        IsSelectedWatched = sid is int id && _watchlist.IsWatched(id);
+    }
+
+    [RelayCommand]
+    private async Task ToggleSelectedWatchAsync()
+    {
+        var sid = _selected.StockId;
+        if (sid is null) return;
+        try { await _watchlist.ToggleAsync(sid.Value).ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogError(ex, "Toggle watchlist from TradePage failed."); }
     }
 
     private void OnEditServiceChanged(object? sender, PropertyChangedEventArgs e)
@@ -170,6 +196,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     {
         _selected.PropertyChanged -= OnSelectedChanged;
         _editService.PropertyChanged -= OnEditServiceChanged;
+        _watchlist.Changed -= OnWatchlistChanged;
         ModifyingVm.Dispose();
         TopNavBarVm.Dispose();
     }
@@ -208,7 +235,11 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
             _pickerSelection = match;
             OnPropertyChanged(nameof(PickerSelection));
 
-            if (isStockChange) ChartVm.IsYAutoFit = true;
+            if (isStockChange)
+            {
+                ChartVm.IsYAutoFit = true;
+                RefreshIsSelectedWatched();
+            }
         });
     }
 

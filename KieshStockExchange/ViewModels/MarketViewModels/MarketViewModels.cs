@@ -5,6 +5,7 @@ using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
@@ -19,6 +20,13 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     public ObservableCollection<MarketRow> FilteredStocks { get; } = new();
     /// <summary>The current visible page over <see cref="FilteredStocks"/>.</summary>
     public ObservableCollection<MarketRow> PagedStocks { get; } = new();
+    /// <summary>
+    /// "My Watchlist" card content — user's starred stocks in their saved order.
+    /// Independent of the currency tab so the card stays useful even when the user
+    /// is on USD and a watched stock is EUR.
+    /// </summary>
+    public ObservableCollection<MarketRow> Watchlist { get; } = new();
+    public bool HasWatchlist => Watchlist.Count > 0;
 
     [ObservableProperty] private string _searchText = string.Empty;
 
@@ -28,22 +36,23 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     [NotifyPropertyChangedFor(nameof(PageDisplay))]
     private int _pageNumber; // 0-based
 
-    // USD / EUR / All tab strip. ShowAllCurrencies = true bypasses FilterCurrency.
+    // USD / EUR / Watchlist tab strip. ShowWatchlistOnly = true filters to the
+    // user's starred stocks across both currencies; FilterCurrency is ignored then.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsUsdTabActive))]
     [NotifyPropertyChangedFor(nameof(IsEurTabActive))]
-    [NotifyPropertyChangedFor(nameof(IsAllTabActive))]
+    [NotifyPropertyChangedFor(nameof(IsWatchlistTabActive))]
     private CurrencyType _filterCurrency;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsUsdTabActive))]
     [NotifyPropertyChangedFor(nameof(IsEurTabActive))]
-    [NotifyPropertyChangedFor(nameof(IsAllTabActive))]
-    private bool _showAllCurrencies;
+    [NotifyPropertyChangedFor(nameof(IsWatchlistTabActive))]
+    private bool _showWatchlistOnly;
 
-    public bool IsUsdTabActive => !ShowAllCurrencies && FilterCurrency == CurrencyType.USD;
-    public bool IsEurTabActive => !ShowAllCurrencies && FilterCurrency == CurrencyType.EUR;
-    public bool IsAllTabActive => ShowAllCurrencies;
+    public bool IsUsdTabActive => !ShowWatchlistOnly && FilterCurrency == CurrencyType.USD;
+    public bool IsEurTabActive => !ShowWatchlistOnly && FilterCurrency == CurrencyType.EUR;
+    public bool IsWatchlistTabActive => ShowWatchlistOnly;
 
     public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } =
         new[] { CurrencyType.USD, CurrencyType.EUR };
@@ -63,6 +72,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     private readonly IMarketDataService _market;
     private readonly ISelectedStockService _selected;
     private readonly IUserSessionService _session;
+    private readonly IWatchlistService _watchlist;
     private readonly IDispatcher _dispatcher;
     private readonly ILogger<MarketViewModel> _logger;
 
@@ -78,6 +88,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         IMarketDataService market,
         ISelectedStockService selected,
         IUserSessionService session,
+        IWatchlistService watchlist,
         IDispatcher dispatcher,
         ITrendingService trending,
         TopNavBarViewModel topNavBarVm)
@@ -88,11 +99,13 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         _market     = market      ?? throw new ArgumentNullException(nameof(market));
         _selected   = selected    ?? throw new ArgumentNullException(nameof(selected));
         _session    = session     ?? throw new ArgumentNullException(nameof(session));
+        _watchlist  = watchlist   ?? throw new ArgumentNullException(nameof(watchlist));
         _dispatcher = dispatcher  ?? throw new ArgumentNullException(nameof(dispatcher));
         Trending    = trending    ?? throw new ArgumentNullException(nameof(trending));
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
         _filterCurrency = _session.BaseCurrency;
+        _watchlist.Changed += OnWatchlistChanged;
     }
     #endregion
 
@@ -104,7 +117,8 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         IsBusy = true;
         try
         {
-            if (ShowAllCurrencies)
+            // Watchlist tab spans currencies, so subscribe to every supported one.
+            if (ShowWatchlistOnly)
             {
                 foreach (var ccy in AvailableCurrencies)
                     await _market.SubscribeAllAsync(ccy, forUi: true).ConfigureAwait(false);
@@ -145,6 +159,20 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             _logger.LogError(ex, "Failed to navigate to TradePage for {Symbol}.", row.Symbol);
         }
     }
+
+    [RelayCommand]
+    private async Task ToggleWatchAsync(MarketRow? row)
+    {
+        if (row is null) return;
+        try
+        {
+            await _watchlist.ToggleAsync(row.StockId).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to toggle watchlist for {Symbol}.", row.Symbol);
+        }
+    }
     #endregion
 
     #region Polling
@@ -161,8 +189,15 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     private void Poll()
     {
         IEnumerable<LiveQuote> source = _market.Quotes.Values;
-        if (!ShowAllCurrencies)
+        if (ShowWatchlistOnly)
+        {
+            var watched = _watchlist.GetStockIds().ToHashSet();
+            source = source.Where(q => watched.Contains(q.StockId));
+        }
+        else
+        {
             source = source.Where(q => q.Currency == FilterCurrency);
+        }
         var quotes = source
             .OrderBy(q => q.Symbol, StringComparer.OrdinalIgnoreCase)
             .ThenBy(q => q.Currency)
@@ -179,7 +214,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             }
             else
             {
-                var row = MarketRow.FromQuote(q, TradeCommand);
+                var row = MarketRow.FromQuote(q, TradeCommand, ToggleWatchCommand, _watchlist.IsWatched(q.StockId));
                 _byStockId[key] = row;
                 AllStocks.Add(row);
                 structureChanged = true;
@@ -205,6 +240,11 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             ApplyFilter();
             RebuildPagedStocks();
         }
+
+        // Keep the dedicated Watchlist card in sync — its live values come from the
+        // same LiveQuote cache, and rebuilding here picks up any rows whose quote
+        // arrived after the last membership change.
+        RebuildWatchlistCard();
     }
     #endregion
 
@@ -223,10 +263,80 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         _ = RefreshAsync();
     }
 
-    partial void OnShowAllCurrenciesChanged(bool value)
+    partial void OnShowWatchlistOnlyChanged(bool value)
     {
         ResetRowMap();
         _ = RefreshAsync();
+    }
+
+    private void OnWatchlistChanged(object? sender, EventArgs e)
+    {
+        // Watchlist membership flipped. Sync IsWatched on every existing row,
+        // rebuild the dedicated Watchlist card, and re-derive paging on the
+        // Watchlist tab where structure can change.
+        _ = MainThread.InvokeOnMainThreadAsync(() =>
+        {
+            var watched = _watchlist.GetStockIds().ToHashSet();
+            foreach (var row in AllStocks)
+                row.IsWatched = watched.Contains(row.StockId);
+
+            RebuildWatchlistCard();
+
+            if (ShowWatchlistOnly)
+            {
+                Poll();
+                ApplyFilter();
+                RebuildPagedStocks();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Rebuild the "My Watchlist" top card in saved sort order. Pulls live data
+    /// from the LiveQuote cache; rows whose quote hasn't loaded yet are skipped
+    /// and picked up on the next Poll() that includes them.
+    /// </summary>
+    private void RebuildWatchlistCard()
+    {
+        var ids = _watchlist.GetStockIds();
+        var desired = new List<MarketRow>(ids.Count);
+        foreach (var stockId in ids)
+        {
+            // Prefer a USD quote, else any currency this stock trades in.
+            var quote = _market.Quotes.Values
+                .Where(q => q.StockId == stockId)
+                .OrderBy(q => q.Currency != CurrencyType.USD)
+                .FirstOrDefault();
+            if (quote is null) continue;
+
+            desired.Add(MarketRow.FromQuote(quote, TradeCommand, ToggleWatchCommand, isWatched: true));
+        }
+        SyncRows(Watchlist, desired);
+        OnPropertyChanged(nameof(HasWatchlist));
+    }
+
+    [RelayCommand]
+    private async Task MoveWatchUpAsync(MarketRow? row)
+    {
+        if (row is null) return;
+        var ids = _watchlist.GetStockIds().ToList();
+        var i = ids.IndexOf(row.StockId);
+        if (i <= 0) return;
+        (ids[i - 1], ids[i]) = (ids[i], ids[i - 1]);
+        try { await _watchlist.ReorderAsync(ids).ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogError(ex, "Move watchlist up failed."); }
+    }
+
+    [RelayCommand]
+    private async Task MoveWatchDownAsync(MarketRow? row)
+    {
+        if (row is null) return;
+        var ids = _watchlist.GetStockIds().ToList();
+        var i = ids.IndexOf(row.StockId);
+        if (i < 0 || i >= ids.Count - 1) return;
+        (ids[i], ids[i + 1]) = (ids[i + 1], ids[i]);
+        try { await _watchlist.ReorderAsync(ids).ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogError(ex, "Move watchlist down failed."); }
     }
 
     private void ResetRowMap()
@@ -238,19 +348,19 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         PageNumber = 0;
     }
 
-    /// <summary> Tab strip handler. <paramref name="tag"/> is "USD", "EUR", or "All". </summary>
+    /// <summary> Tab strip handler. <paramref name="tag"/> is "USD", "EUR", or "Watchlist". </summary>
     [RelayCommand]
     private void SelectCurrencyTab(string? tag)
     {
         if (string.IsNullOrWhiteSpace(tag)) return;
-        if (string.Equals(tag, "All", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(tag, "Watchlist", StringComparison.OrdinalIgnoreCase))
         {
-            if (!ShowAllCurrencies) ShowAllCurrencies = true;
+            if (!ShowWatchlistOnly) ShowWatchlistOnly = true;
             return;
         }
         if (CurrencyHelper.TryFromIsoCode(tag, out var ccy))
         {
-            if (ShowAllCurrencies) ShowAllCurrencies = false;
+            if (ShowWatchlistOnly) ShowWatchlistOnly = false;
             if (FilterCurrency != ccy) FilterCurrency = ccy;
         }
     }
@@ -345,6 +455,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             _pollTimer.Stop();
             _pollTimer = null;
         }
+        _watchlist.Changed -= OnWatchlistChanged;
         TopNavBarVm.Dispose();
         _disposed = true;
         GC.SuppressFinalize(this);
@@ -360,6 +471,7 @@ public partial class MarketRow : ObservableObject
     public required CurrencyType Currency { get; init; }
     // Injected by owner VM so Trade button binds directly.
     public required ICommand TradeCommand { get; init; }
+    public required ICommand ToggleWatchCommand { get; init; }
 
     [ObservableProperty] private string _lastPriceDisplay = "-";
 
@@ -372,20 +484,24 @@ public partial class MarketRow : ObservableObject
 
     [ObservableProperty] private string _dollarVolumeDisplay = "-";
 
+    [ObservableProperty] private bool _isWatched;
+
     public bool IsBullish => ChangePct > 0m;
     public bool IsBearish => ChangePct < 0m;
 
-    public static MarketRow FromQuote(LiveQuote q, ICommand tradeCommand) => new()
+    public static MarketRow FromQuote(LiveQuote q, ICommand tradeCommand, ICommand toggleWatchCommand, bool isWatched) => new()
     {
-        StockId          = q.StockId,
-        Symbol           = q.Symbol,
-        CompanyName      = q.CompanyName,
-        Currency         = q.Currency,
-        LastPriceDisplay = q.LastPriceDisplay,
-        ChangePct        = q.ChangePct,
-        ChangePctDisplay = q.ChangePctDisplay,
+        StockId             = q.StockId,
+        Symbol              = q.Symbol,
+        CompanyName         = q.CompanyName,
+        Currency            = q.Currency,
+        LastPriceDisplay    = q.LastPriceDisplay,
+        ChangePct           = q.ChangePct,
+        ChangePctDisplay    = q.ChangePctDisplay,
         DollarVolumeDisplay = q.DollarVolumeDisplay,
-        TradeCommand     = tradeCommand,
+        TradeCommand        = tradeCommand,
+        ToggleWatchCommand  = toggleWatchCommand,
+        IsWatched           = isWatched,
     };
 
     public void UpdateFrom(LiveQuote q)

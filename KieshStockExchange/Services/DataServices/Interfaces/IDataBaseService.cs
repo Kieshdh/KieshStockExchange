@@ -154,6 +154,13 @@ public interface IDataBaseService
     Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default);
     #endregion
 
+    #region UserWatchlist operations
+    Task<List<UserWatchlistEntry>> GetWatchlistByUserId(int userId, CancellationToken ct = default);
+    Task UpsertWatchlistEntry(UserWatchlistEntry entry, CancellationToken ct = default);
+    Task<bool> DeleteWatchlistEntry(int userId, int stockId, CancellationToken ct = default);
+    Task ReplaceWatchlistAsync(int userId, IReadOnlyList<UserWatchlistEntry> entries, CancellationToken ct = default);
+    #endregion
+
     #region AIUser operations
     Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default);
     Task<AIUser?> GetAIUserById(int aiUserId, CancellationToken ct = default);

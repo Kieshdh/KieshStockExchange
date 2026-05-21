@@ -75,6 +75,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<IOrderCacheService, OrderCacheService>();
         builder.Services.AddSingleton<ISelectedStockService, SelectedStockService>();
         builder.Services.AddSingleton<IUserPortfolioService, UserPortfolioService>();
+        builder.Services.AddSingleton<IWatchlistService, WatchlistService>();
         builder.Services.AddSingleton<IUserSessionService, UserSessionService>();
         builder.Services.AddSingleton<ITrendingService, TrendingService>();
         builder.Services.AddSingleton<IPriceSnapshotService, PriceSnapshotService>();
