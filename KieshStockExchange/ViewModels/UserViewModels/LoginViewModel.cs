@@ -76,8 +76,8 @@ public partial class LoginViewModel : BaseViewModel
         catch (Exception ex)
         {
             _logger.LogError(ex, "Background services failed to initialize; aborting login.");
-            await Shell.Current.DisplayAlert("Startup error",
-                "The app failed to initialize. Please restart and try again.", "OK");
+            await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.DisplayAlert(
+                "Startup error", "The app failed to initialize. Please restart and try again.", "OK"));
             return;
         }
 
@@ -96,11 +96,14 @@ public partial class LoginViewModel : BaseViewModel
             catch (Exception ex) { _logger.LogWarning(ex, "Watchlist refresh on login failed."); }
 
             await _session.StartBotsAsync();
-            await Shell.Current.GoToAsync("//TradePage");
+            // Shell navigation must run on the UI thread; the prior awaits can
+            // resume on a thread-pool thread where Shell.Current returns null.
+            await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.GoToAsync("//TradePage"));
         }
         else
         {
-            await Shell.Current.DisplayAlert("Error", "User and password combination does not exist", "OK");
+            await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.DisplayAlert(
+                "Error", "User and password combination does not exist", "OK"));
         }
     }
 
