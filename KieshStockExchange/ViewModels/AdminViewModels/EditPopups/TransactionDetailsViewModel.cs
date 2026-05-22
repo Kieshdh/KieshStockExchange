@@ -1,9 +1,9 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.ViewModels.OtherViewModels;
 
-namespace KieshStockExchange.ViewModels.AdminViewModels;
+namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
 public partial class TransactionDetailsViewModel : BaseViewModel
 {

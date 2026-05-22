@@ -18,6 +18,8 @@ using KieshStockExchange.Services.UserServices;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.AccountViewModels;
 using KieshStockExchange.ViewModels.AdminViewModels;
+using KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
+using KieshStockExchange.ViewModels.AdminViewModels.Tables;
 using KieshStockExchange.ViewModels.PortfolioViewModels;
 using KieshStockExchange.ViewModels.TradeViewModels;
 using KieshStockExchange.ViewModels.UserViewModels;

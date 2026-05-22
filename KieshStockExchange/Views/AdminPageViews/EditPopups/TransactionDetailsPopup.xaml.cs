@@ -1,5 +1,5 @@
 using CommunityToolkit.Maui.Views;
-using KieshStockExchange.ViewModels.AdminViewModels;
+using KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
 namespace KieshStockExchange.Views.AdminPageViews.EditPopups;
 

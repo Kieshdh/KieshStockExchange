@@ -1,4 +1,4 @@
-using KieshStockExchange.ViewModels.AdminViewModels;
+using KieshStockExchange.ViewModels.AdminViewModels.Tables;
 
 
 namespace KieshStockExchange.Views.AdminPageViews.Tables;

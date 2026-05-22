@@ -1,4 +1,4 @@
-using CommunityToolkit.Maui.Views;
+﻿using CommunityToolkit.Maui.Views;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
@@ -8,7 +8,7 @@ using KieshStockExchange.Views.AdminPageViews.EditPopups;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace KieshStockExchange.ViewModels.AdminViewModels;
+namespace KieshStockExchange.ViewModels.AdminViewModels.Tables;
 
 public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
 {

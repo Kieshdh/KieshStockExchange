@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
@@ -6,7 +6,7 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 
-namespace KieshStockExchange.ViewModels.AdminViewModels;
+namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
 public partial class PositionEditViewModel : BaseViewModel
 {

@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
@@ -7,7 +7,7 @@ using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using System.Collections.ObjectModel;
 
-namespace KieshStockExchange.ViewModels.AdminViewModels;
+namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
 public partial class OrderDetailsViewModel : BaseViewModel
 {

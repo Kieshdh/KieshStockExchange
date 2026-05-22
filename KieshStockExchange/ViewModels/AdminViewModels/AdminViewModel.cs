@@ -5,6 +5,7 @@ using KieshStockExchange.Models;
 using System.Diagnostics;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.ViewModels.AdminViewModels.Tables;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Views.AdminPageViews.EditPopups;
 using Microsoft.Extensions.DependencyInjection;

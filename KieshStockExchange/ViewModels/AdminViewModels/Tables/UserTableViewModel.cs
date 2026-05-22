@@ -1,4 +1,4 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using CommunityToolkit.Maui.Views;
 
-namespace KieshStockExchange.ViewModels.AdminViewModels;
+namespace KieshStockExchange.ViewModels.AdminViewModels.Tables;
 
 public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
 {
