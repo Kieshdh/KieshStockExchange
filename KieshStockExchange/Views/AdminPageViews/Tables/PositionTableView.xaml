@@ -4,7 +4,7 @@
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels.Tables"
              xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
-             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             xmlns:models="clr-namespace:KieshStockExchange.Models;assembly=KieshStockExchange.Shared"
              x:Class="KieshStockExchange.Views.AdminPageViews.Tables.PositionTableView"
              x:Name="PositionTableRoot"
              x:DataType="vm:PositionTableViewModel">

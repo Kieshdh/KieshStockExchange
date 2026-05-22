@@ -4,7 +4,7 @@
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels.Tables"
              xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
-             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             xmlns:models="clr-namespace:KieshStockExchange.Models;assembly=KieshStockExchange.Shared"
              x:Class="KieshStockExchange.Views.AdminPageViews.Tables.OrderTableView"
              x:Name="OrderTableRoot"
              x:DataType="vm:OrderTableViewModel">
@@ -121,7 +121,7 @@
             <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="vm:OrderTableObject">
-                        <Grid ColumnDefinitions="70, 3*, 3*, 2*, 110, 3*, 2*, 3*, 2*, 70, 3"
+                        <Grid ColumnDefinitions="120, 3*, 3*, 2*, 110, 3*, 2*, 3*, 2*, 70, 3"
                               Style="{StaticResource TableRowGrid}">
                             <Label Text="{Binding Order.OrderId}"             Grid.Column="0" Style="{StaticResource TableRowLabelNumeric}"/>
                             <Label Text="{Binding Order.CreatedDateShort}"    Grid.Column="1" Style="{StaticResource TableRowLabel}"/>

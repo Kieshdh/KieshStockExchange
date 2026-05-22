@@ -6,6 +6,7 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.DataServices.Persistence;
 
 namespace KieshStockExchange.Services.DataServices;
 
@@ -362,22 +363,24 @@ public class LocalDBService: IDataBaseService, IDisposable
     public async Task<List<Stock>> GetStocksAsync(CancellationToken ct = default)
     {
         await InitializeAsync(ct);
-        return await RunDbAsync(() => _db.Table<Stock>().ToListAsync(), ct);
+        var rows = await RunDbAsync(() => _db.Table<StockRow>().ToListAsync(), ct);
+        return rows.Select(StockMapper.ToDomain).ToList();
     }
 
     public async Task<Stock?> GetStockById(int stockId, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
-        return await RunDbAsync(() =>
-            _db.Table<Stock>().Where(s => s.StockId == stockId).FirstOrDefaultAsync(),
+        var row = await RunDbAsync(() =>
+            _db.Table<StockRow>().Where(s => s.StockId == stockId).FirstOrDefaultAsync(),
             ct);
+        return row is null ? null : StockMapper.ToDomain(row);
     }
 
     public async Task<bool> StockExists(int stockId, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
         var count = await RunDbAsync(() =>
-            _db.Table<Stock>().Where(s => s.StockId == stockId).CountAsync(),
+            _db.Table<StockRow>().Where(s => s.StockId == stockId).CountAsync(),
             ct);
         return count > 0;
     }
@@ -387,7 +390,9 @@ public class LocalDBService: IDataBaseService, IDisposable
         await InitializeAsync(ct);
         if (!stock.IsValid())
             throw new ArgumentException("Stock entity is not valid", nameof(stock));
-        await RunDbAsync(() => _db.InsertAsync(stock), ct);
+        var row = StockMapper.ToRow(stock);
+        await RunDbAsync(() => _db.InsertAsync(row), ct);
+        stock.StockId = row.StockId; // propagate auto-assigned PK
     }
 
     public async Task UpdateStock(Stock stock, CancellationToken ct = default)
@@ -395,7 +400,7 @@ public class LocalDBService: IDataBaseService, IDisposable
         await InitializeAsync(ct);
         if (!stock.IsValid())
             throw new ArgumentException("Stock entity is not valid", nameof(stock));
-        await RunDbAsync(() => _db.UpdateAsync(stock), ct);
+        await RunDbAsync(() => _db.UpdateAsync(StockMapper.ToRow(stock)), ct);
     }
 
     public async Task UpsertStock(Stock stock, CancellationToken ct = default)
@@ -403,7 +408,7 @@ public class LocalDBService: IDataBaseService, IDisposable
         await InitializeAsync(ct);
         if (!stock.IsValid())
             throw new ArgumentException("Stock entity is not valid", nameof(stock));
-        await RunDbAsync(() => _db.InsertOrReplaceAsync(stock), ct);
+        await RunDbAsync(() => _db.InsertOrReplaceAsync(StockMapper.ToRow(stock)), ct);
     }
 
     public async Task DeleteStock(Stock stock, CancellationToken ct = default)
@@ -411,7 +416,7 @@ public class LocalDBService: IDataBaseService, IDisposable
         await InitializeAsync(ct);
         if (stock.StockId == 0)
             throw new ArgumentException("Stock entity must have a valid StockId", nameof(stock));
-        await RunDbAsync(() => _db.DeleteAsync(stock), ct);
+        await RunDbAsync(() => _db.DeleteAsync(StockMapper.ToRow(stock)), ct);
     }
     #endregion
 
@@ -1381,11 +1386,12 @@ public class LocalDBService: IDataBaseService, IDisposable
     public async Task<UserPreferences?> GetUserPreferencesByUserId(int userId, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
-        return await RunDbAsync(() =>
-            _db.Table<UserPreferences>()
+        var row = await RunDbAsync(() =>
+            _db.Table<UserPreferencesRow>()
                .Where(p => p.UserId == userId)
                .FirstOrDefaultAsync(),
             ct);
+        return row is null ? null : UserPreferencesMapper.ToDomain(row);
     }
 
     public async Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default)
@@ -1395,7 +1401,8 @@ public class LocalDBService: IDataBaseService, IDisposable
             throw new ArgumentException("UserPreferences entity is not valid", nameof(prefs));
 
         // PK is UserId (no AutoIncrement). InsertOrReplaceAsync handles both cases atomically.
-        await RunDbAsync(() => _db.InsertOrReplaceAsync(prefs), ct);
+        var row = UserPreferencesMapper.ToRow(prefs);
+        await RunDbAsync(() => _db.InsertOrReplaceAsync(row), ct);
     }
     #endregion
 
@@ -1534,7 +1541,7 @@ public class LocalDBService: IDataBaseService, IDisposable
             await Pragma();
 
             await _db.CreateTableAsync<User>();
-            await _db.CreateTableAsync<Stock>();
+            await _db.CreateTableAsync<StockRow>();
             await _db.CreateTableAsync<StockListing>();
             await _db.CreateTableAsync<StockPrice>();
             await _db.CreateTableAsync<Order>();
@@ -1542,7 +1549,7 @@ public class LocalDBService: IDataBaseService, IDisposable
             await _db.CreateTableAsync<Position>();
             await _db.CreateTableAsync<Fund>();
             await _db.CreateTableAsync<FundTransaction>();
-            await _db.CreateTableAsync<UserPreferences>();
+            await _db.CreateTableAsync<UserPreferencesRow>();
             await _db.CreateTableAsync<UserWatchlistEntry>();
             await _db.CreateTableAsync<Candle>();
             await _db.CreateTableAsync<Message>();

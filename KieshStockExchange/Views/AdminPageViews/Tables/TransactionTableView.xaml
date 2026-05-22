@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels.Tables"
              xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
-             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             xmlns:models="clr-namespace:KieshStockExchange.Models;assembly=KieshStockExchange.Shared"
              x:Class="KieshStockExchange.Views.AdminPageViews.Tables.TransactionTableView"
              x:Name="TransactionTableRoot"
              x:DataType="vm:TransactionTableViewModel">
@@ -92,7 +92,7 @@
             <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="vm:TransactionTableObject">
-                        <Grid ColumnDefinitions="70, 3*, 2*, 2*, 2*, 3*, 2*, 3*, 60, 3"
+                        <Grid ColumnDefinitions="100, 3*, 2*, 2*, 2*, 3*, 2*, 3*, 60, 3"
                               Style="{StaticResource TableRowGrid}">
                             <Label Text="{Binding Transaction.TransactionId}"      Grid.Column="0" Style="{StaticResource TableRowLabelNumeric}"/>
                             <Label Text="{Binding Transaction.TimestampDisplay}"    Grid.Column="1" Style="{StaticResource TableRowLabel}"/>

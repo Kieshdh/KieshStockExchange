@@ -1,32 +1,31 @@
-﻿using SQLite;
 using System.Text.RegularExpressions;
 using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
-[Table("Stocks")]
 public class Stock : IValidatable
 {
-    #region Properties
     private int _stockId = 0;
-    [PrimaryKey, AutoIncrement]
-    [Column("StockId")] public int StockId {
+    public int StockId
+    {
         get => _stockId;
-        set {
+        set
+        {
             if (_stockId != 0 && value != _stockId) throw new InvalidOperationException("StockId is immutable once set.");
             _stockId = value < 0 ? 0 : value;
         }
     }
 
     private string _symbol = string.Empty;
-    [Indexed(Unique = true)]
-    [Column("Symbol")] public string Symbol {
+    public string Symbol
+    {
         get => _symbol;
         set => _symbol = value?.Trim().ToUpperInvariant() ?? string.Empty;
     }
 
     private string _companyName = string.Empty;
-    [Column("CompanyName")] public string CompanyName {
+    public string CompanyName
+    {
         get => _companyName;
         set => _companyName = value?.Trim() ?? string.Empty;
     }
@@ -36,13 +35,12 @@ public class Stock : IValidatable
     // (TryGetCurrency returns the primary listing).
 
     private DateTime _createdAt = TimeHelper.NowUtc();
-    [Column("CreatedAt")] public DateTime CreatedAt {
+    public DateTime CreatedAt
+    {
         get => _createdAt;
         set => _createdAt = TimeHelper.EnsureUtc(value);
     }
-    #endregion
 
-    #region IValidatable Implementation
     public bool IsValid() => IsValidSymbol() && IsValidCompanyName();
 
     public bool IsInvalid => !IsValid();
@@ -63,11 +61,9 @@ public class Stock : IValidatable
         // Company name must be between 1 to 100 characters
         return CompanyName.Length > 0 && CompanyName.Length <= 100;
     }
-    #endregion
 
-    #region String Representations
     public override string ToString() =>
         $"Stock #{StockId}: {Symbol} - {CompanyName}";
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy");
-    #endregion
+
+    public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy");
 }

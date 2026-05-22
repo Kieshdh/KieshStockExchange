@@ -2,7 +2,7 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.OtherViewModels"
-             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             xmlns:models="clr-namespace:KieshStockExchange.Models;assembly=KieshStockExchange.Shared"
              x:Class="KieshStockExchange.Views.OtherViews.ToastHostView"
              x:DataType="vm:ToastHostViewModel">
 
