@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
+             xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             x:Class="KieshStockExchange.Views.AdminPageViews.Tables.OrderTableView"
+             x:Name="OrderTableRoot"
+             x:DataType="vm:OrderTableViewModel">
+
+    <Grid RowDefinitions="Auto,*">
+    <BoxView Grid.Row="0" Style="{StaticResource TableHorizontalSeparator}" VerticalOptions="Start" />
+    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+        <!-- Column headers: ID • Created • User • Symbol • Side+Type • Price • Filled/Qty • Total • Status • Details -->
+        <Grid ColumnDefinitions="Auto, 3*, 3*, 2*, 110, 3*, 2*, 3*, 2*, 70, 3"
+              Style="{StaticResource TableHeaderGrid}">
+            <adminViews:SortableHeader Grid.Column="0"
+                Text="ID" SortKey="OrderId"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="1"
+                Text="Created" SortKey="CreatedAt"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="2"
+                Text="Username" SortKey="UserId"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="3"
+                Text="Symbol" SortKey="StockId"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <Label Text="Side / Type" Grid.Column="4" Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="Price"       Grid.Column="5" Style="{StaticResource TableHeaderLabel}" />
+            <adminViews:SortableHeader Grid.Column="6"
+                Text="Filled / Qty" SortKey="Quantity"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="7"
+                Text="Total" SortKey="Total"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <Label Text="Status" Grid.Column="8" Style="{StaticResource TableHeaderLabel}" />
+            <Label Text=""       Grid.Column="9" Style="{StaticResource TableHeaderLabel}" />
+        </Grid>
+
+        <!-- Row 1: date + time pickers + quick-range chips (5m default). -->
+        <HorizontalStackLayout Grid.Row="1" Spacing="8" Padding="10,4" HeightRequest="54">
+            <Label Text="From:" VerticalOptions="Center"/>
+            <DatePicker Date="{Binding FromDate, Mode=TwoWay}" Style="{StaticResource AdminDatePicker}"/>
+            <TimePicker Time="{Binding FromTime, Mode=TwoWay}" Style="{StaticResource AdminTimePicker}"/>
+            <Label Text="To:" VerticalOptions="Center"/>
+            <DatePicker Date="{Binding ToDate, Mode=TwoWay}" Style="{StaticResource AdminDatePicker}"/>
+            <TimePicker Time="{Binding ToTime, Mode=TwoWay}" Style="{StaticResource AdminTimePicker}"/>
+            <Button Text="5m"  Command="{Binding SetLast5MinCommand}"  Style="{StaticResource TableSortingButton}"/>
+            <Button Text="15m" Command="{Binding SetLast15MinCommand}" Style="{StaticResource TableSortingButton}"/>
+            <Button Text="1h"  Command="{Binding SetLastHourCommand}"  Style="{StaticResource TableSortingButton}"/>
+            <Button Text="1d"  Command="{Binding SetLast1DayCommand}"  Style="{StaticResource TableSortingButton}"/>
+        </HorizontalStackLayout>
+
+        <!-- Row 2: Username Entry fills, Symbol/Status/Side/Type/Hide-AI auto-size on the right. -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8" Margin="10,0,10,4">
+            <Entry Grid.Column="0" Text="{Binding UsernameSearch, Mode=TwoWay}"
+                   Placeholder="Username or user-id…" />
+            <Label Grid.Column="1" Text="Symbol:" VerticalOptions="Center" />
+            <Picker Grid.Column="2"
+                    ItemsSource="{Binding PickerStocks}"
+                    SelectedItem="{Binding SelectedStockFilter, Mode=TwoWay}"
+                    MinimumWidthRequest="100">
+                <Picker.ItemDisplayBinding>
+                    <Binding Path="Symbol" x:DataType="models:Stock" />
+                </Picker.ItemDisplayBinding>
+            </Picker>
+            <other:SegmentedTabView Grid.Column="3"
+                SelectedIndex="{Binding StatusIndex, Mode=TwoWay}"
+                SelectedButtonStyle="{StaticResource AdminSelectedSegment}"
+                UnselectedButtonStyle="{StaticResource AdminUnselectedSegment}"
+                HeaderContainerHorizontalOptions="Start"
+                MinTabWidth="0" VerticalOptions="Center">
+                <other:SegmentedTabView.Tabs>
+                    <other:SegmentedTabItem Header="All" />
+                    <other:SegmentedTabItem Header="Open" />
+                    <other:SegmentedTabItem Header="Filled" />
+                    <other:SegmentedTabItem Header="Cancelled" />
+                </other:SegmentedTabView.Tabs>
+            </other:SegmentedTabView>
+            <other:SegmentedTabView Grid.Column="4"
+                SelectedIndex="{Binding SelectedSideIndex, Mode=TwoWay}"
+                SelectedButtonStyle="{StaticResource AdminSelectedSegment}"
+                UnselectedButtonStyle="{StaticResource AdminUnselectedSegment}"
+                HeaderContainerHorizontalOptions="Start"
+                MinTabWidth="0" VerticalOptions="Center">
+                <other:SegmentedTabView.Tabs>
+                    <other:SegmentedTabItem Header="All" />
+                    <other:SegmentedTabItem Header="Buy" />
+                    <other:SegmentedTabItem Header="Sell" />
+                </other:SegmentedTabView.Tabs>
+            </other:SegmentedTabView>
+            <other:SegmentedTabView Grid.Column="5"
+                SelectedIndex="{Binding SelectedTypeIndex, Mode=TwoWay}"
+                SelectedButtonStyle="{StaticResource AdminSelectedSegment}"
+                UnselectedButtonStyle="{StaticResource AdminUnselectedSegment}"
+                HeaderContainerHorizontalOptions="Start"
+                MinTabWidth="0" VerticalOptions="Center">
+                <other:SegmentedTabView.Tabs>
+                    <other:SegmentedTabItem Header="All" />
+                    <other:SegmentedTabItem Header="Limit" />
+                    <other:SegmentedTabItem Header="Market" />
+                </other:SegmentedTabView.Tabs>
+            </other:SegmentedTabView>
+            <HorizontalStackLayout Grid.Column="6" Spacing="6" VerticalOptions="Center">
+                <Label Text="Hide AI" VerticalOptions="Center" />
+                <Switch IsToggled="{Binding HideAiBots, Mode=TwoWay}" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+        </Grid>
+
+        <!-- CollectionView -->
+        <Grid Grid.Row="3">
+            <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:OrderTableObject">
+                        <Grid ColumnDefinitions="70, 3*, 3*, 2*, 110, 3*, 2*, 3*, 2*, 70, 3"
+                              Style="{StaticResource TableRowGrid}">
+                            <Label Text="{Binding Order.OrderId}"             Grid.Column="0" Style="{StaticResource TableRowLabelNumeric}"/>
+                            <Label Text="{Binding Order.CreatedDateShort}"    Grid.Column="1" Style="{StaticResource TableRowLabel}"/>
+                            <Label Text="{Binding User.Username}"             Grid.Column="2" Style="{StaticResource TableRowLabel}"/>
+                            <Label Text="{Binding Stock.Symbol}"              Grid.Column="3" Style="{StaticResource TableRowLabel}"/>
+                            <Label Text="{Binding Order.SideTypeDisplay}"     Grid.Column="4" Style="{StaticResource TableRowLabel}"/>
+                            <Label Text="{Binding Order.PriceDisplay}"        Grid.Column="5" Style="{StaticResource TableRowLabelNumeric}"/>
+                            <Label Text="{Binding Order.AmountFilledDisplay}" Grid.Column="6" Style="{StaticResource TableRowLabelNumeric}"/>
+                            <Label Text="{Binding Order.TotalAmountDisplay}"  Grid.Column="7" Style="{StaticResource TableRowLabelNumeric}"/>
+                            <Label Text="{Binding Order.Status}"              Grid.Column="8" Style="{StaticResource TableRowLabel}"/>
+
+                            <Label Text="Details" Grid.Column="9"
+                                   Style="{StaticResource TableEditLabel}">
+                                <Label.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding DetailsCommand}" NumberOfTapsRequired="1" />
+                                </Label.GestureRecognizers>
+                            </Label>
+
+                            <BoxView Grid.Column="0"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="1"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="2"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="3"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="4"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="5"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="6"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="7"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="8"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="9"  Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="10" Style="{StaticResource TableVerticalSeparator}"/>
+
+                            <BoxView Style="{StaticResource TableHorizontalSeparator}"/>
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+            <ActivityIndicator IsVisible="{Binding IsBusy}" IsRunning="{Binding IsBusy}"
+                               HorizontalOptions="Center" VerticalOptions="Center"
+                               WidthRequest="40" HeightRequest="40" />
+        </Grid>
+
+        <!-- Pager -->
+        <adminViews:TablePagerView Grid.Row="4"
+            CurrentPage="{Binding CurrentPageDisplay}"
+            TotalPages="{Binding TotalPages}"
+            PagerSummary="{Binding PagerSummary}"
+            PageSize="{Binding PageSize, Mode=TwoWay}"
+            AvailablePageSizes="{Binding AvailablePageSizes}"
+            VisiblePages="{Binding VisiblePages}"
+            CanGoPrev="{Binding CanGoPrev}"
+            CanGoNext="{Binding CanGoNext}"
+            GoToPageCommand="{Binding GoToPageCommand}"
+            GoPrevCommand="{Binding GoPrevCommand}"
+            GoNextCommand="{Binding GoNextCommand}" />
+    </Grid>
+    </Grid>
+</ContentView>

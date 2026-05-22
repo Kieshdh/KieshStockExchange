@@ -170,7 +170,10 @@
         <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurfaceMuted}" />
         <Setter Property="RowDefinitions"        Value="Auto" />
         <Setter Property="Padding"               Value="4" />
-        <Setter Property="Margin"                Value="10,10,10,-10" />
+        <!-- Bottom margin is positive so the filter row and CollectionView
+             below get breathing room instead of being pulled up under the
+             header. -->
+        <Setter Property="Margin"                Value="10,10,10,6" />
     </Style>
 
     <Style x:Key="PageNumberStackLayout" TargetType="HorizontalStackLayout">
@@ -189,11 +192,22 @@
         <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurfaceMuted}" />
     </Style>
 
+    <!-- Quick-filter chip used on the sort/filter rows (1h / 7d / 30d / All).
+         Default sized 20x20 squares blended into the card background and were
+         unreadable; this version is a proper pill that fits its label and
+         contrasts against the table card. -->
     <Style x:Key="TableSortingButton" TargetType="Button">
-        <Setter Property="CornerRadius"          Value="30" />
-        <Setter Property="WidthRequest"          Value="20" />
-        <Setter Property="HeightRequest"         Value="20" />
-        <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurface}" />
+        <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurfaceMuted}" />
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="BorderColor"           Value="{DynamicResource Divider}" />
+        <Setter Property="BorderWidth"           Value="1" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+        <Setter Property="FontSize"              Value="12" />
+        <Setter Property="CornerRadius"          Value="14" />
+        <Setter Property="Padding"               Value="10,2" />
+        <Setter Property="MinimumWidthRequest"   Value="44" />
+        <Setter Property="HeightRequest"         Value="28" />
+        <Setter Property="VerticalOptions"       Value="Center" />
     </Style>
 
     <Style x:Key="SortingStackLayout" TargetType="HorizontalStackLayout">
@@ -258,6 +272,123 @@
         <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
         <Setter Property="FontFamily"            Value="OpenSansSemibold" />
         <Setter Property="FontSize"              Value="18" />
+    </Style>
+
+    <!-- ============================================================
+         WAVE 6 — Sortable header + pager + numeric cell
+         ============================================================ -->
+
+    <!-- Clickable column header. Acts as the button surface for SortableHeader. -->
+    <Style x:Key="SortableHeaderButton" TargetType="Border">
+        <Setter Property="BackgroundColor"       Value="Transparent" />
+        <Setter Property="Stroke"                Value="Transparent" />
+        <Setter Property="StrokeThickness"       Value="0" />
+        <Setter Property="Padding"               Value="6,4" />
+        <Setter Property="HorizontalOptions"     Value="Fill" />
+        <Setter Property="VerticalOptions"       Value="Fill" />
+    </Style>
+
+    <!-- Tiny arrow that appears next to the active sort column. -->
+    <Style x:Key="SortableHeaderArrow" TargetType="Label">
+        <Setter Property="TextColor"             Value="{DynamicResource Primary}" />
+        <Setter Property="FontSize"              Value="11" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+    </Style>
+
+    <!-- Prev/Next chevron buttons in the pager. -->
+    <Style x:Key="PagerNavButton" TargetType="Button">
+        <Setter Property="BackgroundColor"       Value="Transparent" />
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+        <Setter Property="FontSize"              Value="14" />
+        <Setter Property="Padding"               Value="8,4" />
+        <Setter Property="CornerRadius"          Value="6" />
+        <Setter Property="MinimumWidthRequest"   Value="36" />
+        <Setter Property="HeightRequest"         Value="30" />
+    </Style>
+
+    <!-- Inactive page-number button. -->
+    <Style x:Key="PagerPageButton" TargetType="Button">
+        <Setter Property="BackgroundColor"       Value="Transparent" />
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+        <Setter Property="FontSize"              Value="13" />
+        <Setter Property="Padding"               Value="0" />
+        <Setter Property="CornerRadius"          Value="6" />
+        <Setter Property="MinimumWidthRequest"   Value="30" />
+        <Setter Property="HeightRequest"         Value="28" />
+    </Style>
+
+    <!-- Active page-number button. Applied via DataTrigger inside the pager. -->
+    <Style x:Key="PagerActivePageButton" TargetType="Button" BasedOn="{StaticResource PagerPageButton}">
+        <Setter Property="BackgroundColor"       Value="{DynamicResource Primary}" />
+        <Setter Property="TextColor"             Value="{DynamicResource PrimaryDarkText}" />
+    </Style>
+
+    <!-- "Page X of Y · N rows" summary label. -->
+    <Style x:Key="PagerSummaryLabel" TargetType="Label">
+        <Setter Property="TextColor"             Value="{DynamicResource TextMuted}" />
+        <Setter Property="FontSize"              Value="12" />
+        <Setter Property="VerticalOptions"       Value="Center" />
+    </Style>
+
+    <!-- Page-size picker. -->
+    <Style x:Key="PagerSizePicker" TargetType="Picker">
+        <Setter Property="BackgroundColor"       Value="Transparent" />
+        <Setter Property="TextColor"             Value="{DynamicResource TextPrimary}" />
+        <Setter Property="FontSize"              Value="12" />
+        <Setter Property="MinimumWidthRequest"   Value="60" />
+        <Setter Property="HeightRequest"         Value="28" />
+    </Style>
+
+    <!-- Right-aligned numeric cell (used for currency/quantity columns). -->
+    <Style x:Key="TableRowLabelNumeric" TargetType="Label" BasedOn="{StaticResource TableRowLabel}">
+        <Setter Property="HorizontalOptions"       Value="Fill" />
+        <Setter Property="HorizontalTextAlignment" Value="End" />
+        <Setter Property="Margin"                  Value="0,0,8,0" />
+    </Style>
+
+    <!-- Date + Time pickers on the Orders/Transactions filter rows: native
+         WinUI peers have different default heights, so we force a matching
+         visual height. HeightRequest + MinimumHeightRequest + VerticalOptions
+         is the combination that actually sticks; HeightRequest alone is
+         treated as a hint and gets overridden by the platform default. -->
+    <Style x:Key="AdminDatePicker" TargetType="DatePicker">
+        <Setter Property="HeightRequest"        Value="36" />
+        <Setter Property="MinimumHeightRequest" Value="36" />
+        <Setter Property="VerticalOptions"      Value="Fill" />
+    </Style>
+    <Style x:Key="AdminTimePicker" TargetType="TimePicker">
+        <Setter Property="HeightRequest"        Value="36" />
+        <Setter Property="MinimumHeightRequest" Value="36" />
+        <Setter Property="VerticalOptions"      Value="Fill" />
+        <Setter Property="Format"               Value="HH:mm" />
+    </Style>
+
+    <!-- Compact segment buttons for admin filter rows (less tall than the
+         PlaceOrderView segments). Values inlined rather than BasedOn so the
+         style doesn't depend on SegmentedTabStyles.xaml being merged first. -->
+    <Style x:Key="AdminUnselectedSegment" TargetType="Button">
+        <Setter Property="BackgroundColor" Value="Transparent" />
+        <Setter Property="TextColor"       Value="{DynamicResource UnselectedTabFg}" />
+        <Setter Property="FontFamily"      Value="OpenSansSemibold" />
+        <Setter Property="FontSize"        Value="12" />
+        <Setter Property="Padding"         Value="10,2" />
+        <Setter Property="CornerRadius"    Value="12" />
+        <Setter Property="BorderColor"     Value="Transparent" />
+        <Setter Property="BorderWidth"     Value="1" />
+        <Setter Property="HeightRequest"   Value="28" />
+    </Style>
+    <Style x:Key="AdminSelectedSegment" TargetType="Button">
+        <Setter Property="BackgroundColor" Value="{DynamicResource SelectedTabBg}" />
+        <Setter Property="TextColor"       Value="{DynamicResource SelectedTabFg}" />
+        <Setter Property="FontFamily"      Value="OpenSansSemibold" />
+        <Setter Property="FontSize"        Value="12" />
+        <Setter Property="Padding"         Value="10,2" />
+        <Setter Property="CornerRadius"    Value="12" />
+        <Setter Property="BorderColor"     Value="{DynamicResource Divider}" />
+        <Setter Property="BorderWidth"     Value="1" />
+        <Setter Property="HeightRequest"   Value="28" />
     </Style>
 
 </ResourceDictionary>

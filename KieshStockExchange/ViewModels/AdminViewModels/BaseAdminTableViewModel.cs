@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -14,64 +15,95 @@ public interface ILazyTab
     Task RefreshAsync();
 }
 
-// Pager item; carries the command so the DataTemplate binds directly.
-public sealed record PageButton(int Page, ICommand GoToCommand);
-
 public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTab
 {
-    #region Page Properties
+    #region Page properties
     [ObservableProperty] private ObservableCollection<TItem> _pagedItems = new();
     [ObservableProperty] private int _pageNumber;
-    private int _total;
+    [ObservableProperty] private int _pageSize = 50;
+    [ObservableProperty] private int _totalRows;
 
-    public int PageSize { get; set; } = 20;
+    public IReadOnlyList<int> AvailablePageSizes { get; } = new[] { 25, 50, 100, 200 };
 
-    public int TotalPages => (int)Math.Ceiling((double)_total / PageSize);
+    public int TotalPages => Math.Max(1, (int)Math.Ceiling((double)TotalRows / Math.Max(1, PageSize)));
 
-    public List<PageButton> VisiblePageNumbers
+    public int CurrentPageDisplay => PageNumber + 1;
+
+    public bool CanGoPrev => PageNumber > 0;
+    public bool CanGoNext => PageNumber + 1 < TotalPages;
+
+    public string PagerSummary => $"Page {CurrentPageDisplay} of {TotalPages} · {TotalRows:N0} rows";
+
+    public List<int> VisiblePages => ComputeVisiblePages();
+
+    private List<int> ComputeVisiblePages()
     {
-        get
-        {
-            var pages = new HashSet<int>();
-            int current = PageNumber + 1;
-            int total = TotalPages;
+        var pages = new HashSet<int>();
+        int current = CurrentPageDisplay;
+        int total = TotalPages;
 
-            pages.Add(1);
-            if (total > 1) pages.Add(total);
+        pages.Add(1);
+        if (total > 1) pages.Add(total);
+        for (int i = current - 2; i <= current + 2; i++)
+            if (i > 1 && i < total) pages.Add(i);
 
-            for (int i = current - 2; i <= current + 2; i++)
-                if (i > 1 && i < total)
-                    pages.Add(i);
-
-            return pages.OrderBy(x => x)
-                        .Select(p => new PageButton(p, GoToPageCommand))
-                        .ToList();
-        }
+        return pages.OrderBy(x => x).ToList();
     }
     #endregion
 
-    #region Sort / Filter state (set by subclasses)
-    protected string? SortKey;
-    protected bool SortDesc = true;
+    #region Sort / filter state
+    [ObservableProperty] private string? _sortKey;
+    [ObservableProperty] private bool _sortDesc = true;
     protected string? CurrentFilter;
     #endregion
 
-    #region Services, Commands and Constructor
+    #region Services, commands, constructor
     protected readonly IDataBaseService _db;
     protected readonly ILogger _logger;
     private CancellationTokenSource _loadCts = new();
     private bool _initialized;
 
     public ICommand GoToPageCommand { get; }
+    public IAsyncRelayCommand GoPrevCommand { get; }
+    public IAsyncRelayCommand GoNextCommand { get; }
+    public IAsyncRelayCommand<string> ToggleSortCommand { get; }
 
     protected BaseTableViewModel(IDataBaseService dbService, ILogger? logger = null)
     {
         _db = dbService;
         _logger = logger ?? NullLogger.Instance;
+
         GoToPageCommand = new Command<int>(page =>
         {
-            PageNumber = page - 1;
+            PageNumber = Math.Max(0, page - 1);
             _ = RefreshAsync();
+        });
+
+        GoPrevCommand = new AsyncRelayCommand(async () =>
+        {
+            if (!CanGoPrev) return;
+            PageNumber--;
+            await RefreshAsync();
+        });
+
+        GoNextCommand = new AsyncRelayCommand(async () =>
+        {
+            if (!CanGoNext) return;
+            PageNumber++;
+            await RefreshAsync();
+        });
+
+        ToggleSortCommand = new AsyncRelayCommand<string>(async key =>
+        {
+            if (string.IsNullOrWhiteSpace(key)) return;
+            if (string.Equals(key, SortKey, StringComparison.Ordinal))
+                SortDesc = !SortDesc;
+            else
+            {
+                SortKey = key;
+                SortDesc = true;
+            }
+            await ApplyViewChange();
         });
     }
     #endregion
@@ -98,12 +130,11 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
         try
         {
             var (items, total) = await LoadPageAsync(PageNumber * PageSize, PageSize, SortKey, SortDesc, CurrentFilter, ct);
-            _total = total;
+            TotalRows = total;
             PagedItems.Clear();
             foreach (var item in items)
                 PagedItems.Add(item);
-            OnPropertyChanged(nameof(TotalPages));
-            OnPropertyChanged(nameof(VisiblePageNumbers));
+            NotifyPagerProperties();
             IsBusy = false;
         }
         catch (OperationCanceledException) { /* superseded by a newer request */ }
@@ -116,11 +147,32 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
     }
     #endregion
 
-    #region Helpers for subclasses
+    #region Helpers
     protected async Task ApplyViewChange()
     {
         PageNumber = 0;
         await RefreshAsync();
+    }
+
+    private void NotifyPagerProperties()
+    {
+        OnPropertyChanged(nameof(TotalPages));
+        OnPropertyChanged(nameof(CurrentPageDisplay));
+        OnPropertyChanged(nameof(CanGoPrev));
+        OnPropertyChanged(nameof(CanGoNext));
+        OnPropertyChanged(nameof(PagerSummary));
+        OnPropertyChanged(nameof(VisiblePages));
+    }
+
+    partial void OnPageNumberChanged(int value) => NotifyPagerProperties();
+    partial void OnTotalRowsChanged(int value) => NotifyPagerProperties();
+    partial void OnPageSizeChanged(int value)
+    {
+        NotifyPagerProperties();
+        // Only refresh once the tab has been activated; before that, the
+        // first RefreshAsync from EnsureInitializedAsync will pick up the
+        // new size on its own.
+        if (_initialized) _ = ApplyViewChange();
     }
     #endregion
 }

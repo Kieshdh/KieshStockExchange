@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
+             x:Class="KieshStockExchange.Views.AdminPageViews.Tables.TablePagerView"
+             x:Name="Root">
+    <Grid ColumnDefinitions="Auto, *, Auto"
+          ColumnSpacing="12"
+          Padding="10,4">
+
+        <!-- Left cluster: Prev + page numbers + Next -->
+        <HorizontalStackLayout Grid.Column="0" Spacing="4" VerticalOptions="Center">
+            <Button Text="‹ Prev"
+                    Style="{StaticResource PagerNavButton}"
+                    IsEnabled="{Binding CanGoPrev, Source={x:Reference Root}}"
+                    Command="{Binding GoPrevCommand, Source={x:Reference Root}}" />
+
+            <HorizontalStackLayout Spacing="4" VerticalOptions="Center"
+                                   BindableLayout.ItemsSource="{Binding Entries, Source={x:Reference Root}}">
+                <BindableLayout.ItemTemplate>
+                    <DataTemplate x:DataType="adminViews:PagerEntry">
+                        <Grid>
+                            <Label Text="…"
+                                   IsVisible="{Binding IsEllipsis}"
+                                   Style="{StaticResource PagerSummaryLabel}"
+                                   VerticalOptions="Center"
+                                   HorizontalOptions="Center"
+                                   Margin="4,0" />
+                            <Button Text="{Binding Page}"
+                                    IsVisible="{Binding IsButton}"
+                                    CommandParameter="{Binding Page}"
+                                    Command="{Binding GoToPageCommand, Source={x:Reference Root}}"
+                                    Style="{StaticResource PagerPageButton}">
+                                <Button.Triggers>
+                                    <DataTrigger TargetType="Button"
+                                                 Binding="{Binding IsActive}"
+                                                 Value="True">
+                                        <Setter Property="BackgroundColor"
+                                                Value="{DynamicResource Primary}" />
+                                        <Setter Property="TextColor"
+                                                Value="{DynamicResource PrimaryDarkText}" />
+                                    </DataTrigger>
+                                </Button.Triggers>
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </BindableLayout.ItemTemplate>
+            </HorizontalStackLayout>
+
+            <Button Text="Next ›"
+                    Style="{StaticResource PagerNavButton}"
+                    IsEnabled="{Binding CanGoNext, Source={x:Reference Root}}"
+                    Command="{Binding GoNextCommand, Source={x:Reference Root}}" />
+        </HorizontalStackLayout>
+
+        <!-- Middle: summary label -->
+        <Label Grid.Column="1"
+               Text="{Binding PagerSummary, Source={x:Reference Root}}"
+               Style="{StaticResource PagerSummaryLabel}"
+               HorizontalOptions="Center"
+               VerticalOptions="Center" />
+
+        <!-- Right cluster: page-size picker -->
+        <HorizontalStackLayout Grid.Column="2" Spacing="6" VerticalOptions="Center">
+            <Label Text="Show:"
+                   Style="{StaticResource PagerSummaryLabel}"
+                   VerticalOptions="Center" />
+            <Picker x:Name="SizePicker"
+                    ItemsSource="{Binding AvailablePageSizes, Source={x:Reference Root}}"
+                    SelectedIndexChanged="OnSizePickerSelectionChanged"
+                    Style="{StaticResource PagerSizePicker}" />
+        </HorizontalStackLayout>
+    </Grid>
+</ContentView>

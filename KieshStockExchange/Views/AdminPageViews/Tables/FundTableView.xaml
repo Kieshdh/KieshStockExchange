@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
+             x:Class="KieshStockExchange.Views.AdminPageViews.Tables.FundTableView"
+             x:Name="FundTableRoot"
+             x:DataType="vm:FundTableViewModel">
+    <Grid RowDefinitions="Auto,*">
+    <BoxView Grid.Row="0" Style="{StaticResource TableHorizontalSeparator}" VerticalOptions="Start" />
+    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Header row (long-form: ID • Username • Currency • Total • Reserved • Available • Updated • Total (base) • Adjust) -->
+        <Grid ColumnDefinitions="60, 2*, 70, 2*, 2*, 2*, 2*, 2*, 70, 3"
+              Style="{StaticResource TableHeaderGrid}">
+            <adminViews:SortableHeader Grid.Column="0"
+                Text="ID" SortKey="UserId"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <Label Text="Username" Grid.Column="1" Style="{StaticResource TableHeaderLabel}" />
+            <adminViews:SortableHeader Grid.Column="2"
+                Text="Currency" SortKey="Currency"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="3"
+                Text="Total" SortKey="TotalBalance"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="4"
+                Text="Reserved" SortKey="ReservedBalance"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <Label Text="Available" Grid.Column="5" Style="{StaticResource TableHeaderLabel}" />
+            <adminViews:SortableHeader Grid.Column="6"
+                Text="Updated" SortKey="UpdatedAt"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <Label Text="Total (base)" Grid.Column="7" Style="{StaticResource TableHeaderLabel}" />
+            <Label Text="Adjust"       Grid.Column="8" Style="{StaticResource TableHeaderLabel}" />
+        </Grid>
+
+        <!-- Filter row -->
+        <Grid Grid.Row="1" ColumnDefinitions="2*,Auto,Auto,Auto" ColumnSpacing="10" Margin="10,4">
+            <Entry Grid.Column="0"
+                   Text="{Binding UserSearch, Mode=TwoWay}"
+                   Placeholder="Username or user-id…" />
+            <Picker Grid.Column="1"
+                    ItemsSource="{Binding CurrencyFilterOptions}"
+                    SelectedItem="{Binding SelectedCurrencyFilter, Mode=TwoWay}"
+                    WidthRequest="90"
+                    HorizontalOptions="Start" />
+            <HorizontalStackLayout Grid.Column="2" Spacing="6" VerticalOptions="Center">
+                <Label Text="Non-zero" VerticalOptions="Center" />
+                <Switch IsToggled="{Binding HasNonZeroOnly, Mode=TwoWay}" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+            <HorizontalStackLayout Grid.Column="3" Spacing="6" VerticalOptions="Center">
+                <Label Text="Reserved" VerticalOptions="Center" />
+                <Switch IsToggled="{Binding HasReservedOnly, Mode=TwoWay}" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+        </Grid>
+
+        <!-- CollectionView -->
+        <Grid Grid.Row="2">
+            <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FundTableObject">
+                        <Grid ColumnDefinitions="60, 2*, 70, 2*, 2*, 2*, 2*, 2*, 70, 3"
+                              Style="{StaticResource TableRowGrid}">
+                            <Label Text="{Binding UserId}"               Grid.Column="0" Style="{StaticResource TableRowLabelNumeric}" />
+                            <Label Text="{Binding Username}"             Grid.Column="1" Style="{StaticResource TableRowLabel}" />
+                            <Label Text="{Binding CurrencyDisplay}"      Grid.Column="2" Style="{StaticResource TableRowLabel}" />
+                            <Label Text="{Binding TotalDisplay}"         Grid.Column="3" Style="{StaticResource TableRowLabelNumeric}" />
+                            <Label Text="{Binding ReservedDisplay}"      Grid.Column="4" Style="{StaticResource TableRowLabelNumeric}" />
+                            <Label Text="{Binding AvailableDisplay}"     Grid.Column="5" Style="{StaticResource TableRowLabelNumeric}" />
+                            <Label Text="{Binding UpdatedDisplay}"       Grid.Column="6" Style="{StaticResource TableRowLabel}" />
+                            <Label Text="{Binding TotalConvertedDisplay}" Grid.Column="7" Style="{StaticResource TableRowLabelNumeric}" />
+
+                            <Label Text="Adjust" Grid.Column="8"
+                                   Style="{StaticResource TableEditLabel}">
+                                <Label.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding AdjustCommand}" NumberOfTapsRequired="1" />
+                                </Label.GestureRecognizers>
+                            </Label>
+
+                            <BoxView Grid.Column="0" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="1" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="2" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="3" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="4" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="5" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="6" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="7" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="8" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="9" Style="{StaticResource TableVerticalSeparator}"/>
+
+                            <BoxView Style="{StaticResource TableHorizontalSeparator}" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+            <ActivityIndicator IsVisible="{Binding IsBusy}" IsRunning="{Binding IsBusy}"
+                               HorizontalOptions="Center" VerticalOptions="Center"
+                               WidthRequest="40" HeightRequest="40" />
+        </Grid>
+
+        <!-- Pager -->
+        <adminViews:TablePagerView Grid.Row="3"
+            CurrentPage="{Binding CurrentPageDisplay}"
+            TotalPages="{Binding TotalPages}"
+            PagerSummary="{Binding PagerSummary}"
+            PageSize="{Binding PageSize, Mode=TwoWay}"
+            AvailablePageSizes="{Binding AvailablePageSizes}"
+            VisiblePages="{Binding VisiblePages}"
+            CanGoPrev="{Binding CanGoPrev}"
+            CanGoNext="{Binding CanGoNext}"
+            GoToPageCommand="{Binding GoToPageCommand}"
+            GoPrevCommand="{Binding GoPrevCommand}"
+            GoNextCommand="{Binding GoNextCommand}" />
+    </Grid>
+    </Grid>
+</ContentView>

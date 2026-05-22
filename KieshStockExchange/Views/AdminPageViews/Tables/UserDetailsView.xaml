@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+             xmlns:models="clr-namespace:KieshStockExchange.Models"
+             x:Class="KieshStockExchange.Views.AdminPageViews.Tables.UserDetailsView"
+             x:Name="UserDetailsRoot"
+             x:DataType="vm:UserDetailsViewModel">
+
+    <ScrollView>
+        <VerticalStackLayout Spacing="14" Padding="10">
+
+            <!-- User search bar — type to filter the preloaded user list. -->
+            <Grid ColumnDefinitions="2*,Auto" ColumnSpacing="8">
+                <Entry Grid.Column="0" Text="{Binding UserSearch, Mode=TwoWay}"
+                       Placeholder="Search by username or id…" />
+                <Button Grid.Column="1" Text="Refresh"
+                        Command="{Binding RefreshCommand}"
+                        IsVisible="{Binding HasUser}"
+                        Style="{StaticResource SecondaryActionButtonStyle}" />
+            </Grid>
+
+            <!-- Autocomplete dropdown: visible while typing and no user picked. -->
+            <Border Style="{StaticResource DashboardCardStyle}"
+                    Padding="0"
+                    IsVisible="{Binding HasSuggestions}">
+                <CollectionView ItemsSource="{Binding Suggestions}"
+                                MaximumHeightRequest="240">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="models:User">
+                            <Grid Padding="14,8" ColumnDefinitions="*,Auto">
+                                <Grid.GestureRecognizers>
+                                    <TapGestureRecognizer NumberOfTapsRequired="1"
+                                        Command="{Binding Source={x:Reference UserDetailsRoot}, Path=BindingContext.PickUserCommand}"
+                                        CommandParameter="{Binding .}" />
+                                </Grid.GestureRecognizers>
+                                <Label Grid.Column="0" Text="{Binding Username}" Style="{StaticResource FormLabelStyle}" />
+                                <Label Grid.Column="1" Text="{Binding UserId, StringFormat='#{0}'}" Style="{StaticResource MutedLabelStyle}" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </Border>
+
+            <!-- Status: 'No user selected' (empty box) or 'User not found' (no match). -->
+            <Label Text="{Binding StatusMessage}"
+                   Style="{StaticResource MutedLabelStyle}"
+                   HorizontalOptions="Center"
+                   IsVisible="{Binding HasStatus}" />
+
+            <!-- Identity card -->
+            <Border Style="{StaticResource DashboardCardStyle}"
+                    Padding="18"
+                    IsVisible="{Binding HasUser}">
+                <VerticalStackLayout Spacing="10">
+                    <Label Style="{StaticResource SectionHeaderLabelStyle}">
+                        <Label.Text>
+                            <MultiBinding StringFormat="Identity — user #{0}">
+                                <Binding Path="UserId" />
+                            </MultiBinding>
+                        </Label.Text>
+                    </Label>
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
+                        <VerticalStackLayout Grid.Row="0" Grid.Column="0" Spacing="4">
+                            <Label Text="Username" Style="{StaticResource FormLabelStyle}" />
+                            <Entry Text="{Binding Username, Mode=TwoWay}" Style="{StaticResource FormEntryStyle}" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Row="0" Grid.Column="1" Spacing="4">
+                            <Label Text="Full name" Style="{StaticResource FormLabelStyle}" />
+                            <Entry Text="{Binding FullName, Mode=TwoWay}" Style="{StaticResource FormEntryStyle}" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Row="1" Grid.Column="0" Spacing="4">
+                            <Label Text="Email" Style="{StaticResource FormLabelStyle}" />
+                            <Entry Text="{Binding Email, Mode=TwoWay}" Keyboard="Email" Style="{StaticResource FormEntryStyle}" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Row="1" Grid.Column="1" Spacing="4">
+                            <Label Text="Birthdate (dd/MM/yyyy)" Style="{StaticResource FormLabelStyle}" />
+                            <Entry Text="{Binding BirthDateText, Mode=TwoWay}" Style="{StaticResource FormEntryStyle}" />
+                        </VerticalStackLayout>
+                        <HorizontalStackLayout Grid.Row="2" Grid.Column="0" Spacing="10" VerticalOptions="Center">
+                            <Label Text="Admin" Style="{StaticResource FormLabelStyle}" VerticalOptions="Center" />
+                            <Switch IsToggled="{Binding IsAdmin, Mode=TwoWay}" VerticalOptions="Center" />
+                        </HorizontalStackLayout>
+                        <!-- Member since + Save share the row 2 right cell: text on the left,
+                             Save button pinned to the far right. -->
+                        <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8" VerticalOptions="Center">
+                            <VerticalStackLayout Grid.Column="0" Spacing="4" VerticalOptions="Center">
+                                <Label Text="Member since" Style="{StaticResource FormLabelStyle}" />
+                                <Label Text="{Binding MemberSinceDisplay}" Style="{StaticResource MutedLabelStyle}" />
+                            </VerticalStackLayout>
+                            <Button Grid.Column="1"
+                                    Text="Save identity"
+                                    Command="{Binding SaveIdentityCommand}"
+                                    Style="{StaticResource PrimaryActionButtonStyle}"
+                                    HorizontalOptions="End"
+                                    VerticalOptions="Center" />
+                        </Grid>
+                        <Label Grid.Row="3" Grid.ColumnSpan="2"
+                               Text="{Binding IdentityErrorMessage}"
+                               Style="{StaticResource RegistrationErrorLabel}"
+                               IsVisible="{Binding HasIdentityError}" />
+                        <Label Grid.Row="3" Grid.ColumnSpan="2"
+                               Text="{Binding IdentityStatusMessage}"
+                               Style="{StaticResource MutedLabelStyle}" />
+                    </Grid>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Funds card -->
+            <Border Style="{StaticResource DashboardCardStyle}"
+                    Padding="18"
+                    IsVisible="{Binding HasUser}">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Funds" Style="{StaticResource SectionHeaderLabelStyle}" />
+                    <Grid ColumnDefinitions="70, *, *, *, 70"
+                          Style="{StaticResource TableHeaderGrid}">
+                        <Label Text="Currency"  Grid.Column="0" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Total"     Grid.Column="1" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Reserved"  Grid.Column="2" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Available" Grid.Column="3" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text=""          Grid.Column="4" Style="{StaticResource TableHeaderLabel}" />
+                    </Grid>
+                    <CollectionView ItemsSource="{Binding Funds}">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:UserDetailsFundRow">
+                                <Grid ColumnDefinitions="70, *, *, *, 70"
+                                      Style="{StaticResource TableRowGrid}">
+                                    <Label Text="{Binding Currency}"         Grid.Column="0" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding TotalDisplay}"     Grid.Column="1" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding ReservedDisplay}"  Grid.Column="2" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding AvailableDisplay}" Grid.Column="3" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="Adjust" Grid.Column="4"
+                                           Style="{StaticResource TableEditLabel}">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding AdjustCommand}" NumberOfTapsRequired="1" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+                                    <BoxView Style="{StaticResource TableHorizontalSeparator}" Grid.ColumnSpan="5" />
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Positions card -->
+            <Border Style="{StaticResource DashboardCardStyle}"
+                    Padding="18"
+                    IsVisible="{Binding HasUser}">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Positions" Style="{StaticResource SectionHeaderLabelStyle}" />
+                    <Grid ColumnDefinitions="100, *, *, *, *, 70"
+                          Style="{StaticResource TableHeaderGrid}">
+                        <Label Text="Symbol"   Grid.Column="0" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Quantity" Grid.Column="1" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Reserved" Grid.Column="2" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Price"    Grid.Column="3" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Value"    Grid.Column="4" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text=""         Grid.Column="5" Style="{StaticResource TableHeaderLabel}" />
+                    </Grid>
+                    <CollectionView ItemsSource="{Binding Positions}">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:UserDetailsPositionRow">
+                                <Grid ColumnDefinitions="100, *, *, *, *, 70"
+                                      Style="{StaticResource TableRowGrid}">
+                                    <Label Text="{Binding Symbol}"             Grid.Column="0" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding QuantityDisplay}"    Grid.Column="1" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding ReservedDisplay}"    Grid.Column="2" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding PriceDisplay}"       Grid.Column="3" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding ValueDisplay}"       Grid.Column="4" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="Edit" Grid.Column="5"
+                                           Style="{StaticResource TableEditLabel}">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding EditCommand}" NumberOfTapsRequired="1" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+                                    <BoxView Style="{StaticResource TableHorizontalSeparator}" Grid.ColumnSpan="6" />
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Activity: Recent orders -->
+            <Border Style="{StaticResource DashboardCardStyle}"
+                    Padding="18"
+                    IsVisible="{Binding HasUser}">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Recent orders (last 25)" Style="{StaticResource SectionHeaderLabelStyle}" />
+                    <Grid ColumnDefinitions="70, 3*, 90, 60, 60, 2*, 2*, 2*, 70"
+                          Style="{StaticResource TableHeaderGrid}">
+                        <Label Text="ID"      Grid.Column="0" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Created" Grid.Column="1" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Symbol"  Grid.Column="2" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Side"    Grid.Column="3" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Type"    Grid.Column="4" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Price"   Grid.Column="5" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Filled/Qty" Grid.Column="6" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Status"  Grid.Column="7" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text=""        Grid.Column="8" Style="{StaticResource TableHeaderLabel}" />
+                    </Grid>
+                    <CollectionView ItemsSource="{Binding RecentOrders}">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:UserDetailsOrderRow">
+                                <Grid ColumnDefinitions="70, 3*, 90, 60, 60, 2*, 2*, 2*, 70"
+                                      Style="{StaticResource TableRowGrid}">
+                                    <Label Text="{Binding Order.OrderId}"            Grid.Column="0" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding Order.CreatedAtDisplay}"   Grid.Column="1" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding Symbol}"                   Grid.Column="2" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding Order.SideDisplay}"        Grid.Column="3" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding Order.TypeDisplay}"        Grid.Column="4" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding Order.PriceDisplay}"       Grid.Column="5" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding Order.AmountFilledDisplay}" Grid.Column="6" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding Order.Status}"             Grid.Column="7" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="Details" Grid.Column="8"
+                                           Style="{StaticResource TableEditLabel}">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding DetailsCommand}" NumberOfTapsRequired="1" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+                                    <BoxView Style="{StaticResource TableHorizontalSeparator}" Grid.ColumnSpan="9" />
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- Activity: Recent transactions -->
+            <Border Style="{StaticResource DashboardCardStyle}"
+                    Padding="18"
+                    IsVisible="{Binding HasUser}">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Recent transactions (last 25)" Style="{StaticResource SectionHeaderLabelStyle}" />
+                    <Grid ColumnDefinitions="70, 3*, 90, 60, 2*, 2*, 60"
+                          Style="{StaticResource TableHeaderGrid}">
+                        <Label Text="ID"        Grid.Column="0" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Timestamp" Grid.Column="1" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Symbol"    Grid.Column="2" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Side"      Grid.Column="3" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Price"     Grid.Column="4" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text="Qty"       Grid.Column="5" Style="{StaticResource TableHeaderLabel}" />
+                        <Label Text=""          Grid.Column="6" Style="{StaticResource TableHeaderLabel}" />
+                    </Grid>
+                    <CollectionView ItemsSource="{Binding RecentTransactions}">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:UserDetailsTransactionRow">
+                                <Grid ColumnDefinitions="70, 3*, 90, 60, 2*, 2*, 60"
+                                      Style="{StaticResource TableRowGrid}">
+                                    <Label Text="{Binding Transaction.TransactionId}"   Grid.Column="0" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding Transaction.TimestampDisplay}" Grid.Column="1" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding Symbol}"                      Grid.Column="2" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding SideForUser}"                 Grid.Column="3" Style="{StaticResource TableRowLabel}" />
+                                    <Label Text="{Binding Transaction.PriceDisplay}"    Grid.Column="4" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="{Binding Transaction.Quantity}"        Grid.Column="5" Style="{StaticResource TableRowLabelNumeric}" />
+                                    <Label Text="Details" Grid.Column="6"
+                                           Style="{StaticResource TableEditLabel}">
+                                        <Label.GestureRecognizers>
+                                            <TapGestureRecognizer Command="{Binding DetailsCommand}" NumberOfTapsRequired="1" />
+                                        </Label.GestureRecognizers>
+                                    </Label>
+                                    <BoxView Style="{StaticResource TableHorizontalSeparator}" Grid.ColumnSpan="7" />
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </Border>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentView>

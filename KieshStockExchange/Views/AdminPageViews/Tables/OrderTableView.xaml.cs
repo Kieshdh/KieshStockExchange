@@ -1,4 +1,4 @@
-namespace KieshStockExchange.Views.AdminPageViews;
+namespace KieshStockExchange.Views.AdminPageViews.Tables;
 
 public partial class OrderTableView : ContentView
 {
