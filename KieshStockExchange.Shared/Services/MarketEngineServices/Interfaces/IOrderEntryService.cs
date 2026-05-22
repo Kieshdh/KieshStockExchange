@@ -1,16 +1,13 @@
-﻿using KieshStockExchange.Helpers;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 public interface IOrderEntryService
 {
-    #region Order Operations
     Task<OrderResult> CancelOrderAsync(int userId, int orderId, CancellationToken ct = default);
     Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default);
-    #endregion
 
-    #region Place Orders
     Task<OrderResult> PlaceLimitBuyOrderAsync(int userId, int stockId, int quantity,
         decimal limitPrice, CurrencyType currency, CancellationToken ct = default);
 
@@ -28,5 +25,4 @@ public interface IOrderEntryService
 
     Task<OrderResult> PlaceTrueMarketSellOrderAsync(int userId, int stockId,
         int quantity, CurrencyType currency, CancellationToken ct = default);
-    #endregion 
 }

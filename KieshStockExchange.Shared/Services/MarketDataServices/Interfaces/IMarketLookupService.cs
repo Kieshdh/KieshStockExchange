@@ -7,9 +7,7 @@ namespace KieshStockExchange.Services.MarketDataServices.Interfaces;
 /// Pure read-side lookup surface for market data: stock catalog reads, last/at-time
 /// price resolution, and historical-tick loading. No live-quote registry, no UI
 /// dispatcher — these helpers only touch the in-memory stock catalog, the candle
-/// service, and the database, so they can be reused by lookup-only consumers
-/// (admin VMs, snapshot service, decision service) without dragging in the
-/// subscription pipeline.
+/// service, and the database.
 /// </summary>
 public interface IMarketLookupService
 {
@@ -36,8 +34,6 @@ public interface IMarketLookupService
 
     /// <summary>
     /// Load today's transactions for a book, sorted ascending by timestamp.
-    /// Used by <see cref="IMarketDataService.BuildFromHistoryAsync"/> to seed the
-    /// LiveQuote OHLC/volume on first subscribe.
     /// </summary>
     Task<List<Transaction>> LoadHistoricalTicksAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
 

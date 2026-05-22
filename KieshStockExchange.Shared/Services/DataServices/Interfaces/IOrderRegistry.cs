@@ -18,15 +18,11 @@ public interface IOrderRegistry
 
     /// <summary>
     /// Return the canonical instance for <paramref name="candidate"/>'s OrderId.
-    /// If the registry already has an entry, returns it; otherwise adds and returns
-    /// the candidate. Used by hydration paths (book + accounts cache cold-load) so
-    /// whichever loader runs first wins.
     /// </summary>
     Order GetOrAdd(Order candidate);
 
     /// <summary>
-    /// Register a freshly-inserted order whose OrderId was just assigned by the DB
-    /// (post Phase-2 bulk insert). Overwrites any prior entry with the same id.
+    /// Register a freshly-inserted order whose OrderId was just assigned by the DB.
     /// </summary>
     void Register(Order order);
 
@@ -41,8 +37,7 @@ public interface IOrderRegistry
 
     /// <summary>
     /// Snapshot enumeration over all registered orders. Used by the reconciler to name
-    /// offending closed orders that still hold a CurrentReservation. Not for hot-path
-    /// lookups — prefer <see cref="TryGet"/> when an OrderId is known.
+    /// offending closed orders that still hold a CurrentReservation.
     /// </summary>
     IEnumerable<Order> AllOrders();
 

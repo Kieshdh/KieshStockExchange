@@ -12,7 +12,7 @@ public interface IProfileService
     /// <summary>Update base currency in session AND persist to the user's preferences row.</summary>
     Task UpdateBaseCurrencyAsync(CurrencyType newCurrency);
 
-    /// <summary>Apply a theme key via <see cref="OtherServices.Interfaces.IThemeService"/> and persist.</summary>
+    /// <summary>Apply a theme key via the active theme service and persist.</summary>
     Task UpdateThemeAsync(string themeKey);
 
     /// <summary>Update default candle resolution in session and persist.</summary>

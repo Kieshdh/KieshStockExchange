@@ -1,6 +1,5 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
@@ -31,7 +30,6 @@ public enum OrderStatus
 /// </summary>
 public class OrderResult
 {
-    #region Status and Fills
     /// <summary> Reason the order did — or did not — go through. </summary>
     public OrderStatus Status { get; set; }
 
@@ -52,9 +50,7 @@ public class OrderResult
 
     /// <summary> Weighted-average price across all fills; zero if nothing filled. </summary>
     public decimal AverageFillPrice { get; private set; }
-    #endregion
 
-    #region Placed Order
     /// <summary>
     /// The original order handed to the market/user service. Its quantity is adjusted
     /// down by any fills so callers can see how much is still resting, if any.
@@ -72,9 +68,7 @@ public class OrderResult
     /// database-assigned ID so the UI can reference or cancel it later.
     /// </summary>
     public int? NewOrderId => PlacedOrder?.OrderId > 0 ? PlacedOrder.OrderId : null;
-    #endregion
 
-    #region Messages and State
     /// <summary> Optional success message for UI display. </summary>
     public string SuccessMessage { get; set; } = string.Empty;
 
@@ -90,9 +84,7 @@ public class OrderResult
         Status == OrderStatus.PartialFill ||
         Status == OrderStatus.Filled ||
         Status == OrderStatus.PlacedOnBook;
-    #endregion
 
-    #region Helpers
     // Recompute total filled quantity and weighted-average fill price whenever the
     // transaction list is replaced.
     private void SetFillTransactions(IReadOnlyList<Transaction> value)
@@ -110,5 +102,4 @@ public class OrderResult
         TotalFilledQuantity = totalQty;
         AverageFillPrice = totalQty > 0 ? notional / totalQty : 0m;
     }
-    #endregion
 }
