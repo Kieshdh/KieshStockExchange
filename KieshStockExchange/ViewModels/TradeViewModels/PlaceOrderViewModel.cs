@@ -242,9 +242,13 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                     _logger.LogInformation("Placing {Side} MARKET± order for {Quantity} of {Symbol} (slippage {Slippage:P2}).",
                         IsBuySelected ? "BUY" : "SELL", Quantity, Selected.Symbol, SlippagePrc);
 
+                    // SlippagePrc is a fraction (UI shows it as `:P2`, so 0.005 ⇒ 0.50%).
+                    // The engine's slippagePct parameter is percentage points (0..100),
+                    // matching AiBotDecisionService.cs:89 (`user.SlippageTolerancePrc * 100m`).
+                    var slippagePct = SlippagePrc * 100m;
                     result = IsBuySelected
-                        ? await _orders.PlaceSlippageMarketBuyOrderAsync(userId, id, Quantity, SlippagePrc, cur, ct)
-                        : await _orders.PlaceSlippageMarketSellOrderAsync(userId, id, Quantity, SlippagePrc, cur, ct);
+                        ? await _orders.PlaceSlippageMarketBuyOrderAsync(userId, id, Quantity, slippagePct, cur, ct)
+                        : await _orders.PlaceSlippageMarketSellOrderAsync(userId, id, Quantity, slippagePct, cur, ct);
                 }
             }
             else

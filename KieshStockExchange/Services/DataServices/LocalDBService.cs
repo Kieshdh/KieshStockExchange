@@ -159,57 +159,68 @@ public class LocalDBService: IDataBaseService, IDisposable
     public async Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
-        switch (items)
-        {
-            case IEnumerable<Order> v:              await InsertViaMapper(v, OrderMapper.ToRow,              (d, r) => d.OrderId = r.OrderId); return;
-            case IEnumerable<Transaction> v:        await InsertViaMapper(v, TransactionMapper.ToRow,        (d, r) => d.TransactionId = r.TransactionId); return;
-            case IEnumerable<Position> v:           await InsertViaMapper(v, PositionMapper.ToRow,           (d, r) => d.PositionId = r.PositionId); return;
-            case IEnumerable<Fund> v:               await InsertViaMapper(v, FundMapper.ToRow,               (d, r) => d.FundId = r.FundId); return;
-            case IEnumerable<FundTransaction> v:    await InsertViaMapper(v, FundTransactionMapper.ToRow,    (d, r) => d.FundTransactionId = r.FundTransactionId); return;
-            case IEnumerable<Stock> v:              await InsertViaMapper(v, StockMapper.ToRow,              (d, r) => d.StockId = r.StockId); return;
-            case IEnumerable<StockListing> v:       await InsertViaMapper(v, StockListingMapper.ToRow,       (d, r) => d.ListingId = r.ListingId); return;
-            case IEnumerable<StockPrice> v:         await InsertViaMapper(v, StockPriceMapper.ToRow,         (d, r) => d.PriceId = r.PriceId); return;
-            case IEnumerable<User> v:               await InsertViaMapper(v, UserMapper.ToRow,               (d, r) => d.UserId = r.UserId); return;
-            case IEnumerable<AIUser> v:             await InsertViaMapper(v, AIUserMapper.ToRow,             (d, r) => d.AiUserId = r.AiUserId); return;
-            case IEnumerable<Candle> v:             await InsertViaMapper(v, CandleMapper.ToRow,             (d, r) => d.CandleId = r.CandleId); return;
-            case IEnumerable<Message> v:            await InsertViaMapper(v, MessageMapper.ToRow,            (d, r) => d.MessageId = r.MessageId); return;
-            case IEnumerable<UserPreferences> v:    await InsertViaMapper(v, UserPreferencesMapper.ToRow,    (_, _) => { }); return; // UserId is PK, not auto-assigned
-            case IEnumerable<UserWatchlistEntry> v: await InsertViaMapper(v, UserWatchlistEntryMapper.ToRow, (d, r) => d.Id = r.Id); return;
-        }
+        // typeof(T) is JIT-constant per generic specialization — the matching branch survives
+        // and the rest are eliminated, so this is effectively a direct call to InsertViaMapper.
+        var t = typeof(T);
+        if (t == typeof(Order))               { await InsertViaMapper((IEnumerable<Order>)items,               OrderMapper.ToRow,              (d, r) => d.OrderId = r.OrderId); return; }
+        if (t == typeof(Transaction))         { await InsertViaMapper((IEnumerable<Transaction>)items,         TransactionMapper.ToRow,        (d, r) => d.TransactionId = r.TransactionId); return; }
+        if (t == typeof(Position))            { await InsertViaMapper((IEnumerable<Position>)items,            PositionMapper.ToRow,           (d, r) => d.PositionId = r.PositionId); return; }
+        if (t == typeof(Fund))                { await InsertViaMapper((IEnumerable<Fund>)items,                FundMapper.ToRow,               (d, r) => d.FundId = r.FundId); return; }
+        if (t == typeof(FundTransaction))     { await InsertViaMapper((IEnumerable<FundTransaction>)items,     FundTransactionMapper.ToRow,    (d, r) => d.FundTransactionId = r.FundTransactionId); return; }
+        if (t == typeof(Stock))               { await InsertViaMapper((IEnumerable<Stock>)items,               StockMapper.ToRow,              (d, r) => d.StockId = r.StockId); return; }
+        if (t == typeof(StockListing))        { await InsertViaMapper((IEnumerable<StockListing>)items,        StockListingMapper.ToRow,       (d, r) => d.ListingId = r.ListingId); return; }
+        if (t == typeof(StockPrice))          { await InsertViaMapper((IEnumerable<StockPrice>)items,          StockPriceMapper.ToRow,         (d, r) => d.PriceId = r.PriceId); return; }
+        if (t == typeof(User))                { await InsertViaMapper((IEnumerable<User>)items,                UserMapper.ToRow,               (d, r) => d.UserId = r.UserId); return; }
+        if (t == typeof(AIUser))              { await InsertViaMapper((IEnumerable<AIUser>)items,              AIUserMapper.ToRow,             (d, r) => d.AiUserId = r.AiUserId); return; }
+        if (t == typeof(Candle))              { await InsertViaMapper((IEnumerable<Candle>)items,              CandleMapper.ToRow,             (d, r) => d.CandleId = r.CandleId); return; }
+        if (t == typeof(Message))             { await InsertViaMapper((IEnumerable<Message>)items,             MessageMapper.ToRow,            (d, r) => d.MessageId = r.MessageId); return; }
+        if (t == typeof(UserPreferences))     { await InsertViaMapper((IEnumerable<UserPreferences>)items,     UserPreferencesMapper.ToRow,    null); return; } // UserId is PK, not auto-assigned
+        if (t == typeof(UserWatchlistEntry))  { await InsertViaMapper((IEnumerable<UserWatchlistEntry>)items,  UserWatchlistEntryMapper.ToRow, (d, r) => d.Id = r.Id); return; }
+
         await _db.InsertAllAsync(items, runInTransaction: false);
     }
 
     public async Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
-        switch (items)
-        {
-            case IEnumerable<Order> v:              await _db.UpdateAllAsync(v.Select(OrderMapper.ToRow).ToList(),              runInTransaction: false); return;
-            case IEnumerable<Transaction> v:        await _db.UpdateAllAsync(v.Select(TransactionMapper.ToRow).ToList(),        runInTransaction: false); return;
-            case IEnumerable<Position> v:           await _db.UpdateAllAsync(v.Select(PositionMapper.ToRow).ToList(),           runInTransaction: false); return;
-            case IEnumerable<Fund> v:               await _db.UpdateAllAsync(v.Select(FundMapper.ToRow).ToList(),               runInTransaction: false); return;
-            case IEnumerable<FundTransaction> v:    await _db.UpdateAllAsync(v.Select(FundTransactionMapper.ToRow).ToList(),    runInTransaction: false); return;
-            case IEnumerable<Stock> v:              await _db.UpdateAllAsync(v.Select(StockMapper.ToRow).ToList(),              runInTransaction: false); return;
-            case IEnumerable<StockListing> v:       await _db.UpdateAllAsync(v.Select(StockListingMapper.ToRow).ToList(),       runInTransaction: false); return;
-            case IEnumerable<StockPrice> v:         await _db.UpdateAllAsync(v.Select(StockPriceMapper.ToRow).ToList(),         runInTransaction: false); return;
-            case IEnumerable<User> v:               await _db.UpdateAllAsync(v.Select(UserMapper.ToRow).ToList(),               runInTransaction: false); return;
-            case IEnumerable<AIUser> v:             await _db.UpdateAllAsync(v.Select(AIUserMapper.ToRow).ToList(),             runInTransaction: false); return;
-            case IEnumerable<Candle> v:             await _db.UpdateAllAsync(v.Select(CandleMapper.ToRow).ToList(),             runInTransaction: false); return;
-            case IEnumerable<Message> v:            await _db.UpdateAllAsync(v.Select(MessageMapper.ToRow).ToList(),            runInTransaction: false); return;
-            case IEnumerable<UserPreferences> v:    await _db.UpdateAllAsync(v.Select(UserPreferencesMapper.ToRow).ToList(),    runInTransaction: false); return;
-            case IEnumerable<UserWatchlistEntry> v: await _db.UpdateAllAsync(v.Select(UserWatchlistEntryMapper.ToRow).ToList(), runInTransaction: false); return;
-        }
+        var t = typeof(T);
+        if (t == typeof(Order))               { await _db.UpdateAllAsync(MapRows((IEnumerable<Order>)items,              OrderMapper.ToRow),              runInTransaction: false); return; }
+        if (t == typeof(Transaction))         { await _db.UpdateAllAsync(MapRows((IEnumerable<Transaction>)items,        TransactionMapper.ToRow),        runInTransaction: false); return; }
+        if (t == typeof(Position))            { await _db.UpdateAllAsync(MapRows((IEnumerable<Position>)items,           PositionMapper.ToRow),           runInTransaction: false); return; }
+        if (t == typeof(Fund))                { await _db.UpdateAllAsync(MapRows((IEnumerable<Fund>)items,               FundMapper.ToRow),               runInTransaction: false); return; }
+        if (t == typeof(FundTransaction))     { await _db.UpdateAllAsync(MapRows((IEnumerable<FundTransaction>)items,    FundTransactionMapper.ToRow),    runInTransaction: false); return; }
+        if (t == typeof(Stock))               { await _db.UpdateAllAsync(MapRows((IEnumerable<Stock>)items,              StockMapper.ToRow),              runInTransaction: false); return; }
+        if (t == typeof(StockListing))        { await _db.UpdateAllAsync(MapRows((IEnumerable<StockListing>)items,       StockListingMapper.ToRow),       runInTransaction: false); return; }
+        if (t == typeof(StockPrice))          { await _db.UpdateAllAsync(MapRows((IEnumerable<StockPrice>)items,         StockPriceMapper.ToRow),         runInTransaction: false); return; }
+        if (t == typeof(User))                { await _db.UpdateAllAsync(MapRows((IEnumerable<User>)items,               UserMapper.ToRow),               runInTransaction: false); return; }
+        if (t == typeof(AIUser))              { await _db.UpdateAllAsync(MapRows((IEnumerable<AIUser>)items,             AIUserMapper.ToRow),             runInTransaction: false); return; }
+        if (t == typeof(Candle))              { await _db.UpdateAllAsync(MapRows((IEnumerable<Candle>)items,             CandleMapper.ToRow),             runInTransaction: false); return; }
+        if (t == typeof(Message))             { await _db.UpdateAllAsync(MapRows((IEnumerable<Message>)items,            MessageMapper.ToRow),            runInTransaction: false); return; }
+        if (t == typeof(UserPreferences))     { await _db.UpdateAllAsync(MapRows((IEnumerable<UserPreferences>)items,    UserPreferencesMapper.ToRow),    runInTransaction: false); return; }
+        if (t == typeof(UserWatchlistEntry))  { await _db.UpdateAllAsync(MapRows((IEnumerable<UserWatchlistEntry>)items, UserWatchlistEntryMapper.ToRow), runInTransaction: false); return; }
+
         await _db.UpdateAllAsync(items, runInTransaction: false);
     }
 
+    // Allocate one pre-sized List<TRow> and fill via foreach. Avoids the Select iterator
+    // state machine + a second list reallocation that v.Select(...).ToList() would do.
+    private static List<TRow> MapRows<TDomain, TRow>(IEnumerable<TDomain> items, Func<TDomain, TRow> toRow)
+    {
+        var capacity = items is ICollection<TDomain> coll ? coll.Count : 4;
+        var rows = new List<TRow>(capacity);
+        foreach (var d in items) rows.Add(toRow(d));
+        return rows;
+    }
+
     private async Task InsertViaMapper<TDomain, TRow>(
-        IEnumerable<TDomain> items, Func<TDomain, TRow> toRow, Action<TDomain, TRow> writeBack)
+        IEnumerable<TDomain> items, Func<TDomain, TRow> toRow, Action<TDomain, TRow>? writeBack)
     {
         var domain = items as IList<TDomain> ?? items.ToList();
         if (domain.Count == 0) return;
         var rows = new List<TRow>(domain.Count);
         for (int i = 0; i < domain.Count; i++) rows.Add(toRow(domain[i]));
         await _db.InsertAllAsync(rows, runInTransaction: false);
+        if (writeBack is null) return;
         for (int i = 0; i < domain.Count; i++) writeBack(domain[i], rows[i]);
     }
 
