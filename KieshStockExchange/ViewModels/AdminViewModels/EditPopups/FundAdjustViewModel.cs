@@ -12,6 +12,7 @@ public partial class FundAdjustViewModel : BaseViewModel
     public const string KindDeposit = "Deposit";
     public const string KindWithdrawal = "Withdrawal";
 
+    #region Fields, events and Constructor
     private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<FundAdjustViewModel> _logger;
 
@@ -19,7 +20,9 @@ public partial class FundAdjustViewModel : BaseViewModel
 
     public event EventHandler? CloseRequested;
     public event EventHandler? Saved;
+    #endregion
 
+    #region Bound state
     [ObservableProperty] private int _userId;
     [ObservableProperty] private CurrencyType _currency = CurrencyType.USD;
     [ObservableProperty] private string _currencyDisplay = "USD";
@@ -32,6 +35,7 @@ public partial class FundAdjustViewModel : BaseViewModel
     private string _errorMessage = string.Empty;
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+    #endregion
 
     public FundAdjustViewModel(IUserPortfolioService portfolio, ILogger<FundAdjustViewModel> logger)
     {
@@ -40,6 +44,7 @@ public partial class FundAdjustViewModel : BaseViewModel
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    #region Initialize and commands
     public void Initialize(int userId, CurrencyType currency)
     {
         UserId = userId;
@@ -101,4 +106,5 @@ public partial class FundAdjustViewModel : BaseViewModel
 
     [RelayCommand]
     private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
+    #endregion
 }

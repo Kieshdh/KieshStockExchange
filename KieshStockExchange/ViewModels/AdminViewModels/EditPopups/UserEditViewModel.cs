@@ -10,6 +10,7 @@ namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
 public partial class UserEditViewModel : BaseViewModel
 {
+    #region Fields, events and Constructor
     private readonly IDataBaseService _db;
     private readonly ILogger<UserEditViewModel> _logger;
 
@@ -17,7 +18,9 @@ public partial class UserEditViewModel : BaseViewModel
 
     public event EventHandler? CloseRequested;
     public event EventHandler? Saved;
+    #endregion
 
+    #region Bound state
     [ObservableProperty] private int _userId;
     [ObservableProperty] private string _username = string.Empty;
     [ObservableProperty] private string _fullName = string.Empty;
@@ -30,6 +33,7 @@ public partial class UserEditViewModel : BaseViewModel
     private string _errorMessage = string.Empty;
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+    #endregion
 
     public UserEditViewModel(IDataBaseService db, ILogger<UserEditViewModel> logger)
     {
@@ -38,6 +42,7 @@ public partial class UserEditViewModel : BaseViewModel
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    #region Initialize and commands
     public void Initialize(User user)
     {
         _original = user ?? throw new ArgumentNullException(nameof(user));
@@ -121,4 +126,5 @@ public partial class UserEditViewModel : BaseViewModel
 
     [RelayCommand]
     private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
+    #endregion
 }

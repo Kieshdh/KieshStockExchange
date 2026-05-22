@@ -11,6 +11,7 @@ namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
 public partial class OrderDetailsViewModel : BaseViewModel
 {
+    #region Fields, events and Constructor
     private readonly IDataBaseService _db;
     private readonly IOrderExecutionService _execution;
     private readonly ILogger<OrderDetailsViewModel> _logger;
@@ -20,7 +21,9 @@ public partial class OrderDetailsViewModel : BaseViewModel
     public event EventHandler? CloseRequested;
     public event EventHandler<int>? NavigateToUserRequested;
     public event EventHandler<int>? NavigateToTransactionRequested;
+    #endregion
 
+    #region Bound state
     public ObservableCollection<OrderLinkedTransactionRow> LinkedTransactions { get; } = new();
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasLinkedTransactions))]
@@ -56,6 +59,7 @@ public partial class OrderDetailsViewModel : BaseViewModel
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
     public bool CanCancel => IsOpenOrder;
     public bool HasAnchor => !string.IsNullOrEmpty(AnchorPriceDisplay);
+    #endregion
 
     public OrderDetailsViewModel(IDataBaseService db, IOrderExecutionService execution,
         ILogger<OrderDetailsViewModel> logger)
@@ -66,6 +70,7 @@ public partial class OrderDetailsViewModel : BaseViewModel
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    #region Initialize and commands
     public void Initialize(Order order, string username, string symbol)
     {
         _order = order ?? throw new ArgumentNullException(nameof(order));
@@ -128,6 +133,11 @@ public partial class OrderDetailsViewModel : BaseViewModel
         CloseRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    [RelayCommand]
+    private void Close() => CloseRequested?.Invoke(this, EventArgs.Empty);
+    #endregion
+
+    #region Helpers
     private async Task LoadLinkedTransactionsAsync(int orderId)
     {
         try
@@ -149,9 +159,7 @@ public partial class OrderDetailsViewModel : BaseViewModel
         NavigateToTransactionRequested?.Invoke(this, transactionId);
         CloseRequested?.Invoke(this, EventArgs.Empty);
     }
-
-    [RelayCommand]
-    private void Close() => CloseRequested?.Invoke(this, EventArgs.Empty);
+    #endregion
 }
 
 public sealed class OrderLinkedTransactionRow

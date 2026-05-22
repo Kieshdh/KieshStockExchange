@@ -16,6 +16,7 @@ public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
 
     public CurrencyType BaseCurrency = CurrencyType.USD;
 
+    #region Fields, filter state and Constructor
     private readonly IServiceProvider _services;
 
     public IReadOnlyList<string> CurrencyFilterOptions { get; }
@@ -41,7 +42,9 @@ public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
             .Concat(CurrencyHelper.SupportedCurrencies.Select(c => c.ToString()))
             .ToList();
     }
+    #endregion
 
+    #region Page loading and adjust popup
     protected override async Task<(IReadOnlyList<FundTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
@@ -109,6 +112,7 @@ public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
             popup.ViewModel.Saved -= savedHandler;
         }
     }
+    #endregion
 }
 
 public partial class FundTableObject : ObservableObject

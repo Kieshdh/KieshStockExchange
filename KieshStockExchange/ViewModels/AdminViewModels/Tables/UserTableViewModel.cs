@@ -11,6 +11,7 @@ namespace KieshStockExchange.ViewModels.AdminViewModels.Tables;
 
 public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
 {
+    #region Fields, events and Constructor
     private readonly IServiceProvider _services;
 
     /// <summary> Raised when a row's View is tapped so AdminViewModel can switch to the User-details tab. </summary>
@@ -33,7 +34,9 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
         SortDesc = true;
         _services = services ?? throw new ArgumentNullException(nameof(services));
     }
+    #endregion
 
+    #region Page loading and edit popup
     protected override async Task<(IReadOnlyList<UserTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
@@ -64,6 +67,7 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
             popup.ViewModel.Saved -= savedHandler;
         }
     }
+    #endregion
 }
 
 public partial class UserTableObject : ObservableObject

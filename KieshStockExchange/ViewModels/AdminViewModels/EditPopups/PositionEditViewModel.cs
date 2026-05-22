@@ -10,6 +10,7 @@ namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
 public partial class PositionEditViewModel : BaseViewModel
 {
+    #region Fields, events and Constructor
     private readonly IDataBaseService _db;
     private readonly ILogger<PositionEditViewModel> _logger;
 
@@ -17,7 +18,9 @@ public partial class PositionEditViewModel : BaseViewModel
 
     public event EventHandler? CloseRequested;
     public event EventHandler? Saved;
+    #endregion
 
+    #region Bound state
     [ObservableProperty] private int _userId;
     [ObservableProperty] private string _stockSymbol = string.Empty;
     [ObservableProperty] private string _quantityText = "0";
@@ -28,6 +31,7 @@ public partial class PositionEditViewModel : BaseViewModel
     private string _errorMessage = string.Empty;
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+    #endregion
 
     public PositionEditViewModel(IDataBaseService db, ILogger<PositionEditViewModel> logger)
     {
@@ -36,6 +40,7 @@ public partial class PositionEditViewModel : BaseViewModel
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    #region Initialize and commands
     public void Initialize(Position position, string stockSymbol)
     {
         _original = position ?? throw new ArgumentNullException(nameof(position));
@@ -107,4 +112,5 @@ public partial class PositionEditViewModel : BaseViewModel
 
     [RelayCommand]
     private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
+    #endregion
 }

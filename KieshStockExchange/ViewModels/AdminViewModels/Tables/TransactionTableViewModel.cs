@@ -15,6 +15,7 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
 {
     private const string AnyOption = "Any";
 
+    #region Filter state
     [ObservableProperty] private DateTime _fromDate = DateTime.UtcNow.AddMinutes(-5);
     [ObservableProperty] private DateTime _toDate = DateTime.UtcNow;
     [ObservableProperty] private TimeSpan _fromTime = DateTime.UtcNow.AddMinutes(-5).TimeOfDay;
@@ -46,7 +47,9 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
     partial void OnUsernameSearchChanged(string value) => _ = ApplyViewChange();
     partial void OnSelectedCurrencyFilterChanged(string value) => _ = ApplyViewChange();
     partial void OnHideAiBotsChanged(bool value) => _ = ApplyViewChange();
+    #endregion
 
+    #region Fields, events and Constructor
     private Dictionary<int, Stock> _stocksById = new();
     private List<int>? _aiUserIds;
     private readonly IDataBaseService _dbRef;
@@ -70,7 +73,9 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
 
     internal void RaiseUserSelected(int userId) => UserSelected?.Invoke(this, userId);
     internal void RaiseOrderSelected(int orderId) => OrderSelected?.Invoke(this, orderId);
+    #endregion
 
+    #region Initialization and page loading
     public override async Task EnsureInitializedAsync()
     {
         await EnsureStocksLoadedAsync();
@@ -146,7 +151,9 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         };
         return (ordered.ToList(), total);
     }
+    #endregion
 
+    #region Details popup and helpers
     private async Task OpenDetailsAsync(Transaction tx, User buyer, User seller, Stock stock)
     {
         var page = Shell.Current?.CurrentPage
@@ -193,6 +200,7 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         ToDate = now;
         ToTime = now.TimeOfDay;
     }
+    #endregion
 }
 
 public partial class TransactionTableObject : ObservableObject

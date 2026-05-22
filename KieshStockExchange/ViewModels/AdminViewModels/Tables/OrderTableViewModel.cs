@@ -71,6 +71,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
     partial void OnHideAiBotsChanged(bool value) => _ = ApplyViewChange();
     #endregion
 
+    #region Fields, events and Constructor
     private Dictionary<int, Stock> _stocksById = new();
     private List<int>? _aiUserIds;
     private readonly IDataBaseService _dbRef;
@@ -94,7 +95,9 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
 
     internal void RaiseUserSelected(int userId) => UserSelected?.Invoke(this, userId);
     internal void RaiseTransactionSelected(int transactionId) => TransactionSelected?.Invoke(this, transactionId);
+    #endregion
 
+    #region Initialization and page loading
     public override async Task EnsureInitializedAsync()
     {
         await EnsureStocksLoadedAsync();
@@ -167,7 +170,9 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
         };
         return (ordered.ToList(), total);
     }
+    #endregion
 
+    #region Details popup and helpers
     private async Task OpenDetailsAsync(Order order, User user, Stock stock)
     {
         var page = Shell.Current?.CurrentPage
@@ -217,6 +222,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
         ToDate = now;
         ToTime = now.TimeOfDay;
     }
+    #endregion
 }
 
 public partial class OrderTableObject : ObservableObject

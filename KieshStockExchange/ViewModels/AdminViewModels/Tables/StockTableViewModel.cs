@@ -15,6 +15,7 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
 {
     private const string AnyCurrencyOption = "Any";
 
+    #region Fields, filter state and Constructor
     private readonly IMarketDataService _market;
     private readonly IStockService _stocks;
     private readonly IServiceProvider _services;
@@ -42,7 +43,9 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
             .Concat(CurrencyHelper.SupportedCurrencies.Select(c => c.ToString()))
             .ToList();
     }
+    #endregion
 
+    #region Page loading and row building
     protected override async Task<(IReadOnlyList<StockTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
@@ -122,7 +125,9 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
         return new StockTableObject(stock, priceInline, primaryPrice, changeDisp, changePct,
             bullish, bearish, listings.Count, OpenEditAsync);
     }
+    #endregion
 
+    #region Edit popup
     private async Task OpenEditAsync(Stock stock)
     {
         var page = Shell.Current?.CurrentPage
@@ -144,6 +149,7 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
             popup.ViewModel.Saved -= savedHandler;
         }
     }
+    #endregion
 }
 
 public partial class StockTableObject : ObservableObject

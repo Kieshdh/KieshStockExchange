@@ -14,6 +14,7 @@ namespace KieshStockExchange.ViewModels.AdminViewModels;
 
 public partial class AdminViewModel : BaseViewModel
 {
+    #region UI state
     [ObservableProperty] private bool _isLoading = true;
     [ObservableProperty] private bool _doneLoading = false;
     [ObservableProperty] private string _loadingText = string.Empty;
@@ -31,7 +32,9 @@ public partial class AdminViewModel : BaseViewModel
     public const int OrdersTabIndex = 2;
     public const int TransactionsTabIndex = 3;
     public const int UserDetailsTabIndex = 6;
+    #endregion
 
+    #region Fields and Constructor
     private readonly IExcelImportService ExcelService;
     private readonly IServiceProvider _services;
     private readonly IDataBaseService _db;
@@ -64,7 +67,9 @@ public partial class AdminViewModel : BaseViewModel
         userDetailsVm.OrderSelected += async (_, orderId) => await OpenOrderDetailsAsync(orderId);
         userDetailsVm.TransactionSelected += async (_, txId) => await OpenTransactionDetailsAsync(txId);
     }
+    #endregion
 
+    #region Cross-tab navigation
     private async Task OpenUserDetailsAsync(int userId)
     {
         SelectedTabIndex = UserDetailsTabIndex;
@@ -133,7 +138,9 @@ public partial class AdminViewModel : BaseViewModel
             popup.ViewModel.NavigateToOrderRequested -= orderNav;
         }
     }
+    #endregion
 
+    #region Lifecycle and commands
     public async Task InitializeAsync()
     {
         IsBusy = true;
@@ -171,4 +178,5 @@ public partial class AdminViewModel : BaseViewModel
 
     [RelayCommand]
     private async Task RefreshActiveTabAsync() => await GetTabVm(SelectedTabIndex).RefreshAsync();
+    #endregion
 }

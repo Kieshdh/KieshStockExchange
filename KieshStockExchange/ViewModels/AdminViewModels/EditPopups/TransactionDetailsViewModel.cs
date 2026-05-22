@@ -7,10 +7,13 @@ namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
 public partial class TransactionDetailsViewModel : BaseViewModel
 {
+    #region Events
     public event EventHandler? CloseRequested;
     public event EventHandler<int>? NavigateToUserRequested;
     public event EventHandler<int>? NavigateToOrderRequested;
+    #endregion
 
+    #region Bound state
     [ObservableProperty] private int _transactionId;
     [ObservableProperty] private string _timestampDisplay = string.Empty;
     [ObservableProperty] private string _symbol = string.Empty;
@@ -25,12 +28,14 @@ public partial class TransactionDetailsViewModel : BaseViewModel
     [ObservableProperty] private string _sellerUsername = string.Empty;
     [ObservableProperty] private int _buyOrderId;
     [ObservableProperty] private int _sellOrderId;
+    #endregion
 
     public TransactionDetailsViewModel()
     {
         Title = "Transaction details";
     }
 
+    #region Initialize and commands
     public void Initialize(Transaction tx, string buyerUsername, string sellerUsername, string symbol)
     {
         if (tx is null) throw new ArgumentNullException(nameof(tx));
@@ -83,4 +88,5 @@ public partial class TransactionDetailsViewModel : BaseViewModel
 
     [RelayCommand]
     private void Close() => CloseRequested?.Invoke(this, EventArgs.Empty);
+    #endregion
 }
