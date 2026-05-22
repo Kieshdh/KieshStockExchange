@@ -1,4 +1,4 @@
-﻿
+
 namespace KieshStockExchange.Helpers;
 
 public static class TimeHelper
@@ -54,7 +54,7 @@ public static class TimeHelper
         return (start, start.AddDays(1));
     }
 
-    /// <summary> Returns [startOfTodayUtc, nowUtc) for the current day. 
+    /// <summary> Returns [startOfTodayUtc, nowUtc) for the current day.
     /// start = today's 00:00 UTC, end = NowUtc(). </summary>
     public static (DateTime StartUtc, DateTime EndUtc) TodayUtcRange()
     {

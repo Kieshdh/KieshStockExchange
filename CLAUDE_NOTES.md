@@ -158,12 +158,13 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 
 **Effort with Claude Code: ~3–5 weeks of focused work.** Phases 1, 2, 4, 5 are boilerplate-heavy and benefit a lot from generation. Phase 3 is the long pole — concurrency bugs and manual MAUI testing don't speed up.
 
-#### Phase 0 — Architecture decisions (do first, before any code)
+#### Phase 0 — Architecture decisions ✅ DONE
 - **Transport**: ASP.NET Core Web API for request/response (orders, login, history) + **SignalR** for live ticks/quotes. Native .NET, integrates with auth.
-- **Database**: Postgres for v2; SQLite acceptable for the prototype (single-instance only).
-- **Hosting**: dev = `dotnet run` locally, prod TBD (small VM or Azure App Service).
+- **Database**: Postgres for v2; **SQLite kept through Phase 6, Postgres switchover at Phase 7.** Avoids stacking a DB swap on top of the engine-moves-server-side phase. Tradeoff acknowledged: SQLite serializes writes, so server-side bots + real users will feel contention before Phase 7.
+- **Hosting**: dev = `dotnet run` locally, prod TBD (small VM or Azure App Service). Architectural rule from day one: client reads server base URL from config, never hard-coded.
 - **Auth**: JWT bearer tokens — stateless, works cleanly with SignalR via `AccessTokenProvider`.
 - **Solution shape**: three projects — `KieshStockExchange` (MAUI client), `KieshStockExchange.Server` (ASP.NET Core), `KieshStockExchange.Shared` (Models + DTOs + interfaces both sides reference).
+- **SQLite-net attributes**: server-only partials. Each model becomes `partial`; `[Table]`/`[Column]`/`[Indexed]`/`[PrimaryKey]`/`[AutoIncrement]`/`[Ignore]` move into a sibling file that lives in the Server project. Keeps Shared framework-free.
 
 #### Phase 1 — Extract shared contracts (~1–2 days)
 - Create `KieshStockExchange.Shared`. Move: all `Models/`, the DTO shapes for the wire (likely 1:1 with models, SQLite attributes split off into a server-only partial), and the interfaces both sides talk to.

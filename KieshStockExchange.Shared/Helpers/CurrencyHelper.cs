@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -36,7 +36,7 @@ public static class CurrencyHelper
 
     /// <summary> The base currency for conversion rates. Default is USD. </summary>
     public static CurrencyType BaseCurrency { get; private set; } = CurrencyType.USD;
-    // Exchange rates relative to the base currency. 
+    // Exchange rates relative to the base currency.
     private static readonly Dictionary<CurrencyType, decimal> RatesPerBase = new()
     {
         { CurrencyType.USD, 1m },
@@ -58,7 +58,7 @@ public static class CurrencyHelper
         var culture = CultureCache[currency];
         return string.Format(culture, "{0:C}", amount);
     }
-    
+
     public static string Format(decimal? amount, CurrencyType currency, string fallback = "—")
         => amount.HasValue ? Format(amount.Value, currency) : fallback;
 
@@ -105,7 +105,7 @@ public static class CurrencyHelper
     }
     #endregion
 
-    #region Iso Code 
+    #region Iso Code
     /// <summary>
     /// Converts the specified <see cref="CurrencyType"/> to its ISO 4217 currency code representation.
     /// </summary>

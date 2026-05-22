@@ -63,6 +63,10 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\KieshStockExchange.Shared\KieshStockExchange.Shared.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<PackageReference Include="CommunityToolkit.Maui" Version="9.1.0" />
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
 		<PackageReference Include="ExcelDataReader" Version="3.7.0" />

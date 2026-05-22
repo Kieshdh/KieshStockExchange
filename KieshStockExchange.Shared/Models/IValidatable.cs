@@ -1,4 +1,4 @@
-﻿namespace KieshStockExchange.Models;
+namespace KieshStockExchange.Models;
 
 public interface IValidatable
 {
