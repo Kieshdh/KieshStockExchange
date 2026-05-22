@@ -80,7 +80,12 @@ public interface IDataBaseService
     Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default);
     Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default);
     Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default);
-    Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, CancellationToken ct = default);
+    /// <summary>
+    /// All transactions since the given UTC instant, optionally capped at <paramref name="limit"/> rows.
+    /// In-process callers pass <c>null</c> for unbounded behaviour (original semantics). The HTTP
+    /// transport bounds the response to avoid the 2 s+ payloads observed during the Phase 2 spike.
+    /// </summary>
+    Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, int? limit = null, CancellationToken ct = default);
     Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken ct = default);
     Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default);
     Task CreateTransaction(Transaction transaction, CancellationToken ct = default);

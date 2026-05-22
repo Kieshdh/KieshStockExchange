@@ -47,8 +47,8 @@ public sealed class TransactionController : ControllerBase
         => _db.GetTransactionsByStockIdAndTimeRange(stockId, currency, from, to, ct);
 
     [HttpGet("since")]
-    public Task<List<Transaction>> GetSinceTime([FromQuery] DateTime since, CancellationToken ct)
-        => _db.GetTransactionsSinceTime(since, ct);
+    public Task<List<Transaction>> GetSinceTime([FromQuery] DateTime since, [FromQuery] int? limit, CancellationToken ct)
+        => _db.GetTransactionsSinceTime(since, limit, ct);
 
     [HttpGet("latest/{stockId:int}/{currency}")]
     public async Task<ActionResult<Transaction>> GetLatest(int stockId, CurrencyType currency, CancellationToken ct)
@@ -57,4 +57,16 @@ public sealed class TransactionController : ControllerBase
     [HttpGet("latest-before/{stockId:int}/{currency}")]
     public async Task<ActionResult<Transaction>> GetLatestBefore(int stockId, CurrencyType currency, [FromQuery] DateTime time, CancellationToken ct)
         => await _db.GetLatestTransactionBeforeTime(stockId, currency, time, ct) is { } t ? Ok(t) : NotFound();
+
+    [HttpPost]
+    public async Task<ActionResult<Transaction>> Create([FromBody] Transaction tx, CancellationToken ct)
+    { await _db.CreateTransaction(tx, ct); return Ok(tx); }
+
+    [HttpPut]
+    public async Task<IActionResult> Update([FromBody] Transaction tx, CancellationToken ct)
+    { await _db.UpdateTransaction(tx, ct); return NoContent(); }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    { await _db.DeleteTransaction(new Transaction { TransactionId = id }, ct); return NoContent(); }
 }

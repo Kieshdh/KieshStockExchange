@@ -39,4 +39,24 @@ public sealed class UserController : ControllerBase
 
     [HttpGet("{id:int}/exists")]
     public Task<bool> Exists(int id, CancellationToken ct) => _db.UserExists(id, ct);
+
+    [HttpPost]
+    public async Task<ActionResult<User>> Create([FromBody] User user, CancellationToken ct)
+    { await _db.CreateUser(user, ct); return Ok(user); }
+
+    [HttpPut]
+    public async Task<IActionResult> Update([FromBody] User user, CancellationToken ct)
+    { await _db.UpdateUser(user, ct); return NoContent(); }
+
+    [HttpPut("upsert")]
+    public async Task<ActionResult<User>> Upsert([FromBody] User user, CancellationToken ct)
+    { await _db.UpsertUser(user, ct); return Ok(user); }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    { await _db.DeleteUser(new User { UserId = id }, ct); return NoContent(); }
+
+    [HttpDelete("{id:int}/by-id")]
+    public async Task<IActionResult> DeleteById(int id, CancellationToken ct)
+    { await _db.DeleteUserById(id, ct); return NoContent(); }
 }

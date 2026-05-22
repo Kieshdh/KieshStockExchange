@@ -39,4 +39,20 @@ public sealed class PositionController : ControllerBase
     [HttpPost("for-users")]
     public Task<List<Position>> GetForUsers([FromBody] List<int> userIds, CancellationToken ct)
         => _db.GetPositionsForUsersAsync(userIds, ct);
+
+    [HttpPost]
+    public async Task<ActionResult<Position>> Create([FromBody] Position position, CancellationToken ct)
+    { await _db.CreatePosition(position, ct); return Ok(position); }
+
+    [HttpPut]
+    public async Task<IActionResult> Update([FromBody] Position position, CancellationToken ct)
+    { await _db.UpdatePosition(position, ct); return NoContent(); }
+
+    [HttpPut("upsert")]
+    public async Task<ActionResult<Position>> Upsert([FromBody] Position position, CancellationToken ct)
+    { await _db.UpsertPosition(position, ct); return Ok(position); }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    { await _db.DeletePosition(new Position { PositionId = id }, ct); return NoContent(); }
 }

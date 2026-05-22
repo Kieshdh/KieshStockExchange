@@ -17,4 +17,8 @@ public sealed class StockListingController : ControllerBase
     [HttpGet("by-stock/{stockId:int}")]
     public Task<List<StockListing>> GetByStockId(int stockId, CancellationToken ct)
         => _db.GetStockListingsByStockId(stockId, ct);
+
+    [HttpPost]
+    public async Task<ActionResult<StockListing>> Create([FromBody] StockListing listing, CancellationToken ct)
+    { await _db.CreateStockListing(listing, ct); return Ok(listing); }
 }

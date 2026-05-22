@@ -929,14 +929,15 @@ public class DBService: IDataBaseService, IDisposable
         return rows.Select(TransactionMapper.ToDomain).ToList();
     }
 
-    public async Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, CancellationToken ct = default)
+    public async Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, int? limit = null, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
         var now = TimeHelper.NowUtc();
         var rows = await RunDbAsync(() =>
-            _db.Table<TransactionRow>()
-               .Where(t => t.Timestamp >= since && t.Timestamp <= now)
-               .ToListAsync(), ct);
+        {
+            var q = _db.Table<TransactionRow>().Where(t => t.Timestamp >= since && t.Timestamp <= now);
+            return limit is int n ? q.Take(n).ToListAsync() : q.ToListAsync();
+        }, ct);
         return rows.Select(TransactionMapper.ToDomain).ToList();
     }
 

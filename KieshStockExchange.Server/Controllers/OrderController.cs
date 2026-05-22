@@ -54,4 +54,16 @@ public sealed class OrderController : ControllerBase
     [HttpPost("open-for-users")]
     public Task<List<Order>> GetOpenForUsers([FromBody] List<int> userIds, CancellationToken ct)
         => _db.GetOpenOrdersForUsersAsync(userIds, ct);
+
+    [HttpPost]
+    public async Task<ActionResult<Order>> Create([FromBody] Order order, CancellationToken ct)
+    { await _db.CreateOrder(order, ct); return Ok(order); }
+
+    [HttpPut]
+    public async Task<IActionResult> Update([FromBody] Order order, CancellationToken ct)
+    { await _db.UpdateOrder(order, ct); return NoContent(); }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    { await _db.DeleteOrder(new Order { OrderId = id }, ct); return NoContent(); }
 }

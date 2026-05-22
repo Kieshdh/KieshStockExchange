@@ -64,6 +64,17 @@ Sequence chosen to (a) finish what's already started, (b) land cheap UX wins, (c
 ### Wave 7 — Online migration (3–5 weeks)
 23. Item 2.4 — see full phased plan in section 2.4. **Don't mix migration with new features** — that's the #1 way these projects slip.
 
+### Wave 8 — Data lifecycle & DB size (post-migration)
+24. Item 8.1 — WAL checkpoint hygiene (server-side hosted service + graceful-shutdown handler).
+25. Item 8.2 — Retention policy for `Transactions` (downsample-then-prune older history into coarser candles). **Heavily entangled with 8.7 — must be designed together.**
+26. Item 8.3 — Candle hygiene (drop sub-minute resolutions after N hours; keep daily/hourly forever).
+27. Item 8.4 — `StockPrice` history retention.
+28. Item 8.5 — Periodic `VACUUM` + `PRAGMA auto_vacuum=INCREMENTAL` setup.
+29. Item 8.6 — DB-size telemetry alongside `BotEconomyTelemetry`; warn at thresholds.
+30. Item 8.7 — Order retention: prune closed orders older than 1 day (configurable). **Design first; many cross-references to audit.**
+
+Triggered by the observation that after weeks of bot-driven simulation the SQLite file hit 4.1 GB + a 6.6 GB WAL (graceful shutdowns not happening → WAL never checkpoints back into the main file). See section 8 below.
+
 ### Why this order
 - Wave 1 unblocks Wave 2 mechanically (Fund tx history needs FundTransaction; volume overlay builds on the chart changes).
 - Wave 3 is the most important discipline call: a race that's "low probability" with one user is "every minute" with fifty. Fix engine bugs *before* going multi-user.
@@ -71,6 +82,7 @@ Sequence chosen to (a) finish what's already started, (b) land cheap UX wins, (c
 - Wave 5 places notifications before migration deliberately: a working in-process notification system means migration Phase 4 just swaps the transport, not the consumer.
 - Wave 6 has no hard dependencies; slot earlier as a change of pace if needed.
 - Wave 7 last because by then the system is feature-complete and bug-light — the migration is purely lifting it onto a different runtime, not shipping new behavior at the same time.
+- Wave 8 explicitly post-migration: retention queries against Postgres are cleaner than against SQLite (proper window functions, partial indexes), so most of it lands easier after Phase 7. The one exception is 8.1 (WAL hygiene), which only matters while SQLite is the active store and can land mid-migration if the local DB starts hurting before then.
 
 ---
 
@@ -535,6 +547,94 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
 
 ---
 
+## 8. Data lifecycle & DB size (Wave 8, post-migration)
+
+Triggered by observing the SQLite file grow to 4.1 GB + a 6.6 GB WAL after weeks of bot-driven runtime. Most of the bulk is high-churn append-only history (`Transactions`, `Candles`, `StockPrices`) and a WAL that's never been checkpointed because graceful shutdowns aren't happening. None of this is broken — it's just unbounded. This wave puts retention + cleanup on a schedule.
+
+The wave sits **after Wave 7** because retention queries against Postgres are cleaner than against SQLite (window functions, partial indexes, partitioning). The one exception is 8.1 (WAL hygiene), which is SQLite-specific and can be done mid-migration if the local DB becomes painful before the Postgres switchover.
+
+### 8.1 WAL checkpoint hygiene
+- Add a server-side `IHostedService` that runs `PRAGMA wal_checkpoint(TRUNCATE)` periodically (e.g. every 5 minutes when the writer-gate is idle, gated by a recent-write counter so it doesn't fight active bots).
+- Hook `IHostApplicationLifetime.ApplicationStopping` to checkpoint on graceful shutdown. Force-quits / debugger-stops won't be helped by this, but normal stops will.
+- Add a `/admin/checkpoint` endpoint for on-demand checkpoints during maintenance.
+- Surface "WAL size since last checkpoint" in the existing log line cadence so a runaway WAL is visible before it becomes a 6 GB surprise.
+- Cost: ~half a day. Risk: low — `wal_checkpoint(TRUNCATE)` is a documented PRAGMA, doesn't lock writers, and is a no-op when there's nothing to merge.
+
+### 8.2 `Transactions` retention with downsample-then-prune
+**Design directly entwined with 8.7 — read both before scheduling either.**
+
+- Strategy: keep the last N days of full-resolution `Transactions` (configurable; suggest 7–30 days for a single-user simulation, much longer in a multi-user prod world). Older history collapses into already-existing 1-day `Candles` (which are pre-aggregated OHLCV + volume + count) and the underlying `Transactions` rows are deleted.
+- Charts past the cutoff already use candles for performance; downsample-then-prune doesn't lose chart fidelity at the daily timeframe.
+- **Consumer audit** before scheduling: do any non-chart queries read raw old `Transactions`? Known and unknown sites to walk through:
+  - `OrderResult.FillTransactions` — references fills of a freshly-placed order. Lifetime is the duration of the place-and-match call; doesn't hold raw txs long-term. Safe.
+  - `TradeSettler` reservation reconciler — walks open orders, not raw txs. Probably safe but verify.
+  - Position cost-basis or P/L calculations — **unknown**. If `PortfolioOrderHistoryViewModel` or the upcoming `FundTransactionHistoryPage` reaches back through raw `Transactions` for older P/L summaries, retention breaks them. Likely candidate for a "snapshot daily P/L into a dedicated table at prune time" sibling step.
+  - `Transactions ↔ Orders` foreign-key shape: every `Transaction` row carries `BuyOrderId` + `SellOrderId`. After 8.7 prunes the order rows, those FKs dangle. Either: (a) prune in lockstep so a tx is never older than its order, or (b) accept dangling references and document. (a) is cleaner; see "joint pruning" below.
+  - `BotEconomyTelemetry` and `BotStatsLogger` — these aggregate via in-memory counters, not by querying the table. Safe.
+- **Joint pruning rule** (with 8.7): never delete a `Transaction` whose `BuyOrderId` or `SellOrderId` still exists in `Orders`. Either prune orders first (then their txs become orphans of orders that no longer exist — fine), or use a cutoff that's identical for both tables. Easiest: same cutoff timestamp, same nightly job.
+- Implement as an `IHostedService` running once per night during low-bot hours; emit a log line with rows-pruned + bytes-freed.
+- **Downstream benefit**: removes the upper bound on simulated trading volume per session. The current `MaxDailyTrades` per AIUser + the conservative `ActiveBotCap` partly exist because unbounded growth was a real concern. Once retention is in place those caps can be raised or removed without filling the disk.
+
+### 8.3 Candle hygiene
+- High-resolution candles (1s, 5s, 15s) explode in row count; they're useful for live intraday charting but worthless for history older than a few hours.
+- Drop 1s/5s/15s buckets older than ~6 hours (configurable). Keep 1m and coarser indefinitely.
+- The existing `IX_Candle_Key` composite index on (StockId, Currency, BucketSeconds, OpenTime) is well-shaped for `DELETE WHERE BucketSeconds <= ? AND OpenTime < ?`, so this is a single fast query.
+
+### 8.4 `StockPrice` history retention
+- `StockPrice` rows are the per-tick close snapshot — duplicate of what's already in `Transactions` plus what candles aggregate. They exist mostly for the chart's pre-aggregated price line.
+- Once 8.2 is in place, `StockPrice` becomes mostly redundant. Either: (a) retire the table entirely and have the chart read from `Candles`, or (b) keep it as a thin "latest N rows per stock-currency" ring buffer.
+- Decide during 8.2 implementation; revisit `MarketLookupService.GetLatestPriceFromStoreAsync` which is the main consumer.
+
+### 8.5 `VACUUM` + incremental auto-vacuum
+- Set `PRAGMA auto_vacuum = INCREMENTAL` at DB creation time so reclaimed pages can be returned to the OS without a full `VACUUM` lock.
+- Schedule a periodic `PRAGMA incremental_vacuum(N)` from the same hosted service that does checkpoints.
+- Full `VACUUM` once per quarter (or after a big retention sweep) in a maintenance window — it's exclusive-lock so it can't run while bots are active.
+- This whole item is moot once Phase 7 moves to Postgres, which handles space reclamation via `autovacuum` natively.
+
+### 8.6 DB-size telemetry
+- Extend `BotEconomyTelemetry` (or add a sibling `DbHealthTelemetry`) that logs main-file size, WAL size, and "rows in each high-churn table" on the existing cadence.
+- Warn thresholds: WAL > 100 MB, main file growth > 1 GB/day, `Transactions` count > 10M. Tune as we learn the steady-state shape.
+- Cheap; mostly a `FileInfo(_dbPath).Length` + a few `SELECT COUNT(*)` queries.
+
+### 8.7 `Orders` retention — prune closed orders older than 1 day
+**Sketch only — needs heavy refinement before scheduling.** Listed here so the design decisions don't get lost.
+
+The core idea: a Filled or Cancelled order from yesterday's bot session has zero ongoing value to the engine. It sits in the DB indexed under `IX_Orders_User_Status` and `IX_Orders_Stock_Status`, inflating every paged scan against those indexes and contributing to the WAL churn that 8.1 is trying to bound. Drop it.
+
+**The strict invariants the prune must preserve** (any of these violated = correctness regression):
+- **Never prune `Status = 'Open'` orders.** They're in the book. Pruning them means the book and DB disagree, the order vanishes from the user's open-orders panel mid-session, and the matcher's next batch finds a phantom OrderId in `_registry` that doesn't have a DB row anymore.
+- **Never prune an order with non-zero `CurrentBuyReservation` / `CurrentSellReservedQty`.** Those are runtime-only fields not in the DB, but they signal that the engine still thinks the order is live. Closed orders normally clear these via `ReleaseBuyReservation` / `ReleaseSellReservation`; a non-zero value on a "Cancelled" order is a hint that the cancel path didn't fully unwind. Prune-with-prejudice would hide the bug.
+- **Never prune an order whose `OrderId` still appears in `IOrderRegistry`.** Same reasoning — the registry is the engine's source of truth for "this order is live in memory."
+
+**Open questions (the heavy refinement the user flagged):**
+1. **Order History UI cutoff.** `PortfolioOrderHistoryViewModel` paginates the user's closed orders. What's the longest window a user reasonably scrolls back? 1 day is the proposed default but the UI might need a "show older" affordance that triggers an archive lookup (Postgres partitioning would make this easy; SQLite less so).
+2. **Cost-basis recompute.** Position cost basis is conventionally derived from buy fills. If buy orders + their fills are gone, recomputing cost basis from scratch is impossible. Either: (a) cost basis is already cached on `Position` and never recomputed from history (verify), or (b) snapshot per-position cost basis into a dedicated table at prune time.
+3. **AIUser stats / `BotStatsLogger`.** Daily/historical bot perf stats — are they computed from `Orders` directly or from accumulated counters? In-memory counters survive prune; DB-query-based stats don't.
+4. **Audit / reconciliation.** No external compliance regime here (it's a simulation), but if you ever want to answer "show me every order user X placed in March" the answer becomes "we don't store that any more" or "look in the archive." Decide whether an archive table or just delete is acceptable. Archive can be append-only into a separate `OrdersArchive` file/table that's never queried hot.
+5. **Joint deletion with 8.2.** As noted in 8.2, `Transactions.BuyOrderId` / `SellOrderId` reference `Orders.OrderId`. Pruning orders first leaves transactions with dangling FKs. Pruning transactions first leaves orders with no fill detail (still has aggregate `AmountFilled` on the order). Cleanest: same cutoff, same nightly job, prune transactions first then orders, both with `WHERE UpdatedAt < cutoff AND Status IN ('Filled','Cancelled')` on the order side.
+6. **`FundTransaction` story.** Already isolated (not joined to `Orders` or `Transactions`); user-visible history page wants months not days. Don't prune `FundTransaction` here — it's the deliberate audit log for cash movements.
+7. **Reservation invariants under prune.** `ReservationAuditor` walks open orders' reservations against cached fund/position state. After prune it should walk the same set (only opens). Verify the auditor doesn't enumerate closed orders for any reason.
+8. **Trade replay / debugging.** If something goes wrong mid-session, looking at yesterday's orders to trace cause is the first thing anyone reaches for. A 1-day cutoff means yesterday's incidents have minimal history. Suggest configurable with a generous default (7 days?) for dev environments and 1 day only for production.
+
+**Downstream benefits worth calling out:**
+- **Removes the per-bot order cap and per-day trade cap.** `MaxOpenOrders` and `MaxDailyTrades` on `AIUser` exist partly to bound `Orders`-table growth. With retention in place, those caps can be raised or removed entirely — bots can trade as aggressively as the engine and matcher allow without the simulation eating disk over a week.
+- **Tightens the hot indexes.** `IX_Orders_User_Status` and `IX_Orders_Stock_Status` are queried on every order-book load and every Admin page render. Smaller index = faster scan.
+- **`IOrderRegistry` stays small naturally.** The registry already evicts terminally-Filled orders (`OrderExecutionService` line ~141), but cancellation-then-DB-delete keeps the DB in sync.
+
+**Suggested first concrete sub-steps** (when this item gets picked up):
+- Audit all consumer sites listed above with grep + Read. Produce a one-page "yes this is safe / no this needs migrating first" report.
+- Decide archive vs. hard-delete.
+- Decide cutoff default (1 day vs. 7 days vs. configurable per environment).
+- Land 8.7 and the joint piece of 8.2 in one PR — they're coupled.
+
+### Order of attack
+- **8.1 first** (WAL hygiene). Stops the bleed without touching data. Cheap, low-risk, defensible mid-migration if needed.
+- **8.6 next** (telemetry). Gives the data to make 8.2/8.3 thresholds calibrated rather than guessed.
+- **8.3 before 8.2/8.7.** Sub-minute candles are pure noise past a few hours and have no downstream consumers; safe quick win.
+- **8.7 + 8.2 together, last.** The biggest impact but touches the most semantics — needs the consumer audit and the joint-prune ordering nailed down before either can land safely. Sequencing one without the other introduces FK dangle.
+
+---
+
 ## Cross-cutting notes
 
 - **Already in flight (uncommitted):** Chart MA/EMA + crosshair + price markers, DepositWithdrawPage + FundTransaction, UserPreferences. Land these first before starting new work — several items above depend on them.
@@ -543,4 +643,5 @@ Largest item by far. Goal: UI is faster (no engine work on the local machine) an
   - 3.2 (Multi-currency) depends on `UserPreferences.BaseCurrency` being persisted.
   - 4.4 (Volume overlay) builds on the in-flight chart drawable changes.
   - 2.4 (Engine on server) is a major architectural shift — should be planned independently before any incremental work tries to anticipate it.
+  - Wave 8 (data lifecycle) depends on Wave 7 finishing for the bulk of it; 8.1 (WAL hygiene) can land mid-migration as a circuit-breaker if local SQLite size becomes a problem before then.
 - **Testing reminder (CLAUDE.md):** Manual through the running app; no automated tests assumed unless explicitly added.

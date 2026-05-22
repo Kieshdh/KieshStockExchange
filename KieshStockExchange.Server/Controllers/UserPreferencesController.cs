@@ -14,4 +14,8 @@ public sealed class UserPreferencesController : ControllerBase
     [HttpGet("by-user/{userId:int}")]
     public async Task<ActionResult<UserPreferences>> GetByUserId(int userId, CancellationToken ct)
         => await _db.GetUserPreferencesByUserId(userId, ct) is { } p ? Ok(p) : NotFound();
+
+    [HttpPut("upsert")]
+    public async Task<IActionResult> Upsert([FromBody] UserPreferences prefs, CancellationToken ct)
+    { await _db.UpsertUserPreferences(prefs, ct); return NoContent(); }
 }

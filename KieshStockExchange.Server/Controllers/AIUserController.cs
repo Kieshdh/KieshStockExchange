@@ -21,4 +21,20 @@ public sealed class AIUserController : ControllerBase
     [HttpGet("by-user/{userId:int}")]
     public Task<List<AIUser>> GetByUserId(int userId, CancellationToken ct)
         => _db.GetAIUsersByUserId(userId, ct);
+
+    [HttpPost]
+    public async Task<ActionResult<AIUser>> Create([FromBody] AIUser ai, CancellationToken ct)
+    { await _db.CreateAIUser(ai, ct); return Ok(ai); }
+
+    [HttpPut]
+    public async Task<IActionResult> Update([FromBody] AIUser ai, CancellationToken ct)
+    { await _db.UpdateAIUser(ai, ct); return NoContent(); }
+
+    [HttpPut("upsert")]
+    public async Task<ActionResult<AIUser>> Upsert([FromBody] AIUser ai, CancellationToken ct)
+    { await _db.UpsertAIUser(ai, ct); return Ok(ai); }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    { await _db.DeleteAIUser(new AIUser { AiUserId = id }, ct); return NoContent(); }
 }

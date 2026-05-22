@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
-using System.Runtime.CompilerServices;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
@@ -24,15 +23,6 @@ public sealed class ApiDataBaseService : IDataBaseService
         _http = factory.CreateClient("KSE.Server");
     }
 
-    private static Task<T> NotImpl<T>([CallerMemberName] string member = "")
-        => Task.FromException<T>(new NotImplementedException($"ApiDataBaseService.{member} not yet wired"));
-
-    private static Task NotImpl([CallerMemberName] string member = "")
-        => Task.FromException(new NotImplementedException($"ApiDataBaseService.{member} not yet wired"));
-
-    // Reads where 404 is a legitimate "not found" response and the method signature returns
-    // T? — collapses the response to null instead of throwing. EnsureSuccessStatusCode catches
-    // anything else so transport errors still surface.
     // POST a body, expect a JSON list back. Used by "by ids" / "for users" methods where
     // the id list would be too long for a URL query string.
     private async Task<List<TItem>> PostListAsync<TBody, TItem>(string requestUri, TBody body, CancellationToken ct)
@@ -48,6 +38,67 @@ public sealed class ApiDataBaseService : IDataBaseService
         if (resp.StatusCode == HttpStatusCode.NotFound) return null;
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<T>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+    }
+
+    // POST entity body, deserialize server-returned entity, copy assigned PK back onto the
+    // source instance — preserves the in-process LocalDBService.CreateX contract over HTTP.
+    private async Task PostWriteBackAsync<T>(string url, T body, Action<T, T> writeback, CancellationToken ct) where T : class
+    {
+        var resp = await _http.PostAsJsonAsync(url, body, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        var assigned = await resp.Content.ReadFromJsonAsync<T>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        if (assigned != null) writeback(body, assigned);
+    }
+
+    // PUT entity body, expect 204.
+    private async Task PutJsonAsync<T>(string url, T body, CancellationToken ct)
+    {
+        var resp = await _http.PutAsJsonAsync(url, body, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    // PUT entity body, server returns entity (Upsert path; may assign PK for "new" rows).
+    private async Task PutWriteBackAsync<T>(string url, T body, Action<T, T> writeback, CancellationToken ct) where T : class
+    {
+        var resp = await _http.PutAsJsonAsync(url, body, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        var assigned = await resp.Content.ReadFromJsonAsync<T>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        if (assigned != null) writeback(body, assigned);
+    }
+
+    private async Task DeleteUrlAsync(string url, CancellationToken ct)
+    {
+        var resp = await _http.DeleteAsync(url, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    // Bulk passthrough helpers — paired 1:1 with AdminController endpoints. For Insert, the
+    // server returns the list with auto-assigned PKs; walk it positionally and copy each PK
+    // back to the corresponding source instance so the in-process contract for InsertAllAsync
+    // (mutates input items) is preserved over HTTP.
+    private async Task BulkInsertRouteAsync<T>(IEnumerable<T> items, string resource, Action<T, T> writeback, CancellationToken ct)
+    {
+        var list = items as IList<T> ?? items.ToList();
+        if (list.Count == 0) return;
+        var resp = await _http.PostAsJsonAsync($"api/admin/insert-all/{resource}", list, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        var assigned = await resp.Content.ReadFromJsonAsync<List<T>>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        if (assigned == null) return;
+        for (int i = 0; i < list.Count && i < assigned.Count; i++) writeback(list[i], assigned[i]);
+    }
+
+    private async Task BulkUpdateRouteAsync<T>(IEnumerable<T> items, string resource, CancellationToken ct)
+    {
+        var list = items as IList<T> ?? items.ToList();
+        if (list.Count == 0) return;
+        var resp = await _http.PostAsJsonAsync($"api/admin/update-all/{resource}", list, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+    }
+
+    private async Task BulkResetRouteAsync(string resource, CancellationToken ct)
+    {
+        var resp = await _http.PostAsync($"api/admin/reset/{resource}", content: null, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
     }
 
     // Tiny URL-encoded query-string builder for the paged endpoints. Skips null/empty values
@@ -76,10 +127,76 @@ public sealed class ApiDataBaseService : IDataBaseService
     }
 
     #region Generic operations
-    public Task ResetTableAsync<T>(CancellationToken ct = default) where T : new() => NotImpl();
-    public Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default) => NotImpl();
-    public Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default) => NotImpl();
-    public Task DropAndRecreateAsync(bool keepBackup = false, CancellationToken ct = default) => NotImpl();
+    // Dispatch the IDataBaseService<T> generic bulk methods to typed AdminController endpoints.
+    // Mirrors the in-process dispatch table in DBService — same 14 entity types, same PK-writeback
+    // lambdas. Unknown T throws NotSupportedException; the in-process DBService falls through to
+    // a passthrough, but over HTTP there's no equivalent route to fall through to.
+
+    public Task ResetTableAsync<T>(CancellationToken ct = default) where T : new()
+    {
+        var t = typeof(T);
+        if (t == typeof(User))                return BulkResetRouteAsync("users", ct);
+        if (t == typeof(Stock))               return BulkResetRouteAsync("stocks", ct);
+        if (t == typeof(StockListing))        return BulkResetRouteAsync("stock-listings", ct);
+        if (t == typeof(StockPrice))          return BulkResetRouteAsync("stock-prices", ct);
+        if (t == typeof(Order))               return BulkResetRouteAsync("orders", ct);
+        if (t == typeof(Transaction))         return BulkResetRouteAsync("transactions", ct);
+        if (t == typeof(Position))            return BulkResetRouteAsync("positions", ct);
+        if (t == typeof(Fund))                return BulkResetRouteAsync("funds", ct);
+        if (t == typeof(FundTransaction))     return BulkResetRouteAsync("fund-transactions", ct);
+        if (t == typeof(Candle))              return BulkResetRouteAsync("candles", ct);
+        if (t == typeof(Message))             return BulkResetRouteAsync("messages", ct);
+        if (t == typeof(UserPreferences))     return BulkResetRouteAsync("user-preferences", ct);
+        if (t == typeof(UserWatchlistEntry))  return BulkResetRouteAsync("user-watchlist", ct);
+        if (t == typeof(AIUser))              return BulkResetRouteAsync("ai-users", ct);
+        throw new NotSupportedException($"ResetTableAsync<{t.Name}>: no HTTP route registered");
+    }
+
+    public Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
+    {
+        var t = typeof(T);
+        if (t == typeof(Order))              return BulkInsertRouteAsync((IEnumerable<Order>)items,              "orders",            (d, r) => d.OrderId = r.OrderId, ct);
+        if (t == typeof(Transaction))        return BulkInsertRouteAsync((IEnumerable<Transaction>)items,        "transactions",      (d, r) => d.TransactionId = r.TransactionId, ct);
+        if (t == typeof(Position))           return BulkInsertRouteAsync((IEnumerable<Position>)items,           "positions",         (d, r) => d.PositionId = r.PositionId, ct);
+        if (t == typeof(Fund))               return BulkInsertRouteAsync((IEnumerable<Fund>)items,               "funds",             (d, r) => d.FundId = r.FundId, ct);
+        if (t == typeof(FundTransaction))    return BulkInsertRouteAsync((IEnumerable<FundTransaction>)items,    "fund-transactions", (d, r) => d.FundTransactionId = r.FundTransactionId, ct);
+        if (t == typeof(Stock))              return BulkInsertRouteAsync((IEnumerable<Stock>)items,              "stocks",            (d, r) => d.StockId = r.StockId, ct);
+        if (t == typeof(StockListing))       return BulkInsertRouteAsync((IEnumerable<StockListing>)items,       "stock-listings",    (d, r) => d.ListingId = r.ListingId, ct);
+        if (t == typeof(StockPrice))         return BulkInsertRouteAsync((IEnumerable<StockPrice>)items,         "stock-prices",      (d, r) => d.PriceId = r.PriceId, ct);
+        if (t == typeof(User))               return BulkInsertRouteAsync((IEnumerable<User>)items,               "users",             (d, r) => d.UserId = r.UserId, ct);
+        if (t == typeof(AIUser))             return BulkInsertRouteAsync((IEnumerable<AIUser>)items,             "ai-users",          (d, r) => d.AiUserId = r.AiUserId, ct);
+        if (t == typeof(Candle))             return BulkInsertRouteAsync((IEnumerable<Candle>)items,             "candles",           (d, r) => d.CandleId = r.CandleId, ct);
+        if (t == typeof(Message))            return BulkInsertRouteAsync((IEnumerable<Message>)items,            "messages",          (d, r) => d.MessageId = r.MessageId, ct);
+        if (t == typeof(UserPreferences))    return BulkInsertRouteAsync((IEnumerable<UserPreferences>)items,    "user-preferences",  (_, _) => { }, ct);
+        if (t == typeof(UserWatchlistEntry)) return BulkInsertRouteAsync((IEnumerable<UserWatchlistEntry>)items, "user-watchlist",    (d, r) => d.Id = r.Id, ct);
+        throw new NotSupportedException($"InsertAllAsync<{t.Name}>: no HTTP route registered");
+    }
+
+    public Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
+    {
+        var t = typeof(T);
+        if (t == typeof(Order))              return BulkUpdateRouteAsync((IEnumerable<Order>)items,              "orders", ct);
+        if (t == typeof(Transaction))        return BulkUpdateRouteAsync((IEnumerable<Transaction>)items,        "transactions", ct);
+        if (t == typeof(Position))           return BulkUpdateRouteAsync((IEnumerable<Position>)items,           "positions", ct);
+        if (t == typeof(Fund))               return BulkUpdateRouteAsync((IEnumerable<Fund>)items,               "funds", ct);
+        if (t == typeof(FundTransaction))    return BulkUpdateRouteAsync((IEnumerable<FundTransaction>)items,    "fund-transactions", ct);
+        if (t == typeof(Stock))              return BulkUpdateRouteAsync((IEnumerable<Stock>)items,              "stocks", ct);
+        if (t == typeof(StockListing))       return BulkUpdateRouteAsync((IEnumerable<StockListing>)items,       "stock-listings", ct);
+        if (t == typeof(StockPrice))         return BulkUpdateRouteAsync((IEnumerable<StockPrice>)items,         "stock-prices", ct);
+        if (t == typeof(User))               return BulkUpdateRouteAsync((IEnumerable<User>)items,               "users", ct);
+        if (t == typeof(AIUser))             return BulkUpdateRouteAsync((IEnumerable<AIUser>)items,             "ai-users", ct);
+        if (t == typeof(Candle))             return BulkUpdateRouteAsync((IEnumerable<Candle>)items,             "candles", ct);
+        if (t == typeof(Message))            return BulkUpdateRouteAsync((IEnumerable<Message>)items,            "messages", ct);
+        if (t == typeof(UserPreferences))    return BulkUpdateRouteAsync((IEnumerable<UserPreferences>)items,    "user-preferences", ct);
+        if (t == typeof(UserWatchlistEntry)) return BulkUpdateRouteAsync((IEnumerable<UserWatchlistEntry>)items, "user-watchlist", ct);
+        throw new NotSupportedException($"UpdateAllAsync<{t.Name}>: no HTTP route registered");
+    }
+
+    public async Task DropAndRecreateAsync(bool keepBackup = false, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsync($"api/admin/drop-recreate?keepBackup={(keepBackup ? "true" : "false")}", content: null, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+    }
 
     // Per Phase 2 plan: transactions don't survive the HTTP boundary. Engine multi-writes
     // go through IEngineCommandClient instead. These two stay throwing for the entire phase.
@@ -120,11 +237,20 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<bool> UserExists(int userId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<bool>($"api/users/{userId}/exists", ApiJsonOptions.Default, ct);
 
-    public Task CreateUser(User user, CancellationToken ct = default) => NotImpl();
-    public Task UpdateUser(User user, CancellationToken ct = default) => NotImpl();
-    public Task UpsertUser(User user, CancellationToken ct = default) => NotImpl();
-    public Task DeleteUser(User user, CancellationToken ct = default) => NotImpl();
-    public Task DeleteUserById(int userId, CancellationToken ct = default) => NotImpl();
+    public Task CreateUser(User user, CancellationToken ct = default)
+        => PostWriteBackAsync("api/users", user, (d, r) => { if (d.UserId == 0) d.UserId = r.UserId; }, ct);
+
+    public Task UpdateUser(User user, CancellationToken ct = default)
+        => PutJsonAsync("api/users", user, ct);
+
+    public Task UpsertUser(User user, CancellationToken ct = default)
+        => PutWriteBackAsync("api/users/upsert", user, (d, r) => { if (d.UserId == 0) d.UserId = r.UserId; }, ct);
+
+    public Task DeleteUser(User user, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/users/{user.UserId}", ct);
+
+    public Task DeleteUserById(int userId, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/users/{userId}/by-id", ct);
     #endregion
 
     #region Stock operations
@@ -137,10 +263,17 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<bool> StockExists(int stockId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<bool>($"api/stocks/{stockId}/exists", ApiJsonOptions.Default, ct);
 
-    public Task CreateStock(Stock stock, CancellationToken ct = default) => NotImpl();
-    public Task UpdateStock(Stock stock, CancellationToken ct = default) => NotImpl();
-    public Task UpsertStock(Stock stock, CancellationToken ct = default) => NotImpl();
-    public Task DeleteStock(Stock stock, CancellationToken ct = default) => NotImpl();
+    public Task CreateStock(Stock stock, CancellationToken ct = default)
+        => PostWriteBackAsync("api/stocks", stock, (d, r) => { if (d.StockId == 0) d.StockId = r.StockId; }, ct);
+
+    public Task UpdateStock(Stock stock, CancellationToken ct = default)
+        => PutJsonAsync("api/stocks", stock, ct);
+
+    public Task UpsertStock(Stock stock, CancellationToken ct = default)
+        => PutWriteBackAsync("api/stocks/upsert", stock, (d, r) => { if (d.StockId == 0) d.StockId = r.StockId; }, ct);
+
+    public Task DeleteStock(Stock stock, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/stocks/{stock.StockId}", ct);
     #endregion
 
     #region StockListing operations
@@ -150,7 +283,8 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<StockListing>> GetStockListingsByStockId(int stockId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<StockListing>>($"api/stock-listings/by-stock/{stockId}", ApiJsonOptions.Default, ct) ?? new();
 
-    public Task CreateStockListing(StockListing listing, CancellationToken ct = default) => NotImpl();
+    public Task CreateStockListing(StockListing listing, CancellationToken ct = default)
+        => PostWriteBackAsync("api/stock-listings", listing, (d, r) => { if (d.ListingId == 0) d.ListingId = r.ListingId; }, ct);
     #endregion
 
     #region StockPrice operations
@@ -174,9 +308,14 @@ public sealed class ApiDataBaseService : IDataBaseService
             $"api/stock-prices/by-stock-range/{stockId}/{currency}?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}",
             ApiJsonOptions.Default, ct) ?? new();
 
-    public Task CreateStockPrice(StockPrice stockPrice, CancellationToken ct = default) => NotImpl();
-    public Task UpdateStockPrice(StockPrice stockPrice, CancellationToken ct = default) => NotImpl();
-    public Task DeleteStockPrice(StockPrice stockPrice, CancellationToken ct = default) => NotImpl();
+    public Task CreateStockPrice(StockPrice stockPrice, CancellationToken ct = default)
+        => PostWriteBackAsync("api/stock-prices", stockPrice, (d, r) => { if (d.PriceId == 0) d.PriceId = r.PriceId; }, ct);
+
+    public Task UpdateStockPrice(StockPrice stockPrice, CancellationToken ct = default)
+        => PutJsonAsync("api/stock-prices", stockPrice, ct);
+
+    public Task DeleteStockPrice(StockPrice stockPrice, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/stock-prices/{stockPrice.PriceId}", ct);
     #endregion
 
     #region Order operations
@@ -212,9 +351,14 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default)
         => await PostListAsync<List<int>, Order>("api/orders/open-for-users", userIds, ct);
 
-    public Task CreateOrder(Order order, CancellationToken ct = default) => NotImpl();
-    public Task UpdateOrder(Order order, CancellationToken ct = default) => NotImpl();
-    public Task DeleteOrder(Order order, CancellationToken ct = default) => NotImpl();
+    public Task CreateOrder(Order order, CancellationToken ct = default)
+        => PostWriteBackAsync("api/orders", order, (d, r) => { if (d.OrderId == 0) d.OrderId = r.OrderId; }, ct);
+
+    public Task UpdateOrder(Order order, CancellationToken ct = default)
+        => PutJsonAsync("api/orders", order, ct);
+
+    public Task DeleteOrder(Order order, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/orders/{order.OrderId}", ct);
     #endregion
 
     #region Transaction operations
@@ -246,8 +390,17 @@ public sealed class ApiDataBaseService : IDataBaseService
             $"api/transactions/by-stock-range/{stockId}/{currency}{new Q().Add("from", from).Add("to", to)}",
             ApiJsonOptions.Default, ct) ?? new();
 
-    public async Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Transaction>>($"api/transactions/since{new Q().Add("since", since)}", ApiJsonOptions.Default, ct) ?? new();
+    public async Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, int? limit = null, CancellationToken ct = default)
+    {
+        // Default cap = 10K rows. Bounds the worst-case response time observed during
+        // the Phase 2 spike (375 ms – 2.1 s on unbounded payloads). Caller can override
+        // by passing an explicit limit; null is intentionally not forwarded — that would
+        // re-enable the unbounded path which the SignalR push (Phase 4) replaces anyway.
+        var effective = limit ?? 10_000;
+        return await _http.GetFromJsonAsync<List<Transaction>>(
+            $"api/transactions/since{new Q().Add("since", since).Add("limit", effective)}",
+            ApiJsonOptions.Default, ct) ?? new();
+    }
 
     public Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken ct = default)
         => GetNullableAsync<Transaction>($"api/transactions/latest/{stockId}/{currency}", ct);
@@ -255,9 +408,14 @@ public sealed class ApiDataBaseService : IDataBaseService
     public Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default)
         => GetNullableAsync<Transaction>($"api/transactions/latest-before/{stockId}/{currency}{new Q().Add("time", time)}", ct);
 
-    public Task CreateTransaction(Transaction transaction, CancellationToken ct = default) => NotImpl();
-    public Task UpdateTransaction(Transaction transaction, CancellationToken ct = default) => NotImpl();
-    public Task DeleteTransaction(Transaction transaction, CancellationToken ct = default) => NotImpl();
+    public Task CreateTransaction(Transaction transaction, CancellationToken ct = default)
+        => PostWriteBackAsync("api/transactions", transaction, (d, r) => { if (d.TransactionId == 0) d.TransactionId = r.TransactionId; }, ct);
+
+    public Task UpdateTransaction(Transaction transaction, CancellationToken ct = default)
+        => PutJsonAsync("api/transactions", transaction, ct);
+
+    public Task DeleteTransaction(Transaction transaction, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/transactions/{transaction.TransactionId}", ct);
     #endregion
 
     #region Position operations
@@ -283,10 +441,17 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<Position>> GetPositionsForUsersAsync(List<int> userIds, CancellationToken ct = default)
         => await PostListAsync<List<int>, Position>("api/positions/for-users", userIds, ct);
 
-    public Task CreatePosition(Position position, CancellationToken ct = default) => NotImpl();
-    public Task UpdatePosition(Position position, CancellationToken ct = default) => NotImpl();
-    public Task DeletePosition(Position position, CancellationToken ct = default) => NotImpl();
-    public Task UpsertPosition(Position position, CancellationToken ct = default) => NotImpl();
+    public Task CreatePosition(Position position, CancellationToken ct = default)
+        => PostWriteBackAsync("api/positions", position, (d, r) => { if (d.PositionId == 0) d.PositionId = r.PositionId; }, ct);
+
+    public Task UpdatePosition(Position position, CancellationToken ct = default)
+        => PutJsonAsync("api/positions", position, ct);
+
+    public Task DeletePosition(Position position, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/positions/{position.PositionId}", ct);
+
+    public Task UpsertPosition(Position position, CancellationToken ct = default)
+        => PutWriteBackAsync("api/positions/upsert", position, (d, r) => { if (d.PositionId == 0) d.PositionId = r.PositionId; }, ct);
     #endregion
 
     #region Fund operations
@@ -321,10 +486,17 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<Fund>> GetFundsForUsersAsync(List<int> userIds, CancellationToken ct = default)
         => await PostListAsync<List<int>, Fund>("api/funds/for-users", userIds, ct);
 
-    public Task CreateFund(Fund fund, CancellationToken ct = default) => NotImpl();
-    public Task UpdateFund(Fund fund, CancellationToken ct = default) => NotImpl();
-    public Task DeleteFund(Fund fund, CancellationToken ct = default) => NotImpl();
-    public Task UpsertFund(Fund fund, CancellationToken ct = default) => NotImpl();
+    public Task CreateFund(Fund fund, CancellationToken ct = default)
+        => PostWriteBackAsync("api/funds", fund, (d, r) => { if (d.FundId == 0) d.FundId = r.FundId; }, ct);
+
+    public Task UpdateFund(Fund fund, CancellationToken ct = default)
+        => PutJsonAsync("api/funds", fund, ct);
+
+    public Task DeleteFund(Fund fund, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/funds/{fund.FundId}", ct);
+
+    public Task UpsertFund(Fund fund, CancellationToken ct = default)
+        => PutWriteBackAsync("api/funds/upsert", fund, (d, r) => { if (d.FundId == 0) d.FundId = r.FundId; }, ct);
     #endregion
 
     #region Candle operations
@@ -342,11 +514,24 @@ public sealed class ApiDataBaseService : IDataBaseService
             $"api/candles/by-stock-range/{stockId}/{currency}?resolution={Uri.EscapeDataString(resolution.ToString())}&from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}",
             ApiJsonOptions.Default, ct) ?? new();
 
-    public Task CreateCandle(Candle candle, CancellationToken ct = default) => NotImpl();
-    public Task UpdateCandle(Candle candle, CancellationToken ct = default) => NotImpl();
-    public Task DeleteCandle(Candle candle, CancellationToken ct = default) => NotImpl();
-    public Task UpsertCandle(Candle candle, CancellationToken ct = default) => NotImpl();
-    public Task UpsertCandlesAsync(IReadOnlyList<Candle> candles, CancellationToken ct = default) => NotImpl();
+    public Task CreateCandle(Candle candle, CancellationToken ct = default)
+        => PostWriteBackAsync("api/candles", candle, (d, r) => { if (d.CandleId == 0) d.CandleId = r.CandleId; }, ct);
+
+    public Task UpdateCandle(Candle candle, CancellationToken ct = default)
+        => PutJsonAsync("api/candles", candle, ct);
+
+    public Task DeleteCandle(Candle candle, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/candles/{candle.CandleId}", ct);
+
+    public Task UpsertCandle(Candle candle, CancellationToken ct = default)
+        => PutJsonAsync("api/candles/upsert", candle, ct);
+
+    public async Task UpsertCandlesAsync(IReadOnlyList<Candle> candles, CancellationToken ct = default)
+    {
+        if (candles.Count == 0) return;
+        var resp = await _http.PostAsJsonAsync("api/candles/upsert-batch", candles, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+    }
     #endregion
 
     #region Message operations
@@ -362,34 +547,67 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<int> GetUnreadMessageCount(int userId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<int>($"api/messages/unread-count/{userId}", ApiJsonOptions.Default, ct);
 
-    public Task CreateMessage(Message message, CancellationToken ct = default) => NotImpl();
-    public Task UpdateMessage(Message message, CancellationToken ct = default) => NotImpl();
-    public Task DeleteMessage(Message message, CancellationToken ct = default) => NotImpl();
-    public Task<bool> MarkMessageRead(int messageId, DateTime? readAtUtc = null, CancellationToken ct = default) => NotImpl<bool>();
-    public Task<int> MarkAllMessagesRead(int userId, DateTime? readAtUtc = null, CancellationToken ct = default) => NotImpl<int>();
+    public Task CreateMessage(Message message, CancellationToken ct = default)
+        => PostWriteBackAsync("api/messages", message, (d, r) => { if (d.MessageId == 0) d.MessageId = r.MessageId; }, ct);
+
+    public Task UpdateMessage(Message message, CancellationToken ct = default)
+        => PutJsonAsync("api/messages", message, ct);
+
+    public Task DeleteMessage(Message message, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/messages/{message.MessageId}", ct);
+
+    public async Task<bool> MarkMessageRead(int messageId, DateTime? readAtUtc = null, CancellationToken ct = default)
+    {
+        var url = $"api/messages/{messageId}/mark-read{new Q().Add("readAtUtc", readAtUtc)}";
+        var resp = await _http.PostAsync(url, content: null, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<bool>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+    }
+
+    public async Task<int> MarkAllMessagesRead(int userId, DateTime? readAtUtc = null, CancellationToken ct = default)
+    {
+        var url = $"api/messages/users/{userId}/mark-all-read{new Q().Add("readAtUtc", readAtUtc)}";
+        var resp = await _http.PostAsync(url, content: null, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<int>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+    }
     #endregion
 
     #region FundTransaction operations
     public async Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<FundTransaction>>($"api/fund-transactions/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
 
-    public Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default) => NotImpl();
+    public Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default)
+        => PostWriteBackAsync("api/fund-transactions", tx, (d, r) => { if (d.FundTransactionId == 0) d.FundTransactionId = r.FundTransactionId; }, ct);
     #endregion
 
     #region UserPreferences operations
     public Task<UserPreferences?> GetUserPreferencesByUserId(int userId, CancellationToken ct = default)
         => GetNullableAsync<UserPreferences>($"api/user-preferences/by-user/{userId}", ct);
 
-    public Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default) => NotImpl();
+    public Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default)
+        => PutJsonAsync("api/user-preferences/upsert", prefs, ct);
     #endregion
 
     #region UserWatchlist operations
     public async Task<List<UserWatchlistEntry>> GetWatchlistByUserId(int userId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<UserWatchlistEntry>>($"api/user-watchlist/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
 
-    public Task UpsertWatchlistEntry(UserWatchlistEntry entry, CancellationToken ct = default) => NotImpl();
-    public Task<bool> DeleteWatchlistEntry(int userId, int stockId, CancellationToken ct = default) => NotImpl<bool>();
-    public Task ReplaceWatchlistAsync(int userId, IReadOnlyList<UserWatchlistEntry> entries, CancellationToken ct = default) => NotImpl();
+    public Task UpsertWatchlistEntry(UserWatchlistEntry entry, CancellationToken ct = default)
+        => PutWriteBackAsync("api/user-watchlist/upsert", entry, (d, r) => { if (d.Id == 0) d.Id = r.Id; }, ct);
+
+    public async Task<bool> DeleteWatchlistEntry(int userId, int stockId, CancellationToken ct = default)
+    {
+        var resp = await _http.DeleteAsync($"api/user-watchlist/{userId}/{stockId}", ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<bool>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+    }
+
+    public async Task ReplaceWatchlistAsync(int userId, IReadOnlyList<UserWatchlistEntry> entries, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"api/user-watchlist/users/{userId}/replace", entries, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+    }
     #endregion
 
     #region AIUser operations
@@ -402,9 +620,16 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<AIUser>> GetAIUsersByUserId(int userId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<AIUser>>($"api/ai-users/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
 
-    public Task CreateAIUser(AIUser aiUser, CancellationToken ct = default) => NotImpl();
-    public Task UpdateAIUser(AIUser aiUser, CancellationToken ct = default) => NotImpl();
-    public Task UpsertAIUser(AIUser aiUser, CancellationToken ct = default) => NotImpl();
-    public Task DeleteAIUser(AIUser aiUser, CancellationToken ct = default) => NotImpl();
+    public Task CreateAIUser(AIUser aiUser, CancellationToken ct = default)
+        => PostWriteBackAsync("api/ai-users", aiUser, (d, r) => { if (d.AiUserId == 0) d.AiUserId = r.AiUserId; }, ct);
+
+    public Task UpdateAIUser(AIUser aiUser, CancellationToken ct = default)
+        => PutJsonAsync("api/ai-users", aiUser, ct);
+
+    public Task UpsertAIUser(AIUser aiUser, CancellationToken ct = default)
+        => PutWriteBackAsync("api/ai-users/upsert", aiUser, (d, r) => { if (d.AiUserId == 0) d.AiUserId = r.AiUserId; }, ct);
+
+    public Task DeleteAIUser(AIUser aiUser, CancellationToken ct = default)
+        => DeleteUrlAsync($"api/ai-users/{aiUser.AiUserId}", ct);
     #endregion
 }

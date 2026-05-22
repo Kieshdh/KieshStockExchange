@@ -51,4 +51,20 @@ public sealed class FundController : ControllerBase
     [HttpPost("for-users")]
     public Task<List<Fund>> GetForUsers([FromBody] List<int> userIds, CancellationToken ct)
         => _db.GetFundsForUsersAsync(userIds, ct);
+
+    [HttpPost]
+    public async Task<ActionResult<Fund>> Create([FromBody] Fund fund, CancellationToken ct)
+    { await _db.CreateFund(fund, ct); return Ok(fund); }
+
+    [HttpPut]
+    public async Task<IActionResult> Update([FromBody] Fund fund, CancellationToken ct)
+    { await _db.UpdateFund(fund, ct); return NoContent(); }
+
+    [HttpPut("upsert")]
+    public async Task<ActionResult<Fund>> Upsert([FromBody] Fund fund, CancellationToken ct)
+    { await _db.UpsertFund(fund, ct); return Ok(fund); }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    { await _db.DeleteFund(new Fund { FundId = id }, ct); return NoContent(); }
 }

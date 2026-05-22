@@ -435,7 +435,7 @@ internal sealed class FakeDb : IDataBaseService
     public Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, int? limit = null, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default) => throw new NotImplementedException();
     public Task CreateTransaction(Transaction transaction, CancellationToken ct = default) => throw new NotImplementedException();

@@ -28,4 +28,24 @@ public sealed class CandleController : ControllerBase
         [FromQuery] TimeSpan resolution, [FromQuery] DateTime from, [FromQuery] DateTime to,
         CancellationToken ct)
         => _db.GetCandlesByStockIdAndTimeRange(stockId, currency, resolution, from, to, ct);
+
+    [HttpPost]
+    public async Task<ActionResult<Candle>> Create([FromBody] Candle candle, CancellationToken ct)
+    { await _db.CreateCandle(candle, ct); return Ok(candle); }
+
+    [HttpPut]
+    public async Task<IActionResult> Update([FromBody] Candle candle, CancellationToken ct)
+    { await _db.UpdateCandle(candle, ct); return NoContent(); }
+
+    [HttpPut("upsert")]
+    public async Task<IActionResult> Upsert([FromBody] Candle candle, CancellationToken ct)
+    { await _db.UpsertCandle(candle, ct); return NoContent(); }
+
+    [HttpPost("upsert-batch")]
+    public async Task<IActionResult> UpsertBatch([FromBody] List<Candle> candles, CancellationToken ct)
+    { await _db.UpsertCandlesAsync(candles, ct); return NoContent(); }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id, CancellationToken ct)
+    { await _db.DeleteCandle(new Candle { CandleId = id }, ct); return NoContent(); }
 }

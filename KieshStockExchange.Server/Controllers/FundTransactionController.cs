@@ -14,4 +14,8 @@ public sealed class FundTransactionController : ControllerBase
     [HttpGet("by-user/{userId:int}")]
     public Task<List<FundTransaction>> GetByUserId(int userId, CancellationToken ct)
         => _db.GetFundTransactionsByUserId(userId, ct);
+
+    [HttpPost]
+    public async Task<ActionResult<FundTransaction>> Create([FromBody] FundTransaction tx, CancellationToken ct)
+    { await _db.CreateFundTransaction(tx, ct); return Ok(tx); }
 }
