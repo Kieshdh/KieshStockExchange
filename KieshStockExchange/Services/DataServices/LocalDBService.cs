@@ -126,9 +126,32 @@ public class LocalDBService: IDataBaseService, IDisposable
     #endregion
 
     #region Generic operations
+    // Domain POCOs in Shared have no SQLite-net attributes, so the bulk operations below
+    // dispatch per type to the corresponding Row twin in Services/DataServices/Persistence/.
+    // For Insert paths, auto-assigned PKs are copied back onto the source domain objects
+    // so callers that depend on post-insert IDs (engine batch path, ExcelImportService)
+    // still see them. Unrecognized T falls through to a direct passthrough — preserves
+    // test stubs and any caller already using a Row type directly.
+
     public async Task ResetTableAsync<T>(CancellationToken ct = default) where T : new()
     {
         await InitializeAsync(ct);
+        var t = typeof(T);
+        if (t == typeof(Order))               { await _db.DropTableAsync<OrderRow>();               await _db.CreateTableAsync<OrderRow>();               return; }
+        if (t == typeof(Transaction))         { await _db.DropTableAsync<TransactionRow>();         await _db.CreateTableAsync<TransactionRow>();         return; }
+        if (t == typeof(Position))            { await _db.DropTableAsync<PositionRow>();            await _db.CreateTableAsync<PositionRow>();            return; }
+        if (t == typeof(Fund))                { await _db.DropTableAsync<FundRow>();                await _db.CreateTableAsync<FundRow>();                return; }
+        if (t == typeof(FundTransaction))     { await _db.DropTableAsync<FundTransactionRow>();     await _db.CreateTableAsync<FundTransactionRow>();     return; }
+        if (t == typeof(Stock))               { await _db.DropTableAsync<StockRow>();               await _db.CreateTableAsync<StockRow>();               return; }
+        if (t == typeof(StockListing))        { await _db.DropTableAsync<StockListingRow>();        await _db.CreateTableAsync<StockListingRow>();        return; }
+        if (t == typeof(StockPrice))          { await _db.DropTableAsync<StockPriceRow>();          await _db.CreateTableAsync<StockPriceRow>();          return; }
+        if (t == typeof(User))                { await _db.DropTableAsync<UserRow>();                await _db.CreateTableAsync<UserRow>();                return; }
+        if (t == typeof(AIUser))              { await _db.DropTableAsync<AIUserRow>();              await _db.CreateTableAsync<AIUserRow>();              return; }
+        if (t == typeof(Candle))              { await _db.DropTableAsync<CandleRow>();              await _db.CreateTableAsync<CandleRow>();              return; }
+        if (t == typeof(Message))             { await _db.DropTableAsync<MessageRow>();             await _db.CreateTableAsync<MessageRow>();             return; }
+        if (t == typeof(UserPreferences))     { await _db.DropTableAsync<UserPreferencesRow>();     await _db.CreateTableAsync<UserPreferencesRow>();     return; }
+        if (t == typeof(UserWatchlistEntry))  { await _db.DropTableAsync<UserWatchlistEntryRow>();  await _db.CreateTableAsync<UserWatchlistEntryRow>();  return; }
+
         await _db.DropTableAsync<T>();
         await _db.CreateTableAsync<T>();
     }
@@ -136,13 +159,58 @@ public class LocalDBService: IDataBaseService, IDisposable
     public async Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
+        switch (items)
+        {
+            case IEnumerable<Order> v:              await InsertViaMapper(v, OrderMapper.ToRow,              (d, r) => d.OrderId = r.OrderId); return;
+            case IEnumerable<Transaction> v:        await InsertViaMapper(v, TransactionMapper.ToRow,        (d, r) => d.TransactionId = r.TransactionId); return;
+            case IEnumerable<Position> v:           await InsertViaMapper(v, PositionMapper.ToRow,           (d, r) => d.PositionId = r.PositionId); return;
+            case IEnumerable<Fund> v:               await InsertViaMapper(v, FundMapper.ToRow,               (d, r) => d.FundId = r.FundId); return;
+            case IEnumerable<FundTransaction> v:    await InsertViaMapper(v, FundTransactionMapper.ToRow,    (d, r) => d.FundTransactionId = r.FundTransactionId); return;
+            case IEnumerable<Stock> v:              await InsertViaMapper(v, StockMapper.ToRow,              (d, r) => d.StockId = r.StockId); return;
+            case IEnumerable<StockListing> v:       await InsertViaMapper(v, StockListingMapper.ToRow,       (d, r) => d.ListingId = r.ListingId); return;
+            case IEnumerable<StockPrice> v:         await InsertViaMapper(v, StockPriceMapper.ToRow,         (d, r) => d.PriceId = r.PriceId); return;
+            case IEnumerable<User> v:               await InsertViaMapper(v, UserMapper.ToRow,               (d, r) => d.UserId = r.UserId); return;
+            case IEnumerable<AIUser> v:             await InsertViaMapper(v, AIUserMapper.ToRow,             (d, r) => d.AiUserId = r.AiUserId); return;
+            case IEnumerable<Candle> v:             await InsertViaMapper(v, CandleMapper.ToRow,             (d, r) => d.CandleId = r.CandleId); return;
+            case IEnumerable<Message> v:            await InsertViaMapper(v, MessageMapper.ToRow,            (d, r) => d.MessageId = r.MessageId); return;
+            case IEnumerable<UserPreferences> v:    await InsertViaMapper(v, UserPreferencesMapper.ToRow,    (_, _) => { }); return; // UserId is PK, not auto-assigned
+            case IEnumerable<UserWatchlistEntry> v: await InsertViaMapper(v, UserWatchlistEntryMapper.ToRow, (d, r) => d.Id = r.Id); return;
+        }
         await _db.InsertAllAsync(items, runInTransaction: false);
     }
 
-    public async Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default) 
+    public async Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
+        switch (items)
+        {
+            case IEnumerable<Order> v:              await _db.UpdateAllAsync(v.Select(OrderMapper.ToRow).ToList(),              runInTransaction: false); return;
+            case IEnumerable<Transaction> v:        await _db.UpdateAllAsync(v.Select(TransactionMapper.ToRow).ToList(),        runInTransaction: false); return;
+            case IEnumerable<Position> v:           await _db.UpdateAllAsync(v.Select(PositionMapper.ToRow).ToList(),           runInTransaction: false); return;
+            case IEnumerable<Fund> v:               await _db.UpdateAllAsync(v.Select(FundMapper.ToRow).ToList(),               runInTransaction: false); return;
+            case IEnumerable<FundTransaction> v:    await _db.UpdateAllAsync(v.Select(FundTransactionMapper.ToRow).ToList(),    runInTransaction: false); return;
+            case IEnumerable<Stock> v:              await _db.UpdateAllAsync(v.Select(StockMapper.ToRow).ToList(),              runInTransaction: false); return;
+            case IEnumerable<StockListing> v:       await _db.UpdateAllAsync(v.Select(StockListingMapper.ToRow).ToList(),       runInTransaction: false); return;
+            case IEnumerable<StockPrice> v:         await _db.UpdateAllAsync(v.Select(StockPriceMapper.ToRow).ToList(),         runInTransaction: false); return;
+            case IEnumerable<User> v:               await _db.UpdateAllAsync(v.Select(UserMapper.ToRow).ToList(),               runInTransaction: false); return;
+            case IEnumerable<AIUser> v:             await _db.UpdateAllAsync(v.Select(AIUserMapper.ToRow).ToList(),             runInTransaction: false); return;
+            case IEnumerable<Candle> v:             await _db.UpdateAllAsync(v.Select(CandleMapper.ToRow).ToList(),             runInTransaction: false); return;
+            case IEnumerable<Message> v:            await _db.UpdateAllAsync(v.Select(MessageMapper.ToRow).ToList(),            runInTransaction: false); return;
+            case IEnumerable<UserPreferences> v:    await _db.UpdateAllAsync(v.Select(UserPreferencesMapper.ToRow).ToList(),    runInTransaction: false); return;
+            case IEnumerable<UserWatchlistEntry> v: await _db.UpdateAllAsync(v.Select(UserWatchlistEntryMapper.ToRow).ToList(), runInTransaction: false); return;
+        }
         await _db.UpdateAllAsync(items, runInTransaction: false);
+    }
+
+    private async Task InsertViaMapper<TDomain, TRow>(
+        IEnumerable<TDomain> items, Func<TDomain, TRow> toRow, Action<TDomain, TRow> writeBack)
+    {
+        var domain = items as IList<TDomain> ?? items.ToList();
+        if (domain.Count == 0) return;
+        var rows = new List<TRow>(domain.Count);
+        for (int i = 0; i < domain.Count; i++) rows.Add(toRow(domain[i]));
+        await _db.InsertAllAsync(rows, runInTransaction: false);
+        for (int i = 0; i < domain.Count; i++) writeBack(domain[i], rows[i]);
     }
 
     public async Task<ITransaction> BeginTransactionAsync(CancellationToken ct = default)
