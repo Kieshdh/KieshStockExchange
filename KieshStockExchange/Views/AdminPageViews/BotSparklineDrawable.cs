@@ -2,12 +2,7 @@ using Microsoft.Maui.Graphics;
 
 namespace KieshStockExchange.Views.AdminPageViews;
 
-/// <summary>
-/// Bot activity chart drawable. Renders a single time series with a y-axis
-/// (4 evenly-spaced labels) and an x-axis (5 time labels). Used by the
-/// BotDashboard activity card; the host page swaps Values + Invalidates when
-/// the user picks a different metric or new buckets arrive.
-/// </summary>
+/// <summary> Single-series time-line drawable with x/y axis labels for the bot activity card. </summary>
 public sealed class BotSparklineDrawable : IDrawable
 {
     private const float LeftPad = 56f;   // room for y-axis labels
@@ -40,7 +35,7 @@ public sealed class BotSparklineDrawable : IDrawable
         float plotH = plotBottom - plotTop;
         if (plotW <= 0 || plotH <= 0) return;
 
-        // Y-axis scale: pick a "nice" max so the labels read in round steps.
+        // Round the y-axis max so labels read in tidy steps.
         double rawMax = 0;
         for (int i = 0; i < Values.Count; i++) if (Values[i] > rawMax) rawMax = Values[i];
         double niceMax = NiceMax(rawMax);
@@ -102,8 +97,7 @@ public sealed class BotSparklineDrawable : IDrawable
         canvas.DrawPath(line);
     }
 
-    // Round up to a "nice" upper bound (1, 2, 5 × 10^n) so the labels read
-    // as round numbers. Mirrors the standard chart-axis algorithm.
+    // Round up to 1/2/5 × 10ⁿ for tidy axis labels.
     private static double NiceMax(double value)
     {
         if (value <= 0) return 0;

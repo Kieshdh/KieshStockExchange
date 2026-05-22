@@ -82,8 +82,7 @@
                             <Label Text="Admin" Style="{StaticResource FormLabelStyle}" VerticalOptions="Center" />
                             <Switch IsToggled="{Binding IsAdmin, Mode=TwoWay}" VerticalOptions="Center" />
                         </HorizontalStackLayout>
-                        <!-- Member since + Save share the row 2 right cell: text on the left,
-                             Save button pinned to the far right. -->
+                        <!-- Member since + Save share row 2 right cell. -->
                         <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8" VerticalOptions="Center">
                             <VerticalStackLayout Grid.Column="0" Spacing="4" VerticalOptions="Center">
                                 <Label Text="Member since" Style="{StaticResource FormLabelStyle}" />

@@ -169,10 +169,7 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
     partial void OnPageSizeChanged(int value)
     {
         NotifyPagerProperties();
-        // Only refresh once the tab has been activated; before that, the
-        // first RefreshAsync from EnsureInitializedAsync will pick up the
-        // new size on its own.
-        if (_initialized) _ = ApplyViewChange();
+        if (_initialized) _ = ApplyViewChange(); // first init will pick up the size on its own
     }
     #endregion
 }

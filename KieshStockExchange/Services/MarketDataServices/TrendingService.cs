@@ -99,10 +99,7 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
             .OrderByDescending(q => q.Volume).Take(MaxMovers)
             .Select(ToSnapshot).ToList();
 
-        // MainThread is MAUI's canonical UI-thread marshal; the injected
-        // IDispatcher has been observed to land in the wrong COM apartment
-        // on WinUI, causing RPC_E_WRONG_THREAD when the CollectionChanged
-        // event is delivered to a CollectionView subscriber.
+        // MainThread, not the injected IDispatcher: WinUI lands the latter in the wrong COM apartment.
         MainThread.BeginInvokeOnMainThread(() =>
         {
             try

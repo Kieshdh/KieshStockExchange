@@ -26,9 +26,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
     public IReadOnlyList<string> PivotOptions { get; } = new[] { PivotByStock, PivotByUser };
 
     [ObservableProperty] private string _pivot = PivotByStock;
-    // SegmentedTabView drives the pivot via SelectedIndex; keep the string
-    // `Pivot` as the canonical source so existing IsByStock / IsByUser checks
-    // still work.
+    // Index mirror for SegmentedTabView; `Pivot` remains canonical.
     [ObservableProperty] private int _pivotIndex;
     public bool IsByStock => Pivot == PivotByStock;
     public bool IsByUser  => Pivot == PivotByUser;
@@ -119,8 +117,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
     {
         if (_pickerSelection is null) return (Array.Empty<PositionTableObject>(), 0);
 
-        // UserSearch ("alice" or "42") narrows the stock's holders to a single
-        // user — same UX as the Orders/Transactions search box.
+        // UserSearch narrows the stock's holders to a single user (name or id).
         string? userFilter = null;
         if (!string.IsNullOrWhiteSpace(UserSearch))
         {
@@ -129,9 +126,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
             userFilter = resolved.ToString();
         }
 
-        // Price/PosValue/Username are computed in-VM (the DB layer can't see
-        // them), so for those sort keys we fetch the full slice, build rows,
-        // sort, then page.
+        // Computed sort keys: fetch full slice, sort in-VM, then page.
         bool inVmSort = IsComputedSort(sortKey);
         var (positions, total) = await _db.GetPositionsPageAsync(
             _pickerSelection.StockId,
@@ -208,7 +203,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
     {
         if (positions.Count == 0) return (Array.Empty<PositionTableObject>(), total);
 
-        // Apply Has-Non-Zero + Has-Reserved + min-quantity filters in memory.
+        // In-memory filters (DB doesn't know about MinQuantityText).
         IEnumerable<Position> filtered = positions;
         if (HasNonZeroOnly) filtered = filtered.Where(p => p.Quantity > 0);
         if (HasReservedOnly) filtered = filtered.Where(p => p.ReservedQuantity > 0);
@@ -217,8 +212,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
         var visible = filtered.ToList();
         if (visible.Count == 0) return (Array.Empty<PositionTableObject>(), total);
 
-        // Native price per stock — resolved via the stock's primary listing currency
-        // so a EUR-listed stock isn't silently converted to USD on the row.
+        // Price the row in the stock's primary listing currency, not the base currency.
         var stockIdsToPrice = primaryStockIdForRow > 0
             ? new[] { primaryStockIdForRow }
             : visible.Select(p => p.StockId).Distinct().ToArray();
@@ -240,8 +234,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
             }
         }
 
-        // Per-page username lookup so each row has a display name for the
-        // new Username column (and for the Username sort key).
+        // Username lookup for the Username column + sort key.
         var userIds = visible.Select(p => p.UserId).Distinct().ToList();
         var users = await _db.GetUsersByIds(userIds, ct);
         var usersById = users.ToDictionary(u => u.UserId, u => u.Username);
@@ -301,7 +294,6 @@ public partial class PositionTableObject : ObservableObject
     public int Quantity => Position.Quantity;
     public int ReservedQuantity => Position.ReservedQuantity;
 
-    // Sort keys — native side reads as-is; FX comparison uses base equivalent.
     public decimal NativePriceForSort => NativePrice;
     public decimal NativeValueForSort => NativePrice * Quantity;
 

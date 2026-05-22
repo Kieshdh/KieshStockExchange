@@ -18,8 +18,7 @@ public partial class BotDashboardPage : ContentPage
         _vm = vm ?? throw new ArgumentNullException(nameof(vm));
         BindingContext = _vm;
 
-        // Theme-aware axis + grid colors — mirror the trade-page chart so the
-        // bot card blends with the rest of the design system.
+        // Theme-aware axis + grid colors (mirrors the trade-page chart).
         if (TryGetColor("ChartAxis", out var axis)) _drawable.AxisColor = axis;
         if (TryGetColor("Divider",   out var grid)) _drawable.GridColor = grid;
 
@@ -29,7 +28,6 @@ public partial class BotDashboardPage : ContentPage
 
     private void OnActivityRefreshed(object? sender, EventArgs e)
     {
-        // Pick the series + colour + value formatter based on the picker.
         switch (_vm.SeriesIndex)
         {
             case 1:
@@ -49,7 +47,6 @@ public partial class BotDashboardPage : ContentPage
                 break;
         }
 
-        // X-axis range needs to match the picker so labels read the right times.
         var rangeIdx = Math.Clamp(_vm.ActivityRangeIndex, 0, _vm.ActivityRangeMinutes.Count - 1);
         _drawable.TimeRange = TimeSpan.FromMinutes(_vm.ActivityRangeMinutes[rangeIdx]);
         _drawable.EndTime = DateTime.Now;

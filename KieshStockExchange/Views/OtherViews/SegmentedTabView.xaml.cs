@@ -261,9 +261,7 @@ public partial class SegmentedTabView : ContentView
             {
                 Text = Tabs[i].Header,
             };
-            // MinTabWidth <= 0 → let each button size to its own content
-            // (padding + text). MinTabWidth > 0 → keep equal-width pill
-            // behaviour driven by the longest label.
+            // MinTabWidth > 0 keeps the equal-width pill layout; 0 lets each button hug its label.
             if (MinTabWidth > 0)
                 btn.WidthRequest = tabWidth;
 

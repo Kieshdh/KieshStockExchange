@@ -58,7 +58,7 @@ public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
         var users = await _db.GetUsersByIds(userIds, ct);
         var usersById = users.ToDictionary(u => u.UserId, u => u);
 
-        // Per-user complete fund set for the converted-total column.
+        // Fetch every fund per user so the converted-total column sums all currencies.
         var allFunds = await _db.GetFundsForUsersAsync(userIds, ct);
         var fundsByUser = allFunds.GroupBy(f => f.UserId)
             .ToDictionary(g => g.Key, g => g.ToList());

@@ -263,10 +263,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         lock (_activitySamplesLock) return _activitySamples.ToArray();
     }
 
-    // Cadence: one sample every 10s. Independent of TradeInterval so the chart
-    // reads consistently even if a future cadence change makes ticks much
-    // faster/slower. 8640 samples × 10s = 24h of history — matches the longest
-    // dashboard range.
+    // 10s cadence × 8640 = 24h history (matches longest dashboard range).
     private const int MaxActivitySamples = 8640;
     private static readonly TimeSpan ActivitySampleInterval = TimeSpan.FromSeconds(10);
     private DateTime _lastActivitySampleUtc = DateTime.MinValue;

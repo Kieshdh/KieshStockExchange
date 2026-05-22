@@ -80,12 +80,7 @@ public static class CurrencyHelper
     public static string GetSymbol(CurrencyType currency) =>
         CultureCache[currency].NumberFormat.CurrencySymbol;
 
-    /// <summary>
-    /// Compact currency formatter for tight spaces (chart axes, KPI chips):
-    /// 1-decimal scaled value + K / M / B / T / Q suffix. Below 1000 falls
-    /// back to an integer. Symbol placement follows the currency's culture
-    /// so EUR shows "1,2K €" while USD shows "$1.2K".
-    /// </summary>
+    /// <summary> Compact currency formatter (K/M/B/T/Q) for chart axes and KPI chips. </summary>
     public static string FormatCompact(decimal amount, CurrencyType currency)
     {
         var culture = CultureCache[currency];

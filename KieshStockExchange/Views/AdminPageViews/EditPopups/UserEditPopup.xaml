@@ -55,8 +55,7 @@
         </VerticalStackLayout>
         </ScrollView>
 
-        <!-- Error message + action buttons stay pinned so they're always visible
-             even when validation pushes the form taller. -->
+        <!-- Errors + actions stay pinned outside the scroll area. -->
         <VerticalStackLayout Grid.Row="1" Spacing="10">
             <Label Text="{Binding ErrorMessage}"
                    Style="{StaticResource RegistrationErrorLabel}"

@@ -167,11 +167,7 @@ public interface IAiTradeService
     /// <summary>Returns a snapshot of all loaded bot UserIds.</summary>
     IReadOnlyCollection<int> GetAiUserIds();
 
-    /// <summary>
-    /// Bounded ring of activity samples — one per trading tick — recording
-    /// the online-bot count + active cap. Survives bot stop/restart so the
-    /// dashboard can plot a continuous timeline of scaler decisions.
-    /// </summary>
+    /// <summary> Bounded ring of per-tick activity samples; survives bot stop/restart. </summary>
     IReadOnlyList<BotActivitySample> GetActivitySamples();
 
     /// <summary>

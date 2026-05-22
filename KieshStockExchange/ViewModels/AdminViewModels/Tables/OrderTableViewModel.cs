@@ -28,8 +28,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
     [ObservableProperty] private string _usernameSearch = string.Empty;
     [ObservableProperty] private string _selectedSideFilter = AnyOption;
     [ObservableProperty] private string _selectedTypeFilter = AnyOption;
-    // Index-backed mirrors so a SegmentedTabView (which uses SelectedIndex)
-    // can drive the same filter as the string-backed field used by the query.
+    // Index mirrors for SegmentedTabView's SelectedIndex binding.
     [ObservableProperty] private int _selectedSideIndex;
     [ObservableProperty] private int _selectedTypeIndex;
     [ObservableProperty] private int _statusIndex;
@@ -78,9 +77,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
     private readonly IOrderExecutionService _execution;
     private readonly IServiceProvider _services;
 
-    // Bubbled up to AdminViewModel when the per-row Details popup raises a
-    // 'View user' or 'Open transaction' redirect — the AdminVM owns cross-tab
-    // navigation.
+    /// <summary> Bubbled to AdminViewModel for cross-tab navigation from the Details popup. </summary>
     public event EventHandler<int>? UserSelected;
     public event EventHandler<int>? TransactionSelected;
 
@@ -135,8 +132,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
         string? typeArg = string.Equals(SelectedTypeFilter, AnyOption, StringComparison.Ordinal) ? null : SelectedTypeFilter;
         IList<int>? excludeIds = HideAiBots ? _aiUserIds : null;
 
-        // Combine the date + time pickers; clamp the upper bound to "now" so
-        // future ranges can't accidentally widen the query.
+        // Combine date+time pickers; clamp upper bound to now.
         var fromCombined = (FromDate.Date + FromTime).ToUniversalTime();
         var toCombined   = (ToDate.Date + ToTime).ToUniversalTime();
         var now = DateTime.UtcNow;
@@ -162,9 +158,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
             return new OrderTableObject(o, user, stock, OpenDetailsAsync);
         }).ToList();
 
-        // Post-fetch sort for "Total" — Order.TotalAmount is conditional on
-        // OrderType (Limit / Slippage / TrueMarket) and can't be expressed in
-        // SQL. Re-orders the visible page in-VM.
+        // "Total" sorts in-VM: Order.TotalAmount branches on OrderType, can't be SQL'd.
         IEnumerable<OrderTableObject> ordered = (sortKey, desc) switch
         {
             ("Total", true)  => rows.OrderByDescending(r => r.Order.TotalAmount),
@@ -194,8 +188,8 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
             popup.ViewModel.NavigateToTransactionRequested -= txNav;
         }
 
-        // Cancel-in-popup may have changed the row; reload to reflect new status.
-        await RefreshAsync();
+        await RefreshAsync(); // popup may have cancelled the order
+
     }
 
     private async Task<int?> ResolveUserIdFilterAsync(CancellationToken ct)
@@ -205,9 +199,8 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
         var text = UsernameSearch.Trim();
         if (int.TryParse(text, out var id)) return id;
 
-        // Substring match — pick the first user whose username contains the text.
         var (matches, _) = await _dbRef.GetUsersPageAsync(0, 1, "Username", false, text, ct);
-        return matches.Count > 0 ? matches[0].UserId : -1; // -1 ensures no orders match
+        return matches.Count > 0 ? matches[0].UserId : -1; // -1: nothing matches
     }
 
     [RelayCommand] private void SetLast5Min()  => SetRange(TimeSpan.FromMinutes(5));

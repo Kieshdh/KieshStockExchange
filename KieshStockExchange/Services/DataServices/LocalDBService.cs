@@ -542,8 +542,7 @@ public class LocalDBService: IDataBaseService, IDisposable
             var q = _db.Table<Order>().Where(o => o.CreatedAt >= fromUtc && o.CreatedAt <= toUtc);
             if (excludeUserIds is { Count: > 0 })
             {
-                // SQLite-Net translates List<int>.Contains into IN (...) — negating it yields NOT IN.
-                var excl = excludeUserIds;
+                var excl = excludeUserIds; // SQLite-Net: .Contains() compiles to IN; negation yields NOT IN.
                 q = q.Where(o => !excl.Contains(o.UserId));
             }
             if (!string.IsNullOrWhiteSpace(statusFilter))
@@ -560,9 +559,7 @@ public class LocalDBService: IDataBaseService, IDisposable
             }
             if (!string.IsNullOrWhiteSpace(sideFilter))
             {
-                // OrderType values end with "Buy" or "Sell". SQLite-Net's LINQ
-                // provider supports basic equality only; enumerate the matching
-                // values rather than using EndsWith.
+                // SQLite-Net only translates equality, so enumerate matching OrderType values.
                 if (string.Equals(sideFilter, "Buy", StringComparison.OrdinalIgnoreCase))
                     q = q.Where(o => o.OrderType == Order.Types.LimitBuy
                                    || o.OrderType == Order.Types.TrueMarketBuy
@@ -756,9 +753,7 @@ public class LocalDBService: IDataBaseService, IDisposable
                 ("Quantity",      false) => q.OrderBy(t => t.Quantity),
                 ("Price",         true)  => q.OrderByDescending(t => t.Price),
                 ("Price",         false) => q.OrderBy(t => t.Price),
-                // "Total"/"BuyerName"/"SellerName" are sorted in-VM after the
-                // page is built (SQLite-Net can't translate Price*Quantity, and
-                // username sort requires the per-page user-lookup join).
+                // Total / BuyerName / SellerName: sorted in-VM after the page is built.
                 (_,               true)  => q.OrderByDescending(t => t.Timestamp),
                 (_,               false) => q.OrderBy(t => t.Timestamp),
             };

@@ -13,8 +13,7 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
 {
     private readonly IServiceProvider _services;
 
-    // Raised when an admin taps the per-row 'View' label so the AdminViewModel
-    // can switch to the User-details tab and pre-load the picked user.
+    /// <summary> Raised when a row's View is tapped so AdminViewModel can switch to the User-details tab. </summary>
     public event EventHandler<int>? UserSelected;
 
     [ObservableProperty] private string _searchText = string.Empty;
@@ -54,9 +53,7 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
         var popup = _services.GetRequiredService<UserEditPopup>();
         popup.ViewModel.Initialize(user);
 
-        // Refresh on successful save so the row reflects new values.
-        EventHandler? savedHandler = null;
-        savedHandler = (_, _) => { _ = RefreshAsync(); };
+        EventHandler? savedHandler = (_, _) => { _ = RefreshAsync(); };
         popup.ViewModel.Saved += savedHandler;
         try
         {

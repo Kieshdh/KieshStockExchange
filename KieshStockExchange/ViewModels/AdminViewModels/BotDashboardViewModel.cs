@@ -84,11 +84,7 @@ public partial class BotDashboardViewModel : BaseViewModel
 
     partial void OnActivityRangeIndexChanged(int value) => _ = RefreshActivityAsync();
 
-    partial void OnSeriesIndexChanged(int value)
-    {
-        // Picker change doesn't need new data — just retell the view to repaint.
-        ActivityRefreshed?.Invoke(this, EventArgs.Empty);
-    }
+    partial void OnSeriesIndexChanged(int value) => ActivityRefreshed?.Invoke(this, EventArgs.Empty);
     #endregion
 
     #region Services and timer
@@ -121,7 +117,7 @@ public partial class BotDashboardViewModel : BaseViewModel
 
         Title = "AI Bot Dashboard";
 
-        // Seed editable fields from current trade-service state so the UI is consistent on first show.
+        // Seed editable fields so first show is consistent.
         _maxBotCapText = _trade.MaxBotCap?.ToString() ?? string.Empty;
         _minBotCapText = _trade.MinBotCap.ToString();
 
@@ -213,10 +209,7 @@ public partial class BotDashboardViewModel : BaseViewModel
 
     private string BuildRecentFailuresText()
     {
-        // Pull structured records (oldest → newest) and format only the tail so the
-        // ScrollView shows the most-recent N. The dashboard polls once a second; the
-        // engine's ring keeps up to 5000 — formatting all 5000 every tick is wasted
-        // work since the user only sees the last RecentFailuresDisplayCount.
+        // Format only the visible tail — the engine's ring holds far more than the view shows.
         var records = _trade.RecentFailureRecords;
         if (records.Count == 0) return "No recent failures.";
 
@@ -408,9 +401,7 @@ public partial class BotDashboardViewModel : BaseViewModel
         }
     }
 
-    // Wraps the platform save-file dialog. The project only targets Windows today,
-    // so we only implement the WinUI 3 path and return null on other platforms
-    // (the build target conditional keeps this from being dead code on Windows).
+    // Windows-only save dialog; returns null on other platforms.
     private static async Task<string?> PickFailureExportPathAsync(string suggestedFileName)
     {
 #if WINDOWS
@@ -421,8 +412,7 @@ public partial class BotDashboardViewModel : BaseViewModel
         };
         picker.FileTypeChoices.Add("CSV file", new List<string> { ".csv" });
 
-        // WinUI 3 requires the picker to be parented to the app's window via HWND,
-        // otherwise PickSaveFileAsync throws E_FAIL on launch.
+        // WinUI 3 requires HWND parenting or PickSaveFileAsync throws E_FAIL.
         var window = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault();
         if (window?.Handler?.PlatformView is Microsoft.UI.Xaml.Window winuiWindow)
         {
@@ -521,21 +511,12 @@ public partial class BotDashboardViewModel : BaseViewModel
                 }
             }
 
-            // "Active bots" comes from scaler samples now, not from transaction
-            // participants. Reasons:
-            //   - Buckets <30s would routinely undercount: a bot that didn't
-            //     happen to trade in that bucket still counted toward "active".
-            //   - We want to plot scaler decisions, not whether matching
-            //     happened to produce a fill.
-            // Per bucket: take max OnlineBots over samples whose timestamp
-            // falls in the bucket. If no sample lands in a bucket, carry
-            // forward the previous bucket's value (samples between snapshots
-            // mean the count was held steady).
+            // Active bots: max OnlineBots per bucket from scaler samples (carry forward when empty).
             var samples = _trade.GetActivitySamples();
             var activeArray = new int[ActivityBucketCount];
             int sIdx = 0;
             int carry = 0;
-            // Walk samples older than the window to seed the carry-forward.
+            // Seed carry from samples older than the window.
             while (sIdx < samples.Count && samples[sIdx].TimestampUtc < from)
             {
                 carry = samples[sIdx].OnlineBots;
@@ -655,7 +636,6 @@ public partial class BotDashboardViewModel : BaseViewModel
         Refresh();
     }
 
-    // Source-generated partial: keeps the trade service in sync with the UI Switch.
     partial void OnScalerEnabledChanged(bool value)
     {
         if (_trade.AutoScale != value) _trade.AutoScale = value;

@@ -53,10 +53,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     private readonly IStockService _stocks;
     private readonly ILogger<SelectedStockService> _logger;
 
-    // Serializes Set/Reset so rapid stock switches can't race their own
-    // Unsubscribe/Subscribe pairs. `_lastRequested` is the latest call's
-    // (stock, currency) tuple — Sets that find a newer request queued behind
-    // them bail without touching subscriptions or logging.
+    // Gate + last-write-wins sentinel: rapid switches serialize and stale Sets bail before touching subs.
     private readonly SemaphoreSlim _setGate = new(1, 1);
     private (int stockId, CurrencyType currency)? _lastRequested;
 
@@ -122,8 +119,8 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         await _setGate.WaitAsync(ct);
         try
         {
-            // A newer Set queued behind us — drop without touching subs or logging.
-            if (_lastRequested != requested) return;
+            if (_lastRequested != requested) return; // a newer Set superseded us
+
             if (stock.StockId == StockId && currency == Currency) return;
 
             await UnsubscribeAsync(ct);
@@ -152,9 +149,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     public async Task Reset(CancellationToken ct = default)
     {
-        // Clear the "latest requested" sentinel so any in-flight or queued Set
-        // bails before touching subscriptions.
-        _lastRequested = null;
+        _lastRequested = null; // queued Sets bail on the staleness check
 
         await _setGate.WaitAsync(ct);
         try

@@ -54,8 +54,7 @@ public partial class AdminViewModel : BaseViewModel
         _services = services ?? throw new ArgumentNullException(nameof(services));
         _db = db ?? throw new ArgumentNullException(nameof(db));
 
-        // Wire every table VM that can request cross-table navigation. The
-        // popup chain (Tx → Order → User) bubbles each step up to this VM.
+        // Cross-table navigation: Tx → Order → User bubbles up to this VM.
         usersVm.UserSelected += async (_, userId) => await OpenUserDetailsAsync(userId);
         ordersVm.UserSelected += async (_, userId) => await OpenUserDetailsAsync(userId);
         ordersVm.TransactionSelected += async (_, txId) => await OpenTransactionDetailsAsync(txId);
@@ -100,8 +99,8 @@ public partial class AdminViewModel : BaseViewModel
             popup.ViewModel.NavigateToTransactionRequested -= txNav;
         }
 
-        // Refresh the Orders table so a cancel from inside the popup is visible.
-        await OrdersVm.RefreshAsync();
+        await OrdersVm.RefreshAsync(); // pick up cancels made from inside the popup
+
     }
 
     private async Task OpenTransactionDetailsAsync(int transactionId)

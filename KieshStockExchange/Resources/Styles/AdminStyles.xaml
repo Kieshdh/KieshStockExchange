@@ -170,9 +170,7 @@
         <Setter Property="BackgroundColor"       Value="{DynamicResource CardSurfaceMuted}" />
         <Setter Property="RowDefinitions"        Value="Auto" />
         <Setter Property="Padding"               Value="4" />
-        <!-- Bottom margin is positive so the filter row and CollectionView
-             below get breathing room instead of being pulled up under the
-             header. -->
+        <!-- Positive bottom margin keeps the filter row + CollectionView clear of the header. -->
         <Setter Property="Margin"                Value="10,10,10,6" />
     </Style>
 
@@ -348,11 +346,7 @@
         <Setter Property="Margin"                  Value="0,0,8,0" />
     </Style>
 
-    <!-- Date + Time pickers on the Orders/Transactions filter rows: native
-         WinUI peers have different default heights, so we force a matching
-         visual height. HeightRequest + MinimumHeightRequest + VerticalOptions
-         is the combination that actually sticks; HeightRequest alone is
-         treated as a hint and gets overridden by the platform default. -->
+    <!-- Date/Time pickers: HeightRequest alone doesn't stick on WinUI, all three are required. -->
     <Style x:Key="AdminDatePicker" TargetType="DatePicker">
         <Setter Property="HeightRequest"        Value="36" />
         <Setter Property="MinimumHeightRequest" Value="36" />
@@ -365,9 +359,7 @@
         <Setter Property="Format"               Value="HH:mm" />
     </Style>
 
-    <!-- Compact segment buttons for admin filter rows (less tall than the
-         PlaceOrderView segments). Values inlined rather than BasedOn so the
-         style doesn't depend on SegmentedTabStyles.xaml being merged first. -->
+    <!-- Compact segment buttons for admin filter rows; inlined so order of merged dictionaries doesn't matter. -->
     <Style x:Key="AdminUnselectedSegment" TargetType="Button">
         <Setter Property="BackgroundColor" Value="Transparent" />
         <Setter Property="TextColor"       Value="{DynamicResource UnselectedTabFg}" />

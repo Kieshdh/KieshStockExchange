@@ -105,8 +105,7 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         string? currencyArg = string.Equals(SelectedCurrencyFilter, AnyOption, StringComparison.Ordinal) ? null : SelectedCurrencyFilter;
         IList<int>? excludeIds = HideAiBots ? _aiUserIds : null;
 
-        // Combine date + time pickers; clamp upper bound to "now" so a stray
-        // future range can't widen the query unnoticed.
+        // Combine date+time pickers; clamp upper bound to now.
         var fromCombined = (FromDate.Date + FromTime).ToUniversalTime();
         var toCombined   = (ToDate.Date + ToTime).ToUniversalTime();
         var now = DateTime.UtcNow;
@@ -134,10 +133,7 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
             return new TransactionTableObject(t, buyer, seller, stock, OpenDetailsAsync);
         }).ToList();
 
-        // Post-fetch sort for computed keys SQLite-Net can't express:
-        // Total = Price*Qty; BuyerName/SellerName require the per-page user
-        // lookup we just did. This re-orders the visible page; total ordering
-        // across pages is by timestamp.
+        // In-VM sort for Total / BuyerName / SellerName (computed or post-join).
         IEnumerable<TransactionTableObject> ordered = (sortKey, desc) switch
         {
             ("Total",      true)  => rows.OrderByDescending(r => r.Transaction.Price * r.Transaction.Quantity),

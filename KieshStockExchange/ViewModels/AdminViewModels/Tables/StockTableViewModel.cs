@@ -48,13 +48,10 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
     {
         var stocks = await _market.GetAllStocksAsync(ct);
 
-        // Apply free-text search via IStockService.Search when non-empty; otherwise
-        // start from the full list.
         IEnumerable<Stock> source = string.IsNullOrWhiteSpace(SearchText)
             ? stocks
             : _stocks.Search(SearchText, take: int.MaxValue);
 
-        // Currency filter: only include stocks that have a listing in the picked currency.
         if (!string.Equals(SelectedCurrencyFilter, AnyCurrencyOption, StringComparison.Ordinal)
             && Enum.TryParse<CurrencyType>(SelectedCurrencyFilter, out var ccyFilter))
         {
@@ -88,7 +85,7 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
     {
         var listings = _stocks.GetListings(stock.StockId);
 
-        // Primary listing first so its price drives sort/24h-change; non-primary listings tail.
+        // Primary first so its price drives sort/24h change.
         var ordered = listings.OrderByDescending(l => l.IsPrimary).ThenBy(l => l.Currency).ToList();
 
         var priceParts = new List<string>(ordered.Count);
@@ -114,8 +111,7 @@ public partial class StockTableViewModel : BaseTableViewModel<StockTableObject>
             }
             else
             {
-                // Fall back to seed price when no quote has been recorded yet.
-                price = l.SeedPrice;
+                price = l.SeedPrice; // no quote yet
             }
             priceParts.Add(CurrencyHelper.Format(price, l.CurrencyType));
             if (l.IsPrimary) primaryPrice = price;

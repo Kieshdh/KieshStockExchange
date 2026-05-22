@@ -37,7 +37,6 @@ public partial class UserDetailsViewModel : BaseViewModel, ILazyTab
 
     public bool HasUser => HasLoadedUser;
 
-    // Autocomplete state
     private List<User> _allUsers = new();
     public ObservableCollection<User> Suggestions { get; } = new();
     [ObservableProperty]
@@ -71,8 +70,6 @@ public partial class UserDetailsViewModel : BaseViewModel, ILazyTab
 
     private void UpdateStatusMessage()
     {
-        // Priority: a loaded user wins; otherwise show "No user selected" when
-        // the search box is empty, "User not found" when text has no matches.
         if (HasUser) { StatusMessage = string.Empty; return; }
         if (string.IsNullOrWhiteSpace(UserSearch)) { StatusMessage = "No user selected"; return; }
         StatusMessage = Suggestions.Count == 0 ? "User not found" : string.Empty;
@@ -89,7 +86,7 @@ public partial class UserDetailsViewModel : BaseViewModel, ILazyTab
         UpdateStatusMessage();
     }
 
-    // Identity card (inline-editable)
+    #region Identity card (inline-editable)
     [ObservableProperty] private int _userId;
     [ObservableProperty] private string _username = string.Empty;
     [ObservableProperty] private string _fullName = string.Empty;
@@ -102,14 +99,10 @@ public partial class UserDetailsViewModel : BaseViewModel, ILazyTab
     private string _identityErrorMessage = string.Empty;
     [ObservableProperty] private string _identityStatusMessage = string.Empty;
     public bool HasIdentityError => !string.IsNullOrEmpty(IdentityErrorMessage);
+    #endregion
 
-    // Funds card
     public ObservableCollection<UserDetailsFundRow> Funds { get; } = new();
-
-    // Positions card
     public ObservableCollection<UserDetailsPositionRow> Positions { get; } = new();
-
-    // Activity cards
     public ObservableCollection<UserDetailsOrderRow> RecentOrders { get; } = new();
     public ObservableCollection<UserDetailsTransactionRow> RecentTransactions { get; } = new();
 
@@ -128,8 +121,7 @@ public partial class UserDetailsViewModel : BaseViewModel, ILazyTab
         if (_allUsers.Count > 0) return;
         try
         {
-            // Load the full user list once so the autocomplete can match without
-            // a DB round-trip per keystroke.
+            // Cache the full user list so autocomplete matches locally per keystroke.
             var (users, _) = await _db.GetUsersPageAsync(0, int.MaxValue, "Username", false, null);
             _allUsers = users.OrderBy(u => u.Username, StringComparer.OrdinalIgnoreCase).ToList();
         }

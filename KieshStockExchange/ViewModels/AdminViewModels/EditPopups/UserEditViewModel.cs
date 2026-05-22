@@ -70,8 +70,7 @@ public partial class UserEditViewModel : BaseViewModel
             return;
         }
 
-        // Stage edits on a clone so the in-memory original isn't mutated on a
-        // validation failure path.
+        // Stage edits on a clone; original stays untouched on validation failure.
         var draft = new User
         {
             UserId = _original.UserId,
@@ -89,8 +88,7 @@ public partial class UserEditViewModel : BaseViewModel
         if (!draft.IsValidEmail())     { ErrorMessage = "Email format is invalid."; return; }
         if (!draft.IsValidBirthdate()) { ErrorMessage = "User must be at least 18 years old."; return; }
 
-        // Uniqueness check on rename — the unique index would throw on save,
-        // but a friendly error is better than a stack trace.
+        // Friendlier than letting the unique-index throw on save.
         if (!string.Equals(draft.Username, _original.Username, StringComparison.OrdinalIgnoreCase))
         {
             var existing = await _db.GetUserByUsername(draft.Username).ConfigureAwait(false);

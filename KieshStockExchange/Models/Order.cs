@@ -189,9 +189,7 @@ public class Order : IValidatable
             if (IsLimitOrder) return CurrencyHelper.Format(Price, CurrencyType);
             if (IsTrueMarketOrder) return "MARKET";
 
-            // Slippage market: cap-only with comparison arrow. The Side/Type
-            // columns already indicate BUY/SELL + MKT±; the anchor lives in
-            // AnchorPriceDisplay (surfaced in the Order details popup).
+            // Slippage market: cap with comparison arrow; anchor surfaces via AnchorPriceDisplay.
             var dir = IsBuyOrder ? "≤" : "≥";
             var cap = CurrencyHelper.Format(PriceWithSlippage, CurrencyType);
             return $"{dir} {cap}";
@@ -204,7 +202,6 @@ public class Order : IValidatable
             if (IsLimitOrder) return CurrencyHelper.Format(TotalAmount, CurrencyType);
             if (IsTrueMarketOrder) return "-"; // Unknown total amount
 
-            // Slippage market: cap notional with arrow, same convention as PriceDisplay.
             var dir = IsBuyOrder ? "≤" : "≥";
             var cap = CurrencyHelper.Format(TotalAmount, CurrencyType);
             return $"{dir} {cap}";
