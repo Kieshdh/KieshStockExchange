@@ -53,6 +53,13 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     private readonly IStockService _stocks;
     private readonly ILogger<SelectedStockService> _logger;
 
+    // Serializes Set/Reset so rapid stock switches can't race their own
+    // Unsubscribe/Subscribe pairs. `_lastRequested` is the latest call's
+    // (stock, currency) tuple — Sets that find a newer request queued behind
+    // them bail without touching subscriptions or logging.
+    private readonly SemaphoreSlim _setGate = new(1, 1);
+    private (int stockId, CurrencyType currency)? _lastRequested;
+
     public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger,
         IOrderBookCache books, IStockService stocks)
     {
@@ -109,43 +116,62 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
         if (stock.StockId == StockId && currency == Currency) return;
 
-        await UnsubscribeAsync();
+        var requested = (stock.StockId, currency);
+        _lastRequested = requested;
 
-        CurrentOrderBook = await _books.GetAsync(stock.StockId, currency, ct);
-        await _market.SubscribeAsync(stock.StockId, currency, ct);
-        await _market.BuildFromHistoryAsync(stock.StockId, currency, ct);
+        await _setGate.WaitAsync(ct);
+        try
+        {
+            // A newer Set queued behind us — drop without touching subs or logging.
+            if (_lastRequested != requested) return;
+            if (stock.StockId == StockId && currency == Currency) return;
 
-        Symbol = stock.Symbol;
-        CompanyName = stock.CompanyName;
-        SelectedStock = stock;
-        StockId = stock.StockId;
-        Currency = currency;
+            await UnsubscribeAsync(ct);
 
-        Quote = TryGetQuote();
-        await UpdateFromLiveAsync(Quote);
+            CurrentOrderBook = await _books.GetAsync(stock.StockId, currency, ct);
+            await _market.SubscribeAsync(stock.StockId, currency, ct);
+            await _market.BuildFromHistoryAsync(stock.StockId, currency, ct);
 
-        if (!_firstSelectionTcs.Task.IsCompleted)
-            _firstSelectionTcs.SetResult(stock);
+            Symbol = stock.Symbol;
+            CompanyName = stock.CompanyName;
+            SelectedStock = stock;
+            StockId = stock.StockId;
+            Currency = currency;
 
-        _logger.LogInformation("SelectedStockService subscribed to {Symbol} #{StockId} in {Currency}.",
-            stock.Symbol, stock.StockId, currency);
+            Quote = TryGetQuote();
+            await UpdateFromLiveAsync(Quote, ct);
+
+            if (!_firstSelectionTcs.Task.IsCompleted)
+                _firstSelectionTcs.SetResult(stock);
+
+            _logger.LogInformation("SelectedStockService subscribed to {Symbol} #{StockId} in {Currency}.",
+                stock.Symbol, stock.StockId, currency);
+        }
+        finally { _setGate.Release(); }
     }
 
     public async Task Reset(CancellationToken ct = default)
     {
-        // Unsubscribe from previous
-        await UnsubscribeAsync(ct);
+        // Clear the "latest requested" sentinel so any in-flight or queued Set
+        // bails before touching subscriptions.
+        _lastRequested = null;
 
-        // Clear state
-        SelectedStock = null;
-        StockId = null;
-        Symbol = string.Empty;
-        CompanyName = string.Empty;
-        CurrentPrice = 0m;
-        Quote = null;
-        PriceUpdatedAt = null;
-        CurrentOrderBook = null;
-        _firstSelectionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        await _setGate.WaitAsync(ct);
+        try
+        {
+            await UnsubscribeAsync(ct);
+
+            SelectedStock = null;
+            StockId = null;
+            Symbol = string.Empty;
+            CompanyName = string.Empty;
+            CurrentPrice = 0m;
+            Quote = null;
+            PriceUpdatedAt = null;
+            CurrentOrderBook = null;
+            _firstSelectionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        finally { _setGate.Release(); }
     }
 
     public async ValueTask DisposeAsync()
