@@ -9,6 +9,16 @@ Batteries_V2.Init();
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Lift Kestrel's request body cap above the 30MB default. The bulk passthrough
+// endpoints (insert-all / update-all) are chunked client-side at 2000 items per
+// call, but TradeSettler's SettleTradeGroup bundle can carry every order touched
+// by a tick group plus the trades and balances — at peak bot load that approaches
+// the limit. 256MB gives plenty of headroom without inviting unbounded payloads.
+builder.WebHost.ConfigureKestrel(opts =>
+{
+    opts.Limits.MaxRequestBodySize = 256L * 1024 * 1024;
+});
+
 // Controllers + System.Text.Json options. JsonStringEnumConverter serialises
 // CurrencyType/CandleResolution and other Shared enums as their string names so
 // the wire payload survives enum reordering across client/server versions.

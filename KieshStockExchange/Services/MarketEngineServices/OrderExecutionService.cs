@@ -575,14 +575,20 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // get to run because the matcher needs OrderIds to populate Transaction rows.
         try
         {
-            // Phase 2: bundle the bulk insert. Server returns the list with assigned
-            // OrderIds, which InsertAllAsync's writeback applies to the in-memory items.
-            await _engineCmd.PlaceOrdersBatchAsync(
+            // Phase 2: bundle the bulk insert. JSON serialization sends a copy across
+            // the wire, so the server's assigned PKs land on the response — we walk the
+            // result positionally and copy each OrderId back onto the in-memory item.
+            var batchResult = await _engineCmd.PlaceOrdersBatchAsync(
                 new PlaceOrdersBatchCommand(orderList), ct).ConfigureAwait(false);
+            var assignedOrders = batchResult.Orders;
+            for (int i = 0; i < orderList.Count && i < assignedOrders.Count; i++)
+            {
+                if (orderList[i].OrderId == 0 && assignedOrders[i].OrderId != 0)
+                    orderList[i].OrderId = assignedOrders[i].OrderId;
+            }
 
-            // OrderIds are assigned by InsertAllAsync; register canonical instances so
-            // the reconciler, matcher, and downstream settle paths all reference the
-            // same Order ref the engine is mutating.
+            // Register canonical instances so the reconciler, matcher, and downstream
+            // settle paths all reference the same Order ref the engine is mutating.
             for (int i = 0; i < orderList.Count; i++)
                 _registry.Register(orderList[i]);
         }

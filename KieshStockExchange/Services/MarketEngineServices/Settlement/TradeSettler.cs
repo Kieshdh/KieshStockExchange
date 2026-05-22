@@ -423,14 +423,28 @@ internal sealed class TradeSettler
         }
 
         var ordersList = new List<Order>(ordersById.Values);
-        await _engineCmd.SettleTradeGroupAsync(
+        var acceptedList = new List<Transaction>(accepted);
+        var groupResult = await _engineCmd.SettleTradeGroupAsync(
             new SettleTradeGroupCommand(
-                AcceptedTrades:      new List<Transaction>(accepted),
+                AcceptedTrades:      acceptedList,
                 OrdersToUpdate:      ordersList,
                 FundsToUpdate:       loadedFunds,
                 PositionsToUpdate:   loadedPositions,
                 NewPositions:        newPositionsThisCall),
             ct).ConfigureAwait(false);
+
+        // PK writeback. Server's response carries the assigned TransactionIds and
+        // PositionIds in payload order; copy them onto the caller's in-memory items.
+        for (int i = 0; i < acceptedList.Count && i < groupResult.AcceptedTrades.Count; i++)
+        {
+            if (acceptedList[i].TransactionId == 0 && groupResult.AcceptedTrades[i].TransactionId != 0)
+                acceptedList[i].TransactionId = groupResult.AcceptedTrades[i].TransactionId;
+        }
+        for (int i = 0; i < newPositionsThisCall.Count && i < groupResult.NewPositions.Count; i++)
+        {
+            if (newPositionsThisCall[i].PositionId == 0 && groupResult.NewPositions[i].PositionId != 0)
+                newPositionsThisCall[i].PositionId = groupResult.NewPositions[i].PositionId;
+        }
 
         return (null, rejected);
     }

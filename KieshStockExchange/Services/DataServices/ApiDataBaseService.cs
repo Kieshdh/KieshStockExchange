@@ -76,23 +76,44 @@ public sealed class ApiDataBaseService : IDataBaseService
     // server returns the list with auto-assigned PKs; walk it positionally and copy each PK
     // back to the corresponding source instance so the in-process contract for InsertAllAsync
     // (mutates input items) is preserved over HTTP.
+    //
+    // Requests are chunked so a single bulk call can never exceed Kestrel's body-size limit.
+    // At ~700 bytes per Order JSON the 2000-item chunk stays under ~1.5MB — comfortably below
+    // both the default 30MB request limit and any reverse-proxy default. The atomicity loss
+    // (each chunk is its own server tx) is acceptable for the bulk admin/cancel paths.
+    private const int BulkChunkSize = 2000;
+
     private async Task BulkInsertRouteAsync<T>(IEnumerable<T> items, string resource, Action<T, T> writeback, CancellationToken ct)
     {
         var list = items as IList<T> ?? items.ToList();
         if (list.Count == 0) return;
-        var resp = await _http.PostAsJsonAsync($"api/admin/insert-all/{resource}", list, ApiJsonOptions.Default, ct).ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
-        var assigned = await resp.Content.ReadFromJsonAsync<List<T>>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
-        if (assigned == null) return;
-        for (int i = 0; i < list.Count && i < assigned.Count; i++) writeback(list[i], assigned[i]);
+        for (int offset = 0; offset < list.Count; offset += BulkChunkSize)
+        {
+            var take = Math.Min(BulkChunkSize, list.Count - offset);
+            var chunk = new List<T>(take);
+            for (int i = 0; i < take; i++) chunk.Add(list[offset + i]);
+
+            var resp = await _http.PostAsJsonAsync($"api/admin/insert-all/{resource}", chunk, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            var assigned = await resp.Content.ReadFromJsonAsync<List<T>>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+            if (assigned == null) continue;
+            for (int i = 0; i < chunk.Count && i < assigned.Count; i++) writeback(list[offset + i], assigned[i]);
+        }
     }
 
     private async Task BulkUpdateRouteAsync<T>(IEnumerable<T> items, string resource, CancellationToken ct)
     {
         var list = items as IList<T> ?? items.ToList();
         if (list.Count == 0) return;
-        var resp = await _http.PostAsJsonAsync($"api/admin/update-all/{resource}", list, ApiJsonOptions.Default, ct).ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
+        for (int offset = 0; offset < list.Count; offset += BulkChunkSize)
+        {
+            var take = Math.Min(BulkChunkSize, list.Count - offset);
+            var chunk = new List<T>(take);
+            for (int i = 0; i < take; i++) chunk.Add(list[offset + i]);
+
+            var resp = await _http.PostAsJsonAsync($"api/admin/update-all/{resource}", chunk, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+        }
     }
 
     private async Task BulkResetRouteAsync(string resource, CancellationToken ct)

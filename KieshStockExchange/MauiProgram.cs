@@ -182,6 +182,10 @@ public static class MauiProgram
 #if DEBUG
         builder.Logging.AddDebug();
 #endif
+        // HttpClient pipelines log Start/Sending/Received at Information per request.
+        // That floods the debug output once bots are placing orders — bump to Warning
+        // so only retries and failures surface.
+        builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
 
         var app = builder.Build();
 
