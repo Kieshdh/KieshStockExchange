@@ -9,7 +9,7 @@
              Title="Account">
 
     <Grid Style="{StaticResource MainGrid}"
-          RowDefinitions="Auto,Auto,*"
+          RowDefinitions="Auto,*"
           RowSpacing="8"
           Padding="0,0,0,8">
 
@@ -23,19 +23,8 @@
                               Margin="0,8,16,0"
                               ZIndex="200" />
 
-        <!-- Page heading -->
-        <Grid Grid.Row="1"
-              Style="{StaticResource PageHeadingGrid}">
-            <Label Grid.Column="0"
-                   Text="Account"
-                   Style="{StaticResource PageHeadingTitle}" />
-            <Label Grid.Column="1"
-                   Text="Profile, security and preferences"
-                   Style="{StaticResource PageHeadingSub}" />
-        </Grid>
-
         <!-- Body: two columns -->
-        <Grid Grid.Row="2"
+        <Grid Grid.Row="1"
               ColumnDefinitions="*,*"
               ColumnSpacing="12"
               Padding="24,0,24,0">

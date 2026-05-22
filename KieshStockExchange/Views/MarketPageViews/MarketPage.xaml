@@ -10,7 +10,7 @@
              Title="Market">
 
     <Grid Style="{StaticResource MainGrid}"
-          RowDefinitions="Auto,Auto,Auto,Auto,*"
+          RowDefinitions="Auto,Auto,Auto,*"
           RowSpacing="8"
           Padding="0,0,0,8">
 
@@ -24,19 +24,8 @@
                               Margin="0,8,16,0"
                               ZIndex="200" />
 
-        <!-- Page heading -->
-        <Grid Grid.Row="1"
-              Style="{StaticResource PageHeadingGrid}">
-            <Label Grid.Column="0"
-                   Text="Market"
-                   Style="{StaticResource PageHeadingTitle}" />
-            <Label Grid.Column="1"
-                   Text="Live overview of all listed instruments"
-                   Style="{StaticResource PageHeadingSub}" />
-        </Grid>
-
         <!-- ============== MY WATCHLIST CARD ============== -->
-        <Border Grid.Row="2"
+        <Border Grid.Row="1"
                 Style="{StaticResource DashboardCardStyle}"
                 Padding="0"
                 Margin="24,0,24,0"
@@ -128,7 +117,7 @@
         </Border>
 
         <!-- ============== TOP STRIP: Top Gainers + Top Losers ============== -->
-        <Grid Grid.Row="3"
+        <Grid Grid.Row="2"
               ColumnDefinitions="*,*"
               ColumnSpacing="12"
               Padding="24,0,24,0">
@@ -221,7 +210,7 @@
         </Grid>
 
         <!-- ============== BOTTOM: All Stocks ============== -->
-        <Border Grid.Row="4"
+        <Border Grid.Row="3"
                 Style="{StaticResource DashboardCardStyle}"
                 Padding="0"
                 Margin="24,0,24,0">

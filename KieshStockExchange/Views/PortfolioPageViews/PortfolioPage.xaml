@@ -11,7 +11,7 @@
              Title="Portfolio">
 
     <Grid Style="{StaticResource MainGrid}"
-          RowDefinitions="Auto,Auto,Auto,*"
+          RowDefinitions="Auto,Auto,*"
           RowSpacing="8"
           Padding="0,0,0,8">
 
@@ -25,19 +25,8 @@
                              Margin="0,8,16,0"
                              ZIndex="200" />
 
-        <!-- Page heading -->
-        <Grid Grid.Row="1"
-              Style="{StaticResource PageHeadingGrid}">
-            <Label Grid.Column="0"
-                   Text="Portfolio"
-                   Style="{StaticResource PageHeadingTitle}" />
-            <Label Grid.Column="1"
-                   Text="Your positions, balances, and performance"
-                   Style="{StaticResource PageHeadingSub}" />
-        </Grid>
-
         <!-- KPI cards row -->
-        <Grid Grid.Row="2"
+        <Grid Grid.Row="1"
               ColumnDefinitions="*,*,*,*"
               ColumnSpacing="12"
               Padding="24,0,24,0">
@@ -101,7 +90,7 @@
         </Grid>
 
         <!-- Tabbed table area -->
-        <Grid Grid.Row="3" Margin="24,0,24,0">
+        <Grid Grid.Row="2" Margin="24,0,24,0">
         <Border Style="{StaticResource TradeContentOutline}"
                 Padding="0">
             <other:SegmentedTabView
