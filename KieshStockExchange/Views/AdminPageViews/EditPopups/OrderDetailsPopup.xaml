@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<toolkit:Popup xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+               xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+               xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+               xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+               x:Class="KieshStockExchange.Views.AdminPageViews.EditPopups.OrderDetailsPopup"
+               x:DataType="vm:OrderDetailsViewModel"
+               Color="Transparent"
+               Size="560,560"
+               CanBeDismissedByTappingOutsideOfPopup="True">
+
+    <Border Style="{StaticResource DashboardCardStyle}"
+            Padding="22"
+            WidthRequest="560"
+            HeightRequest="560">
+        <Grid RowDefinitions="*,Auto" RowSpacing="12">
+
+            <ScrollView Grid.Row="0">
+                <VerticalStackLayout Spacing="12">
+                    <Label Style="{StaticResource SectionHeaderLabelStyle}">
+                        <Label.Text>
+                            <MultiBinding StringFormat="Order #{0} — {1} {2}">
+                                <Binding Path="OrderId" />
+                                <Binding Path="SideDisplay" />
+                                <Binding Path="Symbol" />
+                            </MultiBinding>
+                        </Label.Text>
+                    </Label>
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="16" RowSpacing="6"
+                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                        <Label Grid.Row="0" Grid.Column="0" Text="User" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="0" Grid.Column="1" Style="{StaticResource MutedLabelStyle}">
+                            <Label.Text>
+                                <MultiBinding StringFormat="{}{0} (#{1})">
+                                    <Binding Path="Username" />
+                                    <Binding Path="UserId" />
+                                </MultiBinding>
+                            </Label.Text>
+                        </Label>
+
+                        <Label Grid.Row="1" Grid.Column="0" Text="Type / Status" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="1" Grid.Column="1" Style="{StaticResource MutedLabelStyle}">
+                            <Label.Text>
+                                <MultiBinding StringFormat="{}{0} • {1}">
+                                    <Binding Path="TypeDisplay" />
+                                    <Binding Path="Status" />
+                                </MultiBinding>
+                            </Label.Text>
+                        </Label>
+
+                        <Label Grid.Row="2" Grid.Column="0" Text="Price" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="2" Grid.Column="1" Text="{Binding PriceDisplay}" Style="{StaticResource MutedLabelStyle}" />
+
+                        <Label Grid.Row="3" Grid.Column="0" Text="Anchor"
+                               Style="{StaticResource FormLabelStyle}"
+                               IsVisible="{Binding HasAnchor}" />
+                        <Label Grid.Row="3" Grid.Column="1" Text="{Binding AnchorPriceDisplay}"
+                               Style="{StaticResource MutedLabelStyle}"
+                               IsVisible="{Binding HasAnchor}" />
+
+                        <Label Grid.Row="4" Grid.Column="0" Text="Filled / Qty" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="4" Grid.Column="1" Text="{Binding AmountFilledDisplay}" Style="{StaticResource MutedLabelStyle}" />
+
+                        <Label Grid.Row="5" Grid.Column="0" Text="Total" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="5" Grid.Column="1" Text="{Binding TotalDisplay}" Style="{StaticResource MutedLabelStyle}" />
+
+                        <Label Grid.Row="6" Grid.Column="0" Text="Slippage / Budget" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="6" Grid.Column="1" Style="{StaticResource MutedLabelStyle}">
+                            <Label.Text>
+                                <MultiBinding StringFormat="{}{0} • {1}">
+                                    <Binding Path="SlippageDisplay" />
+                                    <Binding Path="BudgetDisplay" />
+                                </MultiBinding>
+                            </Label.Text>
+                        </Label>
+
+                        <Label Grid.Row="7" Grid.Column="0" Text="Created / Updated" Style="{StaticResource FormLabelStyle}" />
+                        <VerticalStackLayout Grid.Row="7" Grid.Column="1">
+                            <Label Text="{Binding CreatedDisplay}" Style="{StaticResource MutedLabelStyle}" />
+                            <Label Text="{Binding UpdatedDisplay}" Style="{StaticResource MutedLabelStyle}" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <!-- Linked transactions: visible once the order has at least one fill. -->
+                    <VerticalStackLayout Spacing="6" IsVisible="{Binding HasLinkedTransactions}">
+                        <Label Style="{StaticResource FormLabelStyle}">
+                            <Label.Text>
+                                <MultiBinding StringFormat="Transactions ({0})">
+                                    <Binding Path="LinkedTransactionsCount" />
+                                </MultiBinding>
+                            </Label.Text>
+                        </Label>
+                        <CollectionView ItemsSource="{Binding LinkedTransactions}">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="vm:OrderLinkedTransactionRow">
+                                    <Grid ColumnDefinitions="*,Auto" Padding="0,2">
+                                        <Label Grid.Column="0" Text="{Binding Summary}" Style="{StaticResource MutedLabelStyle}" VerticalOptions="Center" />
+                                        <Label Grid.Column="1" Text="Open" Style="{StaticResource TableEditLabel}" VerticalOptions="Center">
+                                            <Label.GestureRecognizers>
+                                                <TapGestureRecognizer Command="{Binding OpenCommand}" NumberOfTapsRequired="1" />
+                                            </Label.GestureRecognizers>
+                                        </Label>
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+            </ScrollView>
+
+            <VerticalStackLayout Grid.Row="1" Spacing="10">
+                <Label Text="{Binding ErrorMessage}"
+                       Style="{StaticResource RegistrationErrorLabel}"
+                       IsVisible="{Binding HasError}" />
+
+                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                    <Button Grid.Column="0"
+                            Text="View user"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding ViewUserCommand}" />
+                    <Button Grid.Column="1"
+                            Text="Cancel order"
+                            Style="{StaticResource PrimaryActionButtonStyle}"
+                            Command="{Binding CancelOrderCommand}"
+                            IsVisible="{Binding CanCancel}"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}" />
+                    <Button Grid.Column="2"
+                            Text="Close"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding CloseCommand}" />
+                </Grid>
+            </VerticalStackLayout>
+
+        </Grid>
+    </Border>
+</toolkit:Popup>

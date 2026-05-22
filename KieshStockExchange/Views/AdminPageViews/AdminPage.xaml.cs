@@ -19,6 +19,7 @@ public partial class AdminPage : ContentPage
         TransactionsTab.BindingContext = vm.TransactionsVm;
         FundsTab.BindingContext        = vm.FundsVm;
         PositionsTab.BindingContext    = vm.PositionsVm;
+        UserDetailsTab.BindingContext  = vm.UserDetailsVm;
         RefreshButton.Command          = vm.RefreshActiveTabCommand;
     }
 

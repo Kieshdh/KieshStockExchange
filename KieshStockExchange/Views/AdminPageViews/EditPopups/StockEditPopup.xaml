@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<toolkit:Popup xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+               xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+               xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+               xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+               x:Class="KieshStockExchange.Views.AdminPageViews.EditPopups.StockEditPopup"
+               x:DataType="vm:StockEditViewModel"
+               Color="Transparent"
+               Size="500,360"
+               CanBeDismissedByTappingOutsideOfPopup="True">
+
+    <Border Style="{StaticResource DashboardCardStyle}"
+            Padding="22"
+            WidthRequest="500"
+            HeightRequest="360">
+        <Grid RowDefinitions="*,Auto" RowSpacing="12">
+
+            <ScrollView Grid.Row="0">
+                <VerticalStackLayout Spacing="14">
+
+                    <Label Text="{Binding StockId, StringFormat='Edit stock #{0}'}"
+                           Style="{StaticResource SectionHeaderLabelStyle}" />
+
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Symbol" Style="{StaticResource FormLabelStyle}" />
+                        <Entry Text="{Binding Symbol, Mode=TwoWay}"
+                               Style="{StaticResource FormEntryStyle}" />
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="Company name" Style="{StaticResource FormLabelStyle}" />
+                        <Entry Text="{Binding CompanyName, Mode=TwoWay}"
+                               Style="{StaticResource FormEntryStyle}" />
+                    </VerticalStackLayout>
+
+                </VerticalStackLayout>
+            </ScrollView>
+
+            <VerticalStackLayout Grid.Row="1" Spacing="10">
+                <Label Text="{Binding ErrorMessage}"
+                       Style="{StaticResource RegistrationErrorLabel}"
+                       IsVisible="{Binding HasError}" />
+
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <Button Grid.Column="0"
+                            Text="Save"
+                            Style="{StaticResource PrimaryActionButtonStyle}"
+                            Command="{Binding SaveCommand}"
+                            IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}" />
+                    <Button Grid.Column="1"
+                            Text="Cancel"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding CancelCommand}" />
+                </Grid>
+            </VerticalStackLayout>
+
+        </Grid>
+    </Border>
+</toolkit:Popup>

@@ -1,9 +1,13 @@
+using CommunityToolkit.Maui.Views;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using System.Diagnostics;
-using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.ViewModels.OtherViewModels;
+using KieshStockExchange.Views.AdminPageViews.EditPopups;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
@@ -20,14 +24,21 @@ public partial class AdminViewModel : BaseViewModel
     public OrderTableViewModel OrdersVm { get; }
     public PositionTableViewModel PositionsVm { get; }
     public FundTableViewModel FundsVm { get; }
+    public UserDetailsViewModel UserDetailsVm { get; }
     public TopNavBarViewModel TopNavBarVm { get; }
 
-    private readonly IExcelImportService ExcelService;
+    public const int OrdersTabIndex = 2;
+    public const int TransactionsTabIndex = 3;
+    public const int UserDetailsTabIndex = 6;
 
-    public AdminViewModel(IExcelImportService excelService,
+    private readonly IExcelImportService ExcelService;
+    private readonly IServiceProvider _services;
+    private readonly IDataBaseService _db;
+
+    public AdminViewModel(IExcelImportService excelService, IServiceProvider services, IDataBaseService db,
         UserTableViewModel usersVm, TransactionTableViewModel transactionsVm, OrderTableViewModel ordersVm,
         StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm,
-        TopNavBarViewModel topNavBarVm)
+        UserDetailsViewModel userDetailsVm, TopNavBarViewModel topNavBarVm)
     {
         Title = "Admin Dashboard";
         UsersVm = usersVm;
@@ -36,8 +47,91 @@ public partial class AdminViewModel : BaseViewModel
         OrdersVm = ordersVm;
         PositionsVm = positionsVm;
         FundsVm = fundsVm;
+        UserDetailsVm = userDetailsVm ?? throw new ArgumentNullException(nameof(userDetailsVm));
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
         ExcelService = excelService;
+        _services = services ?? throw new ArgumentNullException(nameof(services));
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+
+        // Wire every table VM that can request cross-table navigation. The
+        // popup chain (Tx → Order → User) bubbles each step up to this VM.
+        usersVm.UserSelected += async (_, userId) => await OpenUserDetailsAsync(userId);
+        ordersVm.UserSelected += async (_, userId) => await OpenUserDetailsAsync(userId);
+        ordersVm.TransactionSelected += async (_, txId) => await OpenTransactionDetailsAsync(txId);
+        transactionsVm.UserSelected += async (_, userId) => await OpenUserDetailsAsync(userId);
+        transactionsVm.OrderSelected += async (_, orderId) => await OpenOrderDetailsAsync(orderId);
+        userDetailsVm.UserSelected += async (_, userId) => await OpenUserDetailsAsync(userId);
+        userDetailsVm.OrderSelected += async (_, orderId) => await OpenOrderDetailsAsync(orderId);
+        userDetailsVm.TransactionSelected += async (_, txId) => await OpenTransactionDetailsAsync(txId);
+    }
+
+    private async Task OpenUserDetailsAsync(int userId)
+    {
+        SelectedTabIndex = UserDetailsTabIndex;
+        await UserDetailsVm.LoadUserByIdAsync(userId);
+    }
+
+    private async Task OpenOrderDetailsAsync(int orderId)
+    {
+        SelectedTabIndex = OrdersTabIndex;
+        var order = await _db.GetOrderById(orderId);
+        if (order is null) return;
+
+        var user = await _db.GetUserById(order.UserId);
+        var stocks = await _db.GetStocksAsync();
+        var stock = stocks.FirstOrDefault(s => s.StockId == order.StockId);
+
+        var page = Shell.Current?.CurrentPage
+            ?? Application.Current?.Windows?.FirstOrDefault()?.Page;
+        if (page is null) return;
+
+        var popup = _services.GetRequiredService<OrderDetailsPopup>();
+        popup.ViewModel.Initialize(order, user?.Username ?? "Unknown", stock?.Symbol ?? $"#{order.StockId}");
+
+        EventHandler<int>? userNav = async (_, uid) => await OpenUserDetailsAsync(uid);
+        EventHandler<int>? txNav = async (_, tid) => await OpenTransactionDetailsAsync(tid);
+        popup.ViewModel.NavigateToUserRequested += userNav;
+        popup.ViewModel.NavigateToTransactionRequested += txNav;
+        try { await page.ShowPopupAsync(popup); }
+        finally
+        {
+            popup.ViewModel.NavigateToUserRequested -= userNav;
+            popup.ViewModel.NavigateToTransactionRequested -= txNav;
+        }
+
+        // Refresh the Orders table so a cancel from inside the popup is visible.
+        await OrdersVm.RefreshAsync();
+    }
+
+    private async Task OpenTransactionDetailsAsync(int transactionId)
+    {
+        SelectedTabIndex = TransactionsTabIndex;
+        var tx = await _db.GetTransactionById(transactionId);
+        if (tx is null) return;
+
+        var buyer = await _db.GetUserById(tx.BuyerId);
+        var seller = await _db.GetUserById(tx.SellerId);
+        var stocks = await _db.GetStocksAsync();
+        var stock = stocks.FirstOrDefault(s => s.StockId == tx.StockId);
+
+        var page = Shell.Current?.CurrentPage
+            ?? Application.Current?.Windows?.FirstOrDefault()?.Page;
+        if (page is null) return;
+
+        var popup = _services.GetRequiredService<TransactionDetailsPopup>();
+        popup.ViewModel.Initialize(tx, buyer?.Username ?? "Unknown", seller?.Username ?? "Unknown",
+            stock?.Symbol ?? $"#{tx.StockId}");
+
+        EventHandler<int>? userNav = async (_, uid) => await OpenUserDetailsAsync(uid);
+        EventHandler<int>? orderNav = async (_, oid) => await OpenOrderDetailsAsync(oid);
+        popup.ViewModel.NavigateToUserRequested += userNav;
+        popup.ViewModel.NavigateToOrderRequested += orderNav;
+        try { await page.ShowPopupAsync(popup); }
+        finally
+        {
+            popup.ViewModel.NavigateToUserRequested -= userNav;
+            popup.ViewModel.NavigateToOrderRequested -= orderNav;
+        }
     }
 
     public async Task InitializeAsync()
@@ -71,6 +165,7 @@ public partial class AdminViewModel : BaseViewModel
         3 => TransactionsVm,
         4 => FundsVm,
         5 => PositionsVm,
+        6 => UserDetailsVm,
         _ => UsersVm
     };
 

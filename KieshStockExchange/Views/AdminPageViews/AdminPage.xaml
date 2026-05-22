@@ -4,14 +4,14 @@
              x:Class="KieshStockExchange.Views.AdminPageViews.AdminPage"
              x:Name="AdminPageRoot"
              xmlns:local="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
-             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews"
+             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              Title="Admin"
              x:DataType="local:AdminViewModel">
 
     <Grid Style="{StaticResource MainGrid}"
-          RowDefinitions="Auto,Auto,*"
+          RowDefinitions="Auto,*"
           RowSpacing="8"
           Padding="0,0,0,8">
 
@@ -25,18 +25,8 @@
                              Margin="0,8,16,0"
                              ZIndex="200" />
 
-        <!-- Row 1: Page heading -->
-        <Grid Grid.Row="1" Style="{StaticResource PageHeadingGrid}">
-            <Label Grid.Column="0"
-                   Text="Admin"
-                   Style="{StaticResource PageHeadingTitle}" />
-            <Label Grid.Column="1"
-                   Text="Manage users, stocks, orders, and balances"
-                   Style="{StaticResource PageHeadingSub}" />
-        </Grid>
-
-        <!-- Row 2: Tab area with loading overlay on top -->
-        <Grid Grid.Row="2" Margin="24,0,24,0">
+        <!-- Row 1: Tab area with loading overlay on top -->
+        <Grid Grid.Row="1" Margin="24,0,24,0">
 
             <!-- Tab content (hidden while loading) -->
             <Border Style="{StaticResource TradeContentOutline}"
@@ -92,6 +82,12 @@
                         <other:SegmentedTabItem Header="Positions">
                             <other:SegmentedTabItem.Content>
                                 <adminViews:PositionTableView x:Name="PositionsTab" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
+
+                        <other:SegmentedTabItem Header="User">
+                            <other:SegmentedTabItem.Content>
+                                <adminViews:UserDetailsView x:Name="UserDetailsTab" />
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 

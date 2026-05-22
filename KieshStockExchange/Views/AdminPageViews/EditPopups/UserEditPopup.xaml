@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<toolkit:Popup xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+               xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+               xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+               xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+               x:Class="KieshStockExchange.Views.AdminPageViews.EditPopups.UserEditPopup"
+               x:DataType="vm:UserEditViewModel"
+               Color="Transparent"
+               Size="500,640"
+               CanBeDismissedByTappingOutsideOfPopup="True">
+
+    <Border Style="{StaticResource DashboardCardStyle}"
+            Padding="22"
+            WidthRequest="500"
+            HeightRequest="535">
+        <Grid RowDefinitions="*,Auto" RowSpacing="12">
+
+        <ScrollView Grid.Row="0">
+        <VerticalStackLayout Spacing="14">
+
+            <Label Text="{Binding UserId, StringFormat='Edit user #{0}'}"
+                   Style="{StaticResource SectionHeaderLabelStyle}" />
+
+            <VerticalStackLayout Spacing="4">
+                <Label Text="Username" Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding Username, Mode=TwoWay}"
+                       Style="{StaticResource FormEntryStyle}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout Spacing="4">
+                <Label Text="Full name" Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding FullName, Mode=TwoWay}"
+                       Style="{StaticResource FormEntryStyle}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout Spacing="4">
+                <Label Text="Email" Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding Email, Mode=TwoWay}"
+                       Keyboard="Email"
+                       Style="{StaticResource FormEntryStyle}" />
+            </VerticalStackLayout>
+
+            <VerticalStackLayout Spacing="4">
+                <Label Text="Birthdate (dd/MM/yyyy)" Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding BirthDateText, Mode=TwoWay}"
+                       Placeholder="dd/MM/yyyy"
+                       Style="{StaticResource FormEntryStyle}" />
+            </VerticalStackLayout>
+
+            <HorizontalStackLayout Spacing="10" VerticalOptions="Center">
+                <Label Text="Admin" Style="{StaticResource FormLabelStyle}" VerticalOptions="Center" />
+                <Switch IsToggled="{Binding IsAdmin, Mode=TwoWay}" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+
+        </VerticalStackLayout>
+        </ScrollView>
+
+        <!-- Error message + action buttons stay pinned so they're always visible
+             even when validation pushes the form taller. -->
+        <VerticalStackLayout Grid.Row="1" Spacing="10">
+            <Label Text="{Binding ErrorMessage}"
+                   Style="{StaticResource RegistrationErrorLabel}"
+                   IsVisible="{Binding HasError}" />
+
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                <Button Grid.Column="0"
+                        Text="Save"
+                        Style="{StaticResource PrimaryActionButtonStyle}"
+                        Command="{Binding SaveCommand}"
+                        IsEnabled="{Binding IsBusy, Converter={StaticResource InvertedBoolConverter}}" />
+                <Button Grid.Column="1"
+                        Text="Cancel"
+                        Style="{StaticResource SecondaryActionButtonStyle}"
+                        Command="{Binding CancelCommand}" />
+            </Grid>
+        </VerticalStackLayout>
+
+        </Grid>
+    </Border>
+</toolkit:Popup>

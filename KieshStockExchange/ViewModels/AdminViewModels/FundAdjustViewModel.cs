@@ -1,0 +1,104 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
+using KieshStockExchange.ViewModels.OtherViewModels;
+using Microsoft.Extensions.Logging;
+
+namespace KieshStockExchange.ViewModels.AdminViewModels;
+
+public partial class FundAdjustViewModel : BaseViewModel
+{
+    public const string KindDeposit = "Deposit";
+    public const string KindWithdrawal = "Withdrawal";
+
+    private readonly IUserPortfolioService _portfolio;
+    private readonly ILogger<FundAdjustViewModel> _logger;
+
+    public IReadOnlyList<string> KindOptions { get; } = new[] { KindDeposit, KindWithdrawal };
+
+    public event EventHandler? CloseRequested;
+    public event EventHandler? Saved;
+
+    [ObservableProperty] private int _userId;
+    [ObservableProperty] private CurrencyType _currency = CurrencyType.USD;
+    [ObservableProperty] private string _currencyDisplay = "USD";
+    [ObservableProperty] private string _selectedKind = KindDeposit;
+    [ObservableProperty] private string _amountText = string.Empty;
+    [ObservableProperty] private string _note = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasError))]
+    private string _errorMessage = string.Empty;
+
+    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
+
+    public FundAdjustViewModel(IUserPortfolioService portfolio, ILogger<FundAdjustViewModel> logger)
+    {
+        Title = "Adjust funds";
+        _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    public void Initialize(int userId, CurrencyType currency)
+    {
+        UserId = userId;
+        Currency = currency;
+        CurrencyDisplay = currency.ToString();
+        SelectedKind = KindDeposit;
+        AmountText = string.Empty;
+        Note = string.Empty;
+        ErrorMessage = string.Empty;
+    }
+
+    [RelayCommand]
+    private async Task Save()
+    {
+        ErrorMessage = string.Empty;
+
+        var amountInput = CurrencyHelper.Parse(AmountText, Currency);
+        if (!amountInput.HasValue || amountInput.Value <= 0m)
+        {
+            ErrorMessage = "Amount must be a positive number.";
+            return;
+        }
+        var amount = amountInput.Value;
+
+        IsBusy = true;
+        try
+        {
+            bool ok = SelectedKind == KindWithdrawal
+                ? await _portfolio.WithdrawAsync(amount, Currency, NoteOrDefault(), asUserId: UserId)
+                                   .ConfigureAwait(false)
+                : await _portfolio.DepositAsync(amount, Currency, NoteOrDefault(), asUserId: UserId)
+                                   .ConfigureAwait(false);
+
+            if (!ok)
+            {
+                ErrorMessage = SelectedKind == KindWithdrawal
+                    ? "Withdrawal failed — insufficient available balance."
+                    : "Deposit failed. Please try again.";
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "FundAdjust failed for user #{UserId} {Currency}.", UserId, Currency);
+            ErrorMessage = "Adjustment failed. Please try again.";
+            return;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        Saved?.Invoke(this, EventArgs.Empty);
+        CloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private string? NoteOrDefault() =>
+        string.IsNullOrWhiteSpace(Note) ? $"Admin {SelectedKind.ToLowerInvariant()}" : Note.Trim();
+
+    [RelayCommand]
+    private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
+}

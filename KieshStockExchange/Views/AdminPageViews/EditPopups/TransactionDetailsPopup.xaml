@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<toolkit:Popup xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+               xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+               xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+               xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
+               x:Class="KieshStockExchange.Views.AdminPageViews.EditPopups.TransactionDetailsPopup"
+               x:DataType="vm:TransactionDetailsViewModel"
+               Color="Transparent"
+               Size="560,560"
+               CanBeDismissedByTappingOutsideOfPopup="True">
+
+    <Border Style="{StaticResource DashboardCardStyle}"
+            Padding="22"
+            WidthRequest="560"
+            HeightRequest="560">
+        <Grid RowDefinitions="*,Auto" RowSpacing="12">
+
+            <ScrollView Grid.Row="0">
+                <VerticalStackLayout Spacing="12">
+                    <Label Style="{StaticResource SectionHeaderLabelStyle}">
+                        <Label.Text>
+                            <MultiBinding StringFormat="Transaction #{0} — {1}">
+                                <Binding Path="TransactionId" />
+                                <Binding Path="Symbol" />
+                            </MultiBinding>
+                        </Label.Text>
+                    </Label>
+
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="16" RowSpacing="6"
+                          RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+                        <Label Grid.Row="0" Grid.Column="0" Text="Timestamp" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="0" Grid.Column="1" Text="{Binding TimestampDisplay}" Style="{StaticResource MutedLabelStyle}" />
+
+                        <Label Grid.Row="1" Grid.Column="0" Text="Price" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="1" Grid.Column="1" Text="{Binding PriceDisplay}" Style="{StaticResource MutedLabelStyle}" />
+
+                        <Label Grid.Row="2" Grid.Column="0" Text="Quantity" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="2" Grid.Column="1" Text="{Binding QuantityDisplay}" Style="{StaticResource MutedLabelStyle}" />
+
+                        <Label Grid.Row="3" Grid.Column="0" Text="Total" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="3" Grid.Column="1" Text="{Binding TotalDisplay}" Style="{StaticResource MutedLabelStyle}" />
+
+                        <Label Grid.Row="4" Grid.Column="0" Text="Buyer" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="4" Grid.Column="1" Style="{StaticResource MutedLabelStyle}">
+                            <Label.Text>
+                                <MultiBinding StringFormat="{}{0} (#{1})">
+                                    <Binding Path="BuyerUsername" />
+                                    <Binding Path="BuyerId" />
+                                </MultiBinding>
+                            </Label.Text>
+                        </Label>
+
+                        <Label Grid.Row="5" Grid.Column="0" Text="Seller" Style="{StaticResource FormLabelStyle}" />
+                        <Label Grid.Row="5" Grid.Column="1" Style="{StaticResource MutedLabelStyle}">
+                            <Label.Text>
+                                <MultiBinding StringFormat="{}{0} (#{1})">
+                                    <Binding Path="SellerUsername" />
+                                    <Binding Path="SellerId" />
+                                </MultiBinding>
+                            </Label.Text>
+                        </Label>
+                    </Grid>
+                </VerticalStackLayout>
+            </ScrollView>
+
+            <VerticalStackLayout Grid.Row="1" Spacing="10">
+                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+                    <Button Grid.Row="0" Grid.Column="0"
+                            Text="View buyer"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding ViewBuyerCommand}" />
+                    <Button Grid.Row="0" Grid.Column="1"
+                            Text="View seller"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding ViewSellerCommand}" />
+                    <Button Grid.Row="1" Grid.Column="0"
+                            Text="View buy order"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding ViewBuyOrderCommand}" />
+                    <Button Grid.Row="1" Grid.Column="1"
+                            Text="View sell order"
+                            Style="{StaticResource SecondaryActionButtonStyle}"
+                            Command="{Binding ViewSellOrderCommand}" />
+                </Grid>
+                <Button Text="Close"
+                        Style="{StaticResource PrimaryActionButtonStyle}"
+                        Command="{Binding CloseCommand}" />
+            </VerticalStackLayout>
+
+        </Grid>
+    </Border>
+</toolkit:Popup>
