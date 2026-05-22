@@ -1,4 +1,6 @@
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
@@ -28,6 +30,51 @@ public sealed class ApiDataBaseService : IDataBaseService
     private static Task NotImpl([CallerMemberName] string member = "")
         => Task.FromException(new NotImplementedException($"ApiDataBaseService.{member} not yet wired"));
 
+    // Reads where 404 is a legitimate "not found" response and the method signature returns
+    // T? — collapses the response to null instead of throwing. EnsureSuccessStatusCode catches
+    // anything else so transport errors still surface.
+    // POST a body, expect a JSON list back. Used by "by ids" / "for users" methods where
+    // the id list would be too long for a URL query string.
+    private async Task<List<TItem>> PostListAsync<TBody, TItem>(string requestUri, TBody body, CancellationToken ct)
+    {
+        var resp = await _http.PostAsJsonAsync(requestUri, body, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<TItem>>(ApiJsonOptions.Default, ct).ConfigureAwait(false) ?? new();
+    }
+
+    private async Task<T?> GetNullableAsync<T>(string requestUri, CancellationToken ct) where T : class
+    {
+        var resp = await _http.GetAsync(requestUri, ct).ConfigureAwait(false);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<T>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+    }
+
+    // Tiny URL-encoded query-string builder for the paged endpoints. Skips null/empty values
+    // so callers can pass nullable filters straight in without ceremony. Returns "" when empty
+    // so caller can concat unconditionally; first key gets "?", subsequent get "&".
+    private sealed class Q
+    {
+        private readonly System.Text.StringBuilder _sb = new();
+        public Q Add(string key, object? value)
+        {
+            if (value is null) return this;
+            if (value is string s && string.IsNullOrEmpty(s)) return this;
+            _sb.Append(_sb.Length == 0 ? '?' : '&').Append(key).Append('=')
+                .Append(Uri.EscapeDataString(value is DateTime dt ? dt.ToString("O")
+                    : value is bool b ? (b ? "true" : "false")
+                    : value.ToString() ?? ""));
+            return this;
+        }
+        public Q AddEach(string key, System.Collections.IEnumerable? values)
+        {
+            if (values is null) return this;
+            foreach (var v in values) Add(key, v);
+            return this;
+        }
+        public override string ToString() => _sb.ToString();
+    }
+
     #region Generic operations
     public Task ResetTableAsync<T>(CancellationToken ct = default) where T : new() => NotImpl();
     public Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default) => NotImpl();
@@ -46,12 +93,33 @@ public sealed class ApiDataBaseService : IDataBaseService
     #endregion
 
     #region User operations
-    public Task<List<User>> GetUsersAsync(CancellationToken ct = default) => NotImpl<List<User>>();
-    public Task<(List<User> Items, int Total)> GetUsersPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default) => NotImpl<(List<User>, int)>();
-    public Task<User?> GetUserById(int userId, CancellationToken ct = default) => NotImpl<User?>();
-    public Task<User?> GetUserByUsername(string username, CancellationToken ct = default) => NotImpl<User?>();
-    public Task<List<User>> GetUsersByIds(IReadOnlyList<int> userIds, CancellationToken ct = default) => NotImpl<List<User>>();
-    public Task<bool> UserExists(int userId, CancellationToken ct = default) => NotImpl<bool>();
+    public async Task<List<User>> GetUsersAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<User>>("api/users", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<(List<User> Items, int Total)> GetUsersPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
+    {
+        var url = $"api/users/page?skip={skip}&take={take}&sortKey={Uri.EscapeDataString(sortKey ?? "")}&desc={desc}"
+            + (string.IsNullOrEmpty(filter) ? "" : $"&filter={Uri.EscapeDataString(filter)}");
+        var page = await _http.GetFromJsonAsync<PageResponse<User>>(url, ApiJsonOptions.Default, ct);
+        return (page?.Items.ToList() ?? new(), page?.Total ?? 0);
+    }
+
+    public Task<User?> GetUserById(int userId, CancellationToken ct = default)
+        => GetNullableAsync<User>($"api/users/{userId}", ct);
+
+    public Task<User?> GetUserByUsername(string username, CancellationToken ct = default)
+        => GetNullableAsync<User>($"api/users/by-username/{Uri.EscapeDataString(username)}", ct);
+
+    public async Task<List<User>> GetUsersByIds(IReadOnlyList<int> userIds, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync("api/users/by-ids", userIds, ApiJsonOptions.Default, ct);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<List<User>>(ApiJsonOptions.Default, ct) ?? new();
+    }
+
+    public async Task<bool> UserExists(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<bool>($"api/users/{userId}/exists", ApiJsonOptions.Default, ct);
+
     public Task CreateUser(User user, CancellationToken ct = default) => NotImpl();
     public Task UpdateUser(User user, CancellationToken ct = default) => NotImpl();
     public Task UpsertUser(User user, CancellationToken ct = default) => NotImpl();
@@ -60,9 +128,15 @@ public sealed class ApiDataBaseService : IDataBaseService
     #endregion
 
     #region Stock operations
-    public Task<List<Stock>> GetStocksAsync(CancellationToken ct = default) => NotImpl<List<Stock>>();
-    public Task<Stock?> GetStockById(int stockId, CancellationToken ct = default) => NotImpl<Stock?>();
-    public Task<bool> StockExists(int stockId, CancellationToken ct = default) => NotImpl<bool>();
+    public async Task<List<Stock>> GetStocksAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Stock>>("api/stocks", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<Stock?> GetStockById(int stockId, CancellationToken ct = default)
+        => await GetNullableAsync<Stock>($"api/stocks/{stockId}", ct);
+
+    public async Task<bool> StockExists(int stockId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<bool>($"api/stocks/{stockId}/exists", ApiJsonOptions.Default, ct);
+
     public Task CreateStock(Stock stock, CancellationToken ct = default) => NotImpl();
     public Task UpdateStock(Stock stock, CancellationToken ct = default) => NotImpl();
     public Task UpsertStock(Stock stock, CancellationToken ct = default) => NotImpl();
@@ -70,59 +144,145 @@ public sealed class ApiDataBaseService : IDataBaseService
     #endregion
 
     #region StockListing operations
-    public Task<List<StockListing>> GetStockListingsAsync(CancellationToken ct = default) => NotImpl<List<StockListing>>();
-    public Task<List<StockListing>> GetStockListingsByStockId(int stockId, CancellationToken ct = default) => NotImpl<List<StockListing>>();
+    public async Task<List<StockListing>> GetStockListingsAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<StockListing>>("api/stock-listings", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<List<StockListing>> GetStockListingsByStockId(int stockId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<StockListing>>($"api/stock-listings/by-stock/{stockId}", ApiJsonOptions.Default, ct) ?? new();
+
     public Task CreateStockListing(StockListing listing, CancellationToken ct = default) => NotImpl();
     #endregion
 
     #region StockPrice operations
-    public Task<List<StockPrice>> GetStockPricesAsync(CancellationToken ct = default) => NotImpl<List<StockPrice>>();
-    public Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken ct = default) => NotImpl<StockPrice?>();
-    public Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken ct = default) => NotImpl<List<StockPrice>>();
-    public Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CurrencyType currency, CancellationToken ct = default) => NotImpl<StockPrice?>();
-    public Task<StockPrice?> GetLatestStockPriceBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default) => NotImpl<StockPrice?>();
-    public Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default) => NotImpl<List<StockPrice>>();
+    public async Task<List<StockPrice>> GetStockPricesAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<StockPrice>>("api/stock-prices", ApiJsonOptions.Default, ct) ?? new();
+
+    public Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken ct = default)
+        => GetNullableAsync<StockPrice>($"api/stock-prices/{stockPriceId}", ct);
+
+    public async Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<StockPrice>>($"api/stock-prices/by-stock/{stockId}", ApiJsonOptions.Default, ct) ?? new();
+
+    public Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CurrencyType currency, CancellationToken ct = default)
+        => GetNullableAsync<StockPrice>($"api/stock-prices/latest/{stockId}/{currency}", ct);
+
+    public Task<StockPrice?> GetLatestStockPriceBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default)
+        => GetNullableAsync<StockPrice>($"api/stock-prices/latest-before/{stockId}/{currency}?time={Uri.EscapeDataString(time.ToString("O"))}", ct);
+
+    public async Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<StockPrice>>(
+            $"api/stock-prices/by-stock-range/{stockId}/{currency}?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}",
+            ApiJsonOptions.Default, ct) ?? new();
+
     public Task CreateStockPrice(StockPrice stockPrice, CancellationToken ct = default) => NotImpl();
     public Task UpdateStockPrice(StockPrice stockPrice, CancellationToken ct = default) => NotImpl();
     public Task DeleteStockPrice(StockPrice stockPrice, CancellationToken ct = default) => NotImpl();
     #endregion
 
     #region Order operations
-    public Task<List<Order>> GetOrdersAsync(CancellationToken ct = default) => NotImpl<List<Order>>();
-    public Task<(List<Order> Items, int Total)> GetOrdersPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, string? statusFilter, int? userIdFilter = null, int? stockIdFilter = null, string? sideFilter = null, string? typeFilter = null, IList<int>? excludeUserIds = null, CancellationToken ct = default) => NotImpl<(List<Order>, int)>();
-    public Task<Order?> GetOrderById(int orderId, CancellationToken ct = default) => NotImpl<Order?>();
-    public Task<List<Order>> GetOrdersByIds(List<int> orderIds, CancellationToken ct = default) => NotImpl<List<Order>>();
-    public Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default) => NotImpl<List<Order>>();
-    public Task<List<Order>> GetOrdersByStockId(int stockId, CancellationToken ct = default) => NotImpl<List<Order>>();
-    public Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken ct = default) => NotImpl<List<Order>>();
-    public Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default) => NotImpl<List<Order>>();
+    public async Task<List<Order>> GetOrdersAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Order>>("api/orders", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<(List<Order> Items, int Total)> GetOrdersPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, string? statusFilter, int? userIdFilter = null, int? stockIdFilter = null, string? sideFilter = null, string? typeFilter = null, IList<int>? excludeUserIds = null, CancellationToken ct = default)
+    {
+        var q = new Q().Add("skip", skip).Add("take", take).Add("sortKey", sortKey).Add("desc", desc)
+            .Add("fromUtc", fromUtc).Add("toUtc", toUtc)
+            .Add("statusFilter", statusFilter).Add("userIdFilter", userIdFilter).Add("stockIdFilter", stockIdFilter)
+            .Add("sideFilter", sideFilter).Add("typeFilter", typeFilter)
+            .AddEach("excludeUserIds", excludeUserIds);
+        var page = await _http.GetFromJsonAsync<PageResponse<Order>>($"api/orders/page{q}", ApiJsonOptions.Default, ct);
+        return (page?.Items.ToList() ?? new(), page?.Total ?? 0);
+    }
+
+    public Task<Order?> GetOrderById(int orderId, CancellationToken ct = default)
+        => GetNullableAsync<Order>($"api/orders/{orderId}", ct);
+
+    public async Task<List<Order>> GetOrdersByIds(List<int> orderIds, CancellationToken ct = default)
+        => await PostListAsync<List<int>, Order>("api/orders/by-ids", orderIds, ct);
+
+    public async Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Order>>($"api/orders/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<List<Order>> GetOrdersByStockId(int stockId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Order>>($"api/orders/by-stock/{stockId}", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Order>>($"api/orders/open-limit/{stockId}/{currency}", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default)
+        => await PostListAsync<List<int>, Order>("api/orders/open-for-users", userIds, ct);
+
     public Task CreateOrder(Order order, CancellationToken ct = default) => NotImpl();
     public Task UpdateOrder(Order order, CancellationToken ct = default) => NotImpl();
     public Task DeleteOrder(Order order, CancellationToken ct = default) => NotImpl();
     #endregion
 
     #region Transaction operations
-    public Task<List<Transaction>> GetTransactionsAsync(CancellationToken ct = default) => NotImpl<List<Transaction>>();
-    public Task<(List<Transaction> Items, int Total)> GetTransactionsPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, int? userIdFilter = null, int? stockIdFilter = null, string? currencyFilter = null, IList<int>? excludeBuyerOrSellerIds = null, CancellationToken ct = default) => NotImpl<(List<Transaction>, int)>();
-    public Task<Transaction?> GetTransactionById(int transactionId, CancellationToken ct = default) => NotImpl<Transaction?>();
-    public Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default) => NotImpl<List<Transaction>>();
-    public Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default) => NotImpl<List<Transaction>>();
-    public Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default) => NotImpl<List<Transaction>>();
-    public Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, CancellationToken ct = default) => NotImpl<List<Transaction>>();
-    public Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken ct = default) => NotImpl<Transaction?>();
-    public Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default) => NotImpl<Transaction?>();
+    public async Task<List<Transaction>> GetTransactionsAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Transaction>>("api/transactions", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<(List<Transaction> Items, int Total)> GetTransactionsPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, int? userIdFilter = null, int? stockIdFilter = null, string? currencyFilter = null, IList<int>? excludeBuyerOrSellerIds = null, CancellationToken ct = default)
+    {
+        var q = new Q().Add("skip", skip).Add("take", take).Add("sortKey", sortKey).Add("desc", desc)
+            .Add("fromUtc", fromUtc).Add("toUtc", toUtc)
+            .Add("userIdFilter", userIdFilter).Add("stockIdFilter", stockIdFilter)
+            .Add("currencyFilter", currencyFilter)
+            .AddEach("excludeBuyerOrSellerIds", excludeBuyerOrSellerIds);
+        var page = await _http.GetFromJsonAsync<PageResponse<Transaction>>($"api/transactions/page{q}", ApiJsonOptions.Default, ct);
+        return (page?.Items.ToList() ?? new(), page?.Total ?? 0);
+    }
+
+    public Task<Transaction?> GetTransactionById(int transactionId, CancellationToken ct = default)
+        => GetNullableAsync<Transaction>($"api/transactions/{transactionId}", ct);
+
+    public async Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Transaction>>($"api/transactions/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Transaction>>($"api/transactions/by-order/{orderId}", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Transaction>>(
+            $"api/transactions/by-stock-range/{stockId}/{currency}{new Q().Add("from", from).Add("to", to)}",
+            ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Transaction>>($"api/transactions/since{new Q().Add("since", since)}", ApiJsonOptions.Default, ct) ?? new();
+
+    public Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken ct = default)
+        => GetNullableAsync<Transaction>($"api/transactions/latest/{stockId}/{currency}", ct);
+
+    public Task<Transaction?> GetLatestTransactionBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default)
+        => GetNullableAsync<Transaction>($"api/transactions/latest-before/{stockId}/{currency}{new Q().Add("time", time)}", ct);
+
     public Task CreateTransaction(Transaction transaction, CancellationToken ct = default) => NotImpl();
     public Task UpdateTransaction(Transaction transaction, CancellationToken ct = default) => NotImpl();
     public Task DeleteTransaction(Transaction transaction, CancellationToken ct = default) => NotImpl();
     #endregion
 
     #region Position operations
-    public Task<List<Position>> GetPositionsAsync(CancellationToken ct = default) => NotImpl<List<Position>>();
-    public Task<(List<Position> Items, int Total)> GetPositionsPageAsync(int stockId, int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default) => NotImpl<(List<Position>, int)>();
-    public Task<Position?> GetPositionById(int positionId, CancellationToken ct = default) => NotImpl<Position?>();
-    public Task<List<Position>> GetPositionsByUserId(int userId, CancellationToken ct = default) => NotImpl<List<Position>>();
-    public Task<Position?> GetPositionByUserIdAndStockId(int userId, int stockId, CancellationToken ct = default) => NotImpl<Position?>();
-    public Task<List<Position>> GetPositionsForUsersAsync(List<int> userIds, CancellationToken ct = default) => NotImpl<List<Position>>();
+    public async Task<List<Position>> GetPositionsAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Position>>("api/positions", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<(List<Position> Items, int Total)> GetPositionsPageAsync(int stockId, int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
+    {
+        var q = new Q().Add("skip", skip).Add("take", take).Add("sortKey", sortKey).Add("desc", desc).Add("filter", filter);
+        var page = await _http.GetFromJsonAsync<PageResponse<Position>>($"api/positions/page/{stockId}{q}", ApiJsonOptions.Default, ct);
+        return (page?.Items.ToList() ?? new(), page?.Total ?? 0);
+    }
+
+    public Task<Position?> GetPositionById(int positionId, CancellationToken ct = default)
+        => GetNullableAsync<Position>($"api/positions/{positionId}", ct);
+
+    public async Task<List<Position>> GetPositionsByUserId(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Position>>($"api/positions/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+
+    public Task<Position?> GetPositionByUserIdAndStockId(int userId, int stockId, CancellationToken ct = default)
+        => GetNullableAsync<Position>($"api/positions/by-user-stock/{userId}/{stockId}", ct);
+
+    public async Task<List<Position>> GetPositionsForUsersAsync(List<int> userIds, CancellationToken ct = default)
+        => await PostListAsync<List<int>, Position>("api/positions/for-users", userIds, ct);
+
     public Task CreatePosition(Position position, CancellationToken ct = default) => NotImpl();
     public Task UpdatePosition(Position position, CancellationToken ct = default) => NotImpl();
     public Task DeletePosition(Position position, CancellationToken ct = default) => NotImpl();
@@ -130,13 +290,37 @@ public sealed class ApiDataBaseService : IDataBaseService
     #endregion
 
     #region Fund operations
-    public Task<List<Fund>> GetFundsAsync(CancellationToken ct = default) => NotImpl<List<Fund>>();
-    public Task<(List<int> UserIds, int Total)> GetFundsUserIdsPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default) => NotImpl<(List<int>, int)>();
-    public Task<(List<Fund> Items, int Total)> GetFundsPageAsync(int skip, int take, string sortKey, bool desc, int? userIdFilter = null, bool hasNonZero = false, bool hasReserved = false, string? currencyFilter = null, CancellationToken ct = default) => NotImpl<(List<Fund>, int)>();
-    public Task<Fund?> GetFundById(int fundId, CancellationToken ct = default) => NotImpl<Fund?>();
-    public Task<List<Fund>> GetFundsByUserId(int userId, CancellationToken ct = default) => NotImpl<List<Fund>>();
-    public Task<Fund?> GetFundByUserIdAndCurrency(int userId, CurrencyType currency, CancellationToken ct = default) => NotImpl<Fund?>();
-    public Task<List<Fund>> GetFundsForUsersAsync(List<int> userIds, CancellationToken ct = default) => NotImpl<List<Fund>>();
+    public async Task<List<Fund>> GetFundsAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Fund>>("api/funds", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<(List<int> UserIds, int Total)> GetFundsUserIdsPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
+    {
+        var q = new Q().Add("skip", skip).Add("take", take).Add("sortKey", sortKey).Add("desc", desc).Add("filter", filter);
+        var page = await _http.GetFromJsonAsync<PageResponse<int>>($"api/funds/user-ids-page{q}", ApiJsonOptions.Default, ct);
+        return (page?.Items.ToList() ?? new(), page?.Total ?? 0);
+    }
+
+    public async Task<(List<Fund> Items, int Total)> GetFundsPageAsync(int skip, int take, string sortKey, bool desc, int? userIdFilter = null, bool hasNonZero = false, bool hasReserved = false, string? currencyFilter = null, CancellationToken ct = default)
+    {
+        var q = new Q().Add("skip", skip).Add("take", take).Add("sortKey", sortKey).Add("desc", desc)
+            .Add("userIdFilter", userIdFilter).Add("hasNonZero", hasNonZero).Add("hasReserved", hasReserved)
+            .Add("currencyFilter", currencyFilter);
+        var page = await _http.GetFromJsonAsync<PageResponse<Fund>>($"api/funds/page{q}", ApiJsonOptions.Default, ct);
+        return (page?.Items.ToList() ?? new(), page?.Total ?? 0);
+    }
+
+    public Task<Fund?> GetFundById(int fundId, CancellationToken ct = default)
+        => GetNullableAsync<Fund>($"api/funds/{fundId}", ct);
+
+    public async Task<List<Fund>> GetFundsByUserId(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Fund>>($"api/funds/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+
+    public Task<Fund?> GetFundByUserIdAndCurrency(int userId, CurrencyType currency, CancellationToken ct = default)
+        => GetNullableAsync<Fund>($"api/funds/by-user-currency/{userId}/{currency}", ct);
+
+    public async Task<List<Fund>> GetFundsForUsersAsync(List<int> userIds, CancellationToken ct = default)
+        => await PostListAsync<List<int>, Fund>("api/funds/for-users", userIds, ct);
+
     public Task CreateFund(Fund fund, CancellationToken ct = default) => NotImpl();
     public Task UpdateFund(Fund fund, CancellationToken ct = default) => NotImpl();
     public Task DeleteFund(Fund fund, CancellationToken ct = default) => NotImpl();
@@ -144,10 +328,20 @@ public sealed class ApiDataBaseService : IDataBaseService
     #endregion
 
     #region Candle operations
-    public Task<List<Candle>> GetCandlesAsync(CancellationToken ct = default) => NotImpl<List<Candle>>();
-    public Task<Candle?> GetCandleById(int candleId, CancellationToken ct = default) => NotImpl<Candle?>();
-    public Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken ct = default) => NotImpl<List<Candle>>();
-    public Task<List<Candle>> GetCandlesByStockIdAndTimeRange(int stockId, CurrencyType currency, TimeSpan resolution, DateTime from, DateTime to, CancellationToken ct = default) => NotImpl<List<Candle>>();
+    public async Task<List<Candle>> GetCandlesAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Candle>>("api/candles", ApiJsonOptions.Default, ct) ?? new();
+
+    public Task<Candle?> GetCandleById(int candleId, CancellationToken ct = default)
+        => GetNullableAsync<Candle>($"api/candles/{candleId}", ct);
+
+    public async Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Candle>>($"api/candles/by-stock/{stockId}/{currency}", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<List<Candle>> GetCandlesByStockIdAndTimeRange(int stockId, CurrencyType currency, TimeSpan resolution, DateTime from, DateTime to, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Candle>>(
+            $"api/candles/by-stock-range/{stockId}/{currency}?resolution={Uri.EscapeDataString(resolution.ToString())}&from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}",
+            ApiJsonOptions.Default, ct) ?? new();
+
     public Task CreateCandle(Candle candle, CancellationToken ct = default) => NotImpl();
     public Task UpdateCandle(Candle candle, CancellationToken ct = default) => NotImpl();
     public Task DeleteCandle(Candle candle, CancellationToken ct = default) => NotImpl();
@@ -156,10 +350,18 @@ public sealed class ApiDataBaseService : IDataBaseService
     #endregion
 
     #region Message operations
-    public Task<List<Message>> GetMessagesAsync(CancellationToken ct = default) => NotImpl<List<Message>>();
-    public Task<Message?> GetMessageById(int messageId, CancellationToken ct = default) => NotImpl<Message?>();
-    public Task<List<Message>> GetMessagesByUserId(int userId, bool onlyUnread = false, CancellationToken ct = default) => NotImpl<List<Message>>();
-    public Task<int> GetUnreadMessageCount(int userId, CancellationToken ct = default) => NotImpl<int>();
+    public async Task<List<Message>> GetMessagesAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Message>>("api/messages", ApiJsonOptions.Default, ct) ?? new();
+
+    public Task<Message?> GetMessageById(int messageId, CancellationToken ct = default)
+        => GetNullableAsync<Message>($"api/messages/{messageId}", ct);
+
+    public async Task<List<Message>> GetMessagesByUserId(int userId, bool onlyUnread = false, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<Message>>($"api/messages/by-user/{userId}{new Q().Add("onlyUnread", onlyUnread)}", ApiJsonOptions.Default, ct) ?? new();
+
+    public async Task<int> GetUnreadMessageCount(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<int>($"api/messages/unread-count/{userId}", ApiJsonOptions.Default, ct);
+
     public Task CreateMessage(Message message, CancellationToken ct = default) => NotImpl();
     public Task UpdateMessage(Message message, CancellationToken ct = default) => NotImpl();
     public Task DeleteMessage(Message message, CancellationToken ct = default) => NotImpl();
@@ -168,26 +370,38 @@ public sealed class ApiDataBaseService : IDataBaseService
     #endregion
 
     #region FundTransaction operations
-    public Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default) => NotImpl<List<FundTransaction>>();
+    public async Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<FundTransaction>>($"api/fund-transactions/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+
     public Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default) => NotImpl();
     #endregion
 
     #region UserPreferences operations
-    public Task<UserPreferences?> GetUserPreferencesByUserId(int userId, CancellationToken ct = default) => NotImpl<UserPreferences?>();
+    public Task<UserPreferences?> GetUserPreferencesByUserId(int userId, CancellationToken ct = default)
+        => GetNullableAsync<UserPreferences>($"api/user-preferences/by-user/{userId}", ct);
+
     public Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default) => NotImpl();
     #endregion
 
     #region UserWatchlist operations
-    public Task<List<UserWatchlistEntry>> GetWatchlistByUserId(int userId, CancellationToken ct = default) => NotImpl<List<UserWatchlistEntry>>();
+    public async Task<List<UserWatchlistEntry>> GetWatchlistByUserId(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<UserWatchlistEntry>>($"api/user-watchlist/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+
     public Task UpsertWatchlistEntry(UserWatchlistEntry entry, CancellationToken ct = default) => NotImpl();
     public Task<bool> DeleteWatchlistEntry(int userId, int stockId, CancellationToken ct = default) => NotImpl<bool>();
     public Task ReplaceWatchlistAsync(int userId, IReadOnlyList<UserWatchlistEntry> entries, CancellationToken ct = default) => NotImpl();
     #endregion
 
     #region AIUser operations
-    public Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default) => NotImpl<List<AIUser>>();
-    public Task<AIUser?> GetAIUserById(int aiUserId, CancellationToken ct = default) => NotImpl<AIUser?>();
-    public Task<List<AIUser>> GetAIUsersByUserId(int userId, CancellationToken ct = default) => NotImpl<List<AIUser>>();
+    public async Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<AIUser>>("api/ai-users", ApiJsonOptions.Default, ct) ?? new();
+
+    public Task<AIUser?> GetAIUserById(int aiUserId, CancellationToken ct = default)
+        => GetNullableAsync<AIUser>($"api/ai-users/{aiUserId}", ct);
+
+    public async Task<List<AIUser>> GetAIUsersByUserId(int userId, CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<List<AIUser>>($"api/ai-users/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+
     public Task CreateAIUser(AIUser aiUser, CancellationToken ct = default) => NotImpl();
     public Task UpdateAIUser(AIUser aiUser, CancellationToken ct = default) => NotImpl();
     public Task UpsertAIUser(AIUser aiUser, CancellationToken ct = default) => NotImpl();
