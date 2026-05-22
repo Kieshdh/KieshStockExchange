@@ -25,6 +25,7 @@ using KieshStockExchange.ViewModels.MarketViewModels;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Views.AccountPageViews;
 using KieshStockExchange.Views.AdminPageViews;
+using KieshStockExchange.Views.AdminPageViews.EditPopups;
 using KieshStockExchange.Views.MarketPageViews;
 using KieshStockExchange.Views.PortfolioPageViews;
 using KieshStockExchange.Views.TradePageViews;
@@ -129,12 +130,25 @@ public static class MauiProgram
         builder.Services.AddTransient<ModifyOrderViewModel>();
         // - Admin
         builder.Services.AddTransient<UserTableViewModel>();
+        builder.Services.AddTransient<UserEditViewModel>();
+        builder.Services.AddTransient<UserEditPopup>();
         builder.Services.AddTransient<StockTableViewModel>();
+        builder.Services.AddTransient<StockEditViewModel>();
+        builder.Services.AddTransient<StockEditPopup>();
         builder.Services.AddTransient<OrderTableViewModel>();
         builder.Services.AddTransient<TransactionTableViewModel>();
         builder.Services.AddTransient<PositionTableViewModel>();
+        builder.Services.AddTransient<PositionEditViewModel>();
+        builder.Services.AddTransient<PositionEditPopup>();
         builder.Services.AddTransient<FundTableViewModel>();
+        builder.Services.AddTransient<FundAdjustViewModel>();
+        builder.Services.AddTransient<FundAdjustPopup>();
         builder.Services.AddTransient<BotDashboardViewModel>();
+        builder.Services.AddTransient<UserDetailsViewModel>();
+        builder.Services.AddTransient<OrderDetailsViewModel>();
+        builder.Services.AddTransient<OrderDetailsPopup>();
+        builder.Services.AddTransient<TransactionDetailsViewModel>();
+        builder.Services.AddTransient<TransactionDetailsPopup>();
         builder.Services.AddTransient<AdminViewModel>();
         // - Portfolio
         builder.Services.AddTransient<PortfolioViewModel>();

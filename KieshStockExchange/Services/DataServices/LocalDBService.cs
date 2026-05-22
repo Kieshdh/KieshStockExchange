@@ -251,18 +251,26 @@ public class LocalDBService: IDataBaseService, IDisposable
                 else
                 {
                     string f = filter.Trim();
-                    q = q.Where(u => u.Username.Contains(f));
+                    q = q.Where(u => u.Username.Contains(f)
+                                   || u.Email.Contains(f)
+                                   || u.FullName.Contains(f));
                 }
             }
             var total = await q.CountAsync();
             var ordered = (sortKey, desc) switch
             {
-                ("Username", true)  => q.OrderByDescending(u => u.Username),
-                ("Username", false) => q.OrderBy(u => u.Username),
-                ("UserId",   true)  => q.OrderByDescending(u => u.UserId),
-                ("UserId",   false) => q.OrderBy(u => u.UserId),
-                (_,          true)  => q.OrderByDescending(u => u.CreatedAt),
-                (_,          false) => q.OrderBy(u => u.CreatedAt),
+                ("Username",  true)  => q.OrderByDescending(u => u.Username),
+                ("Username",  false) => q.OrderBy(u => u.Username),
+                ("Email",     true)  => q.OrderByDescending(u => u.Email),
+                ("Email",     false) => q.OrderBy(u => u.Email),
+                ("FullName",  true)  => q.OrderByDescending(u => u.FullName),
+                ("FullName",  false) => q.OrderBy(u => u.FullName),
+                ("BirthDate", true)  => q.OrderByDescending(u => u.BirthDate),
+                ("BirthDate", false) => q.OrderBy(u => u.BirthDate),
+                ("UserId",    true)  => q.OrderByDescending(u => u.UserId),
+                ("UserId",    false) => q.OrderBy(u => u.UserId),
+                (_,           true)  => q.OrderByDescending(u => u.CreatedAt),
+                (_,           false) => q.OrderBy(u => u.CreatedAt),
             };
             var items = await ordered.Skip(skip).Take(take).ToListAsync();
             return (items, total);
@@ -526,14 +534,55 @@ public class LocalDBService: IDataBaseService, IDisposable
         return await RunDbAsync(() => _db.Table<Order>().ToListAsync(), ct);
     }
 
-    public async Task<(List<Order> Items, int Total)> GetOrdersPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, string? statusFilter, CancellationToken ct = default)
+    public async Task<(List<Order> Items, int Total)> GetOrdersPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, string? statusFilter, int? userIdFilter = null, int? stockIdFilter = null, string? sideFilter = null, string? typeFilter = null, IList<int>? excludeUserIds = null, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
         return await RunDbAsync(async () =>
         {
             var q = _db.Table<Order>().Where(o => o.CreatedAt >= fromUtc && o.CreatedAt <= toUtc);
+            if (excludeUserIds is { Count: > 0 })
+            {
+                // SQLite-Net translates List<int>.Contains into IN (...) — negating it yields NOT IN.
+                var excl = excludeUserIds;
+                q = q.Where(o => !excl.Contains(o.UserId));
+            }
             if (!string.IsNullOrWhiteSpace(statusFilter))
                 q = q.Where(o => o.Status == statusFilter);
+            if (userIdFilter.HasValue)
+            {
+                var uid = userIdFilter.Value;
+                q = q.Where(o => o.UserId == uid);
+            }
+            if (stockIdFilter.HasValue)
+            {
+                var sid = stockIdFilter.Value;
+                q = q.Where(o => o.StockId == sid);
+            }
+            if (!string.IsNullOrWhiteSpace(sideFilter))
+            {
+                // OrderType values end with "Buy" or "Sell". SQLite-Net's LINQ
+                // provider supports basic equality only; enumerate the matching
+                // values rather than using EndsWith.
+                if (string.Equals(sideFilter, "Buy", StringComparison.OrdinalIgnoreCase))
+                    q = q.Where(o => o.OrderType == Order.Types.LimitBuy
+                                   || o.OrderType == Order.Types.TrueMarketBuy
+                                   || o.OrderType == Order.Types.SlippageMarketBuy);
+                else if (string.Equals(sideFilter, "Sell", StringComparison.OrdinalIgnoreCase))
+                    q = q.Where(o => o.OrderType == Order.Types.LimitSell
+                                   || o.OrderType == Order.Types.TrueMarketSell
+                                   || o.OrderType == Order.Types.SlippageMarketSell);
+            }
+            if (!string.IsNullOrWhiteSpace(typeFilter))
+            {
+                if (string.Equals(typeFilter, "Limit", StringComparison.OrdinalIgnoreCase))
+                    q = q.Where(o => o.OrderType == Order.Types.LimitBuy
+                                   || o.OrderType == Order.Types.LimitSell);
+                else if (string.Equals(typeFilter, "Market", StringComparison.OrdinalIgnoreCase))
+                    q = q.Where(o => o.OrderType == Order.Types.TrueMarketBuy
+                                   || o.OrderType == Order.Types.TrueMarketSell
+                                   || o.OrderType == Order.Types.SlippageMarketBuy
+                                   || o.OrderType == Order.Types.SlippageMarketSell);
+            }
             var total = await q.CountAsync();
             var ordered = (sortKey, desc) switch
             {
@@ -670,12 +719,32 @@ public class LocalDBService: IDataBaseService, IDisposable
         return await RunDbAsync(() => _db.Table<Transaction>().ToListAsync(), ct);
     }
 
-    public async Task<(List<Transaction> Items, int Total)> GetTransactionsPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+    public async Task<(List<Transaction> Items, int Total)> GetTransactionsPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, int? userIdFilter = null, int? stockIdFilter = null, string? currencyFilter = null, IList<int>? excludeBuyerOrSellerIds = null, CancellationToken ct = default)
     {
         await InitializeAsync(ct);
         return await RunDbAsync(async () =>
         {
             var q = _db.Table<Transaction>().Where(t => t.Timestamp >= fromUtc && t.Timestamp <= toUtc);
+            if (excludeBuyerOrSellerIds is { Count: > 0 })
+            {
+                var excl = excludeBuyerOrSellerIds;
+                q = q.Where(t => !excl.Contains(t.BuyerId) && !excl.Contains(t.SellerId));
+            }
+            if (userIdFilter.HasValue)
+            {
+                var uid = userIdFilter.Value;
+                q = q.Where(t => t.BuyerId == uid || t.SellerId == uid);
+            }
+            if (stockIdFilter.HasValue)
+            {
+                var sid = stockIdFilter.Value;
+                q = q.Where(t => t.StockId == sid);
+            }
+            if (!string.IsNullOrWhiteSpace(currencyFilter))
+            {
+                var cf = currencyFilter.ToUpperInvariant();
+                q = q.Where(t => t.Currency == cf);
+            }
             var total = await q.CountAsync();
             var ordered = (sortKey, desc) switch
             {
@@ -685,6 +754,11 @@ public class LocalDBService: IDataBaseService, IDisposable
                 ("StockId",       false) => q.OrderBy(t => t.StockId),
                 ("Quantity",      true)  => q.OrderByDescending(t => t.Quantity),
                 ("Quantity",      false) => q.OrderBy(t => t.Quantity),
+                ("Price",         true)  => q.OrderByDescending(t => t.Price),
+                ("Price",         false) => q.OrderBy(t => t.Price),
+                // "Total"/"BuyerName"/"SellerName" are sorted in-VM after the
+                // page is built (SQLite-Net can't translate Price*Quantity, and
+                // username sort requires the per-page user-lookup join).
                 (_,               true)  => q.OrderByDescending(t => t.Timestamp),
                 (_,               false) => q.OrderBy(t => t.Timestamp),
             };
@@ -709,6 +783,17 @@ public class LocalDBService: IDataBaseService, IDisposable
         return await RunDbAsync(() =>
             _db.Table<Transaction>()
                .Where(t => t.BuyerId == userId || t.SellerId == userId)
+               .ToListAsync(),
+            ct);
+    }
+
+    public async Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(() =>
+            _db.Table<Transaction>()
+               .Where(t => t.BuyOrderId == orderId || t.SellOrderId == orderId)
+               .OrderBy(t => t.Timestamp)
                .ToListAsync(),
             ct);
     }
@@ -945,6 +1030,48 @@ public class LocalDBService: IDataBaseService, IDisposable
                 var users = await ordered.Skip(skip).Take(take).ToListAsync();
                 return (users.Select(u => u.UserId).ToList(), total);
             }
+        }, ct);
+    }
+
+    // Long-form Funds page: one row per (UserId, Currency).
+    public async Task<(List<Fund> Items, int Total)> GetFundsPageAsync(int skip, int take, string sortKey, bool desc,
+        int? userIdFilter = null, bool hasNonZero = false, bool hasReserved = false, string? currencyFilter = null,
+        CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        return await RunDbAsync(async () =>
+        {
+            var q = _db.Table<Fund>();
+            if (userIdFilter.HasValue)
+            {
+                var uid = userIdFilter.Value;
+                q = q.Where(f => f.UserId == uid);
+            }
+            if (hasNonZero)    q = q.Where(f => f.TotalBalance > 0m);
+            if (hasReserved)   q = q.Where(f => f.ReservedBalance > 0m);
+            if (!string.IsNullOrWhiteSpace(currencyFilter))
+            {
+                var cf = currencyFilter.ToUpperInvariant();
+                q = q.Where(f => f.Currency == cf);
+            }
+            var total = await q.CountAsync();
+            var ordered = (sortKey, desc) switch
+            {
+                ("UserId",          true)  => q.OrderByDescending(f => f.UserId),
+                ("UserId",          false) => q.OrderBy(f => f.UserId),
+                ("TotalBalance",    true)  => q.OrderByDescending(f => f.TotalBalance),
+                ("TotalBalance",    false) => q.OrderBy(f => f.TotalBalance),
+                ("ReservedBalance", true)  => q.OrderByDescending(f => f.ReservedBalance),
+                ("ReservedBalance", false) => q.OrderBy(f => f.ReservedBalance),
+                ("Currency",        true)  => q.OrderByDescending(f => f.Currency),
+                ("Currency",        false) => q.OrderBy(f => f.Currency),
+                ("UpdatedAt",       true)  => q.OrderByDescending(f => f.UpdatedAt),
+                ("UpdatedAt",       false) => q.OrderBy(f => f.UpdatedAt),
+                (_,                 true)  => q.OrderByDescending(f => f.UserId),
+                (_,                 false) => q.OrderBy(f => f.UserId),
+            };
+            var items = await ordered.Skip(skip).Take(take).ToListAsync();
+            return (items, total);
         }, ct);
     }
 

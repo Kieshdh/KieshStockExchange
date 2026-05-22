@@ -98,10 +98,10 @@
 	  <Compile Update="Resources\Styles\Themes\Theme.DeepNavyPro.xaml.cs">
 	    <DependentUpon>Theme.DeepNavyPro.xaml</DependentUpon>
 	  </Compile>
-	  <Compile Update="Views\AdminPageViews\FundTableView.xaml.cs">
+	  <Compile Update="Views\AdminPageViews\Tables\FundTableView.xaml.cs">
 	    <DependentUpon>FundTableView.xaml</DependentUpon>
 	  </Compile>
-	  <Compile Update="Views\AdminPageViews\PositionTableView.xaml.cs">
+	  <Compile Update="Views\AdminPageViews\Tables\PositionTableView.xaml.cs">
 	    <DependentUpon>PositionTableView.xaml</DependentUpon>
 	  </Compile>
 	  <Compile Update="Views\TradePageViews\OrderHistoryView.xaml.cs">

@@ -189,11 +189,12 @@ public class Order : IValidatable
             if (IsLimitOrder) return CurrencyHelper.Format(Price, CurrencyType);
             if (IsTrueMarketOrder) return "MARKET";
 
-            // Slippage market
+            // Slippage market: cap-only with comparison arrow. The Side/Type
+            // columns already indicate BUY/SELL + MKT±; the anchor lives in
+            // AnchorPriceDisplay (surfaced in the Order details popup).
             var dir = IsBuyOrder ? "≤" : "≥";
             var cap = CurrencyHelper.Format(PriceWithSlippage, CurrencyType);
-            var anchor = CurrencyHelper.Format(Price, CurrencyType);
-            return $"MKT {dir}{cap} • anchor {anchor}";
+            return $"{dir} {cap}";
         }
     }
     [Ignore] public string TotalAmountDisplay
@@ -203,12 +204,15 @@ public class Order : IValidatable
             if (IsLimitOrder) return CurrencyHelper.Format(TotalAmount, CurrencyType);
             if (IsTrueMarketOrder) return "-"; // Unknown total amount
 
-            // Slippage market
+            // Slippage market: cap notional with arrow, same convention as PriceDisplay.
             var dir = IsBuyOrder ? "≤" : "≥";
             var cap = CurrencyHelper.Format(TotalAmount, CurrencyType);
-            return $"MKT {dir}{cap}";
+            return $"{dir} {cap}";
         }
     }
+
+    [Ignore] public string AnchorPriceDisplay =>
+        IsSlippageOrder ? CurrencyHelper.Format(Price, CurrencyType) : string.Empty;
     [Ignore] public string AmountFilledDisplay => $"{AmountFilled}/{Quantity}";
     [Ignore] public string BuyBudgetDisplay =>
         BuyBudget.HasValue ? CurrencyHelper.Format(BuyBudget.Value, CurrencyType) : "—";
@@ -216,6 +220,7 @@ public class Order : IValidatable
 
     [Ignore] public string SideDisplay => IsBuyOrder ? "BUY" : "SELL";
     [Ignore] public string TypeDisplay => IsLimitOrder ? "LIMIT" : (IsTrueMarketOrder ? "MKT" : "MKT±");
+    [Ignore] public string SideTypeDisplay => $"{SideDisplay} {TypeDisplay}";
     [Ignore] public string StatusDisplay => Status.ToUpperInvariant();
 
     [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
