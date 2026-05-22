@@ -1,0 +1,6 @@
+@KieshStockExchange.Server_HostAddress = http://localhost:5021
+
+GET {{KieshStockExchange.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

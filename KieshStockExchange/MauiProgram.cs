@@ -82,8 +82,14 @@ public static class MauiProgram
         builder.Services.AddTransient<PortfolioPage>();
         builder.Services.AddTransient<MarketPage>();
         builder.Services.AddTransient<TradePage>();
+        // Phase 2: Server BaseUrl loaded from Resources/Raw/appsettings.json. Synchronous read
+        // off the MauiAsset stream so the HttpClient registration below has the URL ready.
+        var serverBaseUrl = LoadServerBaseUrl();
+
+        builder.Services.AddHttpClient("KSE.Server", c => c.BaseAddress = new Uri(serverBaseUrl));
+
         // Services
-        builder.Services.AddSingleton<IDataBaseService, LocalDBService>();
+        builder.Services.AddSingleton<IDataBaseService, ApiDataBaseService>();
         builder.Services.AddSingleton<IOrderRegistry, OrderRegistry>();
         builder.Services.AddSingleton<IExcelImportService, ExcelImportService>();
         builder.Services.AddSingleton<IAuthService, AuthService>();
@@ -184,5 +190,31 @@ public static class MauiProgram
         _ = app.Services.GetRequiredService<NotificationBridgeService>();
 
         return app;
+    }
+
+    /// <summary>
+    /// Read the server base URL from Resources/Raw/appsettings.json. Sync — happens once at
+    /// startup before DI resolution. Returns the localhost fallback if the asset is missing
+    /// or malformed so a misconfigured client still boots and surfaces the error on first call.
+    /// </summary>
+    private static string LoadServerBaseUrl()
+    {
+        const string fallback = "http://localhost:5000";
+        try
+        {
+            using var stream = FileSystem.OpenAppPackageFileAsync("appsettings.json").GetAwaiter().GetResult();
+            using var reader = new StreamReader(stream);
+            using var doc = System.Text.Json.JsonDocument.Parse(reader.ReadToEnd());
+            if (doc.RootElement.TryGetProperty("Server", out var server) &&
+                server.TryGetProperty("BaseUrl", out var url) &&
+                url.GetString() is { Length: > 0 } s)
+                return s;
+        }
+        catch
+        {
+            // Fall through to the default — surfaces as a connection error on first DB call,
+            // which is clearer than a config-parse crash at startup.
+        }
+        return fallback;
     }
 }

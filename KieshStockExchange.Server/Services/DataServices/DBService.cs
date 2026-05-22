@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SQLite;
 using System;
@@ -10,7 +11,7 @@ using KieshStockExchange.Services.DataServices.Persistence;
 
 namespace KieshStockExchange.Services.DataServices;
 
-public class LocalDBService: IDataBaseService, IDisposable
+public class DBService: IDataBaseService, IDisposable
 {
     #region Fields and Constructor
     private const string DB_NAME = "localdb.db3";
@@ -23,8 +24,8 @@ public class LocalDBService: IDataBaseService, IDisposable
     // _txStack, both decide they are root, and both issue BEGIN IMMEDIATE → SQLite throws
     // "cannot start a transaction within a transaction".
     private readonly SemaphoreSlim _writeGate = new(1, 1);
-    private readonly AsyncLocal<Stack<LocalDbTransaction>> _txStack = new();
-    private readonly ILogger<LocalDBService>? _logger;
+    private readonly AsyncLocal<Stack<DbTransaction>> _txStack = new();
+    private readonly ILogger<DBService>? _logger;
     private bool _initialized;
 
     // Threshold for the diagnostic warning when _writeGate wait time gets long enough
@@ -32,18 +33,25 @@ public class LocalDBService: IDataBaseService, IDisposable
     // single-writer SQLite contention.
     private const int WriteGateWaitWarnMs = 100;
 
-    public LocalDBService(ILogger<LocalDBService>? logger = null)
+    public DBService(IConfiguration config, ILogger<DBService>? logger = null)
     {
-        _dbPath = Path.Combine(FileSystem.AppDataDirectory, DB_NAME);
+        // Database:Path overrides the default location. Useful for pointing at the
+        // existing MAUI client's localdb.db3 (in %LocalAppData%\<package>\LocalState\)
+        // when migrating from the in-process Phase 1 setup. If not configured, the DB
+        // lives next to the server binary so a fresh server run is self-contained.
+        var configured = config["Database:Path"];
+        _dbPath = !string.IsNullOrWhiteSpace(configured)
+            ? configured
+            : Path.Combine(AppContext.BaseDirectory, DB_NAME);
         _db = new SQLiteAsyncConnection(_dbPath);
         _logger = logger;
     }
     #endregion
 
     #region DBTransaction
-    private sealed class LocalDbTransaction : ITransaction
+    private sealed class DbTransaction : ITransaction
     {
-        private readonly LocalDBService _owner;
+        private readonly DBService _owner;
         private readonly SQLiteAsyncConnection _conn;
         private readonly string? _savepoint;
         private bool _completed; // committed or rolled back
@@ -53,7 +61,7 @@ public class LocalDBService: IDataBaseService, IDisposable
 
         public bool IsRoot { get; }
 
-        public LocalDbTransaction(LocalDBService owner, SQLiteAsyncConnection conn, bool isRoot, string? savepoint)
+        public DbTransaction(DBService owner, SQLiteAsyncConnection conn, bool isRoot, string? savepoint)
         {
             _owner = owner;
             _conn = conn;
@@ -228,7 +236,7 @@ public class LocalDBService: IDataBaseService, IDisposable
     {
         await InitializeAsync(ct);
 
-        var stack = _txStack.Value ??= new Stack<LocalDbTransaction>();
+        var stack = _txStack.Value ??= new Stack<DbTransaction>();
         var isRoot = stack.Count == 0;
 
         string? spName = null;
@@ -262,7 +270,7 @@ public class LocalDBService: IDataBaseService, IDisposable
             await _db.ExecuteAsync($"SAVEPOINT {spName};");
         }
 
-        var tx = new LocalDbTransaction(this, _db, isRoot, spName);
+        var tx = new DbTransaction(this, _db, isRoot, spName);
         stack.Push(tx);
         return tx;
     }
@@ -270,7 +278,7 @@ public class LocalDBService: IDataBaseService, IDisposable
     public async Task RunInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken ct = default)
     {
         if (action is null) throw new ArgumentNullException(nameof(action));
-        await using var tx = (LocalDbTransaction)await BeginTransactionAsync(ct);
+        await using var tx = (DbTransaction)await BeginTransactionAsync(ct);
         try
         {
             await action(ct);
