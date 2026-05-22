@@ -129,8 +129,8 @@ TRADE_PROB_JITTER         = 0.15
 STRATEGY_CHOICES          = (1, 2, 3, 4)
 
 # Starting balance (_portfolio): log-distributed.
-BALANCE_MIN               = 50_000.0
-BALANCE_MAX_FACTOR        = 20.0
+BALANCE_MIN               = 100_000.0
+BALANCE_MAX_FACTOR        = 10.0
 
 # Cash reserves (_portfolio): aggressive bots keep less cash.
 MAX_CASH_BASE             = 0.50

@@ -105,7 +105,6 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         ChartViewModel chartVm, OrderBookViewModel orderBookVm, OrderHistoryViewModel orderHistoryVm,
         TopNavBarViewModel topNavBarVm)
     {
-        // Initialize services
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _selected = selected ?? throw new ArgumentNullException(nameof(selected));
@@ -225,8 +224,10 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
                 p.StockId == stockId.Value && p.Currency == _selected.Currency);
             if (match is null)
             {
+                // Set() assigns StockId before Currency, so fire on a real listing only —
+                // synthesizing the intermediate (new stock, stale currency) pollutes the picker.
                 var stock = _selected.SelectedStock;
-                if (stock is not null)
+                if (stock is not null && _stocks.IsListedIn(stock.StockId, _selected.Currency))
                 {
                     match = new TradingPair(stock.StockId, stock.Symbol, _selected.Currency);
                     TradingPairs.Add(match);
