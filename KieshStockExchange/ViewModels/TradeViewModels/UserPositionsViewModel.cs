@@ -235,8 +235,18 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
         MainThread.BeginInvokeOnMainThread(() =>
         {
             if (_disposed) return;
-            OnPropertyChanged(nameof(Price));
-            OnPropertyChanged(nameof(Total));
+            try
+            {
+                OnPropertyChanged(nameof(Price));
+                OnPropertyChanged(nameof(Total));
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // Shutdown race: the WinUI TextBlock peer behind a bound Label
+                // can be torn down between this callback being queued and run.
+                // The push then hits a dead COM object (E_UNEXPECTED). Swallow
+                // — the VM is about to be disposed anyway.
+            }
         });
     }
 

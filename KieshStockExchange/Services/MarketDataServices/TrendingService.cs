@@ -99,11 +99,22 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
             .OrderByDescending(q => q.Volume).Take(MaxMovers)
             .Select(ToSnapshot).ToList();
 
-        _dispatcher.Dispatch(() =>
+        // MainThread is MAUI's canonical UI-thread marshal; the injected
+        // IDispatcher has been observed to land in the wrong COM apartment
+        // on WinUI, causing RPC_E_WRONG_THREAD when the CollectionChanged
+        // event is delivered to a CollectionView subscriber.
+        MainThread.BeginInvokeOnMainThread(() =>
         {
-            SyncList(_topGainers, gainers, _gainerRowsBySymbol);
-            SyncList(_topLosers, losers, _loserRowsBySymbol);
-            SyncList(_mostActive, actives, _activeRowsBySymbol);
+            try
+            {
+                SyncList(_topGainers, gainers, _gainerRowsBySymbol);
+                SyncList(_topLosers, losers, _loserRowsBySymbol);
+                SyncList(_mostActive, actives, _activeRowsBySymbol);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "TrendingService: SyncList threw during dispatched update.");
+            }
         });
 
         return Task.CompletedTask;
