@@ -3,13 +3,15 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels"
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
+             xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
+             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews"
              x:Class="KieshStockExchange.Views.AdminPageViews.BotDashboardPage"
              x:Name="BotDashboardPageRoot"
              Title="Bot Dashboard"
              x:DataType="vm:BotDashboardViewModel">
 
     <Grid Style="{StaticResource MainGrid}"
-          RowDefinitions="Auto,Auto,*"
+          RowDefinitions="Auto,*"
           RowSpacing="8"
           Padding="0,0,0,8">
 
@@ -23,19 +25,8 @@
                               Margin="0,8,16,0"
                               ZIndex="200" />
 
-        <!-- Page heading -->
-        <Grid Grid.Row="1"
-              Style="{StaticResource PageHeadingGrid}">
-            <Label Grid.Column="0"
-                   Text="AI Bots"
-                   Style="{StaticResource PageHeadingTitle}" />
-            <Label Grid.Column="1"
-                   Text="Live status, controls, and recent activity for the trading bots"
-                   Style="{StaticResource PageHeadingSub}" />
-        </Grid>
-
         <!-- Bot dashboard body -->
-        <ScrollView Grid.Row="2" Padding="24,0,24,0">
+        <ScrollView Grid.Row="1" Padding="24,0,24,0">
             <VerticalStackLayout Spacing="10">
 
                 <!-- Header row: title + status + start/stop -->
@@ -63,80 +54,101 @@
                     </Grid>
                 </Border>
 
-                <!-- KPI card grid: 4 cols × 2 rows -->
-                <Grid ColumnDefinitions="*,*,*,*"
-                      RowDefinitions="Auto,Auto"
-                      ColumnSpacing="10"
-                      RowSpacing="10"
-                      Padding="12,0">
+                <!-- KPI stack on the left, bot activity chart on the right. -->
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" Padding="12,0">
+                    <VerticalStackLayout Grid.Column="0" Spacing="10" MinimumWidthRequest="180">
+                        <Border Style="{StaticResource AdminBotStatCard}">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="Active / Max" Style="{StaticResource AdminBotStatLabel}" />
+                                <Label Style="{StaticResource AdminBotStatValue}">
+                                    <Label.Text>
+                                        <MultiBinding StringFormat="{}{0} / {1}">
+                                            <Binding Path="ActiveBotCap" TargetNullValue="—" FallbackValue="—" />
+                                            <Binding Path="MaxBotCap" TargetNullValue="∞" FallbackValue="∞" />
+                                        </MultiBinding>
+                                    </Label.Text>
+                                </Label>
+                            </VerticalStackLayout>
+                        </Border>
+                        <Border Style="{StaticResource AdminBotStatCard}">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="Tick" Style="{StaticResource AdminBotStatLabel}" />
+                                <Label Text="{Binding TickCount}" Style="{StaticResource AdminBotStatValue}" />
+                            </VerticalStackLayout>
+                        </Border>
+                        <Border Style="{StaticResource AdminBotStatCard}">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="Trades" Style="{StaticResource AdminBotStatLabel}" />
+                                <Label Text="{Binding TradesPlaced}" Style="{StaticResource AdminBotStatValue}" />
+                            </VerticalStackLayout>
+                        </Border>
+                        <Border Style="{StaticResource AdminBotStatCard}">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="Failures" Style="{StaticResource AdminBotStatLabel}" />
+                                <Label Text="{Binding Failures}" Style="{StaticResource AdminBotStatValue}" />
+                            </VerticalStackLayout>
+                        </Border>
+                        <Border Style="{StaticResource AdminBotStatCard}">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="Uptime" Style="{StaticResource AdminBotStatLabel}" />
+                                <Label Text="{Binding UptimeText}" Style="{StaticResource AdminBotStatValue}" />
+                            </VerticalStackLayout>
+                        </Border>
+                        <Border Style="{StaticResource AdminBotStatCard}">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="Last fill" Style="{StaticResource AdminBotStatLabel}" />
+                                <Label Text="{Binding LastTradeText}" Style="{StaticResource AdminBotStatValue}" />
+                            </VerticalStackLayout>
+                        </Border>
+                    </VerticalStackLayout>
 
-                    <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource AdminBotStatCard}">
-                        <VerticalStackLayout Spacing="4">
-                            <Label Text="Loaded" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Text="{Binding LoadedBots}" Style="{StaticResource AdminBotStatValue}" />
+                    <!-- Bot activity: single chart with series + range pickers. -->
+                    <Border Grid.Column="1" Style="{StaticResource AdminCardStyle}">
+                        <VerticalStackLayout Spacing="10">
+                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                <Label Grid.Column="0" Text="Bot activity"
+                                       Style="{StaticResource AdminCardSubtitle}"
+                                       VerticalOptions="Center" />
+                                <other:SegmentedTabView Grid.Column="1"
+                                    SelectedIndex="{Binding SeriesIndex, Mode=TwoWay}"
+                                    SelectedButtonStyle="{StaticResource AdminSelectedSegment}"
+                                    UnselectedButtonStyle="{StaticResource AdminUnselectedSegment}"
+                                    HeaderContainerHorizontalOptions="Start"
+                                    MinTabWidth="0"
+                                    VerticalOptions="Center">
+                                    <other:SegmentedTabView.Tabs>
+                                        <other:SegmentedTabItem Header="Trades" />
+                                        <other:SegmentedTabItem Header="Volume" />
+                                        <other:SegmentedTabItem Header="Active" />
+                                    </other:SegmentedTabView.Tabs>
+                                </other:SegmentedTabView>
+                                <other:SegmentedTabView Grid.Column="2"
+                                    SelectedIndex="{Binding ActivityRangeIndex, Mode=TwoWay}"
+                                    SelectedButtonStyle="{StaticResource AdminSelectedSegment}"
+                                    UnselectedButtonStyle="{StaticResource AdminUnselectedSegment}"
+                                    HeaderContainerHorizontalOptions="End"
+                                    MinTabWidth="0"
+                                    VerticalOptions="Center">
+                                    <other:SegmentedTabView.Tabs>
+                                        <other:SegmentedTabItem Header="15m" />
+                                        <other:SegmentedTabItem Header="1h" />
+                                        <other:SegmentedTabItem Header="6h" />
+                                        <other:SegmentedTabItem Header="24h" />
+                                    </other:SegmentedTabView.Tabs>
+                                </other:SegmentedTabView>
+                            </Grid>
+
+                            <Label Text="{Binding CurrentSeriesCaption}" Style="{StaticResource AdminBotStatLabel}" />
+                            <GraphicsView x:Name="ActivityChart" HeightRequest="280" />
                         </VerticalStackLayout>
                     </Border>
-
-                    <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource AdminBotStatCard}">
-                        <VerticalStackLayout Spacing="4">
-                            <Label Text="Online" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Text="{Binding OnlineBots}" Style="{StaticResource AdminBotStatValue}" />
-                        </VerticalStackLayout>
-                    </Border>
-
-                    <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource AdminBotStatCard}">
-                        <VerticalStackLayout Spacing="4">
-                            <Label Text="Active / Max" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Style="{StaticResource AdminBotStatValue}">
-                                <Label.Text>
-                                    <MultiBinding StringFormat="{}{0} / {1}">
-                                        <Binding Path="ActiveBotCap" TargetNullValue="—" FallbackValue="—" />
-                                        <Binding Path="MaxBotCap" TargetNullValue="∞" FallbackValue="∞" />
-                                    </MultiBinding>
-                                </Label.Text>
-                            </Label>
-                        </VerticalStackLayout>
-                    </Border>
-
-                    <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource AdminBotStatCard}">
-                        <VerticalStackLayout Spacing="4">
-                            <Label Text="Tick" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Text="{Binding TickCount}" Style="{StaticResource AdminBotStatValue}" />
-                        </VerticalStackLayout>
-                    </Border>
-
-                    <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource AdminBotStatCard}">
-                        <VerticalStackLayout Spacing="4">
-                            <Label Text="Trades" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Text="{Binding TradesPlaced}" Style="{StaticResource AdminBotStatValue}" />
-                        </VerticalStackLayout>
-                    </Border>
-
-                    <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource AdminBotStatCard}">
-                        <VerticalStackLayout Spacing="4">
-                            <Label Text="Failures" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Text="{Binding Failures}" Style="{StaticResource AdminBotStatValue}" />
-                        </VerticalStackLayout>
-                    </Border>
-
-                    <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource AdminBotStatCard}">
-                        <VerticalStackLayout Spacing="4">
-                            <Label Text="Uptime" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Text="{Binding UptimeText}" Style="{StaticResource AdminBotStatValue}" />
-                        </VerticalStackLayout>
-                    </Border>
-
-                    <Border Grid.Row="1" Grid.Column="3" Style="{StaticResource AdminBotStatCard}">
-                        <VerticalStackLayout Spacing="4">
-                            <Label Text="Last fill" Style="{StaticResource AdminBotStatLabel}" />
-                            <Label Text="{Binding LastTradeText}" Style="{StaticResource AdminBotStatValue}" />
-                        </VerticalStackLayout>
-                    </Border>
-
                 </Grid>
 
+                <!-- Bot scaler + 24h stats side-by-side. -->
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+
                 <!-- Scaler controls -->
-                <Border Style="{StaticResource AdminCardStyle}">
+                <Border Grid.Column="0" Style="{StaticResource AdminCardStyle}">
                     <VerticalStackLayout Spacing="8">
                         <Label Text="Bot scaler" Style="{StaticResource AdminCardSubtitle}" />
 
@@ -190,7 +202,7 @@
                 </Border>
 
                 <!-- 24h stats -->
-                <Border Style="{StaticResource AdminCardStyle}">
+                <Border Grid.Column="1" Style="{StaticResource AdminCardStyle}">
                     <VerticalStackLayout Spacing="10">
                         <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8">
                             <Label Grid.Column="0" Text="Last 24h"
@@ -223,6 +235,8 @@
                         </Grid>
                     </VerticalStackLayout>
                 </Border>
+
+                </Grid>
 
                 <!-- Failure breakdown (reasons + top stocks) -->
                 <Border Style="{StaticResource AdminCardStyle}">

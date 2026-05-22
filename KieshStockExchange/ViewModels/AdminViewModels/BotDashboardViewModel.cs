@@ -50,6 +50,47 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private string _last24hVolumeText = "—";
     #endregion
 
+    #region Activity graph fields
+    // 60 buckets always — granularity is the picked range / 60.
+    private const int ActivityBucketCount = 60;
+    private static readonly TimeSpan ActivityRefreshInterval = TimeSpan.FromSeconds(10);
+    private DateTime _nextActivityRefreshUtc = DateTime.MinValue;
+
+    public IReadOnlyList<int> ActivityRangeMinutes { get; } = new[] { 15, 60, 360, 1440 };
+    public IReadOnlyList<string> ActivityRangeLabels { get; } = new[] { "15m", "1h", "6h", "24h" };
+
+    [ObservableProperty] private int _activityRangeIndex = 1; // default 1h
+    [ObservableProperty] private string _activityTradesText = "—";
+    [ObservableProperty] private string _activityVolumeText = "—";
+    [ObservableProperty] private string _activityActiveText = "—";
+
+    public List<double> ActivityTradesSeries { get; private set; } = new();
+    public List<double> ActivityVolumeSeries { get; private set; } = new();
+    public List<double> ActivityActiveSeries { get; private set; } = new();
+
+    // Series picker on the chart: 0 = Trades, 1 = Volume, 2 = Active bots.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentSeriesCaption))]
+    private int _seriesIndex;
+
+    public string CurrentSeriesCaption => SeriesIndex switch
+    {
+        1 => ActivityVolumeText,
+        2 => ActivityActiveText,
+        _ => ActivityTradesText,
+    };
+
+    public event EventHandler? ActivityRefreshed;
+
+    partial void OnActivityRangeIndexChanged(int value) => _ = RefreshActivityAsync();
+
+    partial void OnSeriesIndexChanged(int value)
+    {
+        // Picker change doesn't need new data — just retell the view to repaint.
+        ActivityRefreshed?.Invoke(this, EventArgs.Empty);
+    }
+    #endregion
+
     #region Services and timer
     private readonly IAiTradeService _trade;
     private readonly IUserSessionService _session;
@@ -103,6 +144,7 @@ public partial class BotDashboardViewModel : BaseViewModel
         // First refresh immediately so the UI doesn't show stale defaults.
         Refresh();
         _ = Refresh24hStatsAsync();
+        _ = RefreshActivityAsync();
     }
 
     public void StopPolling()
@@ -116,10 +158,16 @@ public partial class BotDashboardViewModel : BaseViewModel
     private void OnTimerTick(object? sender, EventArgs e)
     {
         Refresh();
-        if (TimeHelper.NowUtc() >= _next24hRefreshUtc)
+        var now = TimeHelper.NowUtc();
+        if (now >= _next24hRefreshUtc)
         {
-            _next24hRefreshUtc = TimeHelper.NowUtc() + Stats24hInterval;
+            _next24hRefreshUtc = now + Stats24hInterval;
             _ = Refresh24hStatsAsync();
+        }
+        if (now >= _nextActivityRefreshUtc)
+        {
+            _nextActivityRefreshUtc = now + ActivityRefreshInterval;
+            _ = RefreshActivityAsync();
         }
     }
     #endregion
@@ -437,6 +485,100 @@ public partial class BotDashboardViewModel : BaseViewModel
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to compute 24h bot stats.");
+        }
+    }
+
+    private async Task RefreshActivityAsync()
+    {
+        try
+        {
+            var aiSet = new HashSet<int>(_trade.GetAiUserIds());
+            int rangeIdx = Math.Clamp(ActivityRangeIndex, 0, ActivityRangeMinutes.Count - 1);
+            var rangeSpan = TimeSpan.FromMinutes(ActivityRangeMinutes[rangeIdx]);
+            var to = TimeHelper.NowUtc();
+            var from = to - rangeSpan;
+            long bucketTicks = rangeSpan.Ticks / ActivityBucketCount;
+
+            var trades = new int[ActivityBucketCount];
+            var volume = new decimal[ActivityBucketCount];
+
+            if (aiSet.Count > 0)
+            {
+                var txs = await _db.GetTransactionsSinceTime(from).ConfigureAwait(false);
+                foreach (var tx in txs)
+                {
+                    bool buyerAi = aiSet.Contains(tx.BuyerId);
+                    bool sellerAi = aiSet.Contains(tx.SellerId);
+                    if (!buyerAi && !sellerAi) continue;
+
+                    var offset = tx.Timestamp - from;
+                    if (offset < TimeSpan.Zero) continue;
+                    int idx = (int)(offset.Ticks / bucketTicks);
+                    if (idx >= ActivityBucketCount) idx = ActivityBucketCount - 1;
+
+                    trades[idx]++;
+                    volume[idx] += tx.TotalAmount;
+                }
+            }
+
+            // "Active bots" comes from scaler samples now, not from transaction
+            // participants. Reasons:
+            //   - Buckets <30s would routinely undercount: a bot that didn't
+            //     happen to trade in that bucket still counted toward "active".
+            //   - We want to plot scaler decisions, not whether matching
+            //     happened to produce a fill.
+            // Per bucket: take max OnlineBots over samples whose timestamp
+            // falls in the bucket. If no sample lands in a bucket, carry
+            // forward the previous bucket's value (samples between snapshots
+            // mean the count was held steady).
+            var samples = _trade.GetActivitySamples();
+            var activeArray = new int[ActivityBucketCount];
+            int sIdx = 0;
+            int carry = 0;
+            // Walk samples older than the window to seed the carry-forward.
+            while (sIdx < samples.Count && samples[sIdx].TimestampUtc < from)
+            {
+                carry = samples[sIdx].OnlineBots;
+                sIdx++;
+            }
+            for (int b = 0; b < ActivityBucketCount; b++)
+            {
+                var bucketEnd = from + TimeSpan.FromTicks(bucketTicks * (b + 1));
+                int bucketMax = -1;
+                while (sIdx < samples.Count && samples[sIdx].TimestampUtc < bucketEnd)
+                {
+                    int v = samples[sIdx].OnlineBots;
+                    if (v > bucketMax) bucketMax = v;
+                    carry = v;
+                    sIdx++;
+                }
+                activeArray[b] = bucketMax >= 0 ? bucketMax : carry;
+            }
+
+            var tradesSeries = trades.Select(v => (double)v).ToList();
+            var volumeSeries = volume.Select(v => (double)v).ToList();
+            var activeSeries = activeArray.Select(v => (double)v).ToList();
+            var totalTrades = trades.Sum();
+            decimal totalVolume = 0m;
+            foreach (var v in volume) totalVolume += v;
+            int maxActive = 0;
+            foreach (var v in activeArray) if (v > maxActive) maxActive = v;
+
+            Application.Current?.Dispatcher.Dispatch(() =>
+            {
+                ActivityTradesSeries = tradesSeries;
+                ActivityVolumeSeries = volumeSeries;
+                ActivityActiveSeries = activeSeries;
+                ActivityTradesText = $"Trades · {totalTrades}";
+                ActivityVolumeText = $"Volume · {CurrencyHelper.Format(totalVolume, _session.BaseCurrency)}";
+                ActivityActiveText = $"Active bots · max {maxActive}";
+                OnPropertyChanged(nameof(CurrentSeriesCaption));
+                ActivityRefreshed?.Invoke(this, EventArgs.Empty);
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to compute bot activity buckets.");
         }
     }
     #endregion
