@@ -1,55 +1,50 @@
-﻿using SQLite;
 using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
-[Table("Candles")]
 public class Candle : IValidatable
 {
-    #region Properties
     // Id, StockId, Currency
     private int _candleId = 0;
-    [PrimaryKey, AutoIncrement]
-    [Column("CandleId")] public int CandleId {
+    public int CandleId
+    {
         get => _candleId;
-        set { 
+        set
+        {
             if (_candleId != 0) throw new InvalidOperationException("CandleId is immutable once set.");
             _candleId = value < 0 ? 0 : value;
         }
     }
 
     private int _stockId = 0;
-    [Indexed(Name = "IX_Candle_Key", Order = 1, Unique = true)]
-    [Column("StockId")] public int StockId { 
+    public int StockId
+    {
         get => _stockId;
-        set {
+        set
+        {
             if (_stockId != 0) throw new InvalidOperationException("StockId is immutable once set.");
             _stockId = value;
         }
     }
 
-    [Ignore] public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
-    [Indexed(Name = "IX_Candle_Key", Order = 2, Unique = true)]
-    [Column("Currency")] public string Currency
+    public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
+    public string Currency
     {
         get => CurrencyType.ToString();
         set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
     // Bucket resolution
-    [Ignore] public CandleResolution Resolution { get; private set; } = CandleResolution.None;
-    [Ignore] public TimeSpan Bucket { get; private set; } = TimeSpan.Zero;
-    [Indexed(Name = "IX_Candle_Key", Order = 3, Unique = true)]
-    [Column("BucketSeconds") ] public int BucketSeconds
+    public CandleResolution Resolution { get; private set; } = CandleResolution.None;
+    public TimeSpan Bucket { get; private set; } = TimeSpan.Zero;
+    public int BucketSeconds
     {
         get => (int)Resolution;
-        set {
-            // Validate
+        set
+        {
             if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value));
-            // Immutable once set
             if (Resolution != CandleResolution.None)
                 throw new InvalidOperationException("ResolutionSeconds is immutable once set.");
-            // Check if valid resolution
             if (!TryFromSeconds(value, out var res))
                 throw new ArgumentOutOfRangeException(nameof(value), "Unsupported resolution.");
             Resolution = res;
@@ -59,72 +54,84 @@ public class Candle : IValidatable
 
     // Open time aligned to bucket
     private DateTime _openTime = TimeHelper.NowUtc();
-    [Indexed(Name = "IX_Candle_Key", Order = 4, Unique = true)]
-    [Column("OpenTime")] public DateTime OpenTime
+    public DateTime OpenTime
     {
         get => _openTime;
         set => _openTime = TimeHelper.EnsureUtc(value);
     }
 
-    // OHLC values, Volume and TradeCount
     private decimal _open = 0m;
-    [Column("Open")] public decimal Open {
+    public decimal Open
+    {
         get => _open;
-        set {
+        set
+        {
             if (value <= 0m) throw new ArgumentException("Open price must be positive.");
             _open = value;
         }
     }
 
     private decimal _high = 0m;
-    [Column("High")] public decimal High {
+    public decimal High
+    {
         get => _high;
-        set {
+        set
+        {
             if (value <= 0m) throw new ArgumentException("High price must be positive.");
             _high = value;
         }
     }
 
     private decimal _low = 0m;
-    [Column("Low")] public decimal Low {
+    public decimal Low
+    {
         get => _low;
-        set {
+        set
+        {
             if (value <= 0m) throw new ArgumentException("Low price must be positive.");
             _low = value;
         }
     }
 
     private decimal _close = 0m;
-    [Column("Close")] public decimal Close {
+    public decimal Close
+    {
         get => _close;
-        set {
+        set
+        {
             if (value <= 0m) throw new ArgumentException("Close price must be positive.");
             _close = value;
         }
     }
 
     private long _volume = 0;
-    [Column("Volume")] public long Volume {
+    public long Volume
+    {
         get => _volume;
-        set {
+        set
+        {
             if (value < 0) throw new ArgumentException("Volume cannot be negative.");
             _volume = value;
         }
     }
 
     private int _tradeCount = 0;
-    [Column("TradeCount")] public int TradeCount {
+    public int TradeCount
+    {
         get => _tradeCount;
-        set {
+        set
+        {
             if (value < 0) throw new ArgumentException("TradeCount cannot be negative.");
             _tradeCount = value;
         }
     }
 
     private int? _minTransactionId = null;
-    [Column("MinTransactionId")] public int? MinTransactionId {
+    public int? MinTransactionId
+    {
         get => _minTransactionId;
-        set {
+        set
+        {
             if (!value.HasValue) return;
             if (value.Value <= 0) throw new ArgumentException("MinTransactionId must be positive.");
             if (!_minTransactionId.HasValue || value < _minTransactionId)
@@ -133,18 +140,18 @@ public class Candle : IValidatable
     }
 
     private int? _maxTransactionId = null;
-    [Column("MaxTransactionId")] public int? MaxTransactionId {
+    public int? MaxTransactionId
+    {
         get => _maxTransactionId;
-        set {
+        set
+        {
             if (!value.HasValue) return;
             if (value.Value <= 0) throw new ArgumentException("MaxTransactionId must be positive.");
             if (!_maxTransactionId.HasValue || value > _maxTransactionId)
                 _maxTransactionId = value.Value;
         }
     }
-    #endregion
 
-    #region IValidatable Implementation
     public bool IsValid() => StockId > 0 && IsValidCurrency() && Resolution != CandleResolution.None &&
         IsValidTimestamp() && IsValidPrice() && IsValidVolume();
 
@@ -152,17 +159,14 @@ public class Candle : IValidatable
 
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
-    private bool IsValidTimestamp() => BucketSeconds > 0 && OpenTime > DateTime.MinValue && 
+    private bool IsValidTimestamp() => BucketSeconds > 0 && OpenTime > DateTime.MinValue &&
         OpenTime <= TimeHelper.NowUtc() && TimeHelper.FloorToBucketUtc(OpenTime, Bucket) == OpenTime;
 
-    private bool IsValidPrice() => Open > 0m && High > 0m && Low > 0m && Close > 0m && 
+    private bool IsValidPrice() => Open > 0m && High > 0m && Low > 0m && Close > 0m &&
         Low <= High && Open >= Low && Open <= High && Close >= Low && Close <= High;
 
     private bool IsValidVolume() => Volume >= 0 && TradeCount >= 0 && Volume >= TradeCount;
 
-    #endregion
-
-    #region String Representations
     public override string ToString() =>
         $"Candle #{CandleId}: StockId #{StockId} - {Currency} {BucketString()} @ {OpenTimeDisplay}";
 
@@ -177,47 +181,39 @@ public class Candle : IValidatable
         return $"{BucketDays}d";
     }
 
-    [Ignore] public string Summary =>
+    public string Summary =>
         $"{ToString()} O:{OpenDisplay} H:{HighDisplay} L:{LowDisplay} C:{CloseDisplay} V:{Volume} T:{TradeCount}";
 
-    [Ignore] public string OpenTimeDisplay => OpenTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
-    [Ignore] public string CloseTimeDisplay => CloseTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    public string OpenTimeDisplay => OpenTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    public string CloseTimeDisplay => CloseTime.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
-    [Ignore] public string OpenDisplay => CurrencyHelper.Format(Open, CurrencyType);
-    [Ignore] public string HighDisplay => CurrencyHelper.Format(High, CurrencyType);
-    [Ignore] public string LowDisplay => CurrencyHelper.Format(Low, CurrencyType);
-    [Ignore] public string CloseDisplay => CurrencyHelper.Format(Close, CurrencyType);
-    [Ignore] public string PriceChangePercentDisplay => $"{PriceChangeRatio:+0.##%;-0.##%;0%}";
-    #endregion
+    public string OpenDisplay => CurrencyHelper.Format(Open, CurrencyType);
+    public string HighDisplay => CurrencyHelper.Format(High, CurrencyType);
+    public string LowDisplay => CurrencyHelper.Format(Low, CurrencyType);
+    public string CloseDisplay => CurrencyHelper.Format(Close, CurrencyType);
+    public string PriceChangePercentDisplay => $"{PriceChangeRatio:+0.##%;-0.##%;0%}";
 
-    #region Helper Variables
-    // Time calculations
-    [Ignore] public DateTime CloseTime => OpenTime.Add(Bucket);
-    [Ignore] public int BucketMinutes => BucketSeconds / 60;
-    [Ignore] public int BucketHours => BucketMinutes / 60;
-    [Ignore] public int BucketDays => BucketHours / 24;
+    public DateTime CloseTime => OpenTime.Add(Bucket);
+    public int BucketMinutes => BucketSeconds / 60;
+    public int BucketHours => BucketMinutes / 60;
+    public int BucketDays => BucketHours / 24;
 
-    // Bool states
-    [Ignore] public bool IsComplete => CloseTime <= TimeHelper.NowUtc();
-    [Ignore] public bool IsInProgress => !IsComplete;
-    [Ignore] public bool IsNew => Volume == 0 && TradeCount == 0;
-    [Ignore] public bool IsOld => !IsNew;
-    [Ignore] public bool IsBullish => Close > Open;
-    [Ignore] public bool IsBearish => Close < Open;
-    [Ignore] public bool IsDoji => Close == Open;
-    [Ignore] public bool HasWick => High > Math.Max(Open, Close) || Low < Math.Min(Open, Close);
+    public bool IsComplete => CloseTime <= TimeHelper.NowUtc();
+    public bool IsInProgress => !IsComplete;
+    public bool IsNew => Volume == 0 && TradeCount == 0;
+    public bool IsOld => !IsNew;
+    public bool IsBullish => Close > Open;
+    public bool IsBearish => Close < Open;
+    public bool IsDoji => Close == Open;
+    public bool HasWick => High > Math.Max(Open, Close) || Low < Math.Min(Open, Close);
 
+    public decimal PriceChange => Close - Open;
+    public decimal PriceChangeRatio => Open == 0m ? 0m : PriceChange / Open;
+    public decimal PriceChangePercent => PriceChangeRatio * 100m;
 
-    // Price change calculations
-    [Ignore] public decimal PriceChange => Close - Open;
-    [Ignore] public decimal PriceChangeRatio => Open == 0m ? 0m : PriceChange / Open;
-    [Ignore] public decimal PriceChangePercent => PriceChangeRatio * 100m;
-    #endregion
-
-    #region Helper Methods
     public void ApplyTrade(Transaction tick)
     {
-        if (!tick.IsValid()) 
+        if (!tick.IsValid())
             throw new ArgumentException("Invalid tick.");
         if (tick.StockId != StockId)
             throw new ArgumentException("Tick stock does not match candle stock.");
@@ -227,13 +223,11 @@ public class Candle : IValidatable
             throw new ArgumentException("Tick time is outside candle time range.");
         NoteTransactionId(tick.TransactionId);
 
-        // OHLC update
-        var price = tick.Price;        
+        var price = tick.Price;
         if (price > High) High = price;
         if (price < Low) Low = price;
         Close = price;
 
-        // Update volume and trade count
         Volume += tick.Quantity;
         TradeCount += 1;
 
@@ -279,5 +273,4 @@ public class Candle : IValidatable
 
     public static bool TryFromTimeSpan(TimeSpan span, out CandleResolution resolution) =>
         TryFromSeconds((int)span.TotalSeconds, out resolution);
-    #endregion
 }

@@ -1,14 +1,11 @@
 using KieshStockExchange.Helpers;
-using SQLite;
 
 namespace KieshStockExchange.Models;
 
-[Table("UserWatchlist")]
 public class UserWatchlistEntry : IValidatable
 {
     private int _id = 0;
-    [PrimaryKey, AutoIncrement]
-    [Column("Id")] public int Id
+    public int Id
     {
         get => _id;
         set
@@ -20,8 +17,7 @@ public class UserWatchlistEntry : IValidatable
     }
 
     private int _userId = 0;
-    [Indexed(Name = "IX_UserWatchlist_User_Stock", Order = 1, Unique = true)]
-    [Column("UserId")] public int UserId
+    public int UserId
     {
         get => _userId;
         set
@@ -33,8 +29,7 @@ public class UserWatchlistEntry : IValidatable
     }
 
     private int _stockId = 0;
-    [Indexed(Name = "IX_UserWatchlist_User_Stock", Order = 2, Unique = true)]
-    [Column("StockId")] public int StockId
+    public int StockId
     {
         get => _stockId;
         set
@@ -45,10 +40,10 @@ public class UserWatchlistEntry : IValidatable
         }
     }
 
-    [Column("SortOrder")] public int SortOrder { get; set; } = 0;
+    public int SortOrder { get; set; } = 0;
 
     private DateTime _addedAt = TimeHelper.NowUtc();
-    [Column("AddedAt")] public DateTime AddedAt
+    public DateTime AddedAt
     {
         get => _addedAt;
         set => _addedAt = TimeHelper.EnsureUtc(value);

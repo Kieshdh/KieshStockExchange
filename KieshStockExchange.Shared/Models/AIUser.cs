@@ -1,17 +1,14 @@
-﻿using KieshStockExchange.Helpers;
-using SQLite;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
 public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4 }
 
-[Table("AIUsers")] public class AIUser : IValidatable
+public class AIUser : IValidatable
 {
-    #region Basic Properties
     // Primary Key
     private int _aiUserId = 0;
-    [PrimaryKey, AutoIncrement]
-    [Column("AiUserId")] public int AiUserId
+    public int AiUserId
     {
         get => _aiUserId;
         set
@@ -24,8 +21,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     // Foreign Key to User
     private int _userId = 0;
-    [Indexed(Name = "IX_UserAi", Unique = true)]
-    [Column("UserId")] public int UserId
+    public int UserId
     {
         get => _userId;
         set
@@ -38,7 +34,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     // Random Seed for reproducibility
     private int _seed = 0;
-    [Column("Seed")] public int Seed
+    public int Seed
     {
         get => _seed;
         set
@@ -50,8 +46,8 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     }
 
     // Time interval between AI decisions
-    [Ignore] public TimeSpan DecisionInterval { get; private set; } = TimeSpan.FromSeconds(1);
-    [Column("DecisionIntervalSeconds")] public int DecisionIntervalSeconds
+    public TimeSpan DecisionInterval { get; private set; } = TimeSpan.FromSeconds(1);
+    public int DecisionIntervalSeconds
     {
         get => (int)DecisionInterval.TotalSeconds;
         set
@@ -63,7 +59,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     // Timestamp of creation
     private DateTime _createdAt = TimeHelper.NowUtc();
-    [Column("CreatedAt")] public DateTime CreatedAt
+    public DateTime CreatedAt
     {
         get => _createdAt;
         set => _createdAt = TimeHelper.EnsureUtc(value);
@@ -71,122 +67,54 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     // Timestamp of last update
     private DateTime _updatedAt = TimeHelper.NowUtc();
-    [Column("UpdatedAt")] public DateTime UpdatedAt
+    public DateTime UpdatedAt
     {
         get => _updatedAt;
         set => _updatedAt = TimeHelper.EnsureUtc(value);
     }
-    #endregion
 
-    #region Percentage Properties
-    // Probability of making a trade decision each interval
     private decimal _tradeProb = 0.1m;
-    [Column("TradeProb")] public decimal TradeProb
-    {
-        get => _tradeProb;
-        set => _tradeProb = RequiredPrc(value, nameof(TradeProb));
-    }
+    public decimal TradeProb { get => _tradeProb; set => _tradeProb = RequiredPrc(value, nameof(TradeProb)); }
 
-    // Probability of using market orders vs limit orders
     private decimal _useMarketProb = 0.3m;
-    [Column("UseMarketProb")] public decimal UseMarketProb
-    {
-        get => _useMarketProb;
-        set => _useMarketProb = RequiredPrc(value, nameof(UseMarketProb));
-    }
+    public decimal UseMarketProb { get => _useMarketProb; set => _useMarketProb = RequiredPrc(value, nameof(UseMarketProb)); }
 
-    // Probability of using slipped market orders
     private decimal _useSlippageMarketProb = 0.8m;
-    [Column("UseSlippageMarketProb")] public decimal UseSlippageMarketProb
-    {
-        get => _useSlippageMarketProb;
-        set => _useSlippageMarketProb = RequiredPrc(value, nameof(UseSlippageMarketProb));
-    }
+    public decimal UseSlippageMarketProb { get => _useSlippageMarketProb; set => _useSlippageMarketProb = RequiredPrc(value, nameof(UseSlippageMarketProb)); }
 
-    // Buy bias percentage (0 to 1)
     private decimal _buyBiasPrc = 0.5m;
-    [Column("BuyBiasPrc")] public decimal BuyBiasPrc
-    {
-        get => _buyBiasPrc;
-        set => _buyBiasPrc = RequiredPrc(value, nameof(BuyBiasPrc));
-    }
+    public decimal BuyBiasPrc { get => _buyBiasPrc; set => _buyBiasPrc = RequiredPrc(value, nameof(BuyBiasPrc)); }
 
-    // Minimum trade amount as a percentage of total portfolio (0 to 1)
     private decimal _minTradeAmountPrc = 0.01m;
-    [Column("MinTradeAmountPrc")] public decimal MinTradeAmountPrc
-    {
-        get => _minTradeAmountPrc;
-        set => _minTradeAmountPrc = RequiredPrc(value, nameof(MinTradeAmountPrc));
-    }
+    public decimal MinTradeAmountPrc { get => _minTradeAmountPrc; set => _minTradeAmountPrc = RequiredPrc(value, nameof(MinTradeAmountPrc)); }
 
-    // Maximum trade amount as a percentage of total portfolio (0 to 1)
     private decimal _maxTradeAmountPrc = 0.05m;
-    [Column("MaxTradeAmountPrc")] public decimal MaxTradeAmountPrc
-    {
-        get => _maxTradeAmountPrc;
-        set => _maxTradeAmountPrc = RequiredPrc(value, nameof(MaxTradeAmountPrc));
-    }
+    public decimal MaxTradeAmountPrc { get => _maxTradeAmountPrc; set => _maxTradeAmountPrc = RequiredPrc(value, nameof(MaxTradeAmountPrc)); }
 
-    // Maximum percentage of portfolio per position (0 to 1)
     private decimal _perPositionMaxPrc = 0.25m;
-    [Column("PerPositionMaxPrc")] public decimal PerPositionMaxPrc
-    {
-        get => _perPositionMaxPrc;
-        set => _perPositionMaxPrc = RequiredPrc(value, nameof(PerPositionMaxPrc));
-    }
+    public decimal PerPositionMaxPrc { get => _perPositionMaxPrc; set => _perPositionMaxPrc = RequiredPrc(value, nameof(PerPositionMaxPrc)); }
 
-    // Minimum cash reserve target as a percentage of total portfolio (0 to 1)
     private decimal _minCashReservePrc = 0.1m;
-    [Column("MinCashReservePrc")] public decimal MinCashReservePrc
-    {
-        get => _minCashReservePrc;
-        set => _minCashReservePrc = RequiredPrc(value, nameof(MinCashReservePrc));
-    }
+    public decimal MinCashReservePrc { get => _minCashReservePrc; set => _minCashReservePrc = RequiredPrc(value, nameof(MinCashReservePrc)); }
 
-    // Maximum cash reserve target as a percentage of total portfolio (0 to 1)
     private decimal _maxCashReservePrc = 0.5m;
-    [Column("MaxCashReservePrc")] public decimal MaxCashReservePrc
-    {
-        get => _maxCashReservePrc;
-        set => _maxCashReservePrc = RequiredPrc(value, nameof(MaxCashReservePrc));
-    }
+    public decimal MaxCashReservePrc { get => _maxCashReservePrc; set => _maxCashReservePrc = RequiredPrc(value, nameof(MaxCashReservePrc)); }
 
-    // Acceptable slippage percentage for trades (0 to 1)
     private decimal _slippageTolerancePrc = 0.02m;
-    [Column("SlippageTolerancePrc")] public decimal SlippageTolerancePrc
-    {
-        get => _slippageTolerancePrc;
-        set => _slippageTolerancePrc = RequiredPrc(value, nameof(SlippageTolerancePrc));
-    }
+    public decimal SlippageTolerancePrc { get => _slippageTolerancePrc; set => _slippageTolerancePrc = RequiredPrc(value, nameof(SlippageTolerancePrc)); }
 
-    // Minimum Limit Order Offset Percentage (0 to 1)
     private decimal _minLimitOffsetPrc = 0.002m;
-    [Column("MinLimitOffsetPrc")] public decimal MinLimitOffsetPrc
-    {
-        get => _minLimitOffsetPrc;
-        set => _minLimitOffsetPrc = RequiredPrc(value, nameof(MinLimitOffsetPrc));
-    }
+    public decimal MinLimitOffsetPrc { get => _minLimitOffsetPrc; set => _minLimitOffsetPrc = RequiredPrc(value, nameof(MinLimitOffsetPrc)); }
 
-    // Maximum Limit Order Offset Percentage (0 to 1)
     private decimal _maxLimitOffsetPrc = 0.05m;
-    [Column("MaxLimitOffsetPrc")] public decimal MaxLimitOffsetPrc
-    {
-        get => _maxLimitOffsetPrc;
-        set => _maxLimitOffsetPrc = RequiredPrc(value, nameof(MaxLimitOffsetPrc));
-    }
+    public decimal MaxLimitOffsetPrc { get => _maxLimitOffsetPrc; set => _maxLimitOffsetPrc = RequiredPrc(value, nameof(MaxLimitOffsetPrc)); }
 
-    // The higher the aggressiveness, the more likely to take risks (0 to 1)
     private decimal _aggressivenessPrc = 0.5m;
-    [Column("AggressivenessPrc")] public decimal AggressivenessPrc
-    {
-        get => _aggressivenessPrc;
-        set => _aggressivenessPrc = RequiredPrc(value, nameof(AggressivenessPrc));
-    }
+    public decimal AggressivenessPrc { get => _aggressivenessPrc; set => _aggressivenessPrc = RequiredPrc(value, nameof(AggressivenessPrc)); }
 
-    // Probability of acting out-of-character at an extreme-sentiment event.
-    // Range [0, 0.5]; seed-time distribution skewed toward 0.
+    // Probability of acting out-of-character at an extreme-sentiment event. Range [0, 0.5].
     private decimal _extremeReactionRandomnessPrc = 0.10m;
-    [Column("ExtremeReactionRandomnessPrc")] public decimal ExtremeReactionRandomnessPrc
+    public decimal ExtremeReactionRandomnessPrc
     {
         get => _extremeReactionRandomnessPrc;
         set
@@ -200,7 +128,7 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     // Per-cycle (1h) cash-injection roll. Seeded inverse to portfolio size.
     private decimal _cashInjectionFrequencyPrc = 0.15m;
-    [Column("CashInjectionFrequencyPrc")] public decimal CashInjectionFrequencyPrc
+    public decimal CashInjectionFrequencyPrc
     {
         get => _cashInjectionFrequencyPrc;
         set
@@ -212,11 +140,9 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         }
     }
 
-    // Deposit size as a fraction of the bot's current portfolio value when an
-    // injection fires. Inverse-size seeded so smaller bots also receive a
-    // larger percentage per hit.
+    // Deposit size as fraction of bot's current portfolio when injection fires.
     private decimal _cashInjectionAmountPrc = 0.004m;
-    [Column("CashInjectionAmountPrc")] public decimal CashInjectionAmountPrc
+    public decimal CashInjectionAmountPrc
     {
         get => _cashInjectionAmountPrc;
         set
@@ -227,13 +153,11 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
             _cashInjectionAmountPrc = value;
         }
     }
-    #endregion
 
-    #region Trading Strategy Properties
     // Set of stock IDs in the AI's watchlist
     private readonly HashSet<int> _watchlist = new();
-    [Ignore] public IReadOnlyCollection<int> Watchlist => _watchlist;
-    [Column("WatchlistCsv")] public string WatchlistCsv
+    public IReadOnlyCollection<int> Watchlist => _watchlist;
+    public string WatchlistCsv
     {
         get => string.Join(",", _watchlist.OrderBy(x => x));
         set
@@ -247,52 +171,30 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         }
     }
 
-    // Minimum number of open positions the AI should maintain
     private int _minOpenPositions = 0;
-    [Column("MinOpenPositions")] public int MinOpenPositions
-    {
-        get => _minOpenPositions;
-        set => _minOpenPositions = value < 0 ? 0 : value;
-    }
+    public int MinOpenPositions { get => _minOpenPositions; set => _minOpenPositions = value < 0 ? 0 : value; }
 
-    // Maximum number of open positions the AI can hold
     private int _maxOpenPositions = 15;
-    [Column("MaxOpenPositions")] public int MaxOpenPositions
-    {
-        get => _maxOpenPositions;
-        set => _maxOpenPositions = value < 0 ? 0 : value;
-    }
+    public int MaxOpenPositions { get => _maxOpenPositions; set => _maxOpenPositions = value < 0 ? 0 : value; }
 
-    // Maximum number of trades the AI can make in a day
-    // When it exceeds then stop trading for the day while keeping orders open
     private int _maxDailyTrades = 50;
-    [Column("MaxDailyTrades")] public int MaxDailyTrades
-    {
-        get => _maxDailyTrades;
-        set => _maxDailyTrades = value < 0 ? 0 : value;
-    }
+    public int MaxDailyTrades { get => _maxDailyTrades; set => _maxDailyTrades = value < 0 ? 0 : value; }
 
-    // Maximum number of open orders the AI can have at once
     private int _maxOpenOrders = 20;
-    [Column("MaxOpenOrders")] public int MaxOpenOrders
-    {
-        get => _maxOpenOrders;
-        set => _maxOpenOrders = value < 0 ? 0 : value;
-    }
+    public int MaxOpenOrders { get => _maxOpenOrders; set => _maxOpenOrders = value < 0 ? 0 : value; }
 
     // Drawn from Tools/Config.py::HOME_CURRENCY_WEIGHTS at seed time.
-    [Ignore] public CurrencyType HomeCurrencyType { get; set; } = CurrencyType.USD;
-    [Column("HomeCurrency")] public string HomeCurrency
+    public CurrencyType HomeCurrencyType { get; set; } = CurrencyType.USD;
+    public string HomeCurrency
     {
         get => HomeCurrencyType.ToString();
         set => HomeCurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
-    // Trading strategy used by the AI
-    [Ignore] public AiStrategy Strategy { get; private set; } = AiStrategy.Random;
+    public AiStrategy Strategy { get; private set; } = AiStrategy.Random;
 
     private int _strategyCode = (int)AiStrategy.Random;
-    [Indexed][Column("Strategy")] public int StrategyCode
+    public int StrategyCode
     {
         get => _strategyCode;
         set
@@ -303,19 +205,16 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
             Strategy = (AiStrategy)value;
         }
     }
-    #endregion
 
-    #region Temporary runtime Properties
-    [Ignore] public bool IsEnabled { get; set; } = true; // True unless excluded by the active bot cap.
-    [Ignore] public DateOnly TradesDayUtc { get; private set; } = TimeHelper.Today();
-    [Ignore] public int TradesToday { get; private set; } = 0; // Number of trades made today
-    [Ignore] public int ErrorsToday { get; private set; } = 0; // Number of errors encountered today
-    [Ignore] public DateTime LastDecisionTime { get; private set; } = DateTime.MinValue; // Timestamp of last decision
-    [Ignore] public DateTime LastTradeTime { get; private set; } = DateTime.MinValue; // Timestamp of last trade
-    [Ignore] public HashSet<int> StocksTouchedToday { get; } = new(); // Set of stock IDs traded today
-    #endregion
+    // Runtime-only (not persisted)
+    public bool IsEnabled { get; set; } = true;
+    public DateOnly TradesDayUtc { get; private set; } = TimeHelper.Today();
+    public int TradesToday { get; private set; } = 0;
+    public int ErrorsToday { get; private set; } = 0;
+    public DateTime LastDecisionTime { get; private set; } = DateTime.MinValue;
+    public DateTime LastTradeTime { get; private set; } = DateTime.MinValue;
+    public HashSet<int> StocksTouchedToday { get; } = new();
 
-    #region IValidatable Implementation
     public bool IsValid() => UserId > 0 && Seed > 0 && DecisionIntervalSeconds > 0 && MaxDailyTrades >= 0 && MaxOpenOrders >= 0 &&
         IsValidPercentages() && ValidateSizing() && ValidatePositions() && IsValidWatchlist() && IsValidTimestamps() &&
         CurrencyHelper.IsSupported(HomeCurrency);
@@ -338,27 +237,25 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
 
     private bool IsValidTimestamps() => CreatedAt > DateTime.MinValue && CreatedAt <= TimeHelper.NowUtc() &&
         UpdatedAt >= CreatedAt && UpdatedAt <= TimeHelper.NowUtc();
-    #endregion
 
-    #region String Representations
     public override string ToString() => $"AIUser #{AiUserId} (User #{UserId})";
 
-    [Ignore] public string SummaryIdentity =>
+    public string SummaryIdentity =>
         $"{ToString()} • Strategy={Strategy} • Seed={Seed}";
 
-    [Ignore] public string SummaryActivity =>
+    public string SummaryActivity =>
         $"Interval {IntervalString()} • " +
         $"Trades {TradesToday}/{MaxDailyTrades} • Errors {ErrorsToday}";
 
-    [Ignore] public string SummarySizing =>
+    public string SummarySizing =>
         $"TradeProb {TradeProbDisplay} • Size {TradeAmountDisplay} • " +
         $"PerPosMax {PerPositionMaxDisplay} • Pos {OpenPositionsDisplay}";
 
-    [Ignore] public string SummaryRisk =>
+    public string SummaryRisk =>
         $"Cash {CashReserveTargetPrc} • Slippage {SlippageToleranceDisplay} • " +
         $"LimitOffset {LimitOffsetDisplay} • Aggro {AggressivenessDisplay}";
 
-    [Ignore] public string Summary =>
+    public string Summary =>
         $"{SummaryIdentity} | {SummaryActivity} | {SummarySizing} | {SummaryRisk}";
 
     public string IntervalString()
@@ -370,21 +267,19 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         return $"{s / 86400}d";
     }
 
-    [Ignore] public string TradeProbDisplay => $"{TradeProb:P0}";
-    [Ignore] public string UseMarketProbDisplay => $"{UseMarketProb:P0}";
-    [Ignore] public string TradeAmountDisplay => $"{MinTradeAmountPrc:P0} - {MaxTradeAmountPrc:P0}";
-    [Ignore] public string OpenPositionsDisplay => $"{MinOpenPositions} - {MaxOpenPositions}";
-    [Ignore] public string PerPositionMaxDisplay => $"{PerPositionMaxPrc:P0}";
-    [Ignore] public string CashReserveTargetPrc => $"{MinCashReservePrc:P0} - {MaxCashReservePrc:P0}";
-    [Ignore] public string SlippageToleranceDisplay => $"{SlippageTolerancePrc:P0}";
-    [Ignore] public string LimitOffsetDisplay => $"{MinLimitOffsetPrc:P0} - {MaxLimitOffsetPrc:P0}";
-    [Ignore] public string AggressivenessDisplay => $"{AggressivenessPrc:P0}";
+    public string TradeProbDisplay => $"{TradeProb:P0}";
+    public string UseMarketProbDisplay => $"{UseMarketProb:P0}";
+    public string TradeAmountDisplay => $"{MinTradeAmountPrc:P0} - {MaxTradeAmountPrc:P0}";
+    public string OpenPositionsDisplay => $"{MinOpenPositions} - {MaxOpenPositions}";
+    public string PerPositionMaxDisplay => $"{PerPositionMaxPrc:P0}";
+    public string CashReserveTargetPrc => $"{MinCashReservePrc:P0} - {MaxCashReservePrc:P0}";
+    public string SlippageToleranceDisplay => $"{SlippageTolerancePrc:P0}";
+    public string LimitOffsetDisplay => $"{MinLimitOffsetPrc:P0} - {MaxLimitOffsetPrc:P0}";
+    public string AggressivenessDisplay => $"{AggressivenessPrc:P0}";
 
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("MM-dd HH:mm");
-    [Ignore] public string UpdatedAtDisplay => UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm");
-    #endregion
+    public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("MM-dd HH:mm");
+    public string UpdatedAtDisplay => UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm");
 
-    #region Private Helper methods
     private static decimal RequiredPrc(decimal value, string name)
     {
         if (value < 0 || value > 1)
@@ -392,21 +287,16 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
         return value;
     }
 
-    private void Touched() => UpdatedAt = TimeHelper.NowUtc(); // Update timestamp
-    #endregion
+    private void Touched() => UpdatedAt = TimeHelper.NowUtc();
 
-    #region Public Helper methods
     public void ResetDay()
     {
         var today = TimeHelper.Today();
         if (TradesDayUtc >= today) return;
-
-        // Reset daily counters
         TradesDayUtc = today;
         TradesToday = 0;
         ErrorsToday = 0;
         StocksTouchedToday.Clear();
-
         Touched();
     }
 
@@ -440,11 +330,9 @@ public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, 
     public void RecordTrade(Transaction tx)
     {
         if (tx == null || tx.IsInvalid || !tx.InvolvesUser(UserId)) return;
-
         TradesToday++;
         StocksTouchedToday.Add(tx.StockId);
         LastTradeTime = tx.Timestamp;
         Touched();
     }
-    #endregion
 }

@@ -1,53 +1,54 @@
-﻿using SQLite;
 using System.Text.RegularExpressions;
 using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
-[Table("Users")]
 public class User : IValidatable
 {
-    #region Properties
     private int _userId = 0;
-    [PrimaryKey, AutoIncrement]
-    [Column("UserId")] public int UserId { 
-        get => _userId; 
-        set {
+    public int UserId
+    {
+        get => _userId;
+        set
+        {
             if (_userId != 0 && value != _userId) throw new InvalidOperationException("UserId is immutable once set.");
             _userId = value < 0 ? 0 : value;
         }
     }
 
     private string _username = string.Empty;
-    [Indexed(Unique = true)]
-    [Column("Username")] public string Username { 
-        get => _username; 
+    public string Username
+    {
+        get => _username;
         set => _username = value.ToLowerInvariant().Trim();
     }
 
     private string _password = string.Empty;
-    [Column("PasswordHash")] public string PasswordHash { 
-        get => _password; 
+    public string PasswordHash
+    {
+        get => _password;
         set => _password = value;
     }
 
     private string _email = string.Empty;
-    [Indexed(Unique = true)]
-    [Column("Email")] public string Email { 
-        get => _email; 
+    public string Email
+    {
+        get => _email;
         set => _email = value?.Trim().ToLowerInvariant() ?? string.Empty;
     }
 
-    [Column("FullName")] public string FullName { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
 
     private DateTime _createdAt = TimeHelper.NowUtc();
-    [Column("CreatedAt")] public DateTime CreatedAt {
+    public DateTime CreatedAt
+    {
         get => _createdAt;
         set => _createdAt = TimeHelper.EnsureUtc(value);
     }
 
     private DateTime? _birthDate = null;
-    [Column("BirthDate")] public DateTime? BirthDate {
+    public DateTime? BirthDate
+    {
         get => _birthDate;
         set
         {
@@ -63,16 +64,15 @@ public class User : IValidatable
     }
 
     private bool _isAdmin = false;
-    [Column("IsAdmin")] public bool IsAdmin { 
-        get => _isAdmin; 
+    public bool IsAdmin
+    {
+        get => _isAdmin;
         set => _isAdmin = value;
     }
-    #endregion
 
-    #region IValidatable Implementation
-    public bool IsValid() => IsValidEmail() && IsValidUsername() 
+    public bool IsValid() => IsValidEmail() && IsValidUsername()
         && IsValidBirthdate() && IsValidName() && IsValidPassword(PasswordHash);
-    
+
     public bool IsInvalid => !IsValid();
 
     public bool IsValidEmail()
@@ -93,9 +93,9 @@ public class User : IValidatable
         return Regex.IsMatch(Username, pattern);
     }
 
-    public bool IsValidPassword(string password) => 
+    public bool IsValidPassword(string password) =>
         SecurityHelper.IsValidPassword(password);
-    
+
     public bool IsValidName()
     {
         // Name must not be empty and can contain letters, spaces, and some punctuation
@@ -108,15 +108,12 @@ public class User : IValidatable
     public bool IsValidBirthdate()
     {
         // Birthdate must be a valid date and at least 18 years old
-        return BirthDate.HasValue && BirthDate.Value > DateTime.MinValue && 
+        return BirthDate.HasValue && BirthDate.Value > DateTime.MinValue &&
                BirthDate.Value <= TimeHelper.NowUtc().AddYears(-18);
     }
-    #endregion
 
-    #region String Representations
     public override string ToString() => $"User #{UserId}: {Username} ({FullName})";
 
-    [Ignore] public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy");
-    [Ignore] public string BirthDateDisplay =>  BirthDate?.ToLocalTime().ToString("dd/MM/yyyy") ?? "N/A";
-    #endregion
+    public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy");
+    public string BirthDateDisplay => BirthDate?.ToLocalTime().ToString("dd/MM/yyyy") ?? "N/A";
 }
