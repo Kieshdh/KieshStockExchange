@@ -85,7 +85,10 @@
       "Bash(git branch *)",
       "Bash(PYTHONIOENCODING=utf-8 python Tools/GenerateAIUsers.py)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git stash *)"
     ]
   },
   "outputStyle": "default"
