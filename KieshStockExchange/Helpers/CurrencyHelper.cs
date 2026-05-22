@@ -79,6 +79,35 @@ public static class CurrencyHelper
     /// <summary> Returns just the symbol of the currency. </summary>
     public static string GetSymbol(CurrencyType currency) =>
         CultureCache[currency].NumberFormat.CurrencySymbol;
+
+    /// <summary>
+    /// Compact currency formatter for tight spaces (chart axes, KPI chips):
+    /// 1-decimal scaled value + K / M / B / T / Q suffix. Below 1000 falls
+    /// back to an integer. Symbol placement follows the currency's culture
+    /// so EUR shows "1,2K €" while USD shows "$1.2K".
+    /// </summary>
+    public static string FormatCompact(decimal amount, CurrencyType currency)
+    {
+        var culture = CultureCache[currency];
+        var nf = culture.NumberFormat;
+        decimal abs = Math.Abs(amount);
+
+        string body =
+            abs >= 1_000_000_000_000_000m ? (amount / 1_000_000_000_000_000m).ToString("0.0", culture) + "Q" :
+            abs >= 1_000_000_000_000m     ? (amount / 1_000_000_000_000m    ).ToString("0.0", culture) + "T" :
+            abs >= 1_000_000_000m         ? (amount / 1_000_000_000m        ).ToString("0.0", culture) + "B" :
+            abs >= 1_000_000m             ? (amount / 1_000_000m            ).ToString("0.0", culture) + "M" :
+            abs >= 1_000m                 ? (amount / 1_000m                ).ToString("0.0", culture) + "K" :
+                                            amount.ToString("0", culture);
+
+        return nf.CurrencyPositivePattern switch
+        {
+            1 => body + nf.CurrencySymbol,
+            2 => nf.CurrencySymbol + " " + body,
+            3 => body + " " + nf.CurrencySymbol,
+            _ => nf.CurrencySymbol + body,
+        };
+    }
     #endregion
 
     #region Iso Code 
