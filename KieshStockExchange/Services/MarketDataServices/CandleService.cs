@@ -420,8 +420,7 @@ public sealed class CandleService : ICandleService, IDisposable
                     throw new InvalidOperationException($"Invalid candle {c.Summary}");
 
             // Persist to DB — single tx, batched ON CONFLICT upsert.
-            await _db.RunInTransactionAsync(txCt =>
-                _db.UpsertCandlesAsync(candles, txCt), ct).ConfigureAwait(false);
+            await _db.UpsertCandlesAsync(candles, ct).ConfigureAwait(false);
 
             // Publish to live stream if any subscribers
             if (_streams.TryGetValue(key, out var stream))
@@ -477,8 +476,7 @@ public sealed class CandleService : ICandleService, IDisposable
                     {
                         try
                         {
-                            await _db.RunInTransactionAsync(txCt =>
-                                _db.UpsertCandlesAsync(batch, txCt), ct).ConfigureAwait(false);
+                            await _db.UpsertCandlesAsync(batch, ct).ConfigureAwait(false);
                         }
                         catch (Exception ex)
                         {
@@ -653,9 +651,8 @@ public sealed class CandleService : ICandleService, IDisposable
         // Aggregate to target resolution
         var aggregated = AggregateMultipleCandles(src, targetRes, true, allowPartialEdges);
 
-        // Persist to DB
-        await _db.RunInTransactionAsync(tx =>
-            _db.UpsertCandlesAsync(aggregated, tx), ct).ConfigureAwait(false);
+        // Persist to DB (UpsertCandlesAsync is atomic server-side)
+        await _db.UpsertCandlesAsync(aggregated, ct).ConfigureAwait(false);
 
         return aggregated;
     }

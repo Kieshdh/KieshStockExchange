@@ -90,6 +90,7 @@ public static class MauiProgram
 
         // Services
         builder.Services.AddSingleton<IDataBaseService, ApiDataBaseService>();
+        builder.Services.AddSingleton<IEngineCommandClient, EngineCommandClient>();
         builder.Services.AddSingleton<IOrderRegistry, OrderRegistry>();
         builder.Services.AddSingleton<IExcelImportService, ExcelImportService>();
         builder.Services.AddSingleton<IAuthService, AuthService>();

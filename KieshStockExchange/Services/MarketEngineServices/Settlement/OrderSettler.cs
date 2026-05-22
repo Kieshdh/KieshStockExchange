@@ -1,6 +1,8 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -11,16 +13,16 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 /// <summary> Place-time balance check, reserve, persist, rollback-on-fail. </summary>
 internal sealed class OrderSettler
 {
-    private readonly IDataBaseService _db;
+    private readonly IEngineCommandClient _engineCmd;
     private readonly IAccountsCache _accounts;
     private readonly IReservationLedger _ledger;
     private readonly IOrderRegistry _registry;
     private readonly ILogger<OrderSettler> _logger;
 
-    public OrderSettler(IDataBaseService db, IAccountsCache accounts,
+    public OrderSettler(IEngineCommandClient engineCmd, IAccountsCache accounts,
         IReservationLedger ledger, IOrderRegistry registry, ILogger<OrderSettler> logger)
     {
-        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _engineCmd = engineCmd ?? throw new ArgumentNullException(nameof(engineCmd));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -119,26 +121,24 @@ internal sealed class OrderSettler
                 orderSellBefore, incoming.CurrentSellReservedQty);
         }
 
-        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // Phase 2: server bundles CreateOrder + (Fund or Position) update in one tx.
+        // OrderId is written back onto `incoming` from the server response so the
+        // registry/UI see the canonical PK immediately.
         try
         {
-            await _db.CreateOrder(incoming, ct).ConfigureAwait(false);
+            var result = await _engineCmd.SettleSingleOrderAsync(
+                new SettleSingleOrderCommand(incoming,
+                    buyFund is not null && buyReservation > 0m ? buyFund : null,
+                    sellPos),
+                ct).ConfigureAwait(false);
+            if (result.Order.OrderId != 0 && incoming.OrderId == 0)
+                incoming.OrderId = result.Order.OrderId;
 
-            // Persist the reservation so DB-backed views (admin, Funds card) match cache
-            if (buyFund is not null && buyReservation > 0m)
-                await _db.UpdateAllAsync(new[] { buyFund }, ct).ConfigureAwait(false);
-            if (sellPos is not null)
-                await _db.UpdateAllAsync(new[] { sellPos }, ct).ConfigureAwait(false);
-
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-
-            // Register the canonical instance once OrderId is assigned by the insert.
             _registry.Register(incoming);
             return null;
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
 
             // Persist failed: release the reservation. Clamp instead of try/catch to dodge
             // first-chance exception flood under 20k bots.

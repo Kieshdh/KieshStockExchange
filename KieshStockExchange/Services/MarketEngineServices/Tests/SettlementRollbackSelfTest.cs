@@ -8,6 +8,7 @@ using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices.Tests;
@@ -209,7 +210,10 @@ public static class SettlementRollbackSelfTest
         var registry = new OrderRegistry();
         var ledger = new ReservationLedger();
         var cache = new AccountsCache(db, registry, ledger, factory.CreateLogger<AccountsCache>());
-        var engine = new SettlementEngine(db, cache, ledger, registry,
+        // FakeEngineCommandClient routes bundle calls back through FakeDb so the existing
+        // FailMode injection still triggers the failure paths these tests exercise.
+        var engineCmd = new FakeEngineCommandClient(db);
+        var engine = new SettlementEngine(db, engineCmd, cache, ledger, registry,
             factory.CreateLogger<SettlementEngine>(),
             factory, Options.Create(new SeparatorLoggerOptions()));
         return (db, cache, engine);
@@ -501,4 +505,34 @@ internal sealed class FakeDb : IDataBaseService
     public Task UpdateAIUser(AIUser aiUser, CancellationToken ct = default) => throw new NotImplementedException();
     public Task UpsertAIUser(AIUser aiUser, CancellationToken ct = default) => throw new NotImplementedException();
     public Task DeleteAIUser(AIUser aiUser, CancellationToken ct = default) => throw new NotImplementedException();
+}
+
+
+// =========================================================================
+// Fake IEngineCommandClient — bundles route back through FakeDb so the same
+// FailMode injection still triggers the rollback paths these tests exercise.
+// =========================================================================
+
+internal sealed class FakeEngineCommandClient : IEngineCommandClient
+{
+    private readonly FakeDb _db;
+    public FakeEngineCommandClient(FakeDb db) => _db = db;
+
+    public async Task<SettleTradeGroupResult> SettleTradeGroupAsync(SettleTradeGroupCommand cmd, CancellationToken ct = default)
+    {
+        // Mirror EngineController order: trades, orders, funds, positions, new positions.
+        if (cmd.AcceptedTrades.Count > 0)    await _db.InsertAllAsync(cmd.AcceptedTrades,    ct).ConfigureAwait(false);
+        if (cmd.OrdersToUpdate.Count > 0)    await _db.UpdateAllAsync(cmd.OrdersToUpdate,    ct).ConfigureAwait(false);
+        if (cmd.FundsToUpdate.Count > 0)     await _db.UpdateAllAsync(cmd.FundsToUpdate,     ct).ConfigureAwait(false);
+        if (cmd.PositionsToUpdate.Count > 0) await _db.UpdateAllAsync(cmd.PositionsToUpdate, ct).ConfigureAwait(false);
+        if (cmd.NewPositions.Count > 0)      await _db.InsertAllAsync(cmd.NewPositions,      ct).ConfigureAwait(false);
+        return new SettleTradeGroupResult(cmd.AcceptedTrades, cmd.NewPositions);
+    }
+
+    // The remaining bundles arent exercised by these tests yet.
+    public Task<SettleSingleOrderResult> SettleSingleOrderAsync(SettleSingleOrderCommand cmd, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<PlaceOrdersBatchResult> PlaceOrdersBatchAsync(PlaceOrdersBatchCommand cmd, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task ApplyOrderChangeAsync(ApplyOrderChangeCommand cmd, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<bool> DepositWithdrawAsync(DepositWithdrawCommand cmd, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<bool> ConvertInternalAsync(ConvertInternalCommand cmd, CancellationToken ct = default) => throw new NotImplementedException();
 }

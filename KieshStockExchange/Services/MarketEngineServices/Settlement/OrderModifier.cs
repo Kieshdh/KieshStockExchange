@@ -1,6 +1,8 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -12,14 +14,16 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 internal sealed class OrderModifier
 {
     private readonly IDataBaseService _db;
+    private readonly IEngineCommandClient _engineCmd;
     private readonly IAccountsCache _accounts;
     private readonly IReservationLedger _ledger;
     private readonly ILogger<OrderModifier> _logger;
 
-    public OrderModifier(IDataBaseService db, IAccountsCache accounts,
+    public OrderModifier(IDataBaseService db, IEngineCommandClient engineCmd, IAccountsCache accounts,
         IReservationLedger ledger, ILogger<OrderModifier> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _engineCmd = engineCmd ?? throw new ArgumentNullException(nameof(engineCmd));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -87,25 +91,17 @@ internal sealed class OrderModifier
         decimal orderOldBuyReservation = order.CurrentBuyReservation;
         int orderOldSellReservedQty = order.CurrentSellReservedQty;
 
-        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // Phase 2: apply cache mutations + the order's own price/qty up-front (under the
+        // gate acquired above), then send one bundle. On bundle failure restore everything
+        // from snapshots; the server's RunInTransactionAsync handles DB rollback for us.
+        // The "Only open orders" defensive re-fetch happens server-side inside the bundle.
+        decimal orderOldPrice = order.Price;
+        int orderOldQuantity = order.Quantity;
         try
         {
-            var dbOrder = await _db.GetOrderById(order.OrderId, ct).ConfigureAwait(false)
-                         ?? throw new InvalidOperationException($"Order #{order.OrderId} not found.");
-
-            if (!dbOrder.IsOpen)
-                throw new InvalidOperationException("Only open orders can be modified.");
-
-            if (newPrice.HasValue) dbOrder.UpdatePrice(newPrice.Value);
-            if (newQuantity.HasValue) dbOrder.UpdateQuantity(newQuantity.Value);
-
-            await _db.UpdateOrder(dbOrder, ct).ConfigureAwait(false);
-
-            // Sync in-memory order for book + UI
             if (newPrice.HasValue) order.UpdatePrice(newPrice.Value);
             if (newQuantity.HasValue) order.UpdateQuantity(newQuantity.Value);
 
-            // Apply delta + persist in the same tx so DB and cache stay in sync
             if (sellPos is not null && sellReservationDelta != 0)
             {
                 var posResBefore = sellPos.ReservedQuantity;
@@ -128,7 +124,6 @@ internal sealed class OrderModifier
                 _ledger.LogOrder(order.UserId, order.OrderId, posAction,
                     Math.Abs(sellReservationDelta), order.CurrentBuyReservation, order.CurrentBuyReservation,
                     orderSellBefore, order.CurrentSellReservedQty);
-                await _db.UpdateAllAsync(new[] { sellPos }, ct).ConfigureAwait(false);
             }
 
             if (buyFund is not null && buyReservationDelta != 0m)
@@ -154,16 +149,20 @@ internal sealed class OrderModifier
                 _ledger.LogOrder(order.UserId, order.OrderId, fundAction,
                     Math.Abs(buyReservationDelta), orderBuyBefore, order.CurrentBuyReservation,
                     order.CurrentSellReservedQty, order.CurrentSellReservedQty);
-                await _db.UpdateAllAsync(new[] { buyFund }, ct).ConfigureAwait(false);
             }
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
+            await _engineCmd.ApplyOrderChangeAsync(
+                new ApplyOrderChangeCommand(order, buyFund, sellPos), ct).ConfigureAwait(false);
         }
         catch
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            // Restore order's price/qty if they were already applied above.
+            if (newPrice.HasValue && order.IsOpen && order.IsLimitOrder && order.Price != orderOldPrice)
+                order.UpdatePrice(orderOldPrice);
+            if (newQuantity.HasValue && order.IsOpen && order.IsLimitOrder && order.Quantity != orderOldQuantity)
+                order.UpdateQuantity(orderOldQuantity);
 
-            // Restore cache — tx rollback handled DB
+            // Restore cache — server-side tx rollback already handled the DB side
             if (sellPos is not null && sellPosOldReserved.HasValue
                 && sellPos.ReservedQuantity != sellPosOldReserved.Value)
             {

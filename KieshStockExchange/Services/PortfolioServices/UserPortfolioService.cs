@@ -7,6 +7,8 @@ using System.Threading;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.UserServices;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
@@ -18,15 +20,17 @@ public class UserPortfolioService : IUserPortfolioService
     #region Constructor & Fields
     private readonly IDataBaseService _db;
     private readonly IFxRateService _fxRates;
+    private readonly IEngineCommandClient _engineCmd;
     private readonly ILogger<UserPortfolioService> _logger;
     private readonly IAuthService _auth;
     private readonly AsyncLocal<int> _systemScopeDepth = new();
 
     public UserPortfolioService(IAuthService auth, IDataBaseService db,
-        IFxRateService fxRates, ILogger<UserPortfolioService> logger)
+        IFxRateService fxRates, IEngineCommandClient engineCmd, ILogger<UserPortfolioService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _fxRates = fxRates ?? throw new ArgumentNullException(nameof(fxRates));
+        _engineCmd = engineCmd ?? throw new ArgumentNullException(nameof(engineCmd));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
     }
@@ -253,47 +257,15 @@ public class UserPortfolioService : IUserPortfolioService
             return false;
         }
 
-        var success = false;
+        // Phase 2: balance check + fund upsert + audit row are bundled server-side.
+        // The server returns false on insufficient funds; refresh only on success.
+        bool success;
         try
         {
-            await _db.RunInTransactionAsync(async _ =>
-            {
-                var fund = await _db.GetFundByUserIdAndCurrency(targetUserId, currency, ct).ConfigureAwait(false)
-                    ?? new Fund { UserId = targetUserId, CurrencyType = currency, TotalBalance = 0 };
-
-                if (kind == FundTransaction.Kinds.Deposit)
-                {
-                    fund.AddFunds(amount);
-                }
-                else // Withdrawal
-                {
-                    if (!CurrencyHelper.GreaterOrEqual(fund.AvailableBalance, amount, currency))
-                    {
-                        _logger.LogWarning(
-                            "Insufficient available funds for withdrawal {Amount} {Currency} (user {UserId}, available={Avail}).",
-                            amount, currency, targetUserId, fund.AvailableBalance);
-                        // Throw so the transaction rolls back; we'll return false from the catch.
-                        throw new InsufficientFundsException();
-                    }
-                    fund.WithdrawFunds(amount);
-                }
-
-                await _db.UpsertFund(fund, ct).ConfigureAwait(false);
-
-                var auditRow = new FundTransaction
-                {
-                    UserId = targetUserId,
-                    CurrencyType = currency,
-                    Amount = amount,
-                    Kind = kind,
-                    Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
-                    CreatedAt = TimeHelper.NowUtc()
-                };
-                await _db.CreateFundTransaction(auditRow, ct).ConfigureAwait(false);
-                success = true;
-            }, ct).ConfigureAwait(false);
+            success = await _engineCmd.DepositWithdrawAsync(
+                new DepositWithdrawCommand(targetUserId, currency, amount, kind, note),
+                ct).ConfigureAwait(false);
         }
-        catch (InsufficientFundsException) { return false; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Deposit/Withdraw failed for user {UserId} ({Kind} {Amount} {Currency}).",
@@ -302,10 +274,7 @@ public class UserPortfolioService : IUserPortfolioService
         }
 
         if (success)
-        {
-            // Refresh outside the DB transaction so the snapshot reflects the new balance.
             await RefreshAsync(asUserId, ct).ConfigureAwait(false);
-        }
         return success;
     }
 
@@ -353,52 +322,15 @@ public class UserPortfolioService : IUserPortfolioService
         var outNote = string.IsNullOrEmpty(trimmedNote) ? rateTag : $"{rateTag} | {trimmedNote}";
         var inNote = outNote;
 
-        var success = false;
+        // Phase 2: bundled server-side. Client passes the bid-rate-derived ConvertedAmount
+        // because FxRateService is still client-side; server doesn't re-quote.
+        bool success;
         try
         {
-            await _db.RunInTransactionAsync(async _ =>
-            {
-                var src = await _db.GetFundByUserIdAndCurrency(targetUserId, from, ct).ConfigureAwait(false);
-                if (src is null || !CurrencyHelper.GreaterOrEqual(src.AvailableBalance, amount, from))
-                {
-                    _logger.LogWarning(
-                        "Insufficient available funds for convert {Amount} {From} (user {UserId}, available={Avail}).",
-                        amount, from, targetUserId, src?.AvailableBalance ?? 0m);
-                    throw new InsufficientFundsException();
-                }
-
-                var dst = await _db.GetFundByUserIdAndCurrency(targetUserId, to, ct).ConfigureAwait(false)
-                    ?? new Fund { UserId = targetUserId, CurrencyType = to, TotalBalance = 0 };
-
-                src.WithdrawFunds(amount);
-                dst.AddFunds(converted);
-
-                await _db.UpsertFund(src, ct).ConfigureAwait(false);
-                await _db.UpsertFund(dst, ct).ConfigureAwait(false);
-
-                var now = TimeHelper.NowUtc();
-                await _db.CreateFundTransaction(new FundTransaction
-                {
-                    UserId = targetUserId,
-                    CurrencyType = from,
-                    Amount = amount,
-                    Kind = FundTransaction.Kinds.ConversionOut,
-                    Note = outNote,
-                    CreatedAt = now
-                }, ct).ConfigureAwait(false);
-                await _db.CreateFundTransaction(new FundTransaction
-                {
-                    UserId = targetUserId,
-                    CurrencyType = to,
-                    Amount = converted,
-                    Kind = FundTransaction.Kinds.ConversionIn,
-                    Note = inNote,
-                    CreatedAt = now
-                }, ct).ConfigureAwait(false);
-                success = true;
-            }, ct).ConfigureAwait(false);
+            success = await _engineCmd.ConvertInternalAsync(
+                new ConvertInternalCommand(targetUserId, from, to, amount, converted, outNote, inNote),
+                ct).ConfigureAwait(false);
         }
-        catch (InsufficientFundsException) { return false; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Convert failed for user {UserId} ({Amount} {From}->{To}).",
@@ -407,9 +339,7 @@ public class UserPortfolioService : IUserPortfolioService
         }
 
         if (success)
-        {
             await RefreshAsync(asUserId, ct).ConfigureAwait(false);
-        }
         return success;
     }
 
@@ -427,8 +357,6 @@ public class UserPortfolioService : IUserPortfolioService
         var rows = await _db.GetFundTransactionsByUserId(targetUserId, ct).ConfigureAwait(false);
         return rows;
     }
-
-    private sealed class InsufficientFundsException : Exception { }
 
     private async Task<bool> MutateFundAsync(FundMutation mutation, decimal amount, CurrencyType currency,
         int? asUserId, CancellationToken ct)
@@ -577,9 +505,9 @@ public class UserPortfolioService : IUserPortfolioService
 
     private async Task NormalizeFundsAsync(int userId, CancellationToken ct = default)
     {
-        // RunInTransactionAsync passes a CancellationToken to the lambda; the ambient
-        // SQLite transaction is carried via AsyncLocal, so DB calls only need the token.
-        await _db.RunInTransactionAsync(async _ =>
+        // Phase 2: normalization is best-effort cleanup; no longer wrapped in a
+        // single tx since HTTP doesn't carry one. A mid-loop failure leaves a partial
+        // merge — acceptable for a rare admin path.
         {
             var funds = await _db.GetFundsByUserId(userId, ct).ConfigureAwait(false);
             var groups = funds
@@ -617,12 +545,11 @@ public class UserPortfolioService : IUserPortfolioService
                 foreach (var dup in duplicates)
                     await _db.DeleteFund(dup, ct).ConfigureAwait(false);
             }
-        }, ct);
+        }
     }
 
     private async Task NormalizePositionsAsync(int userId, CancellationToken ct = default)
     {
-        await _db.RunInTransactionAsync(async _ =>
         {
             var positions = await _db.GetPositionsByUserId(userId, ct).ConfigureAwait(false);
             var groups = positions
@@ -659,7 +586,7 @@ public class UserPortfolioService : IUserPortfolioService
                 foreach (var dup in duplicates)
                     await _db.DeletePosition(dup, ct).ConfigureAwait(false);
             }
-        }, ct);
+        }
     }
     #endregion
 }

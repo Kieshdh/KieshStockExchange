@@ -8,6 +8,7 @@ using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
@@ -20,6 +21,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
     #region Services and Constructor
     private readonly IDataBaseService _db;
+    private readonly IEngineCommandClient _engineCmd;
     private readonly IOrderBookCache _books;
     private readonly IMatchingEngine _matching;
     private readonly IOrderValidator _validator;
@@ -31,7 +33,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly IOrderRegistry _registry;
     private readonly ILogger<OrderExecutionService> _logger;
 
-    public OrderExecutionService(IDataBaseService db, IOrderBookCache books,
+    public OrderExecutionService(IDataBaseService db, IEngineCommandClient engineCmd, IOrderBookCache books,
         IMatchingEngine matching, IOrderValidator validator, ISettlementEngine settlement,
         IMarketDataService marketData, IAccountsCache accounts,
         IOrderCacheService orderCache, IReservationLedger ledger,
@@ -39,6 +41,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         ILogger<OrderExecutionService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _engineCmd = engineCmd ?? throw new ArgumentNullException(nameof(engineCmd));
         _books = books ?? throw new ArgumentNullException(nameof(books));
         _matching = matching ?? throw new ArgumentNullException(nameof(matching));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
@@ -572,17 +575,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // get to run because the matcher needs OrderIds to populate Transaction rows.
         try
         {
-            await using var phase2Tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-            try
-            {
-                await _db.InsertAllAsync(orderList, ct).ConfigureAwait(false);
-                await phase2Tx.CommitAsync(ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await phase2Tx.RollbackAsync(ct).ConfigureAwait(false);
-                throw;
-            }
+            // Phase 2: bundle the bulk insert. Server returns the list with assigned
+            // OrderIds, which InsertAllAsync's writeback applies to the in-memory items.
+            await _engineCmd.PlaceOrdersBatchAsync(
+                new PlaceOrdersBatchCommand(orderList), ct).ConfigureAwait(false);
 
             // OrderIds are assigned by InsertAllAsync; register canonical instances so
             // the reconciler, matcher, and downstream settle paths all reference the
@@ -679,7 +675,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }
             }
 
-            await using var groupTx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            // Phase 2: SettleNoTxAsync persists via SettleTradeGroup bundle (atomic).
+            // The follow-up cancelled-makers UpdateAll and CancelRemainderAsync writes
+            // are no longer wrapped in a single tx with the settle — bundle covers the
+            // cross-table consistency that matters most.
             try
             {
                 if (groupFills.Count > 0)
@@ -729,15 +728,13 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     }
                 }
 
-                await groupTx.CommitAsync(ct).ConfigureAwait(false);
                 committed = true;
             }
             catch
             {
-                await groupTx.RollbackAsync(ct).ConfigureAwait(false);
-
                 // Undo book mutations recorded this group, in reverse order. Upserts come
-                // off first so RollbackMatch only has to put maker fills back.
+                // off first so RollbackMatch only has to put maker fills back. Bundle's
+                // server-side rollback already reverted the DB.
                 for (int j = outcome.Records.Count - 1; j >= 0; j--)
                 {
                     var rec = outcome.Records[j];
@@ -812,9 +809,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
         string failureReason,
         CancellationToken ct)
     {
+        // Phase 2: recovery is best-effort; without HTTP transactions the per-position /
+        // per-fund / per-order updates land as separate calls. A partial failure leaves
+        // the engine logging the error and returning the recovery failure to the caller.
         try
         {
-            await using var recoveryTx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
                 var toUpdate = new List<Order>(groupItems.Count);
@@ -889,12 +888,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }
                 if (toUpdate.Count > 0)
                     await _db.UpdateAllAsync(toUpdate, ct).ConfigureAwait(false);
-
-                await recoveryTx.CommitAsync(ct).ConfigureAwait(false);
             }
             catch
             {
-                await recoveryTx.RollbackAsync(ct).ConfigureAwait(false);
                 throw;
             }
         }
@@ -1009,10 +1005,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
             list.Add(o);
         }
 
-        // One root tx around the in-memory book updates and the DB write. Each book lock is
-        // taken sequentially — they're independent SemaphoreSlims, but the underlying SQLite
-        // connection serializes anyway, so parallel acquire would buy nothing.
-        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // Phase 2: book updates + the single DB UpdateAll cancel write. The UpdateAll is
+        // one HTTP call (atomic server-side); no outer tx wrapping is possible.
         try
         {
             foreach (var kv in groups)
@@ -1037,11 +1031,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
 
             await _db.UpdateAllAsync(liveToCancel, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
             _logger.LogError(ex, "CancelOrdersBatchAsync: tx failed for {Count} orders", liveToCancel.Count);
 
             // Restore book state for the orders we removed; status mutation on the in-memory

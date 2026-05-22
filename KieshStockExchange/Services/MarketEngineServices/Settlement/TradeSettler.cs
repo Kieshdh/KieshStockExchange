@@ -1,6 +1,8 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -12,17 +14,19 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 internal sealed class TradeSettler
 {
     private readonly IDataBaseService _db;
+    private readonly IEngineCommandClient _engineCmd;
     private readonly IAccountsCache _accounts;
     private readonly IReservationLedger _ledger;
     private readonly ILogger<TradeSettler> _logger;
     private readonly SellerCapacityValidator _validator;
     private readonly ConservationProbe _probe;
 
-    public TradeSettler(IDataBaseService db, IAccountsCache accounts,
+    public TradeSettler(IDataBaseService db, IEngineCommandClient engineCmd, IAccountsCache accounts,
         IReservationLedger ledger, ILogger<TradeSettler> logger,
         SellerCapacityValidator validator, ConservationProbe probe)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _engineCmd = engineCmd ?? throw new ArgumentNullException(nameof(engineCmd));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -58,21 +62,19 @@ internal sealed class TradeSettler
 
         var scope = new TradeBatchScope();
 
-        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // Phase 2: SettleNoTxAsync persists via SettleTradeGroup bundle. No outer tx
+        // — the bundle is atomic server-side. On any error, restore snapshots so cache
+        // stays consistent with the (rolled-back) DB state.
         try
         {
             var (err, rejected) = await SettleNoTxAsync(trades, ordersById, scope, ct)
                 .ConfigureAwait(false);
             if (err != null)
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
                 RestoreSnapshots(ordersById, scope);
                 return (err, Array.Empty<RejectedFill>());
             }
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-
-            // Register new positions only after commit
             foreach (var pos in scope.PendingNewPositions.Values)
                 _accounts.TrackNewPosition(pos);
 
@@ -80,7 +82,6 @@ internal sealed class TradeSettler
         }
         catch (Exception ex)
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
             RestoreSnapshots(ordersById, scope);
             _logger.LogError(ex, "SettleTradesAsync failed");
             return (OrderResultFactory.OperationFailed($"SettleTrades failed: {ex.Message}"),
@@ -409,21 +410,27 @@ internal sealed class TradeSettler
         // Conservation invariant: fund + share deltas must sum to 0 per ccy / stock
         _probe.Check(fundMap, fundSnapshots, posMap, posSnapshots, accepted);
 
-        // DB writes on the caller's ambient root tx — accepted only
+        // Phase 2: bundle the entire batch (trades + order updates + fund updates +
+        // position updates + new positions) into one SettleTradeGroup HTTP call. The
+        // server wraps the writes in one RunInTransactionAsync; assigned TransactionIds
+        // and PositionIds come back on the response and are applied to the source lists
+        // by SQLite-net's existing post-insert behaviour (server-side).
         for (int i = 0; i < accepted.Count; i++)
         {
             var t = accepted[i];
             _ledger.LogTransaction(t.BuyerId, t.SellerId, t.StockId, t.CurrencyType,
                 t.BuyOrderId, t.SellOrderId, t.Quantity, t.Price, t.TotalAmount);
         }
-        await _db.InsertAllAsync(accepted, ct).ConfigureAwait(false);
-        await _db.UpdateAllAsync(ordersById.Values, ct).ConfigureAwait(false);
-        if (loadedFunds.Count > 0)
-            await _db.UpdateAllAsync(loadedFunds, ct).ConfigureAwait(false);
-        if (loadedPositions.Count > 0)
-            await _db.UpdateAllAsync(loadedPositions, ct).ConfigureAwait(false);
-        if (newPositionsThisCall.Count > 0)
-            await _db.InsertAllAsync(newPositionsThisCall, ct).ConfigureAwait(false);
+
+        var ordersList = new List<Order>(ordersById.Values);
+        await _engineCmd.SettleTradeGroupAsync(
+            new SettleTradeGroupCommand(
+                AcceptedTrades:      new List<Transaction>(accepted),
+                OrdersToUpdate:      ordersList,
+                FundsToUpdate:       loadedFunds,
+                PositionsToUpdate:   loadedPositions,
+                NewPositions:        newPositionsThisCall),
+            ct).ConfigureAwait(false);
 
         return (null, rejected);
     }

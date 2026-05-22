@@ -1,10 +1,10 @@
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
@@ -17,11 +17,12 @@ public sealed class SettlementEngine : ISettlementEngine
     private readonly OrderModifier _orderModifier;
     private readonly TradeSettler _tradeSettler;
 
-    public SettlementEngine(IDataBaseService db, IAccountsCache accounts,
+    public SettlementEngine(IDataBaseService db, IEngineCommandClient engineCmd, IAccountsCache accounts,
         IReservationLedger ledger, IOrderRegistry registry, ILogger<SettlementEngine> logger,
         ILoggerFactory loggerFactory, IOptions<SeparatorLoggerOptions> loggerOptions)
     {
         if (db is null) throw new ArgumentNullException(nameof(db));
+        if (engineCmd is null) throw new ArgumentNullException(nameof(engineCmd));
         if (accounts is null) throw new ArgumentNullException(nameof(accounts));
         if (ledger is null) throw new ArgumentNullException(nameof(ledger));
         if (registry is null) throw new ArgumentNullException(nameof(registry));
@@ -36,10 +37,10 @@ public sealed class SettlementEngine : ISettlementEngine
         var validator = new SellerCapacityValidator(SepLogger<SellerCapacityValidator>());
         var probe     = new ConservationProbe      (SepLogger<ConservationProbe>());
 
-        _orderSettler   = new OrderSettler  (db, accounts, ledger, registry, SepLogger<OrderSettler>());
+        _orderSettler   = new OrderSettler  (engineCmd, accounts, ledger, registry, SepLogger<OrderSettler>());
         _orderCanceller = new OrderCanceller(db, accounts, ledger, registry, SepLogger<OrderCanceller>());
-        _orderModifier  = new OrderModifier (db, accounts, ledger, SepLogger<OrderModifier>());
-        _tradeSettler   = new TradeSettler  (db, accounts, ledger, SepLogger<TradeSettler>(),
+        _orderModifier  = new OrderModifier (db, engineCmd, accounts, ledger, SepLogger<OrderModifier>());
+        _tradeSettler   = new TradeSettler  (db, engineCmd, accounts, ledger, SepLogger<TradeSettler>(),
                                              validator, probe);
     }
     #endregion
