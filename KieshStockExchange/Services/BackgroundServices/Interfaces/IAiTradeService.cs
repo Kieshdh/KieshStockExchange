@@ -168,6 +168,13 @@ public interface IAiTradeService
     IReadOnlyCollection<int> GetAiUserIds();
 
     /// <summary>
+    /// Bounded ring of activity samples — one per trading tick — recording
+    /// the online-bot count + active cap. Survives bot stop/restart so the
+    /// dashboard can plot a continuous timeline of scaler decisions.
+    /// </summary>
+    IReadOnlyList<BotActivitySample> GetActivitySamples();
+
+    /// <summary>
     /// Starts the background trading loop if it is not already running.
     /// Safe to call multiple times.
     /// </summary>

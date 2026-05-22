@@ -258,6 +258,39 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
     public IReadOnlyCollection<int> GetAiUserIds() => _ctx.AiUsersByUserId.Keys.ToArray();
 
+    public IReadOnlyList<BotActivitySample> GetActivitySamples()
+    {
+        lock (_activitySamplesLock) return _activitySamples.ToArray();
+    }
+
+    // Cadence: one sample every 10s. Independent of TradeInterval so the chart
+    // reads consistently even if a future cadence change makes ticks much
+    // faster/slower. 8640 samples × 10s = 24h of history — matches the longest
+    // dashboard range.
+    private const int MaxActivitySamples = 8640;
+    private static readonly TimeSpan ActivitySampleInterval = TimeSpan.FromSeconds(10);
+    private DateTime _lastActivitySampleUtc = DateTime.MinValue;
+    private readonly object _activitySamplesLock = new();
+    private readonly Queue<BotActivitySample> _activitySamples = new();
+
+    private void RecordActivitySample()
+    {
+        var now = TimeHelper.NowUtc();
+        if (now - _lastActivitySampleUtc < ActivitySampleInterval) return;
+        _lastActivitySampleUtc = now;
+
+        var sample = new BotActivitySample(
+            TimestampUtc: now,
+            OnlineBots:   OnlineBotCount,
+            ActiveBotCap: ActiveBotCap ?? OnlineBotCount,
+            LoadedBots:   LoadedBotCount);
+        lock (_activitySamplesLock)
+        {
+            _activitySamples.Enqueue(sample);
+            while (_activitySamples.Count > MaxActivitySamples) _activitySamples.Dequeue();
+        }
+    }
+
     public async Task StartBotAsync(CancellationToken ct = default)
     {
         if (_runner != null && !_runner.IsCompleted) return;
@@ -343,6 +376,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
             RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
             Interlocked.Increment(ref _tickCount);
+            RecordActivitySample();
 
             // The scaler may move the cap based on the fresh EWMA. SetActiveBotCap
             // fires StatsChanged itself, so only emit the unchanged event when the
