@@ -94,7 +94,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
             if (settleErr != null)
             {
                 RollbackMatch(incoming, result, book);
-                throw new InvalidOperationException(settleErr.ToString());
+                throw new InvalidOperationException(
+                    $"Settlement failed for order #{incoming.OrderId} (user {incoming.UserId}, " +
+                    $"stock {incoming.StockId}, {incoming.CurrencyType}): {settleErr.ErrorMessage ?? settleErr.Status.ToString()}");
             }
 
             // Cancel makers that couldn't honor their fills + roll back their per-fill effect.
