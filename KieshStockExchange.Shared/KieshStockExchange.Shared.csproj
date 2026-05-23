@@ -7,4 +7,15 @@
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
 
+	<ItemGroup>
+		<!-- LiveQuote and other UI-bindable data types use [ObservableProperty] -->
+		<!-- source-gen. Source-gen attributes are needed at compile time on both -->
+		<!-- the client (binds to INPC) and the server (constructs/mutates the -->
+		<!-- LiveQuote and sends it over SignalR). -->
+		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+		<!-- CandleAggregator (and other engine-shape helpers) take ILogger<T>. -->
+		<!-- Abstractions-only — no logging implementation pulled in. -->
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.8" />
+	</ItemGroup>
+
 </Project>

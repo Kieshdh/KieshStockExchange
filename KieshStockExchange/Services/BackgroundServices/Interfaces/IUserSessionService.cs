@@ -50,29 +50,7 @@ public interface IUserSessionService
 
 }
 
-/// <summary>
-/// Immutable snapshot of the current session state.
-/// All fields are simple value types so reads are cheap and thread-safe.
-/// </summary>
-public sealed record SessionSnapshot(
-    int UserId,
-    string UserName,
-    string FullName,
-    bool IsAuthenticated,
-    bool IsAdmin,
-    bool KeepLoggedIn,
-    CurrencyType BaseCurrency,
-    CandleResolution DefaultCandleResolution,
-    int? CurrentStockId)
-{
-    public static SessionSnapshot CreateDefault() => new(
-        UserId: 0,
-        UserName: string.Empty,
-        FullName: string.Empty,
-        IsAuthenticated: false,
-        IsAdmin: false,
-        KeepLoggedIn: false,
-        BaseCurrency: CurrencyType.USD,
-        DefaultCandleResolution: CandleResolution.Default,
-        CurrentStockId: null);
-}
+// SessionSnapshot record moved to KieshStockExchange.Shared/Services/BackgroundServices/
+// during Phase 3 Step 4 so the server-side MarketDataService can reference it.
+// The IUserSessionService interface above stays client-only — it covers UI session
+// lifecycle (StartBots, ClearSession, etc.) which has no server-side analogue.

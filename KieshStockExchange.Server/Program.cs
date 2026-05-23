@@ -3,6 +3,8 @@ using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
@@ -61,8 +63,26 @@ builder.Services.AddSingleton<IReservationLedger, ReservationLedger>();
 builder.Services.AddSingleton<IMatchingEngine, MatchingEngine>();
 builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
 builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();
-// OrderExecutionService, OrderEntryService, EngineAdminService land in Step 4
-// alongside IMarketDataService (their construction depends on it).
+
+// Phase 3 Step 4: market data + candles + FX + lookups move server-side.
+// IDispatcher gets a no-op impl — server has no UI thread to marshal to.
+builder.Services.AddSingleton<IDispatcher, NoopDispatcher>();
+builder.Services.AddSingleton<IStockService, StockService>();
+builder.Services.AddSingleton<IMarketLookupService, MarketLookupService>();
+builder.Services.AddSingleton<ICandleService, CandleService>();
+builder.Services.AddSingleton<IMarketDataService, MarketDataService>();
+builder.Services.AddSingleton<IFxRateService, FxRateService>();
+
+// IOrderCacheService is the engine's UI-notify hook. Client keeps its INPC impl;
+// server uses NoopOrderCacheService until Step 6 swaps it for a SignalR-pushing impl.
+builder.Services.AddSingleton<IOrderCacheService, NoopOrderCacheService>();
+
+// Engine orchestration — fully wired now that IMarketDataService is available.
+builder.Services.AddSingleton<IOrderExecutionService, OrderExecutionService>();
+builder.Services.AddSingleton<IOrderEntryService, OrderEntryService>();
+// EngineAdminService still needs an IAuthService server impl (admin endpoints
+// gate on IsAdmin). Deferred until admin auth lands; the file is here so the
+// move is complete, just not yet resolvable via DI.
 
 // Phase 3 bot-loop host. Stub until Step 5 wires it to IAiTradeService.
 builder.Services.AddHostedService<BotLoopHostedService>();
