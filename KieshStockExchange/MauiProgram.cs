@@ -118,8 +118,13 @@ public static class MauiProgram
         // Market engine
         builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
         builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();
-        builder.Services.AddSingleton<IOrderExecutionService, OrderExecutionService>();
-        builder.Services.AddSingleton<IOrderEntryService, OrderEntryService>();
+        // Phase 3 Step 7: order entry + execution swap from in-process engine to
+        // HTTP proxies. The server's OrderController handles /api/orders/* with
+        // its in-process engine; the client just serializes requests. The local
+        // OrderExecutionService / OrderEntryService classes still compile but
+        // are unreferenced — pending deletion in a follow-up cleanup.
+        builder.Services.AddSingleton<IOrderExecutionService, ApiOrderExecutionService>();
+        builder.Services.AddSingleton<IOrderEntryService, ApiOrderEntryClient>();
         builder.Services.AddSingleton<IEngineAdminService, EngineAdminService>();
         // Service helpers
         builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
