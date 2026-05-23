@@ -1,27 +1,37 @@
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using Microsoft.Extensions.Hosting;
 
 namespace KieshStockExchange.Server.Services.HostedServices;
 
-// Phase 3 Step 1: stub only. Step 5 wires this to IAiTradeService.StartBotAsync /
-// StopBotAsync once the bot services move server-side. Lives here from the start
-// so DI registration in Program.cs is in place before the bot-loop dependency arrives.
+// Phase 3 Step 5: drives the bot loop from server lifetime. Gated on
+// Bots:AutoStart — defaults to false so the client still owns the bot loop until
+// Step 7 deletes the client copies. Flipping the config flag to true and
+// restarting the server is the operational toggle.
 public sealed class BotLoopHostedService : IHostedService
 {
+    private readonly IAiTradeService _bots;
     private readonly IConfiguration _config;
     private readonly ILogger<BotLoopHostedService> _logger;
 
-    public BotLoopHostedService(IConfiguration config, ILogger<BotLoopHostedService> logger)
+    public BotLoopHostedService(IAiTradeService bots, IConfiguration config,
+        ILogger<BotLoopHostedService> logger)
     {
+        _bots = bots;
         _config = config;
         _logger = logger;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        var autoStart = _config.GetValue("Bots:AutoStart", true);
-        _logger.LogInformation("BotLoopHostedService: AutoStart={AutoStart}. Bot loop wiring lands in Phase 3 Step 5.", autoStart);
-        return Task.CompletedTask;
+        var autoStart = _config.GetValue("Bots:AutoStart", false);
+        if (!autoStart)
+        {
+            _logger.LogInformation("BotLoopHostedService: Bots:AutoStart=false, leaving bot loop dormant.");
+            return Task.CompletedTask;
+        }
+        _logger.LogInformation("BotLoopHostedService: starting bot loop (Bots:AutoStart=true).");
+        return _bots.StartBotAsync(cancellationToken);
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken cancellationToken) => _bots.StopBotAsync();
 }

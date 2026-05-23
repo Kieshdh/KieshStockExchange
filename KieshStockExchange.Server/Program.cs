@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
+using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
@@ -10,6 +12,8 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
+using KieshStockExchange.Services.UserServices;
+using KieshStockExchange.Services.UserServices.Interfaces;
 using Microsoft.Extensions.Options;
 using SQLitePCL;
 
@@ -77,14 +81,27 @@ builder.Services.AddSingleton<IFxRateService, FxRateService>();
 // server uses NoopOrderCacheService until Step 6 swaps it for a SignalR-pushing impl.
 builder.Services.AddSingleton<IOrderCacheService, NoopOrderCacheService>();
 
+// Server-side IAuthService is a no-op until Phase 5 adds JWT-derived identity.
+// Bots run in BeginSystemScope; admin endpoints will get a real auth path later.
+builder.Services.AddSingleton<IAuthService, NoopAuthService>();
+
+// UserPortfolioService moves server-side now that bots (which deposit via this
+// service) live here. The pre-Phase-2-Step-6 version is wired — it calls
+// _db.RunInTransactionAsync directly instead of the IEngineCommandClient bundles.
+builder.Services.AddSingleton<IUserPortfolioService, UserPortfolioService>();
+
 // Engine orchestration — fully wired now that IMarketDataService is available.
 builder.Services.AddSingleton<IOrderExecutionService, OrderExecutionService>();
 builder.Services.AddSingleton<IOrderEntryService, OrderEntryService>();
-// EngineAdminService still needs an IAuthService server impl (admin endpoints
-// gate on IsAdmin). Deferred until admin auth lands; the file is here so the
-// move is complete, just not yet resolvable via DI.
+// EngineAdminService is registered now that NoopAuthService satisfies its dep.
+builder.Services.AddSingleton<IEngineAdminService, EngineAdminService>();
 
-// Phase 3 bot-loop host. Stub until Step 5 wires it to IAiTradeService.
+// Phase 3 Step 5: bot loop + helpers move server-side.
+builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
+
+// Phase 3 bot-loop host. Starts AiTradeService.StartBotAsync when
+// Bots:AutoStart is true. Default is false in appsettings.json so the client
+// still owns the bot loop until Step 7 deletes the client side.
 builder.Services.AddHostedService<BotLoopHostedService>();
 
 var app = builder.Build();
