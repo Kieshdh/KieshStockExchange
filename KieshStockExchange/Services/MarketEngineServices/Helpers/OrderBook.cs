@@ -849,11 +849,4 @@ public sealed record BookSnapshot
     public List<PriceLevel> Buys { get; init; } = new();
     public List<PriceLevel> Sells { get; init; } = new();
 }
-public sealed record BookFixReport(
-    int RemovedEmptyPriceLevelsBuys, int RemovedEmptyPriceLevelsSells,
-    int RemovedOrphanedOrdersBuys, int RemovedOrphanedOrdersSells,
-    int RemovedInvalidOrdersBuys, int RemovedInvalidOrdersSells,
-    int RemovedNonOpenLimitBuys, int RemovedNonOpenLimitSells,
-    int FixedIndexMismatchesBuys, int FixedIndexMismatchesSells
-);
 
