@@ -110,6 +110,13 @@ builder.Services.AddHostedService<MarketHubBroadcaster>();
 
 var app = builder.Build();
 
+// Cold-load the stock catalogue before the first request hits OrderValidator —
+// otherwise IStockService.TryGetById returns false for every stock and the
+// validator rejects every order with "Invalid stock ID". The client app does
+// this implicitly via MauiProgram lifecycle hooks; on the server we trigger it
+// here once at boot.
+await app.Services.GetRequiredService<IStockService>().EnsureLoadedAsync().ConfigureAwait(false);
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
