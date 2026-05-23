@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using KieshStockExchange.Server.Hubs;
+using KieshStockExchange.Server.Services.HostedServices;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using SQLitePCL;
@@ -30,10 +32,17 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 // OpenAPI surface for dev. No auth wiring yet — Phase 5 handles JWT.
 builder.Services.AddOpenApi();
 
+// SignalR (Phase 3): one hub at /hubs/market with three group families
+// (quotes:{stockId}:{currency}, orders:{userId}, portfolio:{userId}).
+builder.Services.AddSignalR();
+
 // Persistence — owns the SQLite connection for the entire server process. Singleton:
 // DBService maintains AsyncLocal transaction stacks + a writer-serialising semaphore,
 // both of which need a single instance to function correctly.
 builder.Services.AddSingleton<IDataBaseService, DBService>();
+
+// Phase 3 bot-loop host. Stub until Step 5 wires it to IAiTradeService.
+builder.Services.AddHostedService<BotLoopHostedService>();
 
 var app = builder.Build();
 
@@ -47,5 +56,6 @@ if (app.Environment.IsDevelopment())
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
 
 app.MapControllers();
+app.MapHub<MarketHub>("/hubs/market");
 
 app.Run();
