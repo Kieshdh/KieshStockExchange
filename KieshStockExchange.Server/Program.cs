@@ -78,8 +78,9 @@ builder.Services.AddSingleton<IMarketDataService, MarketDataService>();
 builder.Services.AddSingleton<IFxRateService, FxRateService>();
 
 // IOrderCacheService is the engine's UI-notify hook. Client keeps its INPC impl;
-// server uses NoopOrderCacheService until Step 6 swaps it for a SignalR-pushing impl.
-builder.Services.AddSingleton<IOrderCacheService, NoopOrderCacheService>();
+// server uses SignalROrderCacheService which forwards NotifyOrdersMutated
+// to each user's orders:{userId} SignalR group.
+builder.Services.AddSingleton<IOrderCacheService, SignalROrderCacheService>();
 
 // Server-side IAuthService is a no-op until Phase 5 adds JWT-derived identity.
 // Bots run in BeginSystemScope; admin endpoints will get a real auth path later.
@@ -103,6 +104,9 @@ builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
 // Bots:AutoStart is true. Default is false in appsettings.json so the client
 // still owns the bot loop until Step 7 deletes the client side.
 builder.Services.AddHostedService<BotLoopHostedService>();
+
+// Phase 3 Step 6: subscribe to engine events and push them onto SignalR groups.
+builder.Services.AddHostedService<MarketHubBroadcaster>();
 
 var app = builder.Build();
 
