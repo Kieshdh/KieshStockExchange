@@ -76,6 +76,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // Matching & settlement under book lock
         List<Transaction> trades = new();
         HashSet<int>? affectedUsers = null;
+        OrderResult? settlementFailure = null;
 
         // Why the book lock is held across the DB settlement call (not released between
         // Match and SettleTrades): MatchingEngine.Match mutates the book in-memory.
@@ -93,10 +94,19 @@ public sealed class OrderExecutionService : IOrderExecutionService
             var (settleErr, rejected) = await _settlement.SettleTradesAsync(result.Fills, ordersById, ct).ConfigureAwait(false);
             if (settleErr != null)
             {
+                // Surface the failure to the caller as a structured OrderResult instead
+                // of an unhandled exception that 500s the controller. Drift on a maker
+                // means the maker's reservations got out of sync with the open book —
+                // see Wave 8 §8.9 for the leak hunt. Cancel the offending maker so it
+                // stops poisoning future match cycles, then exit the book lock.
                 RollbackMatch(incoming, result, book);
-                throw new InvalidOperationException(
-                    $"Settlement failed for order #{incoming.OrderId} (user {incoming.UserId}, " +
-                    $"stock {incoming.StockId}, {incoming.CurrencyType}): {settleErr.ErrorMessage ?? settleErr.Status.ToString()}");
+                _logger.LogWarning(
+                    "Settlement drift on order #{OrderId} (user {UserId}, stock {StockId}, {Currency}): {Reason}",
+                    incoming.OrderId, incoming.UserId, incoming.StockId, incoming.CurrencyType,
+                    settleErr.ErrorMessage ?? settleErr.Status.ToString());
+                settlementFailure = OrderResultFactory.OperationFailed(
+                    $"Settlement failed: {settleErr.ErrorMessage ?? settleErr.Status.ToString()}");
+                return;
             }
 
             // Cancel makers that couldn't honor their fills + roll back their per-fill effect.
@@ -151,6 +161,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
 
         }).ConfigureAwait(false);
+
+        if (settlementFailure is not null)
+            return settlementFailure;
 
         // Publish ticks to market data (outside lock)
         if (trades.Count > 0)
