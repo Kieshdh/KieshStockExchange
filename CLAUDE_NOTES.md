@@ -627,11 +627,39 @@ The core idea: a Filled or Cancelled order from yesterday's bot session has zero
 - Decide cutoff default (1 day vs. 7 days vs. configurable per environment).
 - Land 8.7 and the joint piece of 8.2 in one PR — they're coupled.
 
+### 8.8 Phase 2 loose ends — ExcelImportService seed endpoint
+`ExcelImportService.CheckAndAddDatabases` and the four sibling import routines still wrap their seed flow in `_db.RunInTransactionAsync(...)`. After Phase 2 that throws `NotSupportedException` against `ApiDataBaseService` — so an empty target DB can't be bootstrapped via the normal startup path; the dev environment currently relies on the pre-existing 4.1 GB localdb.
+
+Approach: carve out one server-side endpoint per seed flow (or one omnibus `POST /api/admin/seed/excel?kind=...`) that takes the workbook bytes (or a server-resident path) as the payload and runs `_db.RunInTransactionAsync` server-side around the existing reset-table + insert-all sequence. Client `ExcelImportService` becomes a thin trigger that POSTs the file once and waits.
+
+Sub-steps:
+- Inventory the five `RunInTransactionAsync` sites in `ExcelImportService` (lines ~138, 196, 328, 451, 551). Each one is reset + insert-all for a different domain (users / stocks / listings / etc.). Confirm shape with `grep`.
+- Add a `SeedController` on the server that accepts `multipart/form-data` for the workbook and dispatches to the matching `IExcelImportService` method (or relocate the parsing entirely server-side and just pass `{kind, year}`).
+- Update the client to upload + trigger instead of running the import locally.
+- Smoke-test against a fresh empty DB.
+
+Small task, ~2-3 hours. Independent of Phase 3 — can land before, during, or after.
+
+### 8.9 Phase 2 loose ends — reservation phantom-leak hunt
+The `ReservationAuditor` reports growing phantom reservations during long bot sessions (~$2.5M phantom after 20 min, ~$3.2M after 25 min in the 22 May run). Top offenders consistently show "1 open buy" against a Fund.ReservedBalance ~2x the legitimate amount.
+
+Two hypotheses (one of these is the cause, possibly both):
+1. **CancelOrdersBatchAsync gap.** After Phase 2 Step 6 this path drops its outer tx and writes cancelled `Order` rows via `_db.UpdateAllAsync(liveToCancel)` — but the per-order `Fund.UnreserveFunds` call doesn't happen on this batch path. Compare to `OrderCanceller.CancelAsync` which does release explicitly. If batch cancel was relying on a downstream path that's no longer reached, this is a Step 6 regression.
+2. **Pre-existing leak.** `project_market_engine_status.md` notes "reservation leaks" as a known remaining issue from the engine rewrite. The auditor may simply be surfacing what was always there at a more visible cadence.
+
+Approach:
+- Read `OrderExecutionService.CancelOrdersBatchAsync` end-to-end and trace the Fund.ReservedBalance write path on cancel. Compare against `OrderCanceller.CancelAsync`.
+- Pull the offending users (e.g. 2221, 2916, 2469 from the 22 May run) out of the reservation ledger CSV and walk their order history to identify the exact mutation that left a residue.
+- Decide whether to patch in the cancel path or write a remediation pass in `ReservationAuditor` that releases the phantom and logs a counter.
+
+Defer until after Phase 3 unless the phantom growth crosses into "bots can't trade" territory.
+
 ### Order of attack
 - **8.1 first** (WAL hygiene). Stops the bleed without touching data. Cheap, low-risk, defensible mid-migration if needed.
 - **8.6 next** (telemetry). Gives the data to make 8.2/8.3 thresholds calibrated rather than guessed.
 - **8.3 before 8.2/8.7.** Sub-minute candles are pure noise past a few hours and have no downstream consumers; safe quick win.
 - **8.7 + 8.2 together, last.** The biggest impact but touches the most semantics — needs the consumer audit and the joint-prune ordering nailed down before either can land safely. Sequencing one without the other introduces FK dangle.
+- **8.8 and 8.9** are independent loose-ends, schedulable opportunistically when Phase 3 leaves a gap.
 
 ---
 
