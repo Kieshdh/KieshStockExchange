@@ -3,6 +3,12 @@ using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
+using Microsoft.Extensions.Options;
 using SQLitePCL;
 
 // Make the bundled e_sqlite3 native library loadable on every TFM the server runs on.
@@ -40,6 +46,23 @@ builder.Services.AddSignalR();
 // DBService maintains AsyncLocal transaction stacks + a writer-serialising semaphore,
 // both of which need a single instance to function correctly.
 builder.Services.AddSingleton<IDataBaseService, DBService>();
+
+// SeparatorLogger options — engine helpers construct SeparatorLogger<T> inline.
+builder.Services.Configure<SeparatorLoggerOptions>(_ => { });
+
+// Phase 3 Step 2: engine state holders + settlement layer move server-side.
+// Singletons because OrderRegistry / AccountsCache / OrderBookCache hold in-memory
+// state shared across all users for the lifetime of the process, and the matching
+// + settlement classes are stateless per call but share these caches.
+builder.Services.AddSingleton<IOrderRegistry, OrderRegistry>();
+builder.Services.AddSingleton<IAccountsCache, AccountsCache>();
+builder.Services.AddSingleton<IOrderBookCache, OrderBookCache>();
+builder.Services.AddSingleton<IReservationLedger, ReservationLedger>();
+builder.Services.AddSingleton<IMatchingEngine, MatchingEngine>();
+builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
+builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();
+// OrderExecutionService, OrderEntryService, EngineAdminService land in Step 4
+// alongside IMarketDataService (their construction depends on it).
 
 // Phase 3 bot-loop host. Stub until Step 5 wires it to IAiTradeService.
 builder.Services.AddHostedService<BotLoopHostedService>();
