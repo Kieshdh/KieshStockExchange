@@ -1049,9 +1049,20 @@ public sealed class OrderExecutionService : IOrderExecutionService
             list.Add(o);
         }
 
-        // One root tx around the in-memory book updates and the DB write. Each book lock is
-        // taken sequentially — they're independent SemaphoreSlims, but the underlying SQLite
-        // connection serializes anyway, so parallel acquire would buy nothing.
+        // Reservation releases land per-order inside the same gate scope the batch
+        // already holds (we acquired user gates via AcquireUserGatesAsync above), so
+        // we can't call OrderCanceller.CancelAsync — it would try to re-acquire the
+        // same SemaphoreSlim and deadlock. Inline the same Fund/Position release
+        // logic OrderCanceller uses, then batch-persist the touched rows alongside
+        // the cancelled orders inside one root tx.
+        //
+        // This is the §8.9 fix: pre-fix, the batch path marked orders Cancelled
+        // without releasing the reservation, so every prune left phantom Reserved
+        // on the user's Fund/Position. Drift accumulated and surfaced as the
+        // "Insufficient reserved balance" errors during settlement.
+        var touchedFunds = new Dictionary<(int UserId, CurrencyType Ccy), Fund>();
+        var touchedPositions = new Dictionary<(int UserId, int StockId), Position>();
+
         await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
@@ -1065,19 +1076,34 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     {
                         var dbRow = list[i];
                         book.RemoveById(dbRow.OrderId);
-                        // Also flip the canonical so the registry reflects the cancel —
-                        // otherwise downstream readers (reconciler, UI) see an Open
-                        // canonical with CurrentReservation=0 after the release below.
-                        if (_registry.TryGet(dbRow.OrderId, out var canon) && canon.IsOpen)
-                            canon.Cancel();
+                        // Resolve to canonical so we read the live CurrentBuyReservation /
+                        // CurrentSellReservedQty; the DB-loaded copy carries zero in those
+                        // runtime-only fields.
+                        Order target = dbRow;
+                        if (_registry.TryGet(dbRow.OrderId, out var canon))
+                        {
+                            target = canon;
+                            if (canon.IsOpen) canon.Cancel();
+                        }
                         if (dbRow.IsOpen) dbRow.Cancel();
+
+                        ReleaseReservationInline(target, touchedFunds, touchedPositions);
                     }
                     return Task.CompletedTask;
                 }).ConfigureAwait(false);
             }
 
             await _db.UpdateAllAsync(liveToCancel, ct).ConfigureAwait(false);
+            if (touchedFunds.Count > 0)
+                await _db.UpdateAllAsync(touchedFunds.Values, ct).ConfigureAwait(false);
+            if (touchedPositions.Count > 0)
+                await _db.UpdateAllAsync(touchedPositions.Values, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
+
+            // Drop terminal orders from the registry after the tx commits so the
+            // reconciler stops seeing them. Reservation is already 0 by this point.
+            for (int i = 0; i < liveToCancel.Count; i++)
+                _registry.Remove(liveToCancel[i].OrderId);
         }
         catch (Exception ex)
         {
@@ -1499,6 +1525,74 @@ public sealed class OrderExecutionService : IOrderExecutionService
             snap.Order.AmountFilled = snap.OriginalAmountFilled;
             snap.Order.Status = Order.Statuses.Open;
             book.RollbackMakerFill(snap.Order, filledDelta, snap.WasRemovedFromBook);
+        }
+    }
+
+    // Wave 8.9 fix: mirror OrderCanceller's ReleaseSell/ReleaseBuy logic for the
+    // batch-cancel path. CancelOrdersBatchAsync holds per-user gates already, so we
+    // can't delegate to OrderCanceller.CancelAsync (it would re-acquire and
+    // deadlock). Mutate the same Fund/Position instances the AccountsCache returns;
+    // collecting them by key dedupes per (user, currency) and (user, stockId) so the
+    // batch UpdateAllAsync writes each row once.
+    private void ReleaseReservationInline(
+        Order order,
+        Dictionary<(int UserId, CurrencyType Ccy), Fund> touchedFunds,
+        Dictionary<(int UserId, int StockId), Position> touchedPositions)
+    {
+        if (order.IsSellOrder)
+        {
+            var qty = order.CurrentSellReservedQty;
+            if (qty > 0)
+            {
+                var pos = _accounts.GetPosition(order.UserId, order.StockId);
+                if (pos is not null)
+                {
+                    var toRelease = Math.Min(qty, pos.ReservedQuantity);
+                    if (toRelease > 0)
+                    {
+                        var posResBefore = pos.ReservedQuantity;
+                        pos.UnreserveStock(toRelease);
+                        pos.UpdatedAt = TimeHelper.NowUtc();
+                        _ledger.LogPosition(order.UserId, order.StockId, order.OrderId,
+                            "CancelBatch:ReleaseSell", toRelease, posResBefore, pos.ReservedQuantity,
+                            pos.Quantity, pos.Quantity);
+                        var orderSellBefore = order.CurrentSellReservedQty;
+                        var released = order.ReleaseSellReservation();
+                        _ledger.LogOrder(order.UserId, order.OrderId, "CancelBatch:ReleaseSell",
+                            released, order.CurrentBuyReservation, order.CurrentBuyReservation,
+                            orderSellBefore, order.CurrentSellReservedQty);
+                        touchedPositions[(order.UserId, order.StockId)] = pos;
+                    }
+                }
+            }
+        }
+        else if (order.IsBuyOrder)
+        {
+            var amount = order.CurrentBuyReservation;
+            if (amount > 0m)
+            {
+                var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
+                if (fund is not null)
+                {
+                    var toRelease = Math.Min(amount, fund.ReservedBalance);
+                    if (toRelease > 0m)
+                    {
+                        var resB = fund.ReservedBalance;
+                        var totB = fund.TotalBalance;
+                        fund.UnreserveFunds(toRelease);
+                        fund.UpdatedAt = TimeHelper.NowUtc();
+                        var orderBuyBefore = order.CurrentBuyReservation;
+                        var released = order.ReleaseBuyReservation();
+                        _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
+                            "CancelBatch:ReleaseBuy", toRelease, resB, fund.ReservedBalance,
+                            totB, fund.TotalBalance);
+                        _ledger.LogOrder(order.UserId, order.OrderId, "CancelBatch:ReleaseBuy",
+                            released, orderBuyBefore, order.CurrentBuyReservation,
+                            order.CurrentSellReservedQty, order.CurrentSellReservedQty);
+                        touchedFunds[(order.UserId, order.CurrencyType)] = fund;
+                    }
+                }
+            }
         }
     }
 
