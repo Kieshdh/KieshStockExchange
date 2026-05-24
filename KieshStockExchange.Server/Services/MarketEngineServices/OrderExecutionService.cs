@@ -97,15 +97,40 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 // Surface the failure to the caller as a structured OrderResult instead
                 // of an unhandled exception that 500s the controller. Drift on a maker
                 // means the maker's reservations got out of sync with the open book —
-                // see Wave 8 §8.9 for the leak hunt. Cancel the offending maker so it
-                // stops poisoning future match cycles, then exit the book lock.
+                // see Wave 8 §8.9 for the leak hunt. Cancel any maker order that
+                // belongs to the drifted user so the book heals itself.
                 RollbackMatch(incoming, result, book);
+                var msg = settleErr.ErrorMessage ?? settleErr.Status.ToString();
                 _logger.LogWarning(
                     "Settlement drift on order #{OrderId} (user {UserId}, stock {StockId}, {Currency}): {Reason}",
-                    incoming.OrderId, incoming.UserId, incoming.StockId, incoming.CurrencyType,
-                    settleErr.ErrorMessage ?? settleErr.Status.ToString());
+                    incoming.OrderId, incoming.UserId, incoming.StockId, incoming.CurrencyType, msg);
+
+                var driftedUserId = TryParseDriftedUserId(msg);
+                if (driftedUserId is int leakerId)
+                {
+                    // Walk this match cycle's makers; any that belong to the drifted
+                    // user gets cancelled so the next match cycle doesn't hit them again.
+                    var toCancel = new List<Order>();
+                    foreach (var kv in ordersById)
+                    {
+                        var o = kv.Value;
+                        if (o.UserId == leakerId && o.OrderId != incoming.OrderId && o.IsOpen)
+                        {
+                            book.RemoveById(o.OrderId);
+                            o.Cancel();
+                            toCancel.Add(o);
+                        }
+                    }
+                    if (toCancel.Count > 0)
+                    {
+                        await _db.UpdateAllAsync(toCancel, ct).ConfigureAwait(false);
+                        _logger.LogWarning(
+                            "Auto-cancelled {Count} drifted maker order(s) for user {UserId} on stock {StockId} {Currency}.",
+                            toCancel.Count, leakerId, incoming.StockId, incoming.CurrencyType);
+                    }
+                }
                 settlementFailure = OrderResultFactory.OperationFailed(
-                    $"Settlement failed: {settleErr.ErrorMessage ?? settleErr.Status.ToString()}");
+                    $"Settlement failed: {msg}");
                 return;
             }
 
@@ -1475,6 +1500,32 @@ public sealed class OrderExecutionService : IOrderExecutionService
             snap.Order.Status = Order.Statuses.Open;
             book.RollbackMakerFill(snap.Order, filledDelta, snap.WasRemovedFromBook);
         }
+    }
+
+    // TradeSettler emits "Reservation drift on buyer {userId}: ..." (and a matching
+    // "Savings-unreserve drift on buyer ..." variant) on Fund/Position reservation
+    // mismatch. Parse out the userId so we can auto-cancel that user's open orders
+    // on the affected book and let the leak self-heal as bots retrade. Returns null
+    // when the message shape doesn't match either prefix — keeps the auto-cancel
+    // bounded to the known drift cases.
+    private static int? TryParseDriftedUserId(string? msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return null;
+        const string p1 = "Reservation drift on buyer ";
+        const string p2 = "Savings-unreserve drift on buyer ";
+        int idx = msg.IndexOf(p1, StringComparison.Ordinal);
+        int prefixLen = p1.Length;
+        if (idx < 0)
+        {
+            idx = msg.IndexOf(p2, StringComparison.Ordinal);
+            prefixLen = p2.Length;
+            if (idx < 0) return null;
+        }
+        int start = idx + prefixLen;
+        int end = start;
+        while (end < msg.Length && msg[end] >= '0' && msg[end] <= '9') end++;
+        if (end == start) return null;
+        return int.TryParse(msg.AsSpan(start, end - start), out var id) ? id : null;
     }
     #endregion
 }
