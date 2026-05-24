@@ -292,11 +292,8 @@ internal sealed class BotSentimentService
     internal string SuggestedExportFileName =>
         $"bot_sentiment_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}";
 
-    internal async Task<string> ExportCsvAsync(string path, CancellationToken ct = default)
+    internal string BuildCsv(CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("Export path is required.", nameof(path));
-
         SentimentSample[] snapshot;
         lock (_samples) snapshot = _samples.ToArray();
 
@@ -322,8 +319,15 @@ internal sealed class BotSentimentService
               .Append('\n');
         }
 
-        await File.WriteAllTextAsync(path, sb.ToString(), ct).ConfigureAwait(false);
-        _logger.LogInformation("Exported {Count} bot sentiment rows to {Path}.", snapshot.Length, path);
+        return sb.ToString();
+    }
+
+    internal async Task<string> ExportCsvAsync(string path, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Export path is required.", nameof(path));
+        await File.WriteAllTextAsync(path, BuildCsv(ct), ct).ConfigureAwait(false);
+        _logger.LogInformation("Exported bot sentiment rows to {Path}.", path);
         return path;
     }
     #endregion

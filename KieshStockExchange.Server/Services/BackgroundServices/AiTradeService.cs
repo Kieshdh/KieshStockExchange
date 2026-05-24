@@ -90,24 +90,28 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     public string SuggestedFailuresExportFileName => _failures.SuggestedExportFileName;
     public Task<string> ExportFailuresCsvAsync(string path, CancellationToken ct = default)
         => _failures.ExportCsvAsync(path, ct);
+    public string BuildFailuresCsv(CancellationToken ct = default) => _failures.BuildCsv(ct);
 
     // Reservation ledger surface delegates to the auditor.
     public int ReservationLedgerEntryCount => _auditor.LedgerEntryCount;
     public string SuggestedLedgerExportFileName => _auditor.SuggestedLedgerExportFileName;
     public Task<string> ExportReservationLedgerCsvAsync(string path, CancellationToken ct = default)
         => _auditor.ExportLedgerCsvAsync(path, ct);
+    public string BuildReservationLedgerCsv(CancellationToken ct = default) => _auditor.BuildLedgerCsv(ct);
 
     // Economy telemetry surface delegates to the telemetry helper.
     public int EconomySampleCount => _economy.SampleCount;
     public string SuggestedEconomyExportFileName => _economy.SuggestedExportFileName;
     public Task<string> ExportEconomyCsvAsync(string path, CancellationToken ct = default)
         => _economy.ExportCsvAsync(path, ct);
+    public string BuildEconomyCsv(CancellationToken ct = default) => _economy.BuildCsv(ct);
 
     // Sentiment telemetry surface delegates to the sentiment service.
     public int SentimentSampleCount => _sentiment.SampleCount;
     public string SuggestedSentimentExportFileName => _sentiment.SuggestedExportFileName;
     public Task<string> ExportSentimentCsvAsync(string path, CancellationToken ct = default)
         => _sentiment.ExportCsvAsync(path, ct);
+    public string BuildSentimentCsv(CancellationToken ct = default) => _sentiment.BuildCsv(ct);
 
     public event EventHandler? StatsChanged;
     #endregion

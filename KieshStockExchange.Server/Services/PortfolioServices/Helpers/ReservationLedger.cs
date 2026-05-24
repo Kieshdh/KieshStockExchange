@@ -90,6 +90,9 @@ public interface IReservationLedger
     /// <summary>Writes the ring buffer to a CSV file at <paramref name="path"/>.</summary>
     Task<string> ExportCsvAsync(string path, CancellationToken ct = default);
 
+    /// <summary>In-memory CSV body for the ring buffer (header + rows).</summary>
+    string BuildCsv(CancellationToken ct = default);
+
     /// <summary>Clears the ring buffer. Useful between sessions when investigating one run at a time.</summary>
     void Clear();
 }
@@ -181,11 +184,8 @@ public sealed class ReservationLedger : IReservationLedger
         lock (_lock) _entries.Clear();
     }
 
-    public async Task<string> ExportCsvAsync(string path, CancellationToken ct = default)
+    public string BuildCsv(CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("Export path is required.", nameof(path));
-
         LedgerEntry[] snapshot;
         lock (_lock) snapshot = _entries.ToArray();
 
@@ -216,7 +216,14 @@ public sealed class ReservationLedger : IReservationLedger
               .Append(delta2.ToString(CultureInfo.InvariantCulture))
               .Append('\n');
         }
-        await File.WriteAllTextAsync(path, sb.ToString(), ct).ConfigureAwait(false);
+        return sb.ToString();
+    }
+
+    public async Task<string> ExportCsvAsync(string path, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Export path is required.", nameof(path));
+        await File.WriteAllTextAsync(path, BuildCsv(ct), ct).ConfigureAwait(false);
         return path;
     }
 

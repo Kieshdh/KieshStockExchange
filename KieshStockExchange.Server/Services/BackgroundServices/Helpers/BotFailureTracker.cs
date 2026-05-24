@@ -109,11 +109,11 @@ internal sealed class BotFailureTracker
     internal string SuggestedExportFileName =>
         $"bot_failures_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}";
 
-    internal async Task<string> ExportCsvAsync(string path, CancellationToken ct = default)
+    // Phase 3 split: BuildCsv produces the body in-memory so the admin HTTP
+    // endpoint can stream it directly; ExportCsvAsync stays as a thin file
+    // writer for any future on-server export job.
+    internal string BuildCsv(CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("Export path is required.", nameof(path));
-
         FailureRecord[] snapshot;
         lock (_recentFailures) snapshot = _recentFailures.ToArray();
 
@@ -138,9 +138,16 @@ internal sealed class BotFailureTracker
               .Append(EscapeCsv(r.ErrorMessage))
               .Append('\n');
         }
+        return sb.ToString();
+    }
 
-        await File.WriteAllTextAsync(path, sb.ToString(), ct).ConfigureAwait(false);
-        _logger.LogInformation("Exported {Count} bot failure records to {Path}.", snapshot.Length, path);
+    internal async Task<string> ExportCsvAsync(string path, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Export path is required.", nameof(path));
+        var csv = BuildCsv(ct);
+        await File.WriteAllTextAsync(path, csv, ct).ConfigureAwait(false);
+        _logger.LogInformation("Exported bot failure records to {Path}.", path);
         return path;
     }
 

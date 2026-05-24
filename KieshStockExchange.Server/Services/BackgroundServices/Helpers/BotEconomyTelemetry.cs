@@ -153,11 +153,8 @@ internal sealed class BotEconomyTelemetry
     internal string SuggestedExportFileName =>
         $"bot_economy_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}";
 
-    internal async Task<string> ExportCsvAsync(string path, CancellationToken ct = default)
+    internal string BuildCsv(CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("Export path is required.", nameof(path));
-
         EconomySample[] snapshot;
         lock (_samples) snapshot = _samples.ToArray();
 
@@ -207,8 +204,15 @@ internal sealed class BotEconomyTelemetry
             sb.Append('\n');
         }
 
-        await File.WriteAllTextAsync(path, sb.ToString(), ct).ConfigureAwait(false);
-        _logger.LogInformation("Exported {Count} bot economy samples to {Path}.", snapshot.Length, path);
+        return sb.ToString();
+    }
+
+    internal async Task<string> ExportCsvAsync(string path, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Export path is required.", nameof(path));
+        await File.WriteAllTextAsync(path, BuildCsv(ct), ct).ConfigureAwait(false);
+        _logger.LogInformation("Exported bot economy samples to {Path}.", path);
         return path;
     }
     #endregion

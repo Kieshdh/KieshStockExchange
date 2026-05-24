@@ -98,5 +98,7 @@ internal sealed class ReservationAuditor
 
     internal Task<string> ExportLedgerCsvAsync(string path, CancellationToken ct = default)
         => _ledger.ExportCsvAsync(path, ct);
+
+    internal string BuildLedgerCsv(CancellationToken ct = default) => _ledger.BuildCsv(ct);
     #endregion
 }

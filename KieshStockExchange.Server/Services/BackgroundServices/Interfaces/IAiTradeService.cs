@@ -100,6 +100,11 @@ public interface IAiTradeService
     /// </summary>
     Task<string> ExportFailuresCsvAsync(string path, CancellationToken ct = default);
 
+    /// <summary>In-memory CSV body for the failure ringbuffer (header + rows).
+    /// Same shape ExportFailuresCsvAsync writes to disk; lets HTTP callers stream
+    /// the body without staging a temp file on the server.</summary>
+    string BuildFailuresCsv(CancellationToken ct = default);
+
     /// <summary>
     /// Suggested CSV file name (without an extension) for the save-file dialog
     /// the dashboard pops when the user exports failures. Centralised here so
@@ -121,6 +126,9 @@ public interface IAiTradeService
     /// </summary>
     Task<string> ExportReservationLedgerCsvAsync(string path, CancellationToken ct = default);
 
+    /// <summary>In-memory CSV body for the reservation ledger.</summary>
+    string BuildReservationLedgerCsv(CancellationToken ct = default);
+
     /// <summary>Rows currently buffered by the economy-telemetry sampler.</summary>
     int EconomySampleCount { get; }
 
@@ -134,6 +142,9 @@ public interface IAiTradeService
     /// </summary>
     Task<string> ExportEconomyCsvAsync(string path, CancellationToken ct = default);
 
+    /// <summary>In-memory CSV body for the economy ringbuffer.</summary>
+    string BuildEconomyCsv(CancellationToken ct = default);
+
     /// <summary>Rows currently buffered by the sentiment sampler (one per stock per snapshot).</summary>
     int SentimentSampleCount { get; }
 
@@ -145,6 +156,9 @@ public interface IAiTradeService
     /// + two global moods + combined sum) to a CSV at <paramref name="path"/>.
     /// </summary>
     Task<string> ExportSentimentCsvAsync(string path, CancellationToken ct = default);
+
+    /// <summary>In-memory CSV body for the sentiment ringbuffer.</summary>
+    string BuildSentimentCsv(CancellationToken ct = default);
 
     /// <summary>Raised after each trading-loop tick and on lifecycle changes.</summary>
     event EventHandler? StatsChanged;

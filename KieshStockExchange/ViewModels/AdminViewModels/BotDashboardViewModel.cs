@@ -7,6 +7,7 @@ using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
+using System.Net.Http;
 using System.Text;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
@@ -92,6 +93,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     private readonly IUserSessionService _session;
     private readonly IDataBaseService _db;
     private readonly IStockService _stocks;
+    private readonly HttpClient _http;
     private readonly ILogger<BotDashboardViewModel> _logger;
 
     public TopNavBarViewModel TopNavBarVm { get; }
@@ -106,12 +108,15 @@ public partial class BotDashboardViewModel : BaseViewModel
 
     public BotDashboardViewModel(IAiTradeService trade,
         IUserSessionService session, IDataBaseService db, IStockService stocks,
+        IHttpClientFactory httpFactory,
         ILogger<BotDashboardViewModel> logger, TopNavBarViewModel topNavBarVm)
     {
         _trade = trade ?? throw new ArgumentNullException(nameof(trade));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
+        _http = httpFactory?.CreateClient("KSE.Server")
+            ?? throw new ArgumentNullException(nameof(httpFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
@@ -281,119 +286,62 @@ public partial class BotDashboardViewModel : BaseViewModel
     }
 
     [RelayCommand]
-    private async Task ExportFailuresAsync()
-    {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
-        {
-            var path = await PickFailureExportPathAsync(_trade.SuggestedFailuresExportFileName)
-                .ConfigureAwait(false);
-            if (string.IsNullOrEmpty(path))
-            {
-                ExportFailuresStatusText = "Export cancelled.";
-                return;
-            }
-
-            var savedPath = await _trade.ExportFailuresCsvAsync(path).ConfigureAwait(false);
-            var count = _trade.RecentFailureRecords.Count;
-            ExportFailuresStatusText = $"Exported {count:N0} failure rows to {savedPath}";
-            _logger.LogInformation("Bot failure CSV exported: {Path}", savedPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to export bot failures.");
-            ExportFailuresStatusText = $"Export failed: {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
+    private Task ExportFailuresAsync() =>
+        DownloadServerCsvAsync("api/admin/bots/failures.csv", $"bot_failures_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}",
+            "failure rows", v => ExportFailuresStatusText = v);
 
     [RelayCommand]
-    private async Task ExportEconomyAsync()
-    {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
-        {
-            var path = await PickFailureExportPathAsync(_trade.SuggestedEconomyExportFileName)
-                .ConfigureAwait(false);
-            if (string.IsNullOrEmpty(path))
-            {
-                ExportEconomyStatusText = "Export cancelled.";
-                return;
-            }
-            var savedPath = await _trade.ExportEconomyCsvAsync(path).ConfigureAwait(false);
-            var count = _trade.EconomySampleCount;
-            ExportEconomyStatusText = $"Exported {count:N0} economy samples to {savedPath}";
-            _logger.LogInformation("Bot economy CSV exported: {Path}", savedPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to export bot economy telemetry.");
-            ExportEconomyStatusText = $"Export failed: {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
+    private Task ExportEconomyAsync() =>
+        DownloadServerCsvAsync("api/admin/bots/economy.csv", $"bot_economy_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}",
+            "economy samples", v => ExportEconomyStatusText = v);
 
     [RelayCommand]
-    private async Task ExportSentimentAsync()
-    {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
-        {
-            var path = await PickFailureExportPathAsync(_trade.SuggestedSentimentExportFileName)
-                .ConfigureAwait(false);
-            if (string.IsNullOrEmpty(path))
-            {
-                ExportSentimentStatusText = "Export cancelled.";
-                return;
-            }
-            var savedPath = await _trade.ExportSentimentCsvAsync(path).ConfigureAwait(false);
-            var count = _trade.SentimentSampleCount;
-            ExportSentimentStatusText = $"Exported {count:N0} sentiment rows to {savedPath}";
-            _logger.LogInformation("Bot sentiment CSV exported: {Path}", savedPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to export bot sentiment.");
-            ExportSentimentStatusText = $"Export failed: {ex.Message}";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
+    private Task ExportSentimentAsync() =>
+        DownloadServerCsvAsync("api/admin/bots/sentiment.csv", $"bot_sentiment_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}",
+            "sentiment rows", v => ExportSentimentStatusText = v);
 
     [RelayCommand]
-    private async Task ExportLedgerAsync()
+    private Task ExportLedgerAsync() =>
+        DownloadServerCsvAsync("api/admin/bots/reservation-ledger.csv", $"reservation_ledger_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}",
+            "ledger rows", v => ExportLedgerStatusText = v);
+
+    // Phase 3 follow-up: data lives in the server's ringbuffers now. Pull the
+    // CSV body over HTTP, ask the user where to save it via the existing
+    // platform picker, then write the body locally. Row count comes from the
+    // body itself (line count minus header) so we don't need a separate counts
+    // round-trip per export.
+    private async Task DownloadServerCsvAsync(string serverPath, string suggestedFileName,
+        string rowLabel, Action<string> setStatus)
     {
         if (IsBusy) return;
         IsBusy = true;
         try
         {
-            var path = await PickFailureExportPathAsync(_trade.SuggestedLedgerExportFileName)
-                .ConfigureAwait(false);
-            if (string.IsNullOrEmpty(path))
+            var savePath = await PickFailureExportPathAsync(suggestedFileName).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(savePath))
             {
-                ExportLedgerStatusText = "Export cancelled.";
+                setStatus("Export cancelled.");
                 return;
             }
-            var savedPath = await _trade.ExportReservationLedgerCsvAsync(path).ConfigureAwait(false);
-            var count = _trade.ReservationLedgerEntryCount;
-            ExportLedgerStatusText = $"Exported {count:N0} ledger rows to {savedPath}";
-            _logger.LogInformation("Reservation ledger CSV exported: {Path}", savedPath);
+
+            using var resp = await _http.GetAsync(serverPath).ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            var csv = await resp.Content.ReadAsStringAsync().ConfigureAwait(false);
+            await File.WriteAllTextAsync(savePath, csv).ConfigureAwait(false);
+
+            // Header line + N data lines. Trailing newline is fine — Count('\n') still
+            // gives header + data; subtract one for the header itself.
+            var lineCount = 0;
+            for (int i = 0; i < csv.Length; i++) if (csv[i] == '\n') lineCount++;
+            var rowCount = Math.Max(0, lineCount - 1);
+
+            setStatus($"Exported {rowCount:N0} {rowLabel} to {savePath}");
+            _logger.LogInformation("CSV exported from {ServerPath} → {Local}", serverPath, savePath);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to export reservation ledger.");
-            ExportLedgerStatusText = $"Export failed: {ex.Message}";
+            _logger.LogError(ex, "Failed to download CSV from {ServerPath}", serverPath);
+            setStatus($"Export failed: {ex.Message}");
         }
         finally
         {
