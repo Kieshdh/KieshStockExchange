@@ -654,12 +654,27 @@ Approach:
 
 Defer until after Phase 3 unless the phantom growth crosses into "bots can't trade" territory.
 
+### 8.10 Client bot lifecycle — move out of UserSessionService into BotDashboard
+Phase 3 moved the bot loop to the server (`BotLoopHostedService`, `Bots:AutoStart=true`). The client's `UserSessionService.StartBotsAsync` / `StopBotsAsync` and the `AiBotsRunning` flag are no longer the right home — they tied bot lifecycle to a logged-in user's session, but the bots are now a server-process concern.
+
+Direction:
+- Strip the bot-lifecycle surface from `IUserSessionService` (`StartBotsAsync`, `StopBotsAsync`, `AiBotsRunning`, `InitializeBackgroundServicesAsync` bot parts). Keep the user/session/preferences bits.
+- Add a server admin controller (e.g. `AdminBotController`) with start / stop / pause / status endpoints backed by `IAiTradeService` + the `Bots:AutoStart` config.
+- Surface the controls in the existing `BotDashboard` admin view — start/stop buttons + status badge bound to a small HTTP poll or SignalR push.
+- Drop the client's bot-running code paths (the `AiTradeService` impl + its startup hooks) as part of the same change; this also resolves the "double bot" risk that today is mitigated by `Bots:AutoStart=false`.
+
+Pairs naturally with Phase 3 Step 7b's client cleanup.
+
+### 8.11 PriceSnapshotService — likely removable
+`PriceSnapshotService` is the client-side hourly price archive. Now that the server owns the market data + candle pipeline and the chart pulls historical prices from server endpoints, the client-side archive is redundant. Verify no remaining consumer reads `_db.GetStockPricesByStockIdAndTimeRange` from the client, then drop the service + its DI registration. Server already persists what's needed for chart/history.
+
 ### Order of attack
 - **8.1 first** (WAL hygiene). Stops the bleed without touching data. Cheap, low-risk, defensible mid-migration if needed.
 - **8.6 next** (telemetry). Gives the data to make 8.2/8.3 thresholds calibrated rather than guessed.
 - **8.3 before 8.2/8.7.** Sub-minute candles are pure noise past a few hours and have no downstream consumers; safe quick win.
 - **8.7 + 8.2 together, last.** The biggest impact but touches the most semantics — needs the consumer audit and the joint-prune ordering nailed down before either can land safely. Sequencing one without the other introduces FK dangle.
 - **8.8 and 8.9** are independent loose-ends, schedulable opportunistically when Phase 3 leaves a gap.
+- **8.10 and 8.11** ride along with Phase 3 Step 7b (client cleanup) — both remove dead client code that Phase 3 made redundant.
 
 ---
 
