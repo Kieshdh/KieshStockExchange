@@ -37,7 +37,7 @@ internal sealed class BotScalerService
     // Logging throttle. Cap changes happen frequently when load wobbles around a
     // threshold; emitting one INFO per change buries the rest of the log. Buffer
     // changes here and emit a summary at most every LogInterval.
-    private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(60);
     private DateTime _lastLogAt = DateTime.MinValue;
     private readonly List<(int Old, int New, double Load, double Ewma)> _pendingChanges = new();
     #endregion

@@ -128,7 +128,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private DateTime _nextSentimentLogTime  = DateTime.MinValue;
     private DateTime _nextCashInjectionTime = DateTime.MinValue;
 
-    private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(60);
     // Reservation reconcile: 5 minutes is plenty for a passive leak hunter; first
     // run fires 1 minute after start so a cold-load mismatch surfaces early.
     private static readonly TimeSpan ReconcileInterval   = TimeSpan.FromMinutes(5);
@@ -331,16 +331,22 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
     private void ResetSessionState()
     {
+        // Per-session run counters reset every Start.
         Interlocked.Exchange(ref _tickCount, 0);
         Interlocked.Exchange(ref _tradesPlacedThisSession, 0);
         Interlocked.Exchange(ref _failuresThisSession, 0);
         Volatile.Write(ref _tickWorkMsEwma, 0.0);
         Interlocked.Exchange(ref _lastTickWorkMicros, 0);
         _stats.Reset();
-        _failures.Reset();
-        _economy.Reset();
-        _sentiment.Reset(TimeHelper.NowUtc());
         _fxRates.Reset();
+
+        // _failures, _economy, _sentiment ringbuffers are intentionally NOT
+        // cleared. They accumulate across Stop/Start cycles so the dashboard
+        // shows the full session history, and they survive server restarts
+        // once disk persistence lands. Sentiment still re-rolls its starting
+        // factors though (different semantics from the others).
+        _sentiment.Reset(TimeHelper.NowUtc());
+
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
@@ -439,6 +445,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         try
         {
             results = await _marketOrders.PlaceAndMatchBatchAsync(orderList, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Bot loop is shutting down (Stop button or server exit). Don't log
+            // as an error or fabricate fake failures — the orders simply weren't
+            // attempted. Return so the caller's tick loop exits cleanly.
+            _logger.LogInformation("Bot loop stop requested mid-batch on tick {Tick}; skipping {Count} pending order(s) cleanly.",
+                _tickCount, orderList.Count);
+            return;
         }
         catch (Exception ex)
         {

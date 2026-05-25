@@ -133,34 +133,15 @@ internal sealed class AiBotStateService
             if (active) enabled++;
         }
 
-        // Skip the log when nothing changed, otherwise rate-limit so rapid scaler
-        // bursts collapse into one summary line.
-        bool stateChanged = !Nullable.Equals(_lastLoggedCap, cap) || _lastLoggedEnabled != enabled;
-        if (!stateChanged) return;
-
-        var now = TimeHelper.NowUtc();
-        bool firstEver = _lastApplyCapLogAt == DateTime.MinValue;
-        bool windowElapsed = (now - _lastApplyCapLogAt) >= ApplyCapLogInterval;
-
-        if (firstEver || windowElapsed)
+        // The "Applied active bot cap" info log was removed per user feedback —
+        // the BotScalerService log already captures the same cap-change event
+        // with its load %/EWMA context. Bookkeeping fields stay so callers that
+        // read _lastLoggedCap / _lastLoggedEnabled don't break.
+        if (!Nullable.Equals(_lastLoggedCap, cap) || _lastLoggedEnabled != enabled)
         {
-            if (_suppressedApplyCapCount > 0)
-                _logger.LogInformation(
-                    "Applied active bot cap (cap={Cap}, enabled={Enabled}; +{Suppressed} suppressed change(s) in last {Secs:F0}s)",
-                    cap?.ToString() ?? "none", enabled, _suppressedApplyCapCount,
-                    (now - _lastApplyCapLogAt).TotalSeconds);
-            else
-                _logger.LogInformation("Applied active bot cap (cap={Cap}, enabled={Enabled})",
-                    cap?.ToString() ?? "none", enabled);
-
-            _lastApplyCapLogAt = now;
             _lastLoggedCap = cap;
             _lastLoggedEnabled = enabled;
-            _suppressedApplyCapCount = 0;
-        }
-        else
-        {
-            _suppressedApplyCapCount++;
+            _lastApplyCapLogAt = TimeHelper.NowUtc();
         }
     }
     #endregion
