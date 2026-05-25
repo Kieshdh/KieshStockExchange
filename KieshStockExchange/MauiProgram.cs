@@ -111,29 +111,23 @@ public static class MauiProgram
         builder.Services.AddSingleton<IReservationLedger, ReservationLedger>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<NotificationBridgeService>();
-        builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
         // Phase 3 Step 7b.1: ApiBotAdminClient is the dashboard's HTTP-backed
-        // replacement for IAiTradeService + IUserSessionService.Start/StopBotsAsync.
-        // Stays alongside IAiTradeService until Step 7b.2 wires it in.
+        // replacement for the dead in-process AiTradeService.
         builder.Services.AddSingleton<ApiBotAdminClient>();
         builder.Services.AddSingleton<IThemeService, ThemeService>();
         builder.Services.AddSingleton<IProfileService, ProfileService>();
         builder.Services.AddSingleton<IOrderEditService, OrderEditService>();
-        // Market engine
-        builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
-        builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();
-        // Phase 3 Step 7: order entry + execution swap from in-process engine to
-        // HTTP proxies. The server's OrderController handles /api/orders/* with
-        // its in-process engine; the client just serializes requests. The local
-        // OrderExecutionService / OrderEntryService classes still compile but
-        // are unreferenced — pending deletion in a follow-up cleanup.
+        // Order entry/execution route to the server's in-process engine via HTTP
+        // (Phase 3 Step 7a). The client's IOrderEntryService / IOrderExecutionService
+        // impls are HTTP proxies; the in-process classes were deleted in Step 7b.3.
         builder.Services.AddSingleton<IOrderExecutionService, ApiOrderExecutionService>();
         builder.Services.AddSingleton<IOrderEntryService, ApiOrderEntryClient>();
-        builder.Services.AddSingleton<IEngineAdminService, EngineAdminService>();
         // Service helpers
         builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
+        // OrderBookCache stays — SelectedStockService still reads the book
+        // snapshot client-side to drive the order-book view. Replacing this
+        // with a SignalR push is Phase 4 work.
         builder.Services.AddSingleton<IOrderBookCache, OrderBookCache>();
-        builder.Services.AddSingleton<IMatchingEngine, MatchingEngine>();
         // Viewmodels
         // - User
         builder.Services.AddTransient<RegisterViewModel>();
