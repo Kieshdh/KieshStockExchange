@@ -45,10 +45,18 @@ internal sealed class BotSentimentService
     private readonly IStockService _stocks;
     private readonly ILogger<BotSentimentService> _logger;
 
+    private readonly RingBufferStore<SentimentSample> _store;
+
     internal BotSentimentService(IStockService stocks, ILogger<BotSentimentService> logger)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _store  = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
+
+        var prior = _store.LoadTail(RecentSamplesMax);
+        foreach (var s in prior) _samples.Enqueue(s);
+        if (prior.Count > 0)
+            _logger.LogInformation("BotSentimentService: replayed {Count} sample(s) from disk.", prior.Count);
 
         // Default to "never reroll" until Reset(now) is called; until then
         // GetSentiment returns 0 (factor dictionaries empty). AiTradeService
@@ -268,7 +276,7 @@ internal sealed class BotSentimentService
                 _perStock10m.TryGetValue(sid, out var v10);
                 _perStock1m.TryGetValue(sid,  out var v1m);
 
-                _samples.Enqueue(new SentimentSample(
+                var sample = new SentimentSample(
                     TimestampUtc: now,
                     StockId:      sid,
                     PerStock24h:  v24,
@@ -276,7 +284,9 @@ internal sealed class BotSentimentService
                     PerStock10m:  v10,
                     PerStock1m:   v1m,
                     Global24h:    _global24h,
-                    Global1h:     _global1h));
+                    Global1h:     _global1h);
+                _samples.Enqueue(sample);
+                _store.Append(sample);
             }
             while (_samples.Count > RecentSamplesMax) _samples.Dequeue();
         }

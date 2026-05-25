@@ -26,6 +26,7 @@ internal sealed class BotEconomyTelemetry
     private readonly Queue<EconomySample> _samples = new();
     // Guarded by lock(_samples).
     private decimal _totalInjectedThisSession;
+    private readonly RingBufferStore<EconomySample> _store;
 
     internal BotEconomyTelemetry(AiBotContext ctx, IAccountsCache accounts,
         IStockService stocks, IFxRateService fxRates, ILogger<BotEconomyTelemetry> logger)
@@ -35,6 +36,12 @@ internal sealed class BotEconomyTelemetry
         _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
         _fxRates  = fxRates  ?? throw new ArgumentNullException(nameof(fxRates));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _store    = new RingBufferStore<EconomySample>("data/telemetry/bot_economy.ndjson");
+
+        var prior = _store.LoadTail(RecentSamplesMax);
+        foreach (var s in prior) _samples.Enqueue(s);
+        if (prior.Count > 0)
+            _logger.LogInformation("BotEconomyTelemetry: replayed {Count} sample(s) from disk.", prior.Count);
     }
     #endregion
 
@@ -113,10 +120,11 @@ internal sealed class BotEconomyTelemetry
         var totalWealthUsd = totalCashUsd + totalSharesUsd;
 
         decimal injectedSnapshot;
+        EconomySample sample;
         lock (_samples)
         {
             injectedSnapshot = _totalInjectedThisSession;
-            _samples.Enqueue(new EconomySample(
+            sample = new EconomySample(
                 TimestampUtc:   TimeHelper.NowUtc(),
                 TotalCashUsd:   totalCashUsd,
                 TotalSharesUsd: totalSharesUsd,
@@ -128,9 +136,11 @@ internal sealed class BotEconomyTelemetry
                 MinDriftStockId: minSid,
                 MaxDriftPct:    maxDrift,
                 MaxDriftStockId: maxSid,
-                TotalInjectedThisSession: injectedSnapshot));
+                TotalInjectedThisSession: injectedSnapshot);
+            _samples.Enqueue(sample);
             while (_samples.Count > RecentSamplesMax) _samples.Dequeue();
         }
+        _store.Append(sample);
 
         _logger.LogInformation(
             "BotEconomy @ {Time}: wealth {Wealth} (cash {Cash} + shares {Shares}), " +

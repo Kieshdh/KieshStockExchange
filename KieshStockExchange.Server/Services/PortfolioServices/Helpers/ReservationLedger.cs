@@ -117,6 +117,18 @@ public sealed class ReservationLedger : IReservationLedger
 
     private readonly Queue<LedgerEntry> _entries = new();
     private readonly object _lock = new();
+    private readonly KieshStockExchange.Services.BackgroundServices.Helpers.RingBufferStore<LedgerEntry> _store
+        = new("data/telemetry/reservation_ledger.ndjson");
+
+    public ReservationLedger()
+    {
+        // Replay the prior session's ledger tail so post-restart diagnostics
+        // still have the historical context. The ledger is the noisiest
+        // tracker (250k entries cap) so the read is heavier than the others,
+        // but only runs once at boot.
+        var prior = _store.LoadTail(RingCapacity);
+        foreach (var e in prior) _entries.Enqueue(e);
+    }
 
     public int EntryCount { get { lock (_lock) return _entries.Count; } }
 
@@ -177,6 +189,7 @@ public sealed class ReservationLedger : IReservationLedger
             _entries.Enqueue(entry);
             while (_entries.Count > RingCapacity) _entries.Dequeue();
         }
+        _store.Append(entry);
     }
 
     public void Clear()

@@ -28,11 +28,26 @@ internal sealed class BotFailureTracker
     private readonly Queue<FailureRecord> _recentFailures = new();
     private readonly ConcurrentDictionary<FailureCategory, long> _failuresByCategory = new();
     private readonly ConcurrentDictionary<int, long> _failuresByStockId = new();
+    private readonly RingBufferStore<FailureRecord> _store;
 
     internal BotFailureTracker(IStockService stocks, ILogger<BotFailureTracker> logger)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _store = new RingBufferStore<FailureRecord>("data/telemetry/bot_failures.ndjson");
+
+        // Replay the tail back into the in-memory ring + aggregates so the
+        // dashboard shows the prior session's failures after a server restart.
+        var prior = _store.LoadTail(RecentFailuresMax);
+        foreach (var r in prior)
+        {
+            _failuresByCategory.AddOrUpdate(r.Category, 1L, static (_, n) => n + 1);
+            if (r.StockId > 0)
+                _failuresByStockId.AddOrUpdate(r.StockId, 1L, static (_, n) => n + 1);
+            _recentFailures.Enqueue(r);
+        }
+        if (prior.Count > 0)
+            _logger.LogInformation("BotFailureTracker: replayed {Count} failure record(s) from disk.", prior.Count);
     }
     #endregion
 
@@ -51,6 +66,7 @@ internal sealed class BotFailureTracker
             _recentFailures.Enqueue(record);
             while (_recentFailures.Count > RecentFailuresMax) _recentFailures.Dequeue();
         }
+        _store.Append(record);
     }
 
     internal void Reset()
