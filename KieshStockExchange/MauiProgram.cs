@@ -14,6 +14,7 @@ using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
+using KieshStockExchange.Services.SignalR;
 using KieshStockExchange.Services.UserServices;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.AccountViewModels;
@@ -88,26 +89,33 @@ public static class MauiProgram
 
         builder.Services.AddHttpClient("KSE.Server", c => c.BaseAddress = new Uri(serverBaseUrl));
 
+        // Phase 3 finish — single shared SignalR connection to /hubs/market.
+        // Every live-state proxy (market data, candles, portfolio, order cache
+        // bridge) subscribes through this. Factory captures serverBaseUrl so
+        // we don't read appsettings.json a second time.
+        builder.Services.AddSingleton<IMarketHubClient>(sp =>
+            new MarketHubClient(new Uri(serverBaseUrl), sp.GetRequiredService<ILogger<MarketHubClient>>()));
+
         // Services
         builder.Services.AddSingleton<IDataBaseService, ApiDataBaseService>();
         builder.Services.AddSingleton<IEngineCommandClient, EngineCommandClient>();
-        builder.Services.AddSingleton<IOrderRegistry, OrderRegistry>();
         builder.Services.AddSingleton<IExcelImportService, ExcelImportService>();
         builder.Services.AddSingleton<IAuthService, AuthService>();
-        builder.Services.AddSingleton<IMarketLookupService, MarketLookupService>();
-        builder.Services.AddSingleton<IMarketDataService, MarketDataService>();
-        builder.Services.AddSingleton<IFxRateService, FxRateService>();
+        // Phase 3 finish — market data + candles + FX + lookups: thin proxies
+        // backed by HTTP + SignalR. The in-process duplicates are dead-code
+        // and get deleted in Step 0e.
+        builder.Services.AddSingleton<IMarketLookupService, ApiMarketLookupClient>();
+        builder.Services.AddSingleton<IMarketDataService, SignalRMarketDataClient>();
+        builder.Services.AddSingleton<IFxRateService, ApiFxRateClient>();
+        builder.Services.AddSingleton<ICandleService, SignalRCandleService>();
+        builder.Services.AddSingleton<IUserPortfolioService, ApiPortfolioClient>();
         builder.Services.AddSingleton<IOrderCacheService, OrderCacheService>();
         builder.Services.AddSingleton<ISelectedStockService, SelectedStockService>();
-        builder.Services.AddSingleton<IUserPortfolioService, UserPortfolioService>();
         builder.Services.AddSingleton<IWatchlistService, WatchlistService>();
         builder.Services.AddSingleton<IUserSessionService, UserSessionService>();
         builder.Services.AddSingleton<ITrendingService, TrendingService>();
-        builder.Services.AddSingleton<ICandleService, CandleService>();
         builder.Services.AddSingleton<IStockService, StockService>();
         builder.Services.AddSingleton<ITransactionService, TransactionService>();
-        builder.Services.AddSingleton<IAccountsCache, AccountsCache>();
-        builder.Services.AddSingleton<IReservationLedger, ReservationLedger>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<NotificationBridgeService>();
         // Phase 3 Step 7b.1: ApiBotAdminClient is the dashboard's HTTP-backed
@@ -121,11 +129,15 @@ public static class MauiProgram
         // impls are HTTP proxies; the in-process classes were deleted in Step 7b.3.
         builder.Services.AddSingleton<IOrderExecutionService, ApiOrderExecutionService>();
         builder.Services.AddSingleton<IOrderEntryService, ApiOrderEntryClient>();
+        // Phase 3 finish — SignalR -> OrderCacheService.RefreshAsync glue.
+        // Eagerly resolved below so its ctor wires up the subscription.
+        builder.Services.AddSingleton<ApiOrderCacheBridge>();
         // Service helpers
         builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
-        // OrderBookCache stays — SelectedStockService still reads the book
-        // snapshot client-side to drive the order-book view. Replacing this
-        // with a SignalR push is Phase 4 work.
+        // OrderBookCache stays for now — Step 0g reworks it (engine/admin/UI
+        // split + live SignalR push). Until then SelectedStockService still
+        // reads a one-shot snapshot via this in-process class, which reads
+        // from IDataBaseService HTTP under the hood.
         builder.Services.AddSingleton<IOrderBookCache, OrderBookCache>();
         // Viewmodels
         // - User
@@ -195,6 +207,11 @@ public static class MauiProgram
         // subscription — DI would otherwise defer construction until something
         // injects it, which nothing does (it's a side-effect-only service).
         _ = app.Services.GetRequiredService<NotificationBridgeService>();
+
+        // Phase 3 finish — same pattern: ApiOrderCacheBridge subscribes to
+        // SignalR "OrderUpdated" in its ctor and triggers OrderCacheService
+        // refresh. Nothing injects it, so force creation here.
+        _ = app.Services.GetRequiredService<ApiOrderCacheBridge>();
 
         return app;
     }

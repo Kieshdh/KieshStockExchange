@@ -40,6 +40,14 @@ public sealed class CandleService : ICandleService, IDisposable
     public TimeSpan FlushInterval { get; } = TimeSpan.FromSeconds(1);
 
     public CandleResolution DefaultCandleResolution { get; private set; } = CandleResolution.Default;
+
+    /// <summary>
+    /// Raised once per live bucket close (flush loop, phase 3). MarketHubBroadcaster
+    /// subscribes to broadcast onto quotes:{stockId}:{currency}. Historical paths
+    /// (FixCandlesAsync, GetHistoricalCandlesAsync rebuild) deliberately skip this —
+    /// they're backfills, not live closes.
+    /// </summary>
+    public event EventHandler<Candle>? CandleClosed;
     #endregion
 
     #region Fields and Constructor
@@ -482,14 +490,21 @@ public sealed class CandleService : ICandleService, IDisposable
                         }
                     }
 
-                    // Phase 3: publish closed candles to per-key live streams (no DB).
+                    // Phase 3: publish closed candles to per-key live streams (no DB)
+                    // and raise the CandleClosed event for hub broadcast.
                     foreach (var (key, closed) in perKeyClosed)
                     {
                         if (ct.IsCancellationRequested) break;
-                        if (_streams.TryGetValue(key, out var stream))
+                        _streams.TryGetValue(key, out var stream);
+                        for (int i = 0; i < closed.Count; i++)
                         {
-                            for (int i = 0; i < closed.Count; i++)
-                                stream.Writer.TryWrite(closed[i]);
+                            var candle = closed[i];
+                            stream?.Writer.TryWrite(candle);
+                            try { CandleClosed?.Invoke(this, candle); }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "CandleClosed handler threw for {Summary}", candle.Summary);
+                            }
                         }
                     }
                 }

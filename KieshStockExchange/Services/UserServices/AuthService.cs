@@ -3,6 +3,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.SignalR;
 using Microsoft.Extensions.Logging;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -24,13 +25,16 @@ public sealed class AuthService : IAuthService
     #region Fields & Constructor
     private readonly IDataBaseService _db;
     private readonly System.Net.Http.HttpClient _http;
+    private readonly IMarketHubClient _hub;
     private readonly ILogger<AuthService> _logger;
 
-    public AuthService(IDataBaseService db, IHttpClientFactory httpFactory, ILogger<AuthService> logger)
+    public AuthService(IDataBaseService db, IHttpClientFactory httpFactory,
+        IMarketHubClient hub, ILogger<AuthService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _http = httpFactory?.CreateClient("KSE.Server")
             ?? throw new ArgumentNullException(nameof(httpFactory));
+        _hub = hub ?? throw new ArgumentNullException(nameof(hub));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -94,16 +98,30 @@ public sealed class AuthService : IAuthService
         // No-op if the server is unreachable — auth itself stays client-local
         // until Phase 5's JWT moves it server-side.
         _ = NotifyServerAsync("api/session/login", user.UserId, user.Username);
+
+        // Phase 3 finish — join orders:{userId} + portfolio:{userId} on the
+        // shared hub so server-pushed order/portfolio events route to this
+        // client. Until Phase 5's JWT lands the hub trusts the supplied userId.
+        _ = JoinHubGroupsSafelyAsync(user.UserId);
     }
 
-    public Task LogoutAsync(CancellationToken ct = default)
+    public async Task LogoutAsync(CancellationToken ct = default)
     {
         var prev = CurrentUser;
         CurrentUser = null;
         _logger.LogInformation("User logged out.");
         if (prev is not null)
+        {
             _ = NotifyServerAsync("api/session/logout", prev.UserId, prev.Username);
-        return Task.CompletedTask;
+            try { await _hub.LeaveUserGroupsAsync(prev.UserId, ct).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Hub LeaveUserGroups failed for #{UserId}", prev.UserId); }
+        }
+    }
+
+    private async Task JoinHubGroupsSafelyAsync(int userId)
+    {
+        try { await _hub.JoinUserGroupsAsync(userId).ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Hub JoinUserGroups failed for #{UserId}", userId); }
     }
 
     private async Task NotifyServerAsync(string path, int userId, string username)

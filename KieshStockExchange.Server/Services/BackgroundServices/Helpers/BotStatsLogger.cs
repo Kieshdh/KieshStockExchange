@@ -98,7 +98,7 @@ internal sealed class BotStatsLogger
         _volumeSnapshot    = vol;
 
         _logger.LogInformation(
-            "BotStats[30s] @ {Time}: bots {Online}/{Loaded}, trades {Total} (buy {Buy}/sell {Sell}), " +
+            "BotStats[60s] @ {Time}: bots {Online}/{Loaded}, trades {Total} (buy {Buy}/sell {Sell}), " +
             "type (Limit {Limit}/SlipMarket {Slip}/TrueMarket {True}), cancelled {Cancelled}, volume {Vol}",
             TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"), onlineBots, loadedBots,
             dBuy + dSell, dBuy, dSell, dLim, dSlip, dTrue, dCancel,

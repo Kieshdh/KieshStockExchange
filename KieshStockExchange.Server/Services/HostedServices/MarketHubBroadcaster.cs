@@ -12,7 +12,8 @@ namespace KieshStockExchange.Server.Services.HostedServices;
 // Phase 3 Step 6: bridges engine-side events into SignalR group broadcasts.
 //
 // Subscribes to:
-//   IMarketDataService.QuoteUpdated     → quotes:{stockId}:{currency}
+//   IMarketDataService.QuoteUpdated      → quotes:{stockId}:{currency}
+//   ICandleService.CandleClosed          → quotes:{stockId}:{currency}
 //   IUserPortfolioService.SnapshotChanged → portfolio:{userId}
 //
 // Lives as IHostedService so the subscription wires up at server boot and
@@ -20,22 +21,20 @@ namespace KieshStockExchange.Server.Services.HostedServices;
 // runs through SignalROrderCacheService instead (the engine already calls
 // IOrderCacheService.NotifyOrdersMutated as part of every settle/cancel path,
 // so reusing that surface is cheaper than adding a parallel event).
-//
-// CandleClosed broadcasts are deferred — CandleService doesn't expose a per-
-// candle event yet; the chart pulls candles via the existing HTTP endpoints
-// until that refactor lands.
 public sealed class MarketHubBroadcaster : IHostedService
 {
     private readonly IHubContext<MarketHub> _hub;
     private readonly IMarketDataService _market;
+    private readonly ICandleService _candles;
     private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<MarketHubBroadcaster> _logger;
 
     public MarketHubBroadcaster(IHubContext<MarketHub> hub, IMarketDataService market,
-        IUserPortfolioService portfolio, ILogger<MarketHubBroadcaster> logger)
+        ICandleService candles, IUserPortfolioService portfolio, ILogger<MarketHubBroadcaster> logger)
     {
         _hub = hub;
         _market = market;
+        _candles = candles;
         _portfolio = portfolio;
         _logger = logger;
     }
@@ -43,6 +42,7 @@ public sealed class MarketHubBroadcaster : IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _market.QuoteUpdated += OnQuoteUpdated;
+        _candles.CandleClosed += OnCandleClosed;
         _portfolio.SnapshotChanged += OnPortfolioChanged;
         _logger.LogInformation("MarketHubBroadcaster subscribed to engine events.");
         return Task.CompletedTask;
@@ -51,6 +51,7 @@ public sealed class MarketHubBroadcaster : IHostedService
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _market.QuoteUpdated -= OnQuoteUpdated;
+        _candles.CandleClosed -= OnCandleClosed;
         _portfolio.SnapshotChanged -= OnPortfolioChanged;
         return Task.CompletedTask;
     }
@@ -62,6 +63,16 @@ public sealed class MarketHubBroadcaster : IHostedService
             .ContinueWith(t =>
             {
                 if (t.IsFaulted) _logger.LogWarning(t.Exception, "QuoteUpdated push failed for {Group}", group);
+            }, TaskScheduler.Default);
+    }
+
+    private void OnCandleClosed(object? sender, Candle candle)
+    {
+        var group = MarketHub.GroupNameQuotes(candle.StockId, candle.CurrencyType);
+        _ = _hub.Clients.Group(group).SendAsync("CandleClosed", candle)
+            .ContinueWith(t =>
+            {
+                if (t.IsFaulted) _logger.LogWarning(t.Exception, "CandleClosed push failed for {Group}", group);
             }, TaskScheduler.Default);
     }
 

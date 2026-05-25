@@ -15,6 +15,15 @@ public interface ICandleService
 
     /// <summary> Currently subscribed (StockId, CurrencyType, CandleResolution) tuples. </summary>
     IReadOnlyCollection<(int, CurrencyType, CandleResolution)> Subscribed { get; }
+
+    /// <summary>
+    /// Fires once per live bucket roll-over (server-side aggregator close).
+    /// Server: emitted from the flush loop after the candle is persisted.
+    /// Client SignalR proxy: re-raised from the hub's "CandleClosed" push.
+    /// Historical backfills do NOT fire this — chart code that needs them
+    /// reads via <see cref="GetHistoricalCandlesAsync"/>.
+    /// </summary>
+    event EventHandler<Candle>? CandleClosed;
     #endregion
 
     #region Subscriptions

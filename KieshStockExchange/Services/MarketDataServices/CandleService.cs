@@ -42,6 +42,11 @@ public sealed class CandleService : ICandleService, IDisposable
     public TimeSpan FlushInterval { get; } = TimeSpan.FromSeconds(1);
 
     public CandleResolution DefaultCandleResolution { get; private set; } = CandleResolution.Default;
+
+    // Interface contract — this client class is scheduled for deletion in
+    // Step 0e once SignalRCandleService replaces it. The event has no in-process
+    // raiser here (closes come from the server hub).
+    public event EventHandler<Candle>? CandleClosed;
     #endregion
 
     #region Fields and Constructor

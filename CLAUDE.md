@@ -7,9 +7,10 @@
 
 ## Build and run
 ```bash
-dotnet build KieshStockExchange.sln -f net9.0-windows10.0.19041.0
+dotnet build KieshStockExchange/KieshStockExchange.csproj -f net9.0-windows10.0.19041.0
 dotnet run --project KieshStockExchange/KieshStockExchange.csproj -f net9.0-windows10.0.19041.0
 ```
+Build the client csproj (not the solution): the Windows TFM only applies to the MAUI project; the `KieshStockExchange.Shared` class library targets `net9.0` and is pulled in via ProjectReference at its native TFM.
 
 ## Testing
 - Testing is mainly manual through the running app unless explicit automated tests are added.
