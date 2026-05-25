@@ -103,7 +103,6 @@ public static class MauiProgram
         builder.Services.AddSingleton<IWatchlistService, WatchlistService>();
         builder.Services.AddSingleton<IUserSessionService, UserSessionService>();
         builder.Services.AddSingleton<ITrendingService, TrendingService>();
-        builder.Services.AddSingleton<IPriceSnapshotService, PriceSnapshotService>();
         builder.Services.AddSingleton<ICandleService, CandleService>();
         builder.Services.AddSingleton<IStockService, StockService>();
         builder.Services.AddSingleton<ITransactionService, TransactionService>();
