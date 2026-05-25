@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
@@ -41,25 +42,25 @@ public sealed class ApiMarketLookupClient : IMarketLookupService
     }
 
     public Task<decimal?> GetLatestPriceFromStoreAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
-        => Http().GetFromJsonAsync<decimal?>($"api/market-lookup/latest-price/{stockId}/{currency}", ct);
+        => Http().GetFromJsonAsync<decimal?>($"api/market-lookup/latest-price/{stockId}/{currency}", ApiJsonOptions.Default, ct);
 
     public async Task<decimal> GetDateTimePriceAsync(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default)
     {
         var url = $"api/market-lookup/price-at/{stockId}/{currency}?time={Uri.EscapeDataString(time.ToString("o"))}";
-        return await Http().GetFromJsonAsync<decimal>(url, ct).ConfigureAwait(false);
+        return await Http().GetFromJsonAsync<decimal>(url, ApiJsonOptions.Default, ct).ConfigureAwait(false);
     }
 
     public async Task<List<Transaction>> LoadHistoricalTicksAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
         var list = await Http().GetFromJsonAsync<List<Transaction>>(
-            $"api/market-lookup/historical-ticks/{stockId}/{currency}", ct).ConfigureAwait(false);
+            $"api/market-lookup/historical-ticks/{stockId}/{currency}", ApiJsonOptions.Default, ct).ConfigureAwait(false);
         return list ?? new List<Transaction>();
     }
 
     public async Task<(decimal Price, DateTime TimeUtc)> GetFallbackPriceAndTimeAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
         var dto = await Http().GetFromJsonAsync<FallbackPriceDto>(
-            $"api/market-lookup/fallback-price/{stockId}/{currency}", ct).ConfigureAwait(false);
+            $"api/market-lookup/fallback-price/{stockId}/{currency}", ApiJsonOptions.Default, ct).ConfigureAwait(false);
         return dto is null ? (100m, TimeHelper.NowUtc()) : (dto.Price, dto.TimeUtc);
     }
 

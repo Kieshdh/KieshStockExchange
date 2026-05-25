@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
@@ -70,8 +71,8 @@ public sealed class ApiPortfolioClient : IUserPortfolioService, IAsyncDisposable
         try
         {
             var http = Http();
-            var fundsTask = http.GetFromJsonAsync<List<Fund>>($"api/funds/by-user/{userId}", ct);
-            var positionsTask = http.GetFromJsonAsync<List<Position>>($"api/positions/by-user/{userId}", ct);
+            var fundsTask = http.GetFromJsonAsync<List<Fund>>($"api/funds/by-user/{userId}", ApiJsonOptions.Default, ct);
+            var positionsTask = http.GetFromJsonAsync<List<Position>>($"api/positions/by-user/{userId}", ApiJsonOptions.Default, ct);
             await Task.WhenAll(fundsTask, positionsTask).ConfigureAwait(false);
 
             var funds = (await fundsTask.ConfigureAwait(false)) ?? new List<Fund>();
@@ -166,9 +167,9 @@ public sealed class ApiPortfolioClient : IUserPortfolioService, IAsyncDisposable
     {
         try
         {
-            var resp = await Http().PostAsJsonAsync("api/portfolio/deposit-withdraw", cmd, ct).ConfigureAwait(false);
+            var resp = await Http().PostAsJsonAsync("api/portfolio/deposit-withdraw", cmd, ApiJsonOptions.Default, ct).ConfigureAwait(false);
             resp.EnsureSuccessStatusCode();
-            var ok = await resp.Content.ReadFromJsonAsync<bool>(cancellationToken: ct).ConfigureAwait(false);
+            var ok = await resp.Content.ReadFromJsonAsync<bool>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
             if (ok) await RefreshAsync(cmd.UserId, ct).ConfigureAwait(false);
             return ok;
         }
@@ -193,9 +194,9 @@ public sealed class ApiPortfolioClient : IUserPortfolioService, IAsyncDisposable
         var cmd = new ConvertInternalCommand(userId, from, to, amount, converted, outNote, inNote);
         try
         {
-            var resp = await Http().PostAsJsonAsync("api/portfolio/convert-internal", cmd, ct).ConfigureAwait(false);
+            var resp = await Http().PostAsJsonAsync("api/portfolio/convert-internal", cmd, ApiJsonOptions.Default, ct).ConfigureAwait(false);
             resp.EnsureSuccessStatusCode();
-            var ok = await resp.Content.ReadFromJsonAsync<bool>(cancellationToken: ct).ConfigureAwait(false);
+            var ok = await resp.Content.ReadFromJsonAsync<bool>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
             if (ok) await RefreshAsync(userId, ct).ConfigureAwait(false);
             return ok;
         }
@@ -212,7 +213,7 @@ public sealed class ApiPortfolioClient : IUserPortfolioService, IAsyncDisposable
         var userId = asUserId ?? _auth.CurrentUserId;
         if (userId <= 0) return Array.Empty<FundTransaction>();
         var list = await Http().GetFromJsonAsync<List<FundTransaction>>(
-            $"api/fund-transactions/by-user/{userId}", ct).ConfigureAwait(false);
+            $"api/fund-transactions/by-user/{userId}", ApiJsonOptions.Default, ct).ConfigureAwait(false);
         return list ?? new List<FundTransaction>();
     }
 

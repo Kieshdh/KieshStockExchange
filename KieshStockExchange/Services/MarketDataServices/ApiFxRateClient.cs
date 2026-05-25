@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Net.Http.Json;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -79,7 +80,7 @@ public sealed class ApiFxRateClient : IFxRateService, IAsyncDisposable
     {
         try
         {
-            var list = await http.GetFromJsonAsync<List<FxRateDto>>("api/fx-rates", ct).ConfigureAwait(false);
+            var list = await http.GetFromJsonAsync<List<FxRateDto>>("api/fx-rates", ApiJsonOptions.Default, ct).ConfigureAwait(false);
             if (list is null) return;
             foreach (var dto in list)
             {

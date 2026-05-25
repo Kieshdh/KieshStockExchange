@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.SignalR;
 using Microsoft.Extensions.Logging;
@@ -142,7 +143,7 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
                   $"?resolution={Uri.EscapeDataString(span.ToString())}" +
                   $"&from={Uri.EscapeDataString(fromUtc.ToString("o"))}" +
                   $"&to={Uri.EscapeDataString(toUtc.ToString("o"))}";
-        var list = await http.GetFromJsonAsync<List<Candle>>(url, ct).ConfigureAwait(false);
+        var list = await http.GetFromJsonAsync<List<Candle>>(url, ApiJsonOptions.Default, ct).ConfigureAwait(false);
         return list ?? new List<Candle>();
     }
 
