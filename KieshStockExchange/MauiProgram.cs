@@ -4,7 +4,6 @@ using KieshStockExchange.Services.BackgroundServices;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
-using KieshStockExchange.Services.Implementations;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
@@ -12,7 +11,6 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices;
-using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.SignalR;
 using KieshStockExchange.Services.UserServices;
@@ -98,7 +96,13 @@ public static class MauiProgram
 
         // Services
         builder.Services.AddSingleton<IDataBaseService, ApiDataBaseService>();
-        builder.Services.AddSingleton<IEngineCommandClient, EngineCommandClient>();
+        // IOrderRegistry stays for now — the in-process OrderBookCache (kept
+        // until Step 0g) still calls _registry.GetOrAdd when bulk-loading the
+        // book. Step 0g's ApiOrderBookFeed will drop both.
+        builder.Services.AddSingleton<IOrderRegistry, OrderRegistry>();
+        // IEngineCommandClient / EngineCommandClient deleted in Step 0e — the
+        // 4 engine bundle endpoints were already removed in Phase 3 Step 6,
+        // and the 2 portfolio bundles now route through ApiPortfolioClient.
         builder.Services.AddSingleton<IExcelImportService, ExcelImportService>();
         builder.Services.AddSingleton<IAuthService, AuthService>();
         // Phase 3 finish — market data + candles + FX + lookups: thin proxies
