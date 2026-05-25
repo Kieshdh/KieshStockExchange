@@ -1,3 +1,5 @@
+using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.BackgroundServices.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
@@ -41,6 +43,89 @@ public sealed class AdminBotController : ControllerBase
             LedgerRows:         _bots.ReservationLedgerEntryCount,
             EconomyRows:        _bots.EconomySampleCount,
             SentimentRows:      _bots.SentimentSampleCount));
+
+    // Phase 3 Step 7b.1 — bot lifecycle + live status. Mirrors what the
+    // BotDashboard used to read directly off IAiTradeService client-side. The
+    // dashboard polls /status on a 1s timer and posts /start, /stop, /scaler
+    // on button clicks.
+
+    [HttpGet("status")]
+    public ActionResult<BotStatusResponse> Status()
+    {
+        // FailureCategory enum → string so the JSON payload is stable across
+        // enum reordering (client deserializes into a Dictionary<string, long>).
+        var byCategory = new Dictionary<string, long>(_bots.FailuresByCategory.Count);
+        foreach (var kv in _bots.FailuresByCategory)
+            byCategory[kv.Key.ToString()] = kv.Value;
+
+        return Ok(new BotStatusResponse(
+            IsRunning:                _bots.LoopStartedAtUtc.HasValue,
+            LoadedBotCount:           _bots.LoadedBotCount,
+            OnlineBotCount:           _bots.OnlineBotCount,
+            ActiveBotCap:             _bots.ActiveBotCap,
+            MaxBotCap:                _bots.MaxBotCap,
+            MinBotCap:                _bots.MinBotCap,
+            AutoScale:                _bots.AutoScale,
+            TickCount:                _bots.TickCount,
+            TradesPlacedThisSession:  _bots.TradesPlacedThisSession,
+            FailuresThisSession:      _bots.FailuresThisSession,
+            TickWorkMsEwma:           _bots.TickWorkMsEwma,
+            LastTickWorkMicros:       _bots.LastTickWorkMicros,
+            LastLoadFraction:         _bots.LastLoadFraction,
+            TradeIntervalMs:          _bots.TradeInterval.TotalMilliseconds,
+            LastTradeAtUtc:           _bots.LastTradeAtUtc,
+            LoopStartedAtUtc:         _bots.LoopStartedAtUtc,
+            RecentFailures:           _bots.RecentFailures,
+            FailuresByCategory:       byCategory,
+            FailuresByStockId:        _bots.FailuresByStockId,
+            RecentFailureRecordsCount: _bots.RecentFailureRecords.Count,
+            CurrenciesToTrade:        _bots.CurrenciesToTrade));
+    }
+
+    [HttpPost("start")]
+    public async Task<IActionResult> Start(CancellationToken ct)
+    {
+        await _bots.StartBotAsync(ct);
+        return NoContent();
+    }
+
+    [HttpPost("stop")]
+    public async Task<IActionResult> Stop()
+    {
+        await _bots.StopBotAsync();
+        return NoContent();
+    }
+
+    // Single endpoint covers all four scaler/cap settings. Body fields are
+    // optional — null leaves the existing value alone. Matches the
+    // SetActiveBotCap / SetMaxBotCap / MinBotCap / AutoScale call surface
+    // BotDashboardViewModel mutates today.
+    [HttpPost("scaler")]
+    public IActionResult Scaler([FromBody] BotScalerSettings req)
+    {
+        if (req is null) return BadRequest();
+        if (req.ActiveCap is not null || _bots.ActiveBotCap is not null) // null only clears if explicitly cleared
+        {
+            // Only call setter when the client actually wanted to change it
+            // (treat ActiveCap = null in a payload with no other fields as
+            // "no change"). The client's JSON serializer omits null props by
+            // default, so checking presence via the deserialized record is
+            // sufficient.
+            _bots.SetActiveBotCap(req.ActiveCap);
+        }
+        if (req.MaxCap is not null) _bots.SetMaxBotCap(req.MaxCap);
+        if (req.MinCap is not null) _bots.MinBotCap = req.MinCap.Value;
+        if (req.AutoScale is not null) _bots.AutoScale = req.AutoScale.Value;
+        return NoContent();
+    }
+
+    [HttpGet("ai-user-ids")]
+    public ActionResult<IReadOnlyCollection<int>> AiUserIds()
+        => Ok(_bots.GetAiUserIds());
+
+    [HttpGet("activity-samples")]
+    public ActionResult<IReadOnlyList<BotActivitySample>> ActivitySamples()
+        => Ok(_bots.GetActivitySamples());
 
     private FileContentResult Csv(string body, string fileName)
     {

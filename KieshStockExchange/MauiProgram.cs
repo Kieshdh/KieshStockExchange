@@ -112,6 +112,10 @@ public static class MauiProgram
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<NotificationBridgeService>();
         builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
+        // Phase 3 Step 7b.1: ApiBotAdminClient is the dashboard's HTTP-backed
+        // replacement for IAiTradeService + IUserSessionService.Start/StopBotsAsync.
+        // Stays alongside IAiTradeService until Step 7b.2 wires it in.
+        builder.Services.AddSingleton<ApiBotAdminClient>();
         builder.Services.AddSingleton<IThemeService, ThemeService>();
         builder.Services.AddSingleton<IProfileService, ProfileService>();
         builder.Services.AddSingleton<IOrderEditService, OrderEditService>();
