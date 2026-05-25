@@ -26,7 +26,6 @@ public partial class LoginViewModel : BaseViewModel
     private readonly IProfileService _profile;
     private readonly IWatchlistService _watchlist;
     private readonly ILogger<LoginViewModel> _logger;
-    private readonly Task _initTask;
 
     public LoginViewModel(IAuthService auth, IUserSessionService session,
         IProfileService profile, IWatchlistService watchlist, ILogger<LoginViewModel> logger)
@@ -39,11 +38,9 @@ public partial class LoginViewModel : BaseViewModel
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         LoginCommand = new AsyncRelayCommand(ExecuteLogin);
 
-        // Start early but keep the task so login paths can await completion.
-        // The exception is allowed to fault the task — ExecuteLogin/AutoLogin
-        // observe it and surface a user-visible error instead of silently
-        // proceeding into a broken session.
-        _initTask = Task.Run(() => _session.InitializeBackgroundServicesAsync());
+        // Step 7b.2: dropped the InitializeBackgroundServicesAsync prelude.
+        // Excel seeding + AiTradeService.Configure + PriceSnapshotService.Start
+        // all moved server-side (Wave 8.8/8.10/8.11). Login just authenticates.
     }
     #endregion
 
@@ -51,9 +48,6 @@ public partial class LoginViewModel : BaseViewModel
     public async Task AutoLogin()
     {
 #if DEBUG
-        // Ensure DB is fully seeded before touching it.
-        await _initTask;
-
         Username = "admin";
         Password = "hallo123";
 
@@ -69,18 +63,6 @@ public partial class LoginViewModel : BaseViewModel
 
     private async Task ExecuteLogin()
     {
-        // Ensure DB is fully seeded before querying it (idempotent guard inside).
-        // If background-service init faulted, surface an error instead of silently
-        // continuing with a half-initialized app.
-        try { await _initTask; }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Background services failed to initialize; aborting login.");
-            await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.DisplayAlert(
-                "Startup error", "The app failed to initialize. Please restart and try again.", "OK"));
-            return;
-        }
-
         await _auth.LoginAsync(Username, Password);
 
         if (_auth.IsLoggedIn)
@@ -95,7 +77,7 @@ public partial class LoginViewModel : BaseViewModel
             try { await _watchlist.RefreshAsync(); }
             catch (Exception ex) { _logger.LogWarning(ex, "Watchlist refresh on login failed."); }
 
-            await _session.StartBotsAsync();
+            //await _session.StartBotsAsync();
             // Shell navigation must run on the UI thread; the prior awaits can
             // resume on a thread-pool thread where Shell.Current returns null.
             await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.GoToAsync("//TradePage"));

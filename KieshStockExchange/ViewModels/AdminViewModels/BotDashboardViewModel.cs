@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.BackgroundServices;
 using KieshStockExchange.Services.BackgroundServices.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices.Interfaces;
@@ -89,7 +90,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     #endregion
 
     #region Services and timer
-    private readonly IAiTradeService _trade;
+    private readonly ApiBotAdminClient _admin;
     private readonly IUserSessionService _session;
     private readonly IDataBaseService _db;
     private readonly IStockService _stocks;
@@ -104,14 +105,23 @@ public partial class BotDashboardViewModel : BaseViewModel
     private static readonly TimeSpan Stats24hInterval = TimeSpan.FromSeconds(30);
     private const int TopStockFailuresCount = 5;
     private const int RecentFailuresDisplayCount = 100;
+
+    // Latest /api/admin/bots/status payload. Refresh() reads from this; the
+    // status poll updates it. Avoids re-issuing HTTP for every getter the UI
+    // reads (and lets us tolerate transient transport failures by reusing the
+    // previous snapshot).
+    private BotStatusResponse? _lastStatus;
+    private IReadOnlyCollection<int> _aiUserIdsCache = Array.Empty<int>();
+    private DateTime _aiUserIdsLoadedAtUtc = DateTime.MinValue;
+    private static readonly TimeSpan AiUserIdsCacheTtl = TimeSpan.FromMinutes(5);
     #endregion
 
-    public BotDashboardViewModel(IAiTradeService trade,
+    public BotDashboardViewModel(ApiBotAdminClient admin,
         IUserSessionService session, IDataBaseService db, IStockService stocks,
         IHttpClientFactory httpFactory,
         ILogger<BotDashboardViewModel> logger, TopNavBarViewModel topNavBarVm)
     {
-        _trade = trade ?? throw new ArgumentNullException(nameof(trade));
+        _admin = admin ?? throw new ArgumentNullException(nameof(admin));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
@@ -122,11 +132,8 @@ public partial class BotDashboardViewModel : BaseViewModel
 
         Title = "AI Bot Dashboard";
 
-        // Seed editable fields so first show is consistent.
-        _maxBotCapText = _trade.MaxBotCap?.ToString() ?? string.Empty;
-        _minBotCapText = _trade.MinBotCap.ToString();
-
-        Refresh();
+        // First poll happens on StartPolling — until then the status fields
+        // show whatever ObservableProperty defaults we declared.
     }
 
     #region Polling lifecycle
@@ -143,7 +150,7 @@ public partial class BotDashboardViewModel : BaseViewModel
         _timer.Start();
 
         // First refresh immediately so the UI doesn't show stale defaults.
-        Refresh();
+        _ = RefreshAsync();
         _ = Refresh24hStatsAsync();
         _ = RefreshActivityAsync();
     }
@@ -158,7 +165,7 @@ public partial class BotDashboardViewModel : BaseViewModel
 
     private void OnTimerTick(object? sender, EventArgs e)
     {
-        Refresh();
+        _ = RefreshAsync();
         var now = TimeHelper.NowUtc();
         if (now >= _next24hRefreshUtc)
         {
@@ -174,71 +181,85 @@ public partial class BotDashboardViewModel : BaseViewModel
     #endregion
 
     #region Refresh
-    private void Refresh()
+    // 1s poll of /api/admin/bots/status. On transport failure we keep the old
+    // values and surface the error in the status text — never let a 5xx blow
+    // up the timer callback.
+    private async Task RefreshAsync()
     {
-        IsRunning = _session.AiBotsRunning;
-        LoadedBots = _trade.LoadedBotCount;
-        OnlineBots = _trade.OnlineBotCount;
-        TickCount = _trade.TickCount;
-        TradesPlaced = _trade.TradesPlacedThisSession;
-        Failures = _trade.FailuresThisSession;
-        ActiveBotCap = _trade.ActiveBotCap;
-        MaxBotCap = _trade.MaxBotCap;
-        MinBotCap = _trade.MinBotCap;
-        ScalerEnabled = _trade.AutoScale;
+        BotStatusResponse? status;
+        try
+        {
+            status = await _admin.GetStatusAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Bot status poll failed; reusing last snapshot.");
+            StatusText = $"Server unreachable ({ex.GetType().Name})";
+            return;
+        }
+        if (status is null) return;
+        _lastStatus = status;
+
+        IsRunning = status.IsRunning;
+        LoadedBots = status.LoadedBotCount;
+        OnlineBots = status.OnlineBotCount;
+        TickCount = status.TickCount;
+        TradesPlaced = status.TradesPlacedThisSession;
+        Failures = status.FailuresThisSession;
+        ActiveBotCap = status.ActiveBotCap;
+        MaxBotCap = status.MaxBotCap;
+        MinBotCap = status.MinBotCap;
+        ScalerEnabled = status.AutoScale;
         StatusText = IsRunning ? "Running" : "Stopped";
 
-        var ewmaMs = _trade.TickWorkMsEwma;
-        var lastUs = _trade.LastTickWorkMicros;
+        var ewmaMs = status.TickWorkMsEwma;
+        var lastUs = status.LastTickWorkMicros;
         TickWorkMsEwma = ewmaMs;
         LastTickWorkMicros = lastUs;
         TickLatencyText = ewmaMs > 0
             ? $"{ewmaMs:F1} ms (last {lastUs / 1000.0:F1} ms)"
             : "—";
 
-        var intervalMs = _trade.TradeInterval.TotalMilliseconds;
+        var intervalMs = status.TradeIntervalMs;
         LoadFraction = intervalMs > 0 ? ewmaMs / intervalMs : 0;
         LoadFractionText = ewmaMs > 0 ? $"{LoadFraction:P0}" : "—";
 
-        LastTradeText = _trade.LastTradeAtUtc is { } last
+        LastTradeText = status.LastTradeAtUtc is { } last
             ? FormatRelative(TimeHelper.NowUtc() - last)
             : "—";
-
-        UptimeText = _trade.LoopStartedAtUtc is { } started
+        UptimeText = status.LoopStartedAtUtc is { } started
             ? FormatDuration(TimeHelper.NowUtc() - started)
             : "—";
 
-        RecentFailuresText = BuildRecentFailuresText();
-        (FailuresByReasonText, FailuresByStockText) = BuildFailureBreakdownTexts();
+        RecentFailuresText = BuildRecentFailuresText(status);
+        (FailuresByReasonText, FailuresByStockText) = BuildFailureBreakdownTexts(status);
+
+        // Re-seed the editable cap text fields only if the user hasn't typed
+        // into them (don't clobber an in-progress edit).
+        if (string.IsNullOrWhiteSpace(MaxBotCapText) && status.MaxBotCap is not null)
+            MaxBotCapText = status.MaxBotCap.Value.ToString();
+        if (string.IsNullOrWhiteSpace(MinBotCapText))
+            MinBotCapText = status.MinBotCap.ToString();
     }
 
-    private string BuildRecentFailuresText()
+    private static string BuildRecentFailuresText(BotStatusResponse status)
     {
-        // Format only the visible tail — the engine's ring holds far more than the view shows.
-        var records = _trade.RecentFailureRecords;
-        if (records.Count == 0) return "No recent failures.";
-
-        int take = Math.Min(RecentFailuresDisplayCount, records.Count);
-        int start = records.Count - take;
-
+        // The server pre-formats one line per failure (timestamp + AIUser +
+        // stock + category + message). We just show the visible tail.
+        var lines = status.RecentFailures;
+        if (lines.Count == 0) return "No recent failures.";
+        int take = Math.Min(RecentFailuresDisplayCount, lines.Count);
+        int start = lines.Count - take;
         var sb = new StringBuilder(take * 80);
-        for (int i = start; i < records.Count; i++)
-        {
-            var r = records[i];
-            sb.Append(r.TimestampUtc.ToLocalTime().ToString("HH:mm:ss"))
-              .Append("  AIUser ").Append(r.AiUserId)
-              .Append(" stock ").Append(r.StockId)
-              .Append(": ").Append(r.Category.DisplayName())
-              .Append(" — ").Append(r.ErrorMessage)
-              .Append('\n');
-        }
+        for (int i = start; i < lines.Count; i++)
+            sb.AppendLine(lines[i]);
         return sb.ToString().TrimEnd();
     }
 
-    private (string ByReason, string ByStock) BuildFailureBreakdownTexts()
+    private (string ByReason, string ByStock) BuildFailureBreakdownTexts(BotStatusResponse status)
     {
-        var byCategory = _trade.FailuresByCategory;
-        var byStock    = _trade.FailuresByStockId;
+        var byCategory = status.FailuresByCategory;
+        var byStock    = status.FailuresByStockId;
         if (byCategory.Count == 0 && byStock.Count == 0)
             return ("No failures yet this session.", string.Empty);
 
@@ -251,11 +272,11 @@ public partial class BotDashboardViewModel : BaseViewModel
         reasonsSb.AppendLine(" total):");
         var orderedCats = byCategory
             .OrderByDescending(kv => kv.Value)
-            .ThenBy(kv => kv.Key.ToString());
+            .ThenBy(kv => kv.Key);
         foreach (var kv in orderedCats)
         {
             var pct = total > 0 ? (double)kv.Value * 100.0 / total : 0.0;
-            reasonsSb.Append("  ").Append(kv.Key.DisplayName())
+            reasonsSb.Append("  ").Append(kv.Key)
                      .Append(": ").Append(kv.Value.ToString("N0"))
                      .Append("  (").Append(pct.ToString("F1")).AppendLine("%)");
         }
@@ -283,6 +304,18 @@ public partial class BotDashboardViewModel : BaseViewModel
         }
 
         return (reasonsSb.ToString().TrimEnd(), stocksText);
+    }
+
+    // AI user-id set rarely changes (bots load at startup); cache for a few minutes
+    // so the 24h/activity refresh paths don't hit the server every cycle.
+    private async Task<IReadOnlyCollection<int>> GetAiUserIdsAsync()
+    {
+        var now = TimeHelper.NowUtc();
+        if (_aiUserIdsCache.Count > 0 && now - _aiUserIdsLoadedAtUtc < AiUserIdsCacheTtl)
+            return _aiUserIdsCache;
+        _aiUserIdsCache = await _admin.GetAiUserIdsAsync().ConfigureAwait(false);
+        _aiUserIdsLoadedAtUtc = now;
+        return _aiUserIdsCache;
     }
 
     [RelayCommand]
@@ -384,7 +417,7 @@ public partial class BotDashboardViewModel : BaseViewModel
             var since = TimeHelper.NowUtc() - TimeSpan.FromHours(24);
             var txs = await _db.GetTransactionsSinceTime(since).ConfigureAwait(false);
 
-            var aiUserIds = new HashSet<int>(_trade.GetAiUserIds());
+            var aiUserIds = new HashSet<int>(await GetAiUserIdsAsync().ConfigureAwait(false));
             if (aiUserIds.Count == 0)
             {
                 Application.Current?.Dispatcher.Dispatch(() =>
@@ -430,7 +463,7 @@ public partial class BotDashboardViewModel : BaseViewModel
     {
         try
         {
-            var aiSet = new HashSet<int>(_trade.GetAiUserIds());
+            var aiSet = new HashSet<int>(await GetAiUserIdsAsync().ConfigureAwait(false));
             int rangeIdx = Math.Clamp(ActivityRangeIndex, 0, ActivityRangeMinutes.Count - 1);
             var rangeSpan = TimeSpan.FromMinutes(ActivityRangeMinutes[rangeIdx]);
             var to = TimeHelper.NowUtc();
@@ -460,7 +493,7 @@ public partial class BotDashboardViewModel : BaseViewModel
             }
 
             // Active bots: max OnlineBots per bucket from scaler samples (carry forward when empty).
-            var samples = _trade.GetActivitySamples();
+            var samples = await _admin.GetActivitySamplesAsync().ConfigureAwait(false);
             var activeArray = new int[ActivityBucketCount];
             int sIdx = 0;
             int carry = 0;
@@ -520,7 +553,7 @@ public partial class BotDashboardViewModel : BaseViewModel
         IsBusy = true;
         try
         {
-            await _session.StartBotsAsync().ConfigureAwait(false);
+            await _admin.StartAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -529,7 +562,7 @@ public partial class BotDashboardViewModel : BaseViewModel
         finally
         {
             IsBusy = false;
-            Refresh();
+            await RefreshAsync().ConfigureAwait(false);
         }
     }
 
@@ -540,7 +573,7 @@ public partial class BotDashboardViewModel : BaseViewModel
         IsBusy = true;
         try
         {
-            await _session.StopBotsAsync().ConfigureAwait(false);
+            await _admin.StopAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -549,12 +582,12 @@ public partial class BotDashboardViewModel : BaseViewModel
         finally
         {
             IsBusy = false;
-            Refresh();
+            await RefreshAsync().ConfigureAwait(false);
         }
     }
 
     [RelayCommand]
-    private void ApplyMaxBotCap()
+    private async Task ApplyMaxBotCapAsync()
     {
         int? cap;
         if (string.IsNullOrWhiteSpace(MaxBotCapText))
@@ -567,12 +600,17 @@ public partial class BotDashboardViewModel : BaseViewModel
             return;
         }
 
-        _trade.SetMaxBotCap(cap);
-        Refresh();
+        try
+        {
+            await _admin.UpdateScalerAsync(new BotScalerSettings(ActiveCap: null, MaxCap: cap, MinCap: null, AutoScale: null))
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to update max bot cap."); }
+        await RefreshAsync().ConfigureAwait(false);
     }
 
     [RelayCommand]
-    private void ApplyMinBotCap()
+    private async Task ApplyMinBotCapAsync()
     {
         if (!int.TryParse(MinBotCapText?.Trim(), out var n) || n < 0)
         {
@@ -580,13 +618,21 @@ public partial class BotDashboardViewModel : BaseViewModel
             return;
         }
 
-        _trade.MinBotCap = n;
-        Refresh();
+        try
+        {
+            await _admin.UpdateScalerAsync(new BotScalerSettings(ActiveCap: null, MaxCap: null, MinCap: n, AutoScale: null))
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to update min bot cap."); }
+        await RefreshAsync().ConfigureAwait(false);
     }
 
     partial void OnScalerEnabledChanged(bool value)
     {
-        if (_trade.AutoScale != value) _trade.AutoScale = value;
+        // Fire and forget — the dashboard's poll picks up the new state on the
+        // next tick. We don't await here because the OnXxxChanged partial is
+        // synchronous and called from the property setter path.
+        _ = _admin.UpdateScalerAsync(new BotScalerSettings(ActiveCap: null, MaxCap: null, MinCap: null, AutoScale: value));
     }
     #endregion
 

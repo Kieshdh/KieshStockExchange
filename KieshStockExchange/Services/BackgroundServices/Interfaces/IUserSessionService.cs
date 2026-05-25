@@ -41,16 +41,12 @@ public interface IUserSessionService
     void SetBaseCurrency(CurrencyType currency);
     void SetDefaultCandleResolution(CandleResolution resolution);
     void SetCurrentStockId(int? stockId);
-
-    // Background services
-    bool AiBotsRunning { get; }
-    Task InitializeBackgroundServicesAsync(CancellationToken ct = default);
-    Task StartBotsAsync(CancellationToken ct = default);
-    Task StopBotsAsync(CancellationToken ct = default);
-
 }
 
 // SessionSnapshot record moved to KieshStockExchange.Shared/Services/BackgroundServices/
 // during Phase 3 Step 4 so the server-side MarketDataService can reference it.
-// The IUserSessionService interface above stays client-only — it covers UI session
-// lifecycle (StartBots, ClearSession, etc.) which has no server-side analogue.
+//
+// Bot lifecycle (AiBotsRunning, InitializeBackgroundServicesAsync, StartBotsAsync,
+// StopBotsAsync) stripped in Step 7b.2 — bots run server-side now and the
+// BotDashboard talks to /api/admin/bots/* directly via ApiBotAdminClient. See
+// Wave 8.10 for the rationale.
