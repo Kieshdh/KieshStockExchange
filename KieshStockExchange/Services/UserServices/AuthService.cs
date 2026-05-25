@@ -4,6 +4,8 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Net.Http;
+using System.Net.Http.Json;
 using KieshStockExchange.Services.UserServices.Interfaces;
 
 namespace KieshStockExchange.Services.UserServices;
@@ -21,11 +23,14 @@ public sealed class AuthService : IAuthService
 
     #region Fields & Constructor
     private readonly IDataBaseService _db;
+    private readonly System.Net.Http.HttpClient _http;
     private readonly ILogger<AuthService> _logger;
 
-    public AuthService(IDataBaseService db, ILogger<AuthService> logger)
+    public AuthService(IDataBaseService db, IHttpClientFactory httpFactory, ILogger<AuthService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _http = httpFactory?.CreateClient("KSE.Server")
+            ?? throw new ArgumentNullException(nameof(httpFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -85,13 +90,33 @@ public sealed class AuthService : IAuthService
         CurrentUser = user;
 
         _logger.LogInformation("User logged in: #{UserId} {Username}", user.UserId, user.Username);
+        // Fire-and-forget: tell the server so its log shows the login too.
+        // No-op if the server is unreachable — auth itself stays client-local
+        // until Phase 5's JWT moves it server-side.
+        _ = NotifyServerAsync("api/session/login", user.UserId, user.Username);
     }
 
     public Task LogoutAsync(CancellationToken ct = default)
     {
+        var prev = CurrentUser;
         CurrentUser = null;
         _logger.LogInformation("User logged out.");
+        if (prev is not null)
+            _ = NotifyServerAsync("api/session/logout", prev.UserId, prev.Username);
         return Task.CompletedTask;
+    }
+
+    private async Task NotifyServerAsync(string path, int userId, string username)
+    {
+        try
+        {
+            await _http.PostAsJsonAsync(path, new { UserId = userId, Username = username, ClientLabel = "MAUI" })
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Session notify {Path} failed (server unreachable).", path);
+        }
     }
 
     public void UpdateCurrentUser(User user) => CurrentUser = user;
