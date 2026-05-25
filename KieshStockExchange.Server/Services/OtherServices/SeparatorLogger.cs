@@ -7,9 +7,9 @@ public enum SeparatorPlacement { Before, After, Both }
 public sealed class SeparatorLoggerOptions
 {
     public string Separator { get; set; } = "";
-    public SeparatorPlacement Placement { get; set; } = SeparatorPlacement.Before;
+    public SeparatorPlacement Placement { get; set; } = SeparatorPlacement.After;
     // Add an empty line after the entry
-    public bool ExtraBlankLine { get; set; } = true;
+    public bool ExtraBlankLine { get; set; } = false;
 }
 
 public sealed class SeparatorLogger<T> : ILogger<T>
