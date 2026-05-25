@@ -43,6 +43,11 @@ internal sealed class ReservationAuditor
             // include in-flight market orders, stay passive.
             mismatches = await _accounts.ReconcileReservationsAsync(clamp: false, ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Cooperative shutdown — the host cancelled mid-pass. Not an error.
+            return;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Reservation reconcile pass failed");

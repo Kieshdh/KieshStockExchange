@@ -54,15 +54,22 @@ internal sealed class AiBotStateService
     #region Load and Refresh
     internal async Task LoadAsync(AiBotContext ctx, CancellationToken ct)
     {
-        ctx.AiUsersByAiUserId.Clear();
-        ctx.AiUsersByUserId.Clear();
-        ctx.AiUserRngs.Clear();
+        var users = await _db.GetAIUsersAsync(ct).ConfigureAwait(false);
 
-        foreach (var user in await _db.GetAIUsersAsync(ct).ConfigureAwait(false))
+        // Lock the dict while we wipe + repopulate so admin readers don't
+        // observe a half-cleared state. Reader side: AiTradeService.OnlineBotCount.
+        lock (ctx.AiUsersByAiUserId)
         {
-            ctx.AiUsersByAiUserId[user.AiUserId] = user;
-            ctx.AiUsersByUserId[user.UserId]     = user;
-            ctx.GetRandom(user.AiUserId); // seed RNG eagerly
+            ctx.AiUsersByAiUserId.Clear();
+            ctx.AiUsersByUserId.Clear();
+            ctx.AiUserRngs.Clear();
+
+            foreach (var user in users)
+            {
+                ctx.AiUsersByAiUserId[user.AiUserId] = user;
+                ctx.AiUsersByUserId[user.UserId]     = user;
+                ctx.GetRandom(user.AiUserId); // seed RNG eagerly
+            }
         }
 
         await RefreshAssetsAsync(ctx, ct).ConfigureAwait(false);

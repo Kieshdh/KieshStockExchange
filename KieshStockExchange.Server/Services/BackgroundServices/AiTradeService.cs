@@ -39,9 +39,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     {
         get
         {
+            // Lock the dict because AiBotStateService.LoadAsync clears + repopulates
+            // it during the daily refresh on the bot-loop thread, while admin HTTP
+            // requests read it on the request thread. Matching lock is in LoadAsync.
             int n = 0;
-            foreach (var u in _ctx.AiUsersByAiUserId.Values)
-                if (u.IsEnabled) n++;
+            lock (_ctx.AiUsersByAiUserId)
+            {
+                foreach (var u in _ctx.AiUsersByAiUserId.Values)
+                    if (u.IsEnabled) n++;
+            }
             return n;
         }
     }

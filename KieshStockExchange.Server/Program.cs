@@ -41,6 +41,11 @@ builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
+// Bump shutdown timeout above the default 30s. Bot loop's clean stop needs to
+// finish the in-flight tick + flush ringbuffers; under load the longest path
+// is the AiTradeService dispose + ReservationLedger CSV flush. 60s is plenty.
+builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(60));
+
 // OpenAPI surface for dev. No auth wiring yet — Phase 5 handles JWT.
 builder.Services.AddOpenApi();
 
