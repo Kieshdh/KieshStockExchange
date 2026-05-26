@@ -136,6 +136,9 @@ public static class MauiProgram
         // Phase 3 finish — SignalR -> OrderCacheService.RefreshAsync glue.
         // Eagerly resolved below so its ctor wires up the subscription.
         builder.Services.AddSingleton<ApiOrderCacheBridge>();
+        // Step 0g-6a — HTTP + SignalR-backed order-book feed. 0g-6b swings
+        // the chart VM onto it; until then no one reads it.
+        builder.Services.AddSingleton<IOrderBookFeed, ApiOrderBookFeed>();
         // Service helpers
         builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
         // OrderBookCache stays for now — Step 0g reworks it (engine/admin/UI
