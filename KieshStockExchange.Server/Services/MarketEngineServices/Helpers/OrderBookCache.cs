@@ -20,9 +20,28 @@ public interface IOrderBookCache
 
     /// <summary> Rebuild the index of the order book for a specific stock and currency. </summary>
     Task RebuildIndexAsync(int stockId, CurrencyType currency, CancellationToken ct);
+
+    /// <summary>
+    /// Read-only depth snapshot for HTTP/SignalR clients. Built under the
+    /// per-book lock; does not expose the engine's mutable OrderBook instance.
+    /// </summary>
+    Task<OrderBookSnapshot> GetSnapshotAsync(int stockId, CurrencyType currency, CancellationToken ct);
 }
 
-public sealed class OrderBookCache : IOrderBookCache
+/// <summary>
+/// Step 0g rename target. Same impl as <see cref="IOrderBookCache"/>; the new
+/// name makes the engine-internal role explicit. During the transition the
+/// concrete <see cref="OrderBookCache"/> implements both interfaces so callers
+/// can migrate one at a time. The 0g-7 cleanup commit drops
+/// <see cref="IOrderBookCache"/> and renames the concrete class.
+/// </summary>
+public interface IOrderBookEngine
+{
+    Task WithBookLockAsync(int stockId, CurrencyType currency, CancellationToken ct, Func<OrderBook, Task> body);
+    Task<OrderBookSnapshot> GetSnapshotAsync(int stockId, CurrencyType currency, CancellationToken ct);
+}
+
+public sealed class OrderBookCache : IOrderBookCache, IOrderBookEngine
 {
     #region Dictionaries
     // Order book for each stock (keyed by stock ID and CurrencyType)
@@ -142,6 +161,16 @@ public sealed class OrderBookCache : IOrderBookCache
             book.RebuildIndex();
             return Task.CompletedTask;
         }).ConfigureAwait(false);
+    }
+
+    public async Task<OrderBookSnapshot> GetSnapshotAsync(int stockId, CurrencyType currency, CancellationToken ct)
+    {
+        await EnsureLoadedAsync(stockId, currency, ct).ConfigureAwait(false);
+        var book = GetOrCreate(stockId, currency);
+        // ToDepthSnapshot is sync under _gate; no need to take the per-book
+        // SemaphoreSlim — that's reserved for mutating bodies that need
+        // exclusive access. Snapshot is a point-in-time read.
+        return book.ToDepthSnapshot();
     }
 
     #endregion

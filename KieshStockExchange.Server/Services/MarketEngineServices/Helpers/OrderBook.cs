@@ -55,6 +55,14 @@ public sealed class OrderBook
     // Set by mutating operations; cleared by FlushChanged.
     private int _dirty;
 
+    /// <summary>
+    /// Monotonic counter incremented on every FlushChanged. Embedded in
+    /// OrderBookSnapshot so clients can drop out-of-order pushes (rare with
+    /// SignalR but free to guard against). Read under <c>_gate</c>; written
+    /// under <c>_gate</c> from FlushChanged.
+    /// </summary>
+    public long BookVersion { get; private set; }
+
     public OrderBook(int stockId, CurrencyType currency)
     {
         StockId = stockId;
@@ -800,8 +808,40 @@ public sealed class OrderBook
     public void FlushChanged()
     {
         if (Interlocked.Exchange(ref _dirty, 0) == 0) return;
+        // Bump BookVersion under _gate so a concurrent GetSnapshotAsync either
+        // sees both the new state and the new version, or neither.
+        lock (_gate) { BookVersion++; }
         try { Changed?.Invoke(this, EventArgs.Empty); }
         catch { /* subscriber errors must not break trading */ }
+    }
+
+    /// <summary>
+    /// Build a wire-shape snapshot of the book's depth. Sorts buys descending
+    /// (best bid first) and sells ascending (best ask first). Held under
+    /// <c>_gate</c> so the snapshot is point-in-time consistent with
+    /// <see cref="BookVersion"/>.
+    /// </summary>
+    public OrderBookSnapshot ToDepthSnapshot()
+    {
+        lock (_gate)
+        {
+            var bids = new List<DepthLevel>(_buyBook.Count);
+            // _buyBook is sorted ascending by price; iterate reverse for "best bid first".
+            foreach (var kv in _buyBook.Reverse())
+            {
+                _buyQtyByPrice.TryGetValue(kv.Key, out var qty);
+                bids.Add(new DepthLevel(kv.Key, qty, kv.Value.Count));
+            }
+
+            var asks = new List<DepthLevel>(_sellBook.Count);
+            foreach (var kv in _sellBook)
+            {
+                _sellQtyByPrice.TryGetValue(kv.Key, out var qty);
+                asks.Add(new DepthLevel(kv.Key, qty, kv.Value.Count));
+            }
+
+            return new OrderBookSnapshot(StockId, Currency, bids, asks, DateTime.UtcNow, BookVersion);
+        }
     }
 
     // --- Aggregate maintenance helpers ----------------------------------------
