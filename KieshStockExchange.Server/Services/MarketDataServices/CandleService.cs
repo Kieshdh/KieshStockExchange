@@ -141,35 +141,52 @@ public sealed class CandleService : ICandleService, IDisposable
         await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
         var stocks = _stock.All;
         var nowAligned = TimeHelper.NowUtc();
-        int primed = 0;
+        int primedFromDb = 0;
+        int primedFromReplay = 0;
+        int emptyKeys = 0;
 
         foreach (var s in stocks)
         {
             foreach (var ccy in currencies)
             {
+                if (!_stock.IsListedIn(s.StockId, ccy)) continue;
+
                 foreach (var res in resolutions)
                 {
                     if (ct.IsCancellationRequested) return;
                     try
                     {
                         var span = TimeSpan.FromSeconds((int)res);
-                        // Look back exactly RingCapacity buckets so the DB filter
-                        // narrows the scan; gaps just mean a less-than-full ring.
+                        // Look back exactly RingCapacity buckets so the DB scan
+                        // is narrow and any transaction replay only walks the
+                        // window we care about.
                         var to = TimeHelper.NextBucketBoundaryUtc(nowAligned, span);
                         var from = to - span * RingCapacity;
-                        var rows = await _db.GetCandlesByStockIdAndTimeRange(
-                            s.StockId, ccy, span, from, to, ct).ConfigureAwait(false);
-                        if (rows.Count == 0) continue;
 
-                        // DB returns descending by OpenTime; the ring expects
-                        // logical-oldest-first push order so iteration matches
-                        // wall-clock order on Snapshot.
-                        rows.Sort(static (a, b) => a.OpenTime.CompareTo(b.OpenTime));
+                        // Snapshot what's in the DB first so we can tell whether
+                        // GetHistoricalCandlesAsync hit the cached rows or had to
+                        // replay transactions to manufacture them. Cheap COUNT-shaped
+                        // call would be ideal, but the existing helper returns the
+                        // list; we just check whether replay happened by comparing
+                        // before/after.
+                        var preCount = (await _db.GetCandlesByStockIdAndTimeRange(
+                            s.StockId, ccy, span, from, to, ct).ConfigureAwait(false)).Count;
 
+                        // Route through the smart historical method so the
+                        // DB → transaction-replay → persist waterfall fires for
+                        // keys that have raw trades but no persisted candles yet.
+                        var candles = await GetHistoricalCandlesAsync(
+                            s.StockId, ccy, res, from, to, ct, fillGaps: false).ConfigureAwait(false);
+
+                        if (candles.Count == 0) { emptyKeys++; continue; }
+
+                        // Candles arrive ascending by OpenTime; push them in that
+                        // order so the ring's FIFO iteration matches wall clock.
                         var ring = GetOrAddRing((s.StockId, ccy, res));
-                        for (int i = 0; i < rows.Count; i++)
-                            ring.Push(rows[i]);
-                        primed++;
+                        for (int i = 0; i < candles.Count; i++)
+                            ring.Push(candles[i]);
+
+                        if (preCount == 0) primedFromReplay++; else primedFromDb++;
                     }
                     catch (Exception ex)
                     {
@@ -179,8 +196,10 @@ public sealed class CandleService : ICandleService, IDisposable
             }
         }
         _logger.LogInformation(
-            "Candle rings primed: {Primed} keys (stocks={Stocks}, currencies={Currencies}, resolutions={Resolutions})",
-            primed, stocks.Count, currencies.Count, resolutions.Count);
+            "Candle rings primed: {FromDb} from DB, {FromReplay} via transaction replay, {Empty} keys had no data " +
+            "(stocks={Stocks}, currencies={Currencies}, resolutions={Resolutions})",
+            primedFromDb, primedFromReplay, emptyKeys,
+            stocks.Count, currencies.Count, resolutions.Count);
     }
 
     public void Dispose()
