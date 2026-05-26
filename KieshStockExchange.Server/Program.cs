@@ -146,6 +146,14 @@ await app.Services.GetRequiredService<IStockService>().EnsureLoadedAsync().Confi
         foreach (var res in chartResolutions)
             await candles.SubscribeAllAsync(ccy, res).ConfigureAwait(false);
 
+    // Backfill higher-resolution candles by aggregating from the dense 5m
+    // source persisted by the long-running bot subscription. Runs BEFORE
+    // priming so the prime then reads a DB that includes the aggregates.
+    // Without this, charts at 1h/4h/1d only show what the current session has
+    // managed to close in real time (e.g. ~5 candles after 5h of uptime at 1h).
+    await candles.BackfillUpwardAsync(CurrencyHelper.SupportedCurrencies)
+        .ConfigureAwait(false);
+
     // Prime each (stock, currency, resolution) ring with the most recent 500
     // persisted candles. Without this, the rings start empty and the chart's
     // "last hour" or "last day" requests still fall through to a DB scan

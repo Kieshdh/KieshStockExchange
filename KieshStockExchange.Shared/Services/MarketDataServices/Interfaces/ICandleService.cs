@@ -49,6 +49,17 @@ public interface ICandleService
     Task PrimeRingsAsync(IReadOnlyCollection<CurrencyType> currencies,
         IReadOnlyCollection<CandleResolution> resolutions,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Backfill higher-resolution candles (15m / 1h / 4h / 1d) by aggregating
+    /// from the dense 5m source persisted by the long-running bot subscription.
+    /// Runs over a 60-day window per (stock, currency, target) combo. Tolerates
+    /// gaps in the source — uses requireFullCoverage:false so missing 5m
+    /// buckets just yield approximate aggregates instead of failing the pass.
+    /// Server-only; client SignalR impl throws.
+    /// </summary>
+    Task BackfillUpwardAsync(IReadOnlyCollection<CurrencyType> currencies,
+        CancellationToken ct = default);
     #endregion
 
     #region Candle Operations

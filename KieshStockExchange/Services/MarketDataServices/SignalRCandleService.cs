@@ -106,6 +106,9 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
         IReadOnlyCollection<CandleResolution> resolutions, CancellationToken ct = default)
         => throw new NotSupportedException("Ring priming is a server-side boot step.");
 
+    public Task BackfillUpwardAsync(IReadOnlyCollection<CurrencyType> currencies, CancellationToken ct = default)
+        => throw new NotSupportedException("Upward backfill is a server-side boot step.");
+
     public Task OnTransactionTickAsync(Transaction tick, CancellationToken ct = default) => Task.CompletedTask;
     public void OnTransactionTick(Transaction tick) { /* no-op on client */ }
 

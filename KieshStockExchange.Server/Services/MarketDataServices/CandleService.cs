@@ -132,6 +132,80 @@ public sealed class CandleService : ICandleService, IDisposable
     public async Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default)
         => await SubscribeAllAsync(currency, DefaultCandleResolution, ct).ConfigureAwait(false);
 
+    public async Task BackfillUpwardAsync(IReadOnlyCollection<CurrencyType> currencies, CancellationToken ct = default)
+    {
+        if (currencies is null || currencies.Count == 0) return;
+        await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
+        var stocks = _stock.All;
+        var nowAligned = TimeHelper.NowUtc();
+        const int WindowDays = 60;
+        var from = nowAligned - TimeSpan.FromDays(WindowDays);
+
+        // Every chart-visible higher resolution is an integer multiple of 5m
+        // (15m=3, 1h=12, 4h=48, 1d=288), so we can aggregate them all from a
+        // single source. The bot loop keeps 5m subscribed for every stock by
+        // default, so this source is the densest and most reliable.
+        var source = CandleResolution.FiveMinutes;
+        var targets = new[]
+        {
+            CandleResolution.FifteenMinutes,
+            CandleResolution.OneHour,
+            CandleResolution.FourHours,
+            CandleResolution.OneDay,
+        };
+
+        int producedCandles = 0;
+        int failedCombos = 0;
+
+        foreach (var s in stocks)
+        {
+            if (ct.IsCancellationRequested) return;
+            foreach (var ccy in currencies)
+            {
+                if (!_stock.IsListedIn(s.StockId, ccy)) continue;
+
+                List<Candle>? srcSnapshot = null;
+                foreach (var target in targets)
+                {
+                    if (ct.IsCancellationRequested) return;
+                    try
+                    {
+                        // Fetch the 5m source once per (stock, currency) and reuse
+                        // it for all target resolutions — avoids repeated DB scans.
+                        if (srcSnapshot is null)
+                        {
+                            var src = await GetHistoricalCandlesAsync(
+                                s.StockId, ccy, source, from, nowAligned, ct, fillGaps: false).ConfigureAwait(false);
+                            if (src.Count == 0) break; // no 5m data → nothing to aggregate
+                            srcSnapshot = src as List<Candle> ?? new List<Candle>(src);
+                        }
+
+                        // requireFullCoverage:false so a missing 5m here-or-there
+                        // (e.g. brief outage between sessions) doesn't blow up the
+                        // entire pass with "must provide continuous coverage".
+                        var aggregated = AggregateMultipleCandles(
+                            srcSnapshot, target, requireFullCoverage: false, allowPartialEdges: true);
+                        if (aggregated.Count == 0) continue;
+
+                        await _db.UpsertCandlesAsync(aggregated, ct).ConfigureAwait(false);
+                        producedCandles += aggregated.Count;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCombos++;
+                        _logger.LogDebug(ex,
+                            "Upward backfill failed for stock={Stock} ccy={Ccy} 5m->{Target}",
+                            s.StockId, ccy, target);
+                    }
+                }
+            }
+        }
+        _logger.LogInformation(
+            "Upward candle backfill: persisted {Candles} candles across 15m/1h/4h/1d ({Window}d window). " +
+            "Failed combos: {Failed}.",
+            producedCandles, WindowDays, failedCombos);
+    }
+
     public async Task PrimeRingsAsync(IReadOnlyCollection<CurrencyType> currencies,
         IReadOnlyCollection<CandleResolution> resolutions, CancellationToken ct = default)
     {
