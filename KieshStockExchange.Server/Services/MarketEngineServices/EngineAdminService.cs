@@ -10,72 +10,40 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 public sealed class EngineAdminService : IEngineAdminService
 {
     #region Services and Constructor
-    private readonly IOrderBookCache _books;
+    // Step 0g-3: depend on the narrow IOrderBookAdmin instead of the full
+    // IOrderBookCache so admin code can't reach for hot-path engine surface.
+    private readonly IOrderBookAdmin _bookAdmin;
     private readonly ILogger<EngineAdminService> _logger;
     private readonly IAuthService _auth;
 
-    public EngineAdminService(IOrderBookCache books, ILogger<EngineAdminService> logger, IAuthService auth)
+    public EngineAdminService(IOrderBookAdmin bookAdmin, ILogger<EngineAdminService> logger, IAuthService auth)
     {
-        _books = books ?? throw new ArgumentNullException(nameof(books));
+        _bookAdmin = bookAdmin ?? throw new ArgumentNullException(nameof(bookAdmin));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
     }
     #endregion
 
     #region Public Methods
-    public async Task<(bool ok, string reason)> ValidateAsync(int stockId, CurrencyType currency, CancellationToken ct)
+    public Task<(bool ok, string reason)> ValidateAsync(int stockId, CurrencyType currency, CancellationToken ct)
     {
-        // Check admin rights
         if (!_auth.IsAdmin)
             throw new UnauthorizedAccessException("Only administrators can validate order books.");
-
-        // Call ValidateIndex under book lock
-        bool ok = false;
-        string reason = "OK"; 
-
-        await _books.WithBookLockAsync(stockId, currency, ct, book =>
-        {
-            // Call ValidateIndex and capture results
-            ok = book.ValidateIndex(out var localReason);
-            reason = localReason;
-            return Task.CompletedTask;
-        }).ConfigureAwait(false);
-
-        return (ok, ok ? "OK" : reason);
+        return _bookAdmin.ValidateAsync(stockId, currency, ct);
     }
 
-    public async Task RebuildIndexAsync(int stockId, CurrencyType currency, CancellationToken ct)
+    public Task RebuildIndexAsync(int stockId, CurrencyType currency, CancellationToken ct)
     {
-        // Check admin rights
         if (!_auth.IsAdmin)
             throw new UnauthorizedAccessException("Only administrators can rebuild order book indexes.");
-
-        // Call RebuildIndex under book lock
-        await _books.WithBookLockAsync(stockId, currency, ct, book =>
-        {
-            // Call RebuildIndex
-            book.RebuildIndex();
-            return Task.CompletedTask;
-        }).ConfigureAwait(false);
+        return _bookAdmin.RebuildIndexAsync(stockId, currency, ct);
     }
 
-    public async Task<BookFixReport> FixBookAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
+    public Task<BookFixReport> FixBookAsync(int stockId, CurrencyType currency, CancellationToken ct = default)
     {
-        // Check admin rights
         if (!_auth.IsAdmin)
             throw new UnauthorizedAccessException("Only administrators can fix order books.");
-
-        // Call FixAll under book lock
-        var report = new BookFixReport(0,0,0,0,0,0,0,0,0,0);
-
-        await _books.WithBookLockAsync(stockId, currency, ct, book =>
-        {
-            // Call FixAll and capture report
-            report = book.FixAll();
-            return Task.CompletedTask;
-        }).ConfigureAwait(false);
-
-        return report;
+        return _bookAdmin.FixBookAsync(stockId, currency, ct);
     }
     #endregion
 }

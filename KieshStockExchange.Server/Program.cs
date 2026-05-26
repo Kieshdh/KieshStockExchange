@@ -70,6 +70,12 @@ builder.Services.Configure<SeparatorLoggerOptions>(_ => { });
 builder.Services.AddSingleton<IOrderRegistry, OrderRegistry>();
 builder.Services.AddSingleton<IAccountsCache, AccountsCache>();
 builder.Services.AddSingleton<IOrderBookCache, OrderBookCache>();
+// Step 0g: same concrete instance exposed via the narrow IOrderBookEngine
+// (engine internals) and IOrderBookAdmin (validate/rebuild/fix) interfaces.
+// The full IOrderBookCache registration goes away in 0g-7 once every caller
+// has migrated.
+builder.Services.AddSingleton<IOrderBookEngine>(sp => (OrderBookCache)sp.GetRequiredService<IOrderBookCache>());
+builder.Services.AddSingleton<IOrderBookAdmin, OrderBookAdminService>();
 builder.Services.AddSingleton<IReservationLedger, ReservationLedger>();
 builder.Services.AddSingleton<IMatchingEngine, MatchingEngine>();
 builder.Services.AddSingleton<IOrderValidator, OrderValidator>();
