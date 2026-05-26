@@ -1,6 +1,7 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
@@ -33,6 +34,7 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     public event EventHandler<Candle>? CandleClosed;
     public event EventHandler<int>? OrderUpdated;
     public event EventHandler<PortfolioSnapshot>? PortfolioChanged;
+    public event EventHandler<OrderBookSnapshot>? OrderBookSnapshotReceived;
 
     public MarketHubClient(Uri serverBaseUrl, ILogger<MarketHubClient> logger)
     {
@@ -48,6 +50,7 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
         _connection.On<Candle>("CandleClosed", c => CandleClosed?.Invoke(this, c));
         _connection.On<OrderUpdatedEnvelope>("OrderUpdated", evt => OrderUpdated?.Invoke(this, evt.UserId));
         _connection.On<PortfolioSnapshot>("PortfolioChanged", s => PortfolioChanged?.Invoke(this, s));
+        _connection.On<OrderBookSnapshot>("OrderBookSnapshot", s => OrderBookSnapshotReceived?.Invoke(this, s));
 
         _connection.Reconnected += OnReconnected;
         _connection.Closed += OnClosed;

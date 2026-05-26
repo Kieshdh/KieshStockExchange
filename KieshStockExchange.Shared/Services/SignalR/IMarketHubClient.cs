@@ -1,6 +1,7 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices;
+using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 namespace KieshStockExchange.Services.SignalR;
@@ -30,6 +31,14 @@ public interface IMarketHubClient
 
     /// <summary>PortfolioChanged push from server-side IUserPortfolioService.</summary>
     event EventHandler<PortfolioSnapshot>? PortfolioChanged;
+
+    /// <summary>
+    /// OrderBookSnapshot push from server-side OrderBookBroadcaster. Arrives
+    /// on the existing quotes:{stockId}:{currency} group, throttled to max 1
+    /// per 100ms per key. Clients should drop pushes whose BookVersion isn't
+    /// strictly greater than their cached value.
+    /// </summary>
+    event EventHandler<OrderBookSnapshot>? OrderBookSnapshotReceived;
 
     /// <summary>Connect to /hubs/market if not already. Safe to call multiple times.</summary>
     Task EnsureConnectedAsync(CancellationToken ct = default);
