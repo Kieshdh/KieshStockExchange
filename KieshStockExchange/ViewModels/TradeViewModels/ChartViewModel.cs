@@ -164,9 +164,11 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
 
+    // Atomic CTS swap. RestartStreamAsync cancels + disposes the previous CTS
+    // before starting a new one. No SemaphoreSlim — aggressive switching
+    // doesn't queue HTTP fetches behind a held gate.
     private CancellationTokenSource? _streamCts;
     private bool _loadingOlder;
-    private readonly SemaphoreSlim _restartGate = new(1, 1);
 
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
         IOrderCacheService orderCache, IAuthService auth, IOrderEditService editService,
@@ -256,12 +258,14 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         if (disposing)
         {
-            try { _streamCts?.Cancel(); } catch { }
-            _streamCts?.Dispose();
-            _streamCts = null;
+            var prev = Interlocked.Exchange(ref _streamCts, null);
+            if (prev is not null)
+            {
+                try { prev.Cancel(); } catch { }
+                prev.Dispose();
+            }
             StopCandleStream();
             _orderCache.OrdersChanged -= OnOrdersChanged;
-            _restartGate.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -421,63 +425,55 @@ public partial class ChartViewModel : StockAwareViewModel
     #region Stream lifecycle
     private async Task RestartStreamAsync(int? stockId, CurrencyType currency, CandleResolution res, CancellationToken outerCt)
     {
-        try { await _restartGate.WaitAsync(outerCt).ConfigureAwait(false); }
-        catch (OperationCanceledException) { return; }
-
-        try
+        // Atomic CTS swap. Any prior in-flight stream (gate-wait, HTTP fetch,
+        // StreamCandlesLoop) sees its token cancel and bails. The new switch
+        // never queues behind it — that was the aggressive-switch hang.
+        var inner = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
+        var prev = Interlocked.Exchange(ref _streamCts, inner);
+        if (prev is not null)
         {
-            // Cancel any in-flight stream loop
-            try { _streamCts?.Cancel(); } catch { }
-            _streamCts?.Dispose();
-            _streamCts = null;
+            try { prev.Cancel(); } catch { }
+            prev.Dispose();
+        }
 
-            // Unsubscribe previous key
-            StopCandleStream();
+        // Unsubscribe previous key off the hot path.
+        StopCandleStream();
 
-            if (stockId is null)
+        if (stockId is null)
+        {
+            await MainThread.InvokeOnMainThreadAsync(() =>
             {
-                await MainThread.InvokeOnMainThreadAsync(() =>
-                {
-                    _candleBuffer.Clear();
-                    OffsetFromLatest = 0;
-                    SyncLatestCandle();
-                    RequestRedraw();
-                }).ConfigureAwait(false);
-                Key = null;
-                return;
-            }
+                _candleBuffer.Clear();
+                OffsetFromLatest = 0;
+                SyncLatestCandle();
+                RequestRedraw();
+            }).ConfigureAwait(false);
+            Key = null;
+            return;
+        }
 
-            Key = (stockId.Value, currency, res);
-            var inner = CancellationTokenSource.CreateLinkedTokenSource(outerCt);
-            _streamCts = inner;
-            var ct = inner.Token;
+        Key = (stockId.Value, currency, res);
+        var ct = inner.Token;
 
-            IsBusy = true;
-            var startupFailed = false;
-            try { await StartStreamingCandles(ct).ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                startupFailed = true;
-                _logger.LogError(ex, "Starting candle stream failed.");
-            }
-            finally
-            {
-                IsBusy = false;
-                // If startup faulted, the inner CTS is no longer driving any loop —
-                // dispose it now and clear the field so we don't leak it until the
-                // next restart that happens to overwrite _streamCts.
-                if (startupFailed && ReferenceEquals(_streamCts, inner))
-                {
-                    try { inner.Cancel(); } catch { }
-                    inner.Dispose();
-                    _streamCts = null;
-                }
-            }
+        IsBusy = true;
+        var startupFailed = false;
+        try { await StartStreamingCandles(ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { /* superseded by a newer switch */ }
+        catch (Exception ex)
+        {
+            startupFailed = true;
+            _logger.LogError(ex, "Starting candle stream failed.");
         }
         finally
         {
-            try { _restartGate.Release(); } catch (ObjectDisposedException) { }
+            IsBusy = false;
+            // Faulted startup: clear our CTS only if it's still the active one
+            // — a newer switch may have already replaced us atomically.
+            if (startupFailed && Interlocked.CompareExchange(ref _streamCts, null, inner) == inner)
+            {
+                try { inner.Cancel(); } catch { }
+                inner.Dispose();
+            }
         }
     }
 
