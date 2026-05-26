@@ -132,6 +132,57 @@ public sealed class CandleService : ICandleService, IDisposable
     public async Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default)
         => await SubscribeAllAsync(currency, DefaultCandleResolution, ct).ConfigureAwait(false);
 
+    public async Task PrimeRingsAsync(IReadOnlyCollection<CurrencyType> currencies,
+        IReadOnlyCollection<CandleResolution> resolutions, CancellationToken ct = default)
+    {
+        if (currencies is null || currencies.Count == 0) return;
+        if (resolutions is null || resolutions.Count == 0) return;
+
+        await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
+        var stocks = _stock.All;
+        var nowAligned = TimeHelper.NowUtc();
+        int primed = 0;
+
+        foreach (var s in stocks)
+        {
+            foreach (var ccy in currencies)
+            {
+                foreach (var res in resolutions)
+                {
+                    if (ct.IsCancellationRequested) return;
+                    try
+                    {
+                        var span = TimeSpan.FromSeconds((int)res);
+                        // Look back exactly RingCapacity buckets so the DB filter
+                        // narrows the scan; gaps just mean a less-than-full ring.
+                        var to = TimeHelper.NextBucketBoundaryUtc(nowAligned, span);
+                        var from = to - span * RingCapacity;
+                        var rows = await _db.GetCandlesByStockIdAndTimeRange(
+                            s.StockId, ccy, span, from, to, ct).ConfigureAwait(false);
+                        if (rows.Count == 0) continue;
+
+                        // DB returns descending by OpenTime; the ring expects
+                        // logical-oldest-first push order so iteration matches
+                        // wall-clock order on Snapshot.
+                        rows.Sort(static (a, b) => a.OpenTime.CompareTo(b.OpenTime));
+
+                        var ring = GetOrAddRing((s.StockId, ccy, res));
+                        for (int i = 0; i < rows.Count; i++)
+                            ring.Push(rows[i]);
+                        primed++;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Ring prime failed for {Stock}/{Ccy}/{Res}", s.StockId, ccy, res);
+                    }
+                }
+            }
+        }
+        _logger.LogInformation(
+            "Candle rings primed: {Primed} keys (stocks={Stocks}, currencies={Currencies}, resolutions={Resolutions})",
+            primed, stocks.Count, currencies.Count, resolutions.Count);
+    }
+
     public void Dispose()
     {
         _flushCts.Cancel();

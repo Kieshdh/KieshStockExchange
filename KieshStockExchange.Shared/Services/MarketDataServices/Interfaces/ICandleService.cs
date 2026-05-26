@@ -38,6 +38,17 @@ public interface ICandleService
 
     /// <summary> For each stock in the system, subscribe to default resolutions (5m) for candle creation. </summary>
     Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default);
+
+    /// <summary>
+    /// Boot-priming helper: for every stock × currency × resolution combination
+    /// supplied, read the most recent buckets (up to the implementation's ring
+    /// capacity) from persistence and push them into the in-memory hot ring. The
+    /// chart then serves from RAM from minute zero instead of waiting for the
+    /// ring to fill from live ticks. Server-only; client SignalR impl throws.
+    /// </summary>
+    Task PrimeRingsAsync(IReadOnlyCollection<CurrencyType> currencies,
+        IReadOnlyCollection<CandleResolution> resolutions,
+        CancellationToken ct = default);
     #endregion
 
     #region Candle Operations

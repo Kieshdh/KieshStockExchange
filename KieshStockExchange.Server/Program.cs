@@ -145,6 +145,14 @@ await app.Services.GetRequiredService<IStockService>().EnsureLoadedAsync().Confi
     foreach (var ccy in CurrencyHelper.SupportedCurrencies)
         foreach (var res in chartResolutions)
             await candles.SubscribeAllAsync(ccy, res).ConfigureAwait(false);
+
+    // Prime each (stock, currency, resolution) ring with the most recent 500
+    // persisted candles. Without this, the rings start empty and the chart's
+    // "last hour" or "last day" requests still fall through to a DB scan
+    // until enough buckets close in real time. Priming makes RAM-served
+    // chart switches work from minute zero.
+    await candles.PrimeRingsAsync(CurrencyHelper.SupportedCurrencies, chartResolutions)
+        .ConfigureAwait(false);
 }
 
 if (app.Environment.IsDevelopment())

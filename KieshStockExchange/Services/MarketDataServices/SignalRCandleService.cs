@@ -102,6 +102,10 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
     public Task SubscribeAllDefaultAsync(CurrencyType currency, CancellationToken ct = default)
         => throw new NotSupportedException("Server-side candle subscriptions are owned by CandleService; client subscribes per chart.");
 
+    public Task PrimeRingsAsync(IReadOnlyCollection<CurrencyType> currencies,
+        IReadOnlyCollection<CandleResolution> resolutions, CancellationToken ct = default)
+        => throw new NotSupportedException("Ring priming is a server-side boot step.");
+
     public Task OnTransactionTickAsync(Transaction tick, CancellationToken ct = default) => Task.CompletedTask;
     public void OnTransactionTick(Transaction tick) { /* no-op on client */ }
 
