@@ -65,14 +65,24 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
 
     public void Subscribe(int stockId, CurrencyType currency, CandleResolution resolution)
     {
-        _subRefs.AddOrUpdate((stockId, currency, resolution), 1, static (_, c) => c + 1);
-        // Quote-group subscription on the hub also delivers CandleClosed (same
-        // group). If only candle resolution is requested without a quote sub,
-        // the consumer is expected to JoinQuotes via IMarketDataService.Subscribe
-        // separately — the standard chart path does both.
+        var key = (stockId, currency, resolution);
+        var n = _subRefs.AddOrUpdate(key, 1, static (_, c) => c + 1);
+        if (n == 1)
+        {
+            // First subscriber for this resolution — tell the server to start
+            // aggregating. Without this, the engine's flush loop has no
+            // aggregator for the key and CandleClosed never fires.
+            _ = JoinHubSafelyAsync(stockId, currency, resolution);
+        }
     }
 
-    public Task UnsubscribeAsync(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
+    private async Task JoinHubSafelyAsync(int stockId, CurrencyType currency, CandleResolution resolution)
+    {
+        try { await _hub.JoinCandlesAsync(stockId, currency, resolution).ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogWarning(ex, "JoinCandles failed for {Stock}/{Currency}/{Res}", stockId, currency, resolution); }
+    }
+
+    public async Task UnsubscribeAsync(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
     {
         var key = (stockId, currency, resolution);
         var c = _subRefs.AddOrUpdate(key, 0, static (_, c) => Math.Max(0, c - 1));
@@ -81,8 +91,9 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
             _subRefs.TryRemove(key, out _);
             if (_streams.TryRemove(key, out var stream))
                 stream.Writer.TryComplete();
+            try { await _hub.LeaveCandlesAsync(stockId, currency, resolution, ct).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "LeaveCandles failed for {Stock}/{Currency}/{Res}", stockId, currency, resolution); }
         }
-        return Task.CompletedTask;
     }
 
     public Task SubscribeAllAsync(CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)

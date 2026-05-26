@@ -42,6 +42,16 @@ public interface IMarketHubClient
 
     Task LeaveQuotesAsync(int stockId, CurrencyType currency, CancellationToken ct = default);
 
+    /// <summary>
+    /// Start aggregating candles at the given resolution for this book on the
+    /// server. Triggers per-bucket CandleClosed pushes onto the quotes:{stockId}:
+    /// {currency} group. The default chart resolution is the only one already
+    /// running server-side at boot; any other resolution needs this join.
+    /// </summary>
+    Task JoinCandlesAsync(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct = default);
+
+    Task LeaveCandlesAsync(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct = default);
+
     /// <summary>Join orders:{userId} and portfolio:{userId} for the active user.</summary>
     Task JoinUserGroupsAsync(int userId, CancellationToken ct = default);
 

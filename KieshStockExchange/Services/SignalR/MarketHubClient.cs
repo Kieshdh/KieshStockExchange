@@ -23,6 +23,7 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     // Group membership — replayed after every successful reconnect.
     private readonly object _groupsLock = new();
     private readonly HashSet<(int stockId, CurrencyType currency)> _quoteGroups = new();
+    private readonly HashSet<(int stockId, CurrencyType currency, CandleResolution resolution)> _candleGroups = new();
     private int? _activeUserId;
 
     public string State => _connection.State.ToString();
@@ -98,6 +99,20 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
         await _connection.InvokeAsync("LeaveQuotes", stockId, currency, ct).ConfigureAwait(false);
     }
 
+    public async Task JoinCandlesAsync(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(ct).ConfigureAwait(false);
+        lock (_groupsLock) _candleGroups.Add((stockId, currency, resolution));
+        await _connection.InvokeAsync("JoinCandles", stockId, currency, resolution, ct).ConfigureAwait(false);
+    }
+
+    public async Task LeaveCandlesAsync(int stockId, CurrencyType currency, CandleResolution resolution, CancellationToken ct = default)
+    {
+        lock (_groupsLock) _candleGroups.Remove((stockId, currency, resolution));
+        if (_connection.State != HubConnectionState.Connected) return;
+        await _connection.InvokeAsync("LeaveCandles", stockId, currency, resolution, ct).ConfigureAwait(false);
+    }
+
     public async Task JoinUserGroupsAsync(int userId, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct).ConfigureAwait(false);
@@ -122,10 +137,12 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     {
         // New connection id = fresh group membership server-side. Replay.
         (int, CurrencyType)[] quotes;
+        (int, CurrencyType, CandleResolution)[] candles;
         int? user;
         lock (_groupsLock)
         {
             quotes = _quoteGroups.Select(g => (g.stockId, g.currency)).ToArray();
+            candles = _candleGroups.Select(g => (g.stockId, g.currency, g.resolution)).ToArray();
             user = _activeUserId;
         }
 
@@ -133,6 +150,11 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
         {
             try { await _connection.InvokeAsync("JoinQuotes", stockId, currency).ConfigureAwait(false); }
             catch (Exception ex) { _logger.LogWarning(ex, "Re-join quotes:{Stock}:{Currency} failed", stockId, currency); }
+        }
+        foreach (var (stockId, currency, resolution) in candles)
+        {
+            try { await _connection.InvokeAsync("JoinCandles", stockId, currency, resolution).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Re-join candles {Stock}:{Currency}:{Res} failed", stockId, currency, resolution); }
         }
         if (user is int uid)
         {
