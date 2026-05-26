@@ -85,14 +85,25 @@ public static class MauiProgram
         // off the MauiAsset stream so the HttpClient registration below has the URL ready.
         var serverBaseUrl = LoadServerBaseUrl();
 
-        builder.Services.AddHttpClient("KSE.Server", c => c.BaseAddress = new Uri(serverBaseUrl));
+        // Step 3b — JWT token plumbing. TokenStore caches in memory + persists
+        // via SecureStorage; AuthHeaderHandler stamps Authorization: Bearer on
+        // every KSE.Server HTTP call when a token is present.
+        builder.Services.AddSingleton<TokenStore>();
+        builder.Services.AddTransient<AuthHeaderHandler>();
+
+        builder.Services
+            .AddHttpClient("KSE.Server", c => c.BaseAddress = new Uri(serverBaseUrl))
+            .AddHttpMessageHandler<AuthHeaderHandler>();
 
         // Phase 3 finish — single shared SignalR connection to /hubs/market.
         // Every live-state proxy (market data, candles, portfolio, order cache
         // bridge) subscribes through this. Factory captures serverBaseUrl so
-        // we don't read appsettings.json a second time.
+        // we don't read appsettings.json a second time. AccessTokenProvider
+        // reads from TokenStore so reconnects pick up the latest token.
         builder.Services.AddSingleton<IMarketHubClient>(sp =>
-            new MarketHubClient(new Uri(serverBaseUrl), sp.GetRequiredService<ILogger<MarketHubClient>>()));
+            new MarketHubClient(new Uri(serverBaseUrl),
+                sp.GetRequiredService<TokenStore>(),
+                sp.GetRequiredService<ILogger<MarketHubClient>>()));
 
         // Services
         builder.Services.AddSingleton<IDataBaseService, ApiDataBaseService>();
@@ -200,6 +211,12 @@ public static class MauiProgram
         builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
 
         var app = builder.Build();
+
+        // Step 3b — populate the in-memory token cache from SecureStorage
+        // before any HTTP call goes out. Synchronous-but-fire-and-forget is
+        // fine because anonymous endpoints (login + healthz) don't need a
+        // token; the first protected call happens after user login anyway.
+        _ = app.Services.GetRequiredService<TokenStore>().LoadAsync();
 
         // Eagerly resolve the bridge so its ctor wires up the OrdersChanged
         // subscription — DI would otherwise defer construction until something

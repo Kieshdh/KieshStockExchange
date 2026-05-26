@@ -3,6 +3,7 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
+using KieshStockExchange.Services.UserServices;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
 
@@ -36,13 +37,18 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     public event EventHandler<PortfolioSnapshot>? PortfolioChanged;
     public event EventHandler<OrderBookSnapshot>? OrderBookSnapshotReceived;
 
-    public MarketHubClient(Uri serverBaseUrl, ILogger<MarketHubClient> logger)
+    public MarketHubClient(Uri serverBaseUrl, TokenStore tokens, ILogger<MarketHubClient> logger)
     {
         _logger = logger;
 
         var hubUrl = new Uri(serverBaseUrl, "/hubs/market");
         _connection = new HubConnectionBuilder()
-            .WithUrl(hubUrl)
+            .WithUrl(hubUrl, options =>
+            {
+                // Hub middleware (Program.cs OnMessageReceived) lifts the token
+                // off ?access_token=... so it survives the WebSocket upgrade.
+                options.AccessTokenProvider = () => Task.FromResult<string?>(tokens.Current);
+            })
             .WithAutomaticReconnect()
             .Build();
 

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using System.Net.Http;
 using System.Net.Http.Json;
 using KieshStockExchange.Services.UserServices.Interfaces;
+using System.Net;
 
 namespace KieshStockExchange.Services.UserServices;
 
@@ -26,15 +27,17 @@ public sealed class AuthService : IAuthService
     private readonly IDataBaseService _db;
     private readonly System.Net.Http.HttpClient _http;
     private readonly IMarketHubClient _hub;
+    private readonly TokenStore _tokens;
     private readonly ILogger<AuthService> _logger;
 
     public AuthService(IDataBaseService db, IHttpClientFactory httpFactory,
-        IMarketHubClient hub, ILogger<AuthService> logger)
+        IMarketHubClient hub, TokenStore tokens, ILogger<AuthService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _http = httpFactory?.CreateClient("KSE.Server")
             ?? throw new ArgumentNullException(nameof(httpFactory));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
+        _tokens = tokens ?? throw new ArgumentNullException(nameof(tokens));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
     #endregion
@@ -78,30 +81,49 @@ public sealed class AuthService : IAuthService
 
     public async Task LoginAsync(string username, string password)
     {
-        // Check if already logged in
         if (IsLoggedIn) return;
-        // Basic checks
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password)) 
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             return;
-        // Get the user
-        var user = await _db.GetUserByUsername(username).ConfigureAwait(false);
-        if (user == null) 
-            return;
-        // Verify password
-        if (!SecurityHelper.VerifyPassword(password, user.PasswordHash))
-            return;
-        // Set current user
+
+        // Step 3b — server is the source of truth for credentials now. Local
+        // DB hashing fallback stays only for legacy/offline paths until 3c
+        // makes the JWT required.
+        LoginResponse? loginResp = null;
+        try
+        {
+            var resp = await _http.PostAsJsonAsync("api/auth/login",
+                new { Username = username, Password = password }).ConfigureAwait(false);
+            if (resp.StatusCode == HttpStatusCode.Unauthorized) return;
+            resp.EnsureSuccessStatusCode();
+            loginResp = await resp.Content.ReadFromJsonAsync<LoginResponse>().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Server login failed; falling back to local check until 3c.");
+        }
+
+        User? user = null;
+        if (loginResp is not null)
+        {
+            await _tokens.SetAsync(loginResp.Token).ConfigureAwait(false);
+            // Pull the full User from DB so VMs that lean on extra fields
+            // (Email, FullName, BirthDate) still have what they expect.
+            user = await _db.GetUserByUsername(loginResp.Username).ConfigureAwait(false);
+        }
+        else
+        {
+            // Legacy fallback — server unreachable or pre-3a binary. Drops
+            // out in 3c when [Authorize] requires a real token.
+            user = await _db.GetUserByUsername(username).ConfigureAwait(false);
+            if (user is null || !SecurityHelper.VerifyPassword(password, user.PasswordHash))
+                return;
+        }
+        if (user is null) return;
+
         CurrentUser = user;
-
-        _logger.LogInformation("User logged in: #{UserId} {Username}", user.UserId, user.Username);
-        // Fire-and-forget: tell the server so its log shows the login too.
-        // No-op if the server is unreachable — auth itself stays client-local
-        // until Phase 5's JWT moves it server-side.
+        _logger.LogInformation("User logged in: #{UserId} {Username} (token={HasToken})",
+            user.UserId, user.Username, loginResp is not null);
         _ = NotifyServerAsync("api/session/login", user.UserId, user.Username);
-
-        // Phase 3 finish — join orders:{userId} + portfolio:{userId} on the
-        // shared hub so server-pushed order/portfolio events route to this
-        // client. Until Phase 5's JWT lands the hub trusts the supplied userId.
         _ = JoinHubGroupsSafelyAsync(user.UserId);
     }
 
@@ -109,6 +131,7 @@ public sealed class AuthService : IAuthService
     {
         var prev = CurrentUser;
         CurrentUser = null;
+        _tokens.Clear();
         _logger.LogInformation("User logged out.");
         if (prev is not null)
         {
@@ -117,6 +140,9 @@ public sealed class AuthService : IAuthService
             catch (Exception ex) { _logger.LogDebug(ex, "Hub LeaveUserGroups failed for #{UserId}", prev.UserId); }
         }
     }
+
+    /// <summary>Wire shape mirror of <c>AuthController.LoginResponse</c>.</summary>
+    private sealed record LoginResponse(string Token, DateTime ExpiresUtc, int UserId, string Username, bool IsAdmin);
 
     private async Task JoinHubGroupsSafelyAsync(int userId)
     {
