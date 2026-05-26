@@ -2,6 +2,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Helpers;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -30,6 +31,13 @@ public sealed class CandleService : ICandleService, IDisposable
     private volatile IReadOnlyCollection<(int, CurrencyType, CandleResolution)> _subscribedSnapshot =
         Array.Empty<(int, CurrencyType, CandleResolution)>();
     public IReadOnlyCollection<(int, CurrencyType, CandleResolution)> Subscribed => _subscribedSnapshot;
+
+    // Hot ring of last N closed candles per key. Filled by the flush loop after
+    // a bucket closes; served from RAM by GetCandlesInRangeAsync when the
+    // requested window fits inside the ring. Avoids a DB range scan on every
+    // chart switch.
+    private const int RingCapacity = 500;
+    private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), CandleRingBuffer> _recent = new();
 
     // Live candle streams
     private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), Channel<Candle>> _streams = new();
@@ -238,6 +246,19 @@ public sealed class CandleService : ICandleService, IDisposable
         var fromAligned = TimeHelper.FloorToBucketUtc(fromUtc, span);
         var toAligned = TimeHelper.NextBucketBoundaryUtc(toUtc, span);
 
+        // Hot-ring fast path: if the per-key ring covers fromAligned, serve
+        // entirely from RAM. Chart switches between resolutions hit this for
+        // the common "last hour / last day" windows once the ring is warm.
+        if (_recent.TryGetValue((stockId, currency, resolution), out var ring))
+        {
+            var (ringCandles, oldest) = ring.Snapshot(fromAligned, toAligned);
+            if (oldest is DateTime o && o <= fromAligned && ringCandles.Count > 0)
+            {
+                if (!fillGaps) return ringCandles;
+                return FillGaps(ringCandles, toAligned, span, stockId, currency);
+            }
+        }
+
         // Load from DB and sort by time
         var list = await _db.GetCandlesByStockIdAndTimeRange(stockId, currency,
             span, fromAligned, toAligned, ct).ConfigureAwait(false);
@@ -257,12 +278,20 @@ public sealed class CandleService : ICandleService, IDisposable
         }
 
         if (!fillGaps) return list;
-
-        // No real candles → no fabricated pre-history.
         if (list.Count == 0) return list;
 
-        // Fill gaps from the first real candle onward. Anything before that stays empty
-        // so the chart's left edge is the stock's first real trade, not a synthetic flat line.
+        return FillGaps(list, toAligned, span, stockId, currency);
+    }
+
+    /// <summary>
+    /// Walks the candle list forward, inserting flat-priced fillers at any missing
+    /// bucket so the chart can render gapless. Anything before the first real candle
+    /// is omitted — the left edge stays the stock's first trade, not a synthesized
+    /// pre-history.
+    /// </summary>
+    private IReadOnlyList<Candle> FillGaps(IReadOnlyList<Candle> list, DateTime toAligned, TimeSpan span,
+        int stockId, CurrencyType currency)
+    {
         var result = new List<Candle>(list.Count);
         var firstRealOpen = list[0].OpenTime;
         decimal lastPrice = list[0].Open;
@@ -278,11 +307,9 @@ public sealed class CandleService : ICandleService, IDisposable
             }
             else
             {
-                // Inter-bucket or post-last-trade gap: extend at last known close.
                 result.Add(NewCandle(stockId, currency, t, span, lastPrice));
             }
         }
-
         return result;
     }
     #endregion
@@ -405,6 +432,9 @@ public sealed class CandleService : ICandleService, IDisposable
         _aggs.GetOrAdd((stockId, currency, resolution), key =>
             new CandleAggregator(stockId, currency, resolution, _logger));
 
+    private CandleRingBuffer GetOrAddRing((int, CurrencyType, CandleResolution) key) =>
+        _recent.GetOrAdd(key, _ => new CandleRingBuffer(RingCapacity));
+
     private Channel<Candle> GetOrAddLiveStream((int, CurrencyType, CandleResolution) key) =>
         _streams.GetOrAdd(key, _ => Channel.CreateBounded<Candle>(
             new BoundedChannelOptions(64)
@@ -490,15 +520,17 @@ public sealed class CandleService : ICandleService, IDisposable
                         }
                     }
 
-                    // Phase 3: publish closed candles to per-key live streams (no DB)
-                    // and raise the CandleClosed event for hub broadcast.
+                    // Phase 3: cache closed candles in the per-key hot ring,
+                    // publish to live streams, and raise CandleClosed for the hub.
                     foreach (var (key, closed) in perKeyClosed)
                     {
                         if (ct.IsCancellationRequested) break;
                         _streams.TryGetValue(key, out var stream);
+                        var ring = GetOrAddRing(key);
                         for (int i = 0; i < closed.Count; i++)
                         {
                             var candle = closed[i];
+                            ring.Push(candle);
                             stream?.Writer.TryWrite(candle);
                             try { CandleClosed?.Invoke(this, candle); }
                             catch (Exception ex)

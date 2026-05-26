@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
 using KieshStockExchange.Services.BackgroundServices;
@@ -121,6 +123,29 @@ var app = builder.Build();
 // this implicitly via MauiProgram lifecycle hooks; on the server we trigger it
 // here once at boot.
 await app.Services.GetRequiredService<IStockService>().EnsureLoadedAsync().ConfigureAwait(false);
+
+// Boot-warm the chart's 7 candle resolutions across every (stock, supported
+// currency). The CandleService then aggregates every bot tick for these keys,
+// and the per-key 500-candle hot ring (CandleService._recent) fills up so
+// chart switches serve from RAM instead of a DB range scan. The keys for
+// resolutions other than the bot-loop default also stay warm without needing
+// the chart to be open.
+{
+    var candles = app.Services.GetRequiredService<ICandleService>();
+    var chartResolutions = new[]
+    {
+        CandleResolution.FifteenSeconds,
+        CandleResolution.OneMinute,
+        CandleResolution.FiveMinutes,
+        CandleResolution.FifteenMinutes,
+        CandleResolution.OneHour,
+        CandleResolution.FourHours,
+        CandleResolution.OneDay,
+    };
+    foreach (var ccy in CurrencyHelper.SupportedCurrencies)
+        foreach (var res in chartResolutions)
+            await candles.SubscribeAllAsync(ccy, res).ConfigureAwait(false);
+}
 
 if (app.Environment.IsDevelopment())
 {
