@@ -25,13 +25,13 @@ internal sealed class AiBotDecisionService
 
     private readonly IMarketDataService _market;
     private readonly IAccountsCache _accounts;
-    private readonly IOrderBookCache _books;
+    private readonly IOrderBookEngine _books;
     private readonly IStockService _stocks;
     private readonly BotSentimentService _sentiment;
     private readonly ILogger<AiBotDecisionService> _logger;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
-        IOrderBookCache books, IStockService stocks, BotSentimentService sentiment,
+        IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
         ILogger<AiBotDecisionService> logger)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));

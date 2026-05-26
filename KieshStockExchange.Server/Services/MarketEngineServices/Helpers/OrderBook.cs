@@ -155,7 +155,7 @@ public sealed class OrderBook
     /// <c>true</c> when the maker was removed.
     /// </summary>
     /// <remarks>
-    /// Caller must already hold the per-book SemaphoreSlim from <c>OrderBookCache.WithBookLockAsync</c>.
+    /// Caller must already hold the per-book SemaphoreSlim from <c>OrderBookEngine.WithBookLockAsync</c>.
     /// This is the only path through which the matching loop should mutate maker fill state,
     /// so the level totals stay consistent.
     /// </remarks>
@@ -232,7 +232,7 @@ public sealed class OrderBook
     /// </summary>
     /// <remarks>
     /// Only safe to call while no other code can observe this book — typically from
-    /// <c>OrderBookCache.EnsureLoadedAsync</c> while the load gate is held.
+    /// <c>OrderBookEngine.EnsureLoadedAsync</c> while the load gate is held.
     /// </remarks>
     public void BulkLoad(IReadOnlyList<Order> openLimits)
     {

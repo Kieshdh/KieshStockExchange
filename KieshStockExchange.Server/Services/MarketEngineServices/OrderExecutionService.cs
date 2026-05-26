@@ -20,7 +20,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
     #region Services and Constructor
     private readonly IDataBaseService _db;
-    private readonly IOrderBookCache _books;
+    private readonly IOrderBookEngine _books;
     private readonly IMatchingEngine _matching;
     private readonly IOrderValidator _validator;
     private readonly ISettlementEngine _settlement;
@@ -31,7 +31,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly IOrderRegistry _registry;
     private readonly ILogger<OrderExecutionService> _logger;
 
-    public OrderExecutionService(IDataBaseService db, IOrderBookCache books,
+    public OrderExecutionService(IDataBaseService db, IOrderBookEngine books,
         IMatchingEngine matching, IOrderValidator validator, ISettlementEngine settlement,
         IMarketDataService marketData, IAccountsCache accounts,
         IOrderCacheService orderCache, IReservationLedger ledger,

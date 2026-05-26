@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
-using KieshStockExchange.Services.MarketEngineServices;
-using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices.Interfaces;
 
@@ -19,7 +17,6 @@ public interface ISelectedStockService : INotifyPropertyChanged
     string Symbol { get; }
     string CompanyName { get; }
     CurrencyType Currency { get; }
-    OrderBook CurrentOrderBook { get; }
 
     // ---- Current Price info ---------------------------------------
     decimal CurrentPrice { get; }

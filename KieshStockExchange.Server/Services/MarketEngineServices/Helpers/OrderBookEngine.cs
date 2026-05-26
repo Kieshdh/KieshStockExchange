@@ -7,49 +7,30 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-public interface IOrderBookCache
-{
-    /// <summary> Get the order book for a specific stock and currency, ensuring it is loaded. </summary>
-    Task<OrderBook> GetAsync(int stockId, CurrencyType currency, CancellationToken ct);
-
-    /// <summary> Execute a function with exclusive access to the order book for a specific stock and currency. </summary>
-    Task WithBookLockAsync(int stockId, CurrencyType currency, CancellationToken ct, Func<OrderBook, Task> body);
-
-    /// <summary> Validate the index of the order book for a specific stock and currency. </summary>
-    Task<(bool ok, string reason)> ValidateAsync(int stockId, CurrencyType currency, CancellationToken ct);
-
-    /// <summary> Rebuild the index of the order book for a specific stock and currency. </summary>
-    Task RebuildIndexAsync(int stockId, CurrencyType currency, CancellationToken ct);
-
-    /// <summary>
-    /// Read-only depth snapshot for HTTP/SignalR clients. Built under the
-    /// per-book lock; does not expose the engine's mutable OrderBook instance.
-    /// </summary>
-    Task<OrderBookSnapshot> GetSnapshotAsync(int stockId, CurrencyType currency, CancellationToken ct);
-}
-
 /// <summary>
-/// Step 0g rename target. Same impl as <see cref="IOrderBookCache"/>; the new
-/// name makes the engine-internal role explicit. During the transition the
-/// concrete <see cref="OrderBookCache"/> implements both interfaces so callers
-/// can migrate one at a time. The 0g-7 cleanup commit drops
-/// <see cref="IOrderBookCache"/> and renames the concrete class.
+/// Engine-internal live-book state. Matcher, settler, bot decisions take this
+/// for mutable book access. Diagnostics go through <see cref="IOrderBookAdmin"/>;
+/// UI consumes <see cref="GetSnapshotAsync"/> via the read-side controller.
 /// </summary>
 public interface IOrderBookEngine
 {
+    /// <summary>Returns the live mutable book for engine-internal callers. Loads on first access.</summary>
+    Task<OrderBook> GetAsync(int stockId, CurrencyType currency, CancellationToken ct);
+
     Task WithBookLockAsync(int stockId, CurrencyType currency, CancellationToken ct, Func<OrderBook, Task> body);
+
+    /// <summary>Read-only depth snapshot for HTTP/SignalR clients.</summary>
     Task<OrderBookSnapshot> GetSnapshotAsync(int stockId, CurrencyType currency, CancellationToken ct);
 
     /// <summary>
-    /// Snapshot of currently-live books. Lazy-allocated; used by
-    /// OrderBookBroadcaster to subscribe Changed on every existing key at
-    /// boot and on newly-created keys later. Stable enumeration order is
-    /// not promised.
+    /// Snapshot of currently-live books — used by OrderBookBroadcaster to
+    /// attach Changed handlers on every existing key at boot and on newly-
+    /// created keys as they appear. Stable enumeration order is not promised.
     /// </summary>
     IEnumerable<OrderBook> EnumerateBooks();
 }
 
-public sealed class OrderBookCache : IOrderBookCache, IOrderBookEngine
+public sealed class OrderBookEngine : IOrderBookEngine
 {
     #region Dictionaries
     // Order book for each stock (keyed by stock ID and CurrencyType)
@@ -70,7 +51,7 @@ public sealed class OrderBookCache : IOrderBookCache, IOrderBookEngine
     private readonly IDataBaseService _db;
     private readonly IOrderRegistry _registry;
 
-    public OrderBookCache(IDataBaseService db, IOrderRegistry registry)
+    public OrderBookEngine(IDataBaseService db, IOrderRegistry registry)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -146,29 +127,6 @@ public sealed class OrderBookCache : IOrderBookCache, IOrderBookEngine
         // Fire one Changed notification per atomic body. Outside the lock so
         // slow subscribers can't back-pressure matching.
         book.FlushChanged();
-    }
-
-    public async Task<(bool ok, string reason)> ValidateAsync(int stockId, CurrencyType currency, CancellationToken ct)
-    {
-        bool ok = false;
-        string reason = string.Empty;
-
-        await WithBookLockAsync(stockId, currency, ct, book =>
-        {
-            ok = book.ValidateIndex(out reason);
-            return Task.CompletedTask;
-        }).ConfigureAwait(false);
-
-        return (ok, ok ? "OK" : reason);
-    }
-
-    public async Task RebuildIndexAsync(int stockId, CurrencyType currency, CancellationToken ct)
-    {
-        await WithBookLockAsync(stockId, currency, ct, book =>
-        {
-            book.RebuildIndex();
-            return Task.CompletedTask;
-        }).ConfigureAwait(false);
     }
 
     public async Task<OrderBookSnapshot> GetSnapshotAsync(int stockId, CurrencyType currency, CancellationToken ct)

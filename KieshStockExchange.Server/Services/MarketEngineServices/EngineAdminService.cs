@@ -11,7 +11,7 @@ public sealed class EngineAdminService : IEngineAdminService
 {
     #region Services and Constructor
     // Step 0g-3: depend on the narrow IOrderBookAdmin instead of the full
-    // IOrderBookCache so admin code can't reach for hot-path engine surface.
+    // engine cache so admin code can't reach for hot-path engine surface.
     private readonly IOrderBookAdmin _bookAdmin;
     private readonly ILogger<EngineAdminService> _logger;
     private readonly IAuthService _auth;

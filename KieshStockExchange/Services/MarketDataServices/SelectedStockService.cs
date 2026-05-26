@@ -4,8 +4,6 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
-using KieshStockExchange.Services.MarketEngineServices;
-using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.MarketDataServices;
@@ -24,7 +22,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     [ObservableProperty] private Stock? _selectedStock = null;
     [ObservableProperty] private string _symbol = string.Empty;
     [ObservableProperty] private string _companyName = string.Empty;
-    [ObservableProperty] private OrderBook? _currentOrderBook = null;
 
     // Convenience property for UI
     public bool HasSelectedStock => SelectedStock is not null && StockId.HasValue && SelectedStock.StockId == StockId;
@@ -49,7 +46,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
     #region Fields & Constructor
     private readonly IMarketDataService _market;
-    private readonly IOrderBookCache _books;
     private readonly IStockService _stocks;
     private readonly ILogger<SelectedStockService> _logger;
 
@@ -58,11 +54,10 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
     private (int stockId, CurrencyType currency)? _lastRequested;
 
     public SelectedStockService(IMarketDataService market, ILogger<SelectedStockService> logger,
-        IOrderBookCache books, IStockService stocks)
+        IStockService stocks)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _books = books ?? throw new ArgumentNullException(nameof(books));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
 
         // React to live quote pushes from the single source of truth
@@ -125,7 +120,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
 
             await UnsubscribeAsync(ct);
 
-            CurrentOrderBook = await _books.GetAsync(stock.StockId, currency, ct);
             await _market.SubscribeAsync(stock.StockId, currency, ct);
             await _market.BuildFromHistoryAsync(stock.StockId, currency, ct);
 
@@ -163,7 +157,6 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
             CurrentPrice = 0m;
             Quote = null;
             PriceUpdatedAt = null;
-            CurrentOrderBook = null;
             _firstSelectionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
         finally { _setGate.Release(); }

@@ -186,7 +186,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IDataBaseService db,
         IAccountsCache accounts,
         IReservationLedger ledger,
-        IOrderBookCache books,
+        IOrderBookEngine books,
         IUserPortfolioService portfolio,
         IFxRateService fxRates,
         ILogger<AiTradeService> logger,

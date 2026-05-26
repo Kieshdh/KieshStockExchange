@@ -96,10 +96,6 @@ public static class MauiProgram
 
         // Services
         builder.Services.AddSingleton<IDataBaseService, ApiDataBaseService>();
-        // IOrderRegistry stays for now — the in-process OrderBookCache (kept
-        // until Step 0g) still calls _registry.GetOrAdd when bulk-loading the
-        // book. Step 0g's ApiOrderBookFeed will drop both.
-        builder.Services.AddSingleton<IOrderRegistry, OrderRegistry>();
         // IEngineCommandClient / EngineCommandClient deleted in Step 0e — the
         // 4 engine bundle endpoints were already removed in Phase 3 Step 6,
         // and the 2 portfolio bundles now route through ApiPortfolioClient.
@@ -141,11 +137,6 @@ public static class MauiProgram
         builder.Services.AddSingleton<IOrderBookFeed, ApiOrderBookFeed>();
         // Service helpers
         builder.Services.AddSingleton(typeof(ILogger<>), typeof(SeparatorLogger<>));
-        // OrderBookCache stays for now — Step 0g reworks it (engine/admin/UI
-        // split + live SignalR push). Until then SelectedStockService still
-        // reads a one-shot snapshot via this in-process class, which reads
-        // from IDataBaseService HTTP under the hood.
-        builder.Services.AddSingleton<IOrderBookCache, OrderBookCache>();
         // Viewmodels
         // - User
         builder.Services.AddTransient<RegisterViewModel>();
