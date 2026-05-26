@@ -39,6 +39,14 @@ public interface IOrderBookEngine
 {
     Task WithBookLockAsync(int stockId, CurrencyType currency, CancellationToken ct, Func<OrderBook, Task> body);
     Task<OrderBookSnapshot> GetSnapshotAsync(int stockId, CurrencyType currency, CancellationToken ct);
+
+    /// <summary>
+    /// Snapshot of currently-live books. Lazy-allocated; used by
+    /// OrderBookBroadcaster to subscribe Changed on every existing key at
+    /// boot and on newly-created keys later. Stable enumeration order is
+    /// not promised.
+    /// </summary>
+    IEnumerable<OrderBook> EnumerateBooks();
 }
 
 public sealed class OrderBookCache : IOrderBookCache, IOrderBookEngine
@@ -172,6 +180,8 @@ public sealed class OrderBookCache : IOrderBookCache, IOrderBookEngine
         // exclusive access. Snapshot is a point-in-time read.
         return book.ToDepthSnapshot();
     }
+
+    public IEnumerable<OrderBook> EnumerateBooks() => _books.Values;
 
     #endregion
 }

@@ -121,6 +121,11 @@ builder.Services.AddHostedService<BotLoopHostedService>();
 // Phase 3 Step 6: subscribe to engine events and push them onto SignalR groups.
 builder.Services.AddHostedService<MarketHubBroadcaster>();
 
+// Step 0g-4: on-change order-book snapshot push, throttled to max 1/100ms
+// per (stockId, currency) key. Same quotes group the chart already joins;
+// the client's OrderBookFeed (0g-6) listens for "OrderBookSnapshot".
+builder.Services.AddHostedService<OrderBookBroadcaster>();
+
 var app = builder.Build();
 
 // Cold-load the stock catalogue before the first request hits OrderValidator —
