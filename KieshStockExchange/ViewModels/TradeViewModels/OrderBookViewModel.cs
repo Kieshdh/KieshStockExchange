@@ -3,6 +3,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.MarketEngineServices.Helpers;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -14,16 +15,8 @@ namespace KieshStockExchange.ViewModels.TradeViewModels;
 public partial class OrderBookViewModel : StockAwareViewModel
 {
     #region Properties
-    // The current order book for the selected stock
-    private OrderBook? Book => Selected.CurrentOrderBook;
-
-    // Handler for book changes, plus the exact book reference we subscribed to.
-    // We can't detach via Selected.CurrentOrderBook because that pointer already
-    // moves to the new book before our PropertyChanged handler runs — detaching
-    // off the live property would no-op against the wrong book and leak the
-    // subscription on the old one, leading to cross-stock UI contamination.
-    private EventHandler? _bookHandler;
-    private OrderBook? _attachedBook;
+    private readonly IOrderBookFeed _feed;
+    private OrderBookSnapshot? _lastSnapshot;
 
     // Bound order-level collections, capped at the user's selected depth. We
     // intentionally do NOT keep a parallel "full-depth" collection: applying a
@@ -46,9 +39,8 @@ public partial class OrderBookViewModel : StockAwareViewModel
             if (_depth == value) return;
             _depth = value;
             OnPropertyChanged(nameof(MaxVisibleLevels));
-            // Re-apply the most recent snapshot at the new depth so trim/extend
-            // happens immediately rather than on the next book Changed event.
-            if (Book is not null) UpdateOrBuildFromSnapshot(Book.Snapshot());
+            // Re-apply the most recent snapshot at the new depth.
+            if (_lastSnapshot is not null) UpdateOrBuildFromSnapshot(_lastSnapshot);
         }
     }
 
@@ -72,7 +64,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
         _userPickedBucket = true;
         if (_currentBucketStep == value.Value) return;
         _currentBucketStep = value.Value;
-        if (Book is not null) UpdateOrBuildFromSnapshot(Book.Snapshot());
+        if (_lastSnapshot is not null) UpdateOrBuildFromSnapshot(_lastSnapshot);
     }
 
     // _currentBucketStep is the step in use; 0 means "no bucketing yet" (we
@@ -81,11 +73,8 @@ public partial class OrderBookViewModel : StockAwareViewModel
     private bool _userPickedBucket = false;
     private bool _suppressBucketPick = false;
 
-    // 1-5-10 progression covers typical equity tick sizes without flooding the
-    // picker. Coarsest entry is added dynamically when ≥ 25% concentration is
-    // already reached.
-    private static readonly decimal[] BucketStepCandidates =
-        new[] { 0.01m, 0.05m, 0.10m, 0.50m, 1.00m, 5.00m, 10.00m, 50.00m, 100.00m };
+    // Bucketing math lives in OrderBookDepthAggregator; picker UI stays here.
+    private static readonly decimal[] BucketStepCandidates = OrderBookDepthAggregator.BucketStepCandidates;
     #endregion
 
     #region Best levels, spread, empty-state
@@ -133,9 +122,12 @@ public partial class OrderBookViewModel : StockAwareViewModel
 
     #region Services and Constructor
     public OrderBookViewModel(ILogger<OrderBookViewModel> logger,
-        ISelectedStockService selected, INotificationService notification)
+        ISelectedStockService selected, INotificationService notification,
+        IOrderBookFeed feed)
         : base(selected, notification, logger)
     {
+        _feed = feed ?? throw new ArgumentNullException(nameof(feed));
+        _feed.SnapshotChanged += OnFeedSnapshot;
         InitializeSelection();
 
         PriceTextColour = ColorNeutral;
@@ -145,36 +137,39 @@ public partial class OrderBookViewModel : StockAwareViewModel
     #region StockAware Overrides
     protected override Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct)
     {
-        // Reattach to the new book
-        DetachFromCurrentBook();
-        AttachToBook();
+        _lastSnapshot = null;
 
         // Reset price-direction state so the first tick on the new stock doesn't
-        // colour itself by comparing against the previous stock's last price.
+        // colour itself against the previous stock's last price.
         PreviousPrice = 0m;
         PriceDirectionArrow = "•";
         PriceTextColour = ColorNeutral;
 
-        // Forget the user's previous bucket choice — auto-format kicks in again
-        // on the next snapshot using the new stock's mid price.
+        // Auto-step picks again on next snapshot once mid price is known.
         _userPickedBucket = false;
         _currentBucketStep = 0m;
 
-        // Reset best/spread state and empty-state defaults; the snapshot rebuild
-        // below will repopulate them when there is data.
         BestAsk = BestBid = Spread = SpreadPercent = null;
         EmptyMessage = Selected.HasSelectedStock ? "Order book is empty" : "No stock selected";
 
-        // Rebuild from snapshot
-        if (Book is not null)
-            UpdateOrBuildFromSnapshot(Book.Snapshot());
+        // Cache-first, HTTP fallback. The HTTP fetch raises SnapshotChanged via
+        // ApplyIfNewer, which routes back through OnFeedSnapshot.
+        if (stockId is int sid)
+        {
+            var cached = _feed.TryGetCached(sid, currency);
+            if (cached is not null)
+                UpdateOrBuildFromSnapshot(cached);
+            else
+                _ = _feed.GetSnapshotAsync(sid, currency, ct);
+        }
         else
+        {
             IsEmpty = true;
+        }
 
         if (Selected.HasSelectedStock)
             PriceTitle = $"Price ({Selected.Currency})";
 
-        // Currency may have changed — refresh formatted displays.
         OnPropertyChanged(nameof(BestAskDisplay));
         OnPropertyChanged(nameof(BestBidDisplay));
         OnPropertyChanged(nameof(SpreadDisplay));
@@ -199,68 +194,39 @@ public partial class OrderBookViewModel : StockAwareViewModel
     protected override void Dispose(bool disposing)
     {
         if (disposing)
-            DetachFromCurrentBook();
+            _feed.SnapshotChanged -= OnFeedSnapshot;
         base.Dispose(disposing);
     }
     #endregion
 
-    #region OrderBook Handling
-    private void AttachToBook()
+    #region Feed Handling
+    private void OnFeedSnapshot(object? sender, OrderBookSnapshot snap)
     {
-        if (Book is null) return;
+        // Drop snapshots for a key the user has since switched away from.
+        if (snap.StockId != (Selected.StockId ?? 0) || snap.Currency != Selected.Currency) return;
 
-        _attachedBook = Book;
-        _bookHandler = (sender, _) =>
-        {
-            // The Changed event is sender-only now — pull the snapshot on the firing
-            // thread so the UI thread isn't blocked by the OrderBook lock.
-            if (sender is not OrderBook book) return;
-            BookSnapshot snap;
-            try { snap = book.Snapshot(); }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to take orderbook snapshot for stock {StockId}", book.StockId);
-                return;
-            }
-
-            if (MainThread.IsMainThread)
-                UpdateOrBuildFromSnapshot(snap);
-            else
-                MainThread.BeginInvokeOnMainThread(() => UpdateOrBuildFromSnapshot(snap));
-        };
-        _attachedBook.Changed += _bookHandler;
+        if (MainThread.IsMainThread)
+            UpdateOrBuildFromSnapshot(snap);
+        else
+            MainThread.BeginInvokeOnMainThread(() => UpdateOrBuildFromSnapshot(snap));
     }
 
-    private void DetachFromCurrentBook()
+    private void UpdateOrBuildFromSnapshot(OrderBookSnapshot snap)
     {
-        if (_attachedBook is not null && _bookHandler is not null)
-            _attachedBook.Changed -= _bookHandler;
-
-        _attachedBook = null;
-        _bookHandler = null;
-    }
-
-    private void UpdateOrBuildFromSnapshot(BookSnapshot snap)
-    {
-        // Always operate on the UI thread
         if (!MainThread.IsMainThread)
         {
             MainThread.BeginInvokeOnMainThread(() => UpdateOrBuildFromSnapshot(snap));
             return;
         }
+        if (snap.StockId != (Selected.StockId ?? 0) || snap.Currency != Selected.Currency) return;
 
-        // Drop snapshots queued from a book the user has since switched away from.
-        // Without this, an in-flight Changed event from the previous stock can
-        // overwrite the levels under the new stock's title.
-        if (snap.StockId != (Selected.StockId ?? 0)) return;
-
+        _lastSnapshot = snap;
         var currency = Selected.Currency;
 
-        // Target view order:
-        //  - Sells: high -> low (best asks = closest to mid = TAIL of list)
-        //  - Buys : high -> low (best bids = HEAD)
-        var orderedSells = snap.Sells.OrderByDescending(l => l.Price).ToList();
-        var orderedBuys = snap.Buys.OrderByDescending(l => l.Price).ToList();
+        // Server emits asks ascending (best-ask first) and bids descending (best-bid first).
+        // The view wants both sides high→low — flip asks; bids pass through.
+        var orderedSells = snap.Asks.Reverse().ToList();
+        var orderedBuys = snap.Bids.ToList();
 
         // Best ask = lowest sell = last of desc list. Best bid = highest buy = first of desc list.
         BestAsk = orderedSells.Count > 0 ? orderedSells[^1].Price : (decimal?)null;
@@ -272,8 +238,8 @@ public partial class OrderBookViewModel : StockAwareViewModel
         // Refresh the picker choices for the current book + pick a default step
         // if the user hasn't overridden. Bucket each side before display.
         RefreshBucketOptions(orderedSells, orderedBuys, currency, midForBucket);
-        var bucketedSells = BucketLevels(orderedSells, _currentBucketStep);
-        var bucketedBuys  = BucketLevels(orderedBuys,  _currentBucketStep);
+        var bucketedSells = OrderBookDepthAggregator.BucketLevels(orderedSells, _currentBucketStep);
+        var bucketedBuys  = OrderBookDepthAggregator.BucketLevels(orderedBuys,  _currentBucketStep);
 
         ApplySideSnapshot(VisibleSellLevels, bucketedSells, currency, LevelSide.Sell, accumulateForward: false);
         ApplySideSnapshot(VisibleBuyLevels, bucketedBuys, currency, LevelSide.Buy, accumulateForward: true);
@@ -302,7 +268,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
     /// even though only the visible slice ends up bound.
     /// </summary>
     private void ApplySideSnapshot(ObservableCollection<LevelRow> target,
-        List<PriceLevel> source, CurrencyType currency, LevelSide side, bool accumulateForward)
+        List<DepthLevel> source, CurrencyType currency, LevelSide side, bool accumulateForward)
     {
         // Cumulative quantities across the full source. Direction depends on side
         // (buys grow head→tail, sells grow tail→head) so the row closest to mid
@@ -365,37 +331,11 @@ public partial class OrderBookViewModel : StockAwareViewModel
     }
     #endregion
 
-    #region Bucketing
-    /// <summary>
-    /// Aggregate adjacent price levels that share a bucket floor of
-    /// <paramref name="step"/>. Input must be sorted high → low; output keeps the
-    /// same direction with bucket-floor prices and summed quantities.
-    /// Step ≤ 0 (or no bucketing) returns the input unchanged.
-    /// </summary>
-    private static List<PriceLevel> BucketLevels(List<PriceLevel> orderedHighToLow, decimal step)
-    {
-        if (step <= 0m || orderedHighToLow.Count == 0) return orderedHighToLow;
-
-        var result = new List<PriceLevel>(orderedHighToLow.Count);
-        foreach (var level in orderedHighToLow)
-        {
-            var floor = Math.Floor(level.Price / step) * step;
-            if (result.Count > 0 && result[^1].Price == floor)
-                result[^1] = new PriceLevel(floor, result[^1].Quantity + level.Quantity);
-            else
-                result.Add(new PriceLevel(floor, level.Quantity));
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Auto-derive the picker's options for the current book and (if the user
-    /// hasn't picked) pick a default step from the mid price. Mutates
-    /// <see cref="AvailableBucketSizes"/> and <see cref="SelectedBucketSize"/>
-    /// only when the resulting list / selection has changed, so the picker
-    /// doesn't flicker on every refresh.
-    /// </summary>
-    private void RefreshBucketOptions(List<PriceLevel> sells, List<PriceLevel> buys,
+    #region Bucket picker UI
+    // Picker options + default-step selection. Pure bucketing math is in
+    // OrderBookDepthAggregator; this region just mirrors the picker UI to the
+    // current book without flickering on every refresh.
+    private void RefreshBucketOptions(List<DepthLevel> sells, List<DepthLevel> buys,
         CurrencyType currency, decimal? midPrice)
     {
         long totalVol = 0;
@@ -411,7 +351,9 @@ public partial class OrderBookViewModel : StockAwareViewModel
             options.Add(new BucketSizeOption(step, CurrencyHelper.Format(step, currency)));
             if (totalVol > 0)
             {
-                var biggest = Math.Max(MaxBucketVolumeAt(sells, step), MaxBucketVolumeAt(buys, step));
+                var biggest = Math.Max(
+                    OrderBookDepthAggregator.MaxBucketVolumeAt(sells, step),
+                    OrderBookDepthAggregator.MaxBucketVolumeAt(buys, step));
                 if (biggest >= quarterThreshold) break;
             }
         }
@@ -434,7 +376,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
             // Default step: auto-scale from price unless the user has overridden.
             decimal targetStep = _userPickedBucket
                 ? _currentBucketStep
-                : AutoStepForPrice(midPrice, options);
+                : OrderBookDepthAggregator.AutoStepForPrice(midPrice, options.Select(o => o.Value).ToArray());
 
             // Snap to the closest available value (the user's stored choice may
             // have fallen off the list if the book volume shrank since).
@@ -452,43 +394,6 @@ public partial class OrderBookViewModel : StockAwareViewModel
         }
     }
 
-    private static long MaxBucketVolumeAt(List<PriceLevel> levels, decimal step)
-    {
-        if (levels.Count == 0 || step <= 0m) return 0;
-        long max = 0, cur = 0;
-        decimal? prevFloor = null;
-        foreach (var l in levels)
-        {
-            var floor = Math.Floor(l.Price / step) * step;
-            if (prevFloor.HasValue && prevFloor.Value != floor)
-            {
-                if (cur > max) max = cur;
-                cur = 0;
-            }
-            cur += l.Quantity;
-            prevFloor = floor;
-        }
-        if (cur > max) max = cur;
-        return max;
-    }
-
-    private static decimal AutoStepForPrice(decimal? price, List<BucketSizeOption> options)
-    {
-        // Aim for ~0.1% of price as the default tick; snap to the closest option.
-        // Defaults to the finest step when no price is available yet.
-        if (!price.HasValue || price.Value <= 0m || options.Count == 0)
-            return options.Count > 0 ? options[0].Value : 0.01m;
-
-        var target = price.Value * 0.001m;
-        var best = options[0].Value;
-        var bestDist = Math.Abs(best - target);
-        for (int i = 1; i < options.Count; i++)
-        {
-            var d = Math.Abs(options[i].Value - target);
-            if (d < bestDist) { best = options[i].Value; bestDist = d; }
-        }
-        return best;
-    }
     #endregion
 }
 
