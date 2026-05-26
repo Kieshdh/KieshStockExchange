@@ -38,10 +38,31 @@ public sealed class RingBufferStore<T>
     /// <summary>Append one record as a JSON line. Thread-safe.</summary>
     public void Append(T record)
     {
-        var line = JsonSerializer.Serialize(record, JsonOpts);
+        var line = JsonSerializer.Serialize(record, JsonOpts) + Environment.NewLine;
+        var bytes = System.Text.Encoding.UTF8.GetBytes(line);
         lock (_writeLock)
         {
-            File.AppendAllText(_path, line + Environment.NewLine);
+            // FileShare.ReadWrite so concurrent CSV-export readers (and AV /
+            // Windows Search scanning the .ndjson) don't block our append.
+            // Short retry loop covers the residual race where another holder
+            // briefly takes the file with stricter sharing — without it the
+            // engine surfaces an IOException to whoever called LogFund/
+            // LogPosition, which today aborts the in-flight settlement.
+            const int maxAttempts = 5;
+            for (int attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    using var fs = new FileStream(_path, FileMode.Append, FileAccess.Write,
+                        FileShare.ReadWrite, bufferSize: 4096, FileOptions.SequentialScan);
+                    fs.Write(bytes, 0, bytes.Length);
+                    return;
+                }
+                catch (IOException) when (attempt < maxAttempts)
+                {
+                    Thread.Sleep(attempt * 5); // 5, 10, 15, 20ms backoff
+                }
+            }
         }
     }
 
