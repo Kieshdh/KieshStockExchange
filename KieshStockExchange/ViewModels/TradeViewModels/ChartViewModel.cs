@@ -501,6 +501,18 @@ public partial class ChartViewModel : StockAwareViewModel
             _candleBuffer.Clear();
             // History from CandleService is already sorted; preserve order on insert.
             _candleBuffer.AddRange(history);
+
+            // Auto-zoom: if the requested viewport is much wider than the data
+            // actually returned (e.g. a young server's 1h ring has 5 buckets but
+            // VisibleCount expects ~120), shrink VisibleCount to fit. Otherwise
+            // the chart renders 5 candle-dots spread across 600 bucket-widths of
+            // horizontal space — looks empty even though data is present.
+            if (history.Count > 0 && history.Count < VisibleCount)
+            {
+                var fit = Math.Clamp(history.Count, MinVisible, MaxVisible);
+                if (fit != VisibleCount) VisibleCount = fit;
+            }
+
             OffsetFromLatest = 0; // snap to live on (re)load
             SyncLatestCandle();
             RequestRedraw();
