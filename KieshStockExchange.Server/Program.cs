@@ -1,8 +1,12 @@
+using System.Text;
 using System.Text.Json.Serialization;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
+using KieshStockExchange.Server.Services.UserServices;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
 using KieshStockExchange.Services.BackgroundServices;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices;
@@ -48,8 +52,51 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 // is the AiTradeService dispose + ReservationLedger CSV flush. 60s is plenty.
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(60));
 
-// OpenAPI surface for dev. No auth wiring yet — Phase 5 handles JWT.
+// OpenAPI surface for dev.
 builder.Services.AddOpenApi();
+
+// Phase 5 Step 3a — JWT auth. Issuance + middleware land first; [Authorize]
+// on existing controllers is deferred to 3c (after client tokens wire up
+// in 3b). The middleware reads tokens from the Authorization header on HTTP
+// and from the access_token query string on SignalR (default behaviour).
+var authSection = builder.Configuration.GetSection("Auth");
+var jwtSettings = new JwtSettings();
+authSection.Bind(jwtSettings);
+if (string.IsNullOrWhiteSpace(jwtSettings.SigningKey))
+    throw new InvalidOperationException("Auth:SigningKey is required. Set it in appsettings.Development.json or user-secrets.");
+builder.Services.AddSingleton(jwtSettings);
+builder.Services.AddSingleton<JwtTokenService>();
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtSettings.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwtSettings.Audience,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SigningKey)),
+            ClockSkew = TimeSpan.FromSeconds(30),
+        };
+        // SignalR hubs read the token from ?access_token=... on the negotiate
+        // request because WebSocket upgrades can't carry custom Authorization
+        // headers from browsers; the MAUI SignalR client uses AccessTokenProvider.
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = ctx =>
+            {
+                var token = ctx.Request.Query["access_token"];
+                var path = ctx.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(token) && path.StartsWithSegments("/hubs"))
+                    ctx.Token = token;
+                return Task.CompletedTask;
+            }
+        };
+    });
+builder.Services.AddAuthorization();
 
 // SignalR (Phase 3): one hub at /hubs/market with three group families
 // (quotes:{stockId}:{currency}, orders:{userId}, portfolio:{userId}).
@@ -180,6 +227,11 @@ if (app.Environment.IsDevelopment())
 // Cheap liveness probe; client uses it during startup to fail fast if the server
 // isn't reachable instead of waiting for the first DB call to time out.
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+
+// Auth must come before MapControllers / MapHub so [Authorize] (added in
+// 3c) and User.FindFirst("sub") work everywhere downstream.
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<MarketHub>("/hubs/market");
