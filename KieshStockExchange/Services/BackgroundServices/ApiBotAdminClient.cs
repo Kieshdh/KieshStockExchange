@@ -61,4 +61,24 @@ public sealed class ApiBotAdminClient
         return await resp.Content.ReadFromJsonAsync<List<BotActivitySample>>(ApiJsonOptions.Default, ct).ConfigureAwait(false)
                ?? (IReadOnlyList<BotActivitySample>)Array.Empty<BotActivitySample>();
     }
+
+    public async Task<BotLast24hStats?> GetLast24hStatsAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync("api/admin/bots/last-24h-stats", ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<BotLast24hStats>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+    }
+
+    public async Task<BotActivityBuckets?> GetActivityBucketsAsync(DateTime fromUtc, DateTime toUtc, int bucketCount, CancellationToken ct = default)
+    {
+        var url = $"api/admin/bots/activity-buckets?fromUtc={Uri.EscapeDataString(fromUtc.ToString("o"))}" +
+                  $"&toUtc={Uri.EscapeDataString(toUtc.ToString("o"))}" +
+                  $"&bucketCount={bucketCount}";
+        var resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<BotActivityBuckets>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+    }
 }
+
+public sealed record BotLast24hStats(int Trades, decimal Volume, int ActiveBots);
+public sealed record BotActivityBuckets(int[] Trades, decimal[] Volume);

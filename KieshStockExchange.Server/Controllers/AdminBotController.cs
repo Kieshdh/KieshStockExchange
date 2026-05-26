@@ -1,6 +1,8 @@
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.BackgroundServices;
 using KieshStockExchange.Services.BackgroundServices.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
 
@@ -15,7 +17,12 @@ namespace KieshStockExchange.Server.Controllers;
 public sealed class AdminBotController : ControllerBase
 {
     private readonly IAiTradeService _bots;
-    public AdminBotController(IAiTradeService bots) => _bots = bots;
+    private readonly IDataBaseService _db;
+    public AdminBotController(IAiTradeService bots, IDataBaseService db)
+    {
+        _bots = bots;
+        _db = db;
+    }
 
     [HttpGet("failures.csv")]
     public IActionResult Failures(CancellationToken ct)
@@ -127,6 +134,78 @@ public sealed class AdminBotController : ControllerBase
     public ActionResult<IReadOnlyList<BotActivitySample>> ActivitySamples()
         => Ok(_bots.GetActivitySamples());
 
+    // Server-side aggregation for the BotDashboard's "Last 24h" card. Returns
+    // total bot-touched trades, sum of volume, and unique bot participants in
+    // the last 24h. Previously the client fetched every transaction since the
+    // 24h cutoff and aggregated locally — for a hot DB with millions of rows
+    // that hit the HttpClient.Timeout (100s) before returning. Now the
+    // aggregation runs in-process next to the DB.
+    [HttpGet("last-24h-stats")]
+    public async Task<ActionResult<BotLast24hStats>> Last24hStats(CancellationToken ct)
+    {
+        var since = TimeHelper.NowUtc() - TimeSpan.FromHours(24);
+        var aiIds = new HashSet<int>(_bots.GetAiUserIds());
+        if (aiIds.Count == 0) return Ok(new BotLast24hStats(0, 0m, 0));
+
+        var txs = await _db.GetTransactionsSinceTime(since, limit: null, ct).ConfigureAwait(false);
+        int trades = 0;
+        decimal volume = 0m;
+        var participants = new HashSet<int>();
+        for (int i = 0; i < txs.Count; i++)
+        {
+            var t = txs[i];
+            bool buyerAi = aiIds.Contains(t.BuyerId);
+            bool sellerAi = aiIds.Contains(t.SellerId);
+            if (!buyerAi && !sellerAi) continue;
+            trades++;
+            volume += t.TotalAmount;
+            if (buyerAi) participants.Add(t.BuyerId);
+            if (sellerAi) participants.Add(t.SellerId);
+        }
+        return Ok(new BotLast24hStats(trades, volume, participants.Count));
+    }
+
+    // Per-bucket trades + volume for the BotDashboard activity chart. Server
+    // does the windowing so the wire payload is fixed at bucketCount entries
+    // (not the full transaction list).
+    [HttpGet("activity-buckets")]
+    public async Task<ActionResult<BotActivityBuckets>> ActivityBuckets(
+        [FromQuery] DateTime fromUtc, [FromQuery] DateTime toUtc, [FromQuery] int bucketCount,
+        CancellationToken ct)
+    {
+        if (toUtc <= fromUtc || bucketCount <= 0)
+            return BadRequest("toUtc must be after fromUtc and bucketCount must be positive.");
+
+        var aiIds = new HashSet<int>(_bots.GetAiUserIds());
+        var trades = new int[bucketCount];
+        var volume = new decimal[bucketCount];
+
+        if (aiIds.Count > 0)
+        {
+            var rangeTicks = (toUtc - fromUtc).Ticks;
+            var bucketTicks = rangeTicks / bucketCount;
+            if (bucketTicks <= 0)
+                return Ok(new BotActivityBuckets(trades, volume));
+
+            var txs = await _db.GetTransactionsSinceTime(fromUtc, limit: null, ct).ConfigureAwait(false);
+            for (int i = 0; i < txs.Count; i++)
+            {
+                var tx = txs[i];
+                if (tx.Timestamp >= toUtc) continue;
+                bool buyerAi = aiIds.Contains(tx.BuyerId);
+                bool sellerAi = aiIds.Contains(tx.SellerId);
+                if (!buyerAi && !sellerAi) continue;
+                var offset = (tx.Timestamp - fromUtc).Ticks;
+                if (offset < 0) continue;
+                int idx = (int)(offset / bucketTicks);
+                if (idx >= bucketCount) idx = bucketCount - 1;
+                trades[idx]++;
+                volume[idx] += tx.TotalAmount;
+            }
+        }
+        return Ok(new BotActivityBuckets(trades, volume));
+    }
+
     private FileContentResult Csv(string body, string fileName)
     {
         var bytes = Encoding.UTF8.GetBytes(body);
@@ -135,3 +214,5 @@ public sealed class AdminBotController : ControllerBase
 }
 
 public sealed record BotRingCounts(int FailureRows, int LedgerRows, int EconomyRows, int SentimentRows);
+public sealed record BotLast24hStats(int Trades, decimal Volume, int ActiveBots);
+public sealed record BotActivityBuckets(int[] Trades, decimal[] Volume);

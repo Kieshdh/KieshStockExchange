@@ -1,5 +1,7 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Channels;
 
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
@@ -7,47 +9,99 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 // (BotFailureTracker, BotEconomyTelemetry, BotSentimentService,
 // ReservationLedger). One record per line, serialized via System.Text.Json.
 // Each tracker owns one store and calls Append() for every new record;
-// Load(N) on construction reads the tail of the file back into its in-memory
+// LoadTail(N) on construction reads the tail of the file back into its in-memory
 // ringbuffer so a server restart doesn't lose the previous session's history.
 //
-// Writes are lock-serialized — the trackers fire from many threads. Reads
-// happen once on boot, so the IO cost amortizes.
+// Append is non-blocking: the producer enqueues the serialized line on a
+// bounded Channel and a single background consumer drains to disk. This keeps
+// disk latency off the engine settlement path — a stalled drive or AV scan
+// adds queue depth, not engine latency. The synchronous fallback fires only
+// if the queue is full (capacity 50K lines), so audit data is never silently
+// dropped.
 //
 // File location defaults to `./data/telemetry/{name}.ndjson` relative to the
 // server working directory. The directory is created if missing. Trim
 // concerns (file rotation, max bytes) intentionally deferred — a single bot
 // session writes a few hundred KB to a few MB depending on the tracker, and
 // the user can delete the files manually if they grow inconvenient.
-public sealed class RingBufferStore<T>
+public sealed class RingBufferStore<T> : IAsyncDisposable
 {
+    private const int QueueCapacity = 50_000;
+
     private readonly string _path;
-    private readonly object _writeLock = new();
+    private readonly object _syncWriteLock = new();
+    private readonly Channel<byte[]> _queue;
+    private readonly Task _consumerLoop;
+    private readonly CancellationTokenSource _shutdownCts = new();
+    private readonly ILogger? _logger;
+    private long _droppedCount;
+    private long _backpressureFallbackCount;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public RingBufferStore(string path)
+    public RingBufferStore(string path, ILogger? logger = null)
     {
         _path = path;
+        _logger = logger;
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+        _queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(QueueCapacity)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = false,
+        });
+        _consumerLoop = Task.Run(() => DrainAsync(_shutdownCts.Token));
     }
 
-    /// <summary>Append one record as a JSON line. Thread-safe.</summary>
+    /// <summary>Append one record as a JSON line. Non-blocking unless the queue is full.</summary>
     public void Append(T record)
     {
         var line = JsonSerializer.Serialize(record, JsonOpts) + Environment.NewLine;
-        var bytes = System.Text.Encoding.UTF8.GetBytes(line);
-        lock (_writeLock)
+        var bytes = Encoding.UTF8.GetBytes(line);
+
+        // Hot path: enqueue and return. Engine settlement never waits on disk.
+        if (_queue.Writer.TryWrite(bytes)) return;
+
+        // Backpressure: queue full (50K pending). Either the consumer is stuck
+        // or the producer is genuinely outrunning disk. Fall back to a
+        // synchronous write so audit data isn't silently dropped — slow but
+        // correct. Log every 1000th occurrence so we know it's happening.
+        var n = Interlocked.Increment(ref _backpressureFallbackCount);
+        if (n % 1000 == 1)
+            _logger?.LogWarning("RingBufferStore {Path}: queue full, falling back to sync write (count {N})", _path, n);
+        WriteToDisk(bytes);
+    }
+
+    private async Task DrainAsync(CancellationToken ct)
+    {
+        try
         {
-            // FileShare.ReadWrite so concurrent CSV-export readers (and AV /
-            // Windows Search scanning the .ndjson) don't block our append.
-            // Short retry loop covers the residual race where another holder
-            // briefly takes the file with stricter sharing — without it the
-            // engine surfaces an IOException to whoever called LogFund/
-            // LogPosition, which today aborts the in-flight settlement.
+            await foreach (var bytes in _queue.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                WriteToDisk(bytes);
+            }
+        }
+        catch (OperationCanceledException) { /* shutdown */ }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "RingBufferStore {Path}: drain loop crashed", _path);
+        }
+    }
+
+    private void WriteToDisk(byte[] bytes)
+    {
+        // FileShare.ReadWrite so concurrent CSV-export readers (and AV /
+        // Windows Search scanning the .ndjson) don't block the writer.
+        // Short retry covers the residual race where an outside holder briefly
+        // takes the file with stricter sharing.
+        lock (_syncWriteLock)
+        {
             const int maxAttempts = 5;
             for (int attempt = 1; ; attempt++)
             {
@@ -61,6 +115,14 @@ public sealed class RingBufferStore<T>
                 catch (IOException) when (attempt < maxAttempts)
                 {
                     Thread.Sleep(attempt * 5); // 5, 10, 15, 20ms backoff
+                }
+                catch (IOException ex)
+                {
+                    // Final attempt failed — drop the line rather than wedging
+                    // the consumer loop indefinitely. Counter surfaces in logs.
+                    Interlocked.Increment(ref _droppedCount);
+                    _logger?.LogWarning(ex, "RingBufferStore {Path}: dropped one record after retry exhaustion", _path);
+                    return;
                 }
             }
         }
@@ -97,5 +159,18 @@ public sealed class RingBufferStore<T>
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Closes the producer side of the queue and waits for the consumer to
+    /// flush every pending record to disk. Bot loop's stop path should call
+    /// this before the engine shuts down so the audit tail is durable.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        _queue.Writer.TryComplete();
+        try { await _consumerLoop.ConfigureAwait(false); } catch { }
+        _shutdownCts.Cancel();
+        _shutdownCts.Dispose();
     }
 }

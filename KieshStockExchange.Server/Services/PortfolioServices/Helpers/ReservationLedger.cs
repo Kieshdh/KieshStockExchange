@@ -97,7 +97,7 @@ public interface IReservationLedger
     void Clear();
 }
 
-public sealed class ReservationLedger : IReservationLedger
+public sealed class ReservationLedger : IReservationLedger, IAsyncDisposable
 {
     private const int RingCapacity = 250_000;
 
@@ -129,6 +129,13 @@ public sealed class ReservationLedger : IReservationLedger
         var prior = _store.LoadTail(RingCapacity);
         foreach (var e in prior) _entries.Enqueue(e);
     }
+
+    /// <summary>
+    /// Drains any audit lines still queued in the RingBufferStore before the
+    /// host disposes singletons. Without this, up to QueueCapacity pending
+    /// records would be lost on Ctrl+C.
+    /// </summary>
+    public ValueTask DisposeAsync() => _store.DisposeAsync();
 
     public int EntryCount { get { lock (_lock) return _entries.Count; } }
 

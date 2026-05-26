@@ -414,43 +414,19 @@ public partial class BotDashboardViewModel : BaseViewModel
     {
         try
         {
-            var since = TimeHelper.NowUtc() - TimeSpan.FromHours(24);
-            var txs = await _db.GetTransactionsSinceTime(since).ConfigureAwait(false);
-
-            var aiUserIds = new HashSet<int>(await GetAiUserIdsAsync().ConfigureAwait(false));
-            if (aiUserIds.Count == 0)
-            {
-                Application.Current?.Dispatcher.Dispatch(() =>
-                {
-                    Last24hTrades = 0;
-                    Last24hVolume = 0m;
-                    Last24hVolumeText = CurrencyHelper.Format(0m, _session.BaseCurrency);
-                    Last24hActiveBots = 0;
-                });
-                return;
-            }
-
-            int trades = 0;
-            decimal volume = 0m;
-            var participants = new HashSet<int>();
-            foreach (var tx in txs)
-            {
-                bool buyerIsAi = aiUserIds.Contains(tx.BuyerId);
-                bool sellerIsAi = aiUserIds.Contains(tx.SellerId);
-                if (!buyerIsAi && !sellerIsAi) continue;
-
-                trades++;
-                volume += tx.TotalAmount;
-                if (buyerIsAi) participants.Add(tx.BuyerId);
-                if (sellerIsAi) participants.Add(tx.SellerId);
-            }
+            // Server-side aggregation — was timing out at 100s client-side
+            // because it had to fetch + iterate the entire 24h transaction list.
+            var stats = await _admin.GetLast24hStatsAsync().ConfigureAwait(false);
+            var trades = stats?.Trades ?? 0;
+            var volume = stats?.Volume ?? 0m;
+            var participants = stats?.ActiveBots ?? 0;
 
             Application.Current?.Dispatcher.Dispatch(() =>
             {
                 Last24hTrades = trades;
                 Last24hVolume = volume;
                 Last24hVolumeText = CurrencyHelper.Format(volume, _session.BaseCurrency);
-                Last24hActiveBots = participants.Count;
+                Last24hActiveBots = participants;
             });
         }
         catch (Exception ex)
@@ -463,34 +439,18 @@ public partial class BotDashboardViewModel : BaseViewModel
     {
         try
         {
-            var aiSet = new HashSet<int>(await GetAiUserIdsAsync().ConfigureAwait(false));
             int rangeIdx = Math.Clamp(ActivityRangeIndex, 0, ActivityRangeMinutes.Count - 1);
             var rangeSpan = TimeSpan.FromMinutes(ActivityRangeMinutes[rangeIdx]);
             var to = TimeHelper.NowUtc();
             var from = to - rangeSpan;
             long bucketTicks = rangeSpan.Ticks / ActivityBucketCount;
 
-            var trades = new int[ActivityBucketCount];
-            var volume = new decimal[ActivityBucketCount];
-
-            if (aiSet.Count > 0)
-            {
-                var txs = await _db.GetTransactionsSinceTime(from).ConfigureAwait(false);
-                foreach (var tx in txs)
-                {
-                    bool buyerAi = aiSet.Contains(tx.BuyerId);
-                    bool sellerAi = aiSet.Contains(tx.SellerId);
-                    if (!buyerAi && !sellerAi) continue;
-
-                    var offset = tx.Timestamp - from;
-                    if (offset < TimeSpan.Zero) continue;
-                    int idx = (int)(offset.Ticks / bucketTicks);
-                    if (idx >= ActivityBucketCount) idx = ActivityBucketCount - 1;
-
-                    trades[idx]++;
-                    volume[idx] += tx.TotalAmount;
-                }
-            }
+            // Server-side bucketing — see Refresh24hStatsAsync for the
+            // motivation. Returned arrays are already sized to ActivityBucketCount.
+            var bucketsResp = await _admin.GetActivityBucketsAsync(from, to, ActivityBucketCount)
+                .ConfigureAwait(false);
+            var trades = bucketsResp?.Trades ?? new int[ActivityBucketCount];
+            var volume = bucketsResp?.Volume ?? new decimal[ActivityBucketCount];
 
             // Active bots: max OnlineBots per bucket from scaler samples (carry forward when empty).
             var samples = await _admin.GetActivitySamplesAsync().ConfigureAwait(false);
