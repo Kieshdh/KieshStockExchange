@@ -1,6 +1,8 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Server.Services.UserServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace KieshStockExchange.Server.Hubs;
@@ -15,8 +17,12 @@ namespace KieshStockExchange.Server.Hubs;
 // aggregator for the requested key and CandleClosed never fires (the chart's
 // "live" indicator never updates and the candle stream looks frozen).
 //
-// Auth is deferred to Phase 5. Until then JoinUserGroups trusts the userId the
-// client supplies; after JWT lands the hub will derive it from a claim instead.
+// Step 3c — hub requires a valid JWT. JoinUserGroups derives userId from the
+// sub claim and ignores the wire parameter; a body userId that doesn't match
+// the token's claim is silently re-mapped to the claim. The parameter stays
+// on the wire so the client (which still passes it for backward compat with
+// the pre-JWT handshake) doesn't need a coordinated breaking change.
+[Authorize]
 public sealed class MarketHub : Hub
 {
     private readonly ICandleService _candles;
@@ -45,14 +51,19 @@ public sealed class MarketHub : Hub
 
     public async Task JoinUserGroups(int userId)
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameOrders(userId));
-        await Groups.AddToGroupAsync(Context.ConnectionId, GroupNamePortfolio(userId));
+        var claim = Context.User.GetUserId();
+        if (claim is null) throw new HubException("Missing user claim.");
+        // Body parameter retained for transition compatibility; the claim wins.
+        await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameOrders(claim.Value));
+        await Groups.AddToGroupAsync(Context.ConnectionId, GroupNamePortfolio(claim.Value));
     }
 
     public async Task LeaveUserGroups(int userId)
     {
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNameOrders(userId));
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNamePortfolio(userId));
+        var claim = Context.User.GetUserId();
+        if (claim is null) return;
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNameOrders(claim.Value));
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNamePortfolio(claim.Value));
     }
 
     public static string GroupNameQuotes(int stockId, CurrencyType currency) => $"quotes:{stockId}:{currency}";

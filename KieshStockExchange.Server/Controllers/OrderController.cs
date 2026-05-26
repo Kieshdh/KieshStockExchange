@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Server.Services.UserServices;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
@@ -90,6 +91,8 @@ public sealed class OrderController : ControllerBase
     public async Task<ActionResult<OrderResult>> Place([FromBody] PlaceOrderRequest req, CancellationToken ct)
     {
         if (req is null) return BadRequest();
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.UserId != caller) return Forbid();
         var result = req.Type switch
         {
             "LimitBuy"            => await _entry.PlaceLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
@@ -110,11 +113,19 @@ public sealed class OrderController : ControllerBase
 
     [HttpPost("{id:int}/modify")]
     public async Task<ActionResult<OrderResult>> Modify(int id, [FromBody] ModifyOrderRequest req, CancellationToken ct)
-        => Ok(await _entry.ModifyOrderAsync(req.UserId, id, req.Quantity, req.Price, ct));
+    {
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.UserId != caller) return Forbid();
+        return Ok(await _entry.ModifyOrderAsync(caller, id, req.Quantity, req.Price, ct));
+    }
 
     [HttpPost("{id:int}/cancel")]
     public async Task<ActionResult<OrderResult>> Cancel(int id, [FromQuery] int userId, CancellationToken ct)
-        => Ok(await _entry.CancelOrderAsync(userId, id, ct));
+    {
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (userId != caller) return Forbid();
+        return Ok(await _entry.CancelOrderAsync(caller, id, ct));
+    }
 
     [HttpPost("cancel-batch")]
     public async Task<ActionResult<IReadOnlyList<OrderResult>>> CancelBatch([FromBody] CancelBatchRequest req, CancellationToken ct)

@@ -1,3 +1,4 @@
+using KieshStockExchange.Server.Services.UserServices;
 using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.AspNetCore.Mvc;
@@ -20,16 +21,14 @@ public sealed class EngineController : ControllerBase
     public async Task<ActionResult<bool>> DepositWithdraw(
         [FromBody] DepositWithdrawCommand cmd, CancellationToken ct)
     {
-        // The UserPortfolioService.AddFundsAsync / WithdrawAsync entry points read
-        // the system scope from BeginSystemScope(). Server-side NoopAuthService
-        // returns IsLoggedIn=false, so the SystemScope path is the only one that
-        // permits the operation. Wrap in BeginSystemScope so the server actor
-        // gets the same permissions a logged-in user would in-process.
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (cmd.UserId != caller) return Forbid();
+
         using var scope = _portfolio.BeginSystemScope();
         bool ok = cmd.Kind switch
         {
-            "Deposit"    => await _portfolio.DepositAsync(cmd.Amount, cmd.Currency, cmd.Note, cmd.UserId, ct),
-            "Withdrawal" => await _portfolio.WithdrawAsync(cmd.Amount, cmd.Currency, cmd.Note, cmd.UserId, ct),
+            "Deposit"    => await _portfolio.DepositAsync(cmd.Amount, cmd.Currency, cmd.Note, caller, ct),
+            "Withdrawal" => await _portfolio.WithdrawAsync(cmd.Amount, cmd.Currency, cmd.Note, caller, ct),
             _            => false
         };
         return Ok(ok);
@@ -39,9 +38,12 @@ public sealed class EngineController : ControllerBase
     public async Task<ActionResult<bool>> ConvertInternal(
         [FromBody] ConvertInternalCommand cmd, CancellationToken ct)
     {
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (cmd.UserId != caller) return Forbid();
+
         using var scope = _portfolio.BeginSystemScope();
         var ok = await _portfolio.ConvertAsync(cmd.Amount, cmd.FromCurrency, cmd.ToCurrency,
-            cmd.OutNote, cmd.UserId, ct);
+            cmd.OutNote, caller, ct);
         return Ok(ok);
     }
 }

@@ -6,6 +6,7 @@ using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
 using KieshStockExchange.Server.Services.UserServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using KieshStockExchange.Services.BackgroundServices;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
@@ -96,7 +97,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             }
         };
     });
-builder.Services.AddAuthorization();
+// Step 3c — fallback policy: every endpoint requires authentication unless
+// explicitly marked [AllowAnonymous]. Auth + login + /healthz are the only
+// allow-anon paths. Role gates (admin-only endpoints) come in Phase 7.
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
 
 // SignalR (Phase 3): one hub at /hubs/market with three group families
 // (quotes:{stockId}:{currency}, orders:{userId}, portfolio:{userId}).
@@ -226,7 +235,7 @@ if (app.Environment.IsDevelopment())
 
 // Cheap liveness probe; client uses it during startup to fail fast if the server
 // isn't reachable instead of waiting for the first DB call to time out.
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 
 // Auth must come before MapControllers / MapHub so [Authorize] (added in
 // 3c) and User.FindFirst("sub") work everywhere downstream.

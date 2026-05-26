@@ -131,14 +131,17 @@ public sealed class AuthService : IAuthService
     {
         var prev = CurrentUser;
         CurrentUser = null;
-        _tokens.Clear();
         _logger.LogInformation("User logged out.");
         if (prev is not null)
         {
-            _ = NotifyServerAsync("api/session/logout", prev.UserId, prev.Username);
+            // Notify + leave hub groups BEFORE clearing the token — both calls
+            // require the bearer after 3c's [Authorize] flip.
+            try { await NotifyServerAsync("api/session/logout", prev.UserId, prev.Username).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Session logout notify failed."); }
             try { await _hub.LeaveUserGroupsAsync(prev.UserId, ct).ConfigureAwait(false); }
             catch (Exception ex) { _logger.LogDebug(ex, "Hub LeaveUserGroups failed for #{UserId}", prev.UserId); }
         }
+        _tokens.Clear();
     }
 
     /// <summary>Wire shape mirror of <c>AuthController.LoginResponse</c>.</summary>
