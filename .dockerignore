@@ -1,0 +1,16 @@
+# Keep the build context small and the MAUI client out of the server image.
+**/bin/
+**/obj/
+.git/
+.gitignore
+.vs/
+.vscode/
+.idea/
+KieshStockExchange/
+*.patch
+*.user
+.env
+.env.*
+!.env.production.example
+deploy/
+docs/

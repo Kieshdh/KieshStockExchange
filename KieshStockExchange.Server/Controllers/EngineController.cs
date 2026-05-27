@@ -2,6 +2,7 @@ using KieshStockExchange.Server.Services.UserServices;
 using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace KieshStockExchange.Server.Controllers;
 
@@ -18,6 +19,7 @@ public sealed class EngineController : ControllerBase
     public EngineController(IUserPortfolioService portfolio) => _portfolio = portfolio;
 
     [HttpPost("portfolio/deposit-withdraw")]
+    [EnableRateLimiting("orders")]
     public async Task<ActionResult<bool>> DepositWithdraw(
         [FromBody] DepositWithdrawCommand cmd, CancellationToken ct)
     {
@@ -35,6 +37,7 @@ public sealed class EngineController : ControllerBase
     }
 
     [HttpPost("portfolio/convert-internal")]
+    [EnableRateLimiting("orders")]
     public async Task<ActionResult<bool>> ConvertInternal(
         [FromBody] ConvertInternalCommand cmd, CancellationToken ct)
     {

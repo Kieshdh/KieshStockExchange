@@ -1,0 +1,57 @@
+# 7c/7d — local dev brings up just Postgres (`docker compose up -d postgres`).
+# Production brings up the full stack (`docker compose --env-file .env.production up -d`).
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kse}
+      POSTGRES_USER: ${POSTGRES_USER:-kse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kse-dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-kse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: .
+      dockerfile: KieshStockExchange.Server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      KSE_DB_CONNECTION_STRING: ${KSE_DB_CONNECTION_STRING}
+      Auth__SigningKey: ${KSE_AUTH_SIGNING_KEY}
+      Cors__AllowedOrigins__0: ${KSE_ALLOWED_ORIGIN}
+    volumes:
+      - serverlogs:/app/logs
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+volumes:
+  pgdata:
+  serverlogs:
+  caddydata:
+  caddyconfig:

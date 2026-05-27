@@ -1,0 +1,9 @@
+# 7d — Caddy terminates TLS (automatic Let's Encrypt) and reverse-proxies to the
+# server container. {$DOMAIN} is read from the DOMAIN env var (set in .env.production).
+{$DOMAIN} {
+    reverse_proxy server:8080
+    encode gzip
+    log {
+        output file /data/access.log
+    }
+}

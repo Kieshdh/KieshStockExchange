@@ -361,5 +361,11 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
-# Server-side bot telemetry NDJSON ringbuffers (Wave 8 persistence)
-KieshStockExchange.Server/data/
+# Server-side bot telemetry NDJSON ringbuffers (Wave 8 persistence).
+# Narrowed to telemetry/ subfolder so it doesn't collide with the Data/
+# code folder on case-insensitive filesystems (Phase 7 added that).
+KieshStockExchange.Server/Data/telemetry/
+
+# Phase 7 — production secrets (never commit real values)
+.env.production
+.env

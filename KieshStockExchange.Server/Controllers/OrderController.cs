@@ -7,6 +7,7 @@ using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace KieshStockExchange.Server.Controllers;
 
@@ -88,6 +89,7 @@ public sealed class OrderController : ControllerBase
     // CancelOrderAsync, and IOrderExecutionService.CancelOrdersBatchAsync.
 
     [HttpPost("place")]
+    [EnableRateLimiting("orders")]
     public async Task<ActionResult<OrderResult>> Place([FromBody] PlaceOrderRequest req, CancellationToken ct)
     {
         if (req is null) return BadRequest();
@@ -112,6 +114,7 @@ public sealed class OrderController : ControllerBase
     }
 
     [HttpPost("{id:int}/modify")]
+    [EnableRateLimiting("orders")]
     public async Task<ActionResult<OrderResult>> Modify(int id, [FromBody] ModifyOrderRequest req, CancellationToken ct)
     {
         if (User.GetUserId() is not int caller) return Forbid();
@@ -120,6 +123,7 @@ public sealed class OrderController : ControllerBase
     }
 
     [HttpPost("{id:int}/cancel")]
+    [EnableRateLimiting("orders")]
     public async Task<ActionResult<OrderResult>> Cancel(int id, [FromQuery] int userId, CancellationToken ct)
     {
         if (User.GetUserId() is not int caller) return Forbid();
@@ -128,6 +132,7 @@ public sealed class OrderController : ControllerBase
     }
 
     [HttpPost("cancel-batch")]
+    [EnableRateLimiting("orders")]
     public async Task<ActionResult<IReadOnlyList<OrderResult>>> CancelBatch([FromBody] CancelBatchRequest req, CancellationToken ct)
         => Ok(await _execution.CancelOrdersBatchAsync(req.OrderIds, ct));
 }

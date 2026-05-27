@@ -1,6 +1,14 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Server.HealthChecks;
+using KieshStockExchange.Server.Services.SeedServices;
+using KieshStockExchange.Server.Services.SeedServices.Interfaces;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
+using Serilog;
 using KieshStockExchange.Models;
 using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
@@ -29,6 +37,11 @@ using SQLitePCL;
 Batteries_V2.Init();
 
 var builder = WebApplication.CreateBuilder(args);
+
+// 7a-3 — Serilog reads its sinks from the "Serilog" config section: console in
+// dev, a rolling daily file (logs/server-.log, 7-day retention) everywhere, and
+// a Warning-only JSON file in Production (see appsettings.Production.json).
+builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration));
 
 // Lift Kestrel's request body cap above the 30MB default. The bulk passthrough
 // endpoints (insert-all / update-all) are chunked client-side at 2000 items per
@@ -65,6 +78,13 @@ var jwtSettings = new JwtSettings();
 authSection.Bind(jwtSettings);
 if (string.IsNullOrWhiteSpace(jwtSettings.SigningKey))
     throw new InvalidOperationException("Auth:SigningKey is required. Set it in appsettings.Development.json or user-secrets.");
+// 7a-4 — refuse to boot in Production with the checked-in dev key. Production
+// must supply its own key via the Auth__SigningKey env var (or a secrets store);
+// the default config provider already binds that env var into Auth:SigningKey.
+const string DevSigningKey = "dev-only-signing-key-rotate-before-deploy-32-bytes-minimum!";
+if (builder.Environment.IsProduction() && jwtSettings.SigningKey == DevSigningKey)
+    throw new InvalidOperationException(
+        "Production must override Auth:SigningKey via the Auth__SigningKey env var or a secrets store.");
 builder.Services.AddSingleton(jwtSettings);
 builder.Services.AddSingleton<JwtTokenService>();
 
@@ -167,6 +187,12 @@ builder.Services.AddSingleton<IEngineAdminService, EngineAdminService>();
 // Phase 3 Step 5: bot loop + helpers move server-side.
 builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
 
+// 7b — Excel seed service + auto-seed-on-empty host. Registered BEFORE the bot
+// loop so a fresh DB is populated before any bot trades (hosted services start
+// in registration order and the host awaits each StartAsync in turn).
+builder.Services.AddSingleton<IExcelSeedService, ExcelSeedService>();
+builder.Services.AddHostedService<SeedOnEmptyHostedService>();
+
 // Phase 3 bot-loop host. Starts AiTradeService.StartBotAsync when
 // Bots:AutoStart is true. Default is false in appsettings.json so the client
 // still owns the bot loop until Step 7 deletes the client side.
@@ -179,6 +205,56 @@ builder.Services.AddHostedService<MarketHubBroadcaster>();
 // per (stockId, currency) key. Same quotes group the chart already joins;
 // the client's OrderBookFeed (0g-6) listens for "OrderBookSnapshot".
 builder.Services.AddHostedService<OrderBookBroadcaster>();
+
+// 7a-2 — rate limiting. "orders" caps order/portfolio mutations per authenticated
+// user (falling back to client IP for the rare anonymous case) at 60/min; "auth"
+// caps login attempts per IP at 10/min to blunt credential stuffing. Reads are
+// unlimited. Over-limit requests get 429 immediately (no queue).
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("orders", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            // GetUserId() reads sub/NameIdentifier (the bearer handler remaps sub);
+            // fall back to client IP for the rare anonymous order path.
+            partitionKey: httpContext.User.GetUserId()?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+    options.AddPolicy("auth", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+});
+
+// 7a-5 — CORS (origins come from config; empty in dev) and forwarded headers so
+// the app sees the real client scheme/IP behind the reverse proxy. KnownProxies
+// is cleared because Caddy is the only hop and runs on a non-loopback address.
+builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
+    .WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>())
+    .AllowAnyHeader()
+    .AllowAnyMethod()
+    .AllowCredentials()));
+builder.Services.Configure<ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    o.KnownNetworks.Clear();
+    o.KnownProxies.Clear();
+});
+
+// 7a-6 — health checks. /healthz/live is a bare liveness probe; /healthz/ready
+// additionally confirms the database answers a trivial query.
+builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
 var app = builder.Build();
 
@@ -228,19 +304,30 @@ await app.Services.GetRequiredService<IStockService>().EnsureLoadedAsync().Confi
         .ConfigureAwait(false);
 }
 
+// 7a-5 — must run before anything that reads the client scheme/IP so downstream
+// middleware and rate-limit partitioning see the proxied values.
+app.UseForwardedHeaders();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
-// Cheap liveness probe; client uses it during startup to fail fast if the server
-// isn't reachable instead of waiting for the first DB call to time out.
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+// 7a-6 — split liveness from readiness. /healthz/live answers 200 as long as the
+// process is up (no checks run); /healthz/ready also confirms the database.
+app.MapHealthChecks("/healthz/live", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
+app.MapHealthChecks("/healthz/ready").AllowAnonymous();
 
-// Auth must come before MapControllers / MapHub so [Authorize] (added in
-// 3c) and User.FindFirst("sub") work everywhere downstream.
+app.UseCors();
+
+// Auth must come before MapControllers / MapHub so [Authorize] and
+// User.FindFirst("sub") work everywhere downstream.
 app.UseAuthentication();
 app.UseAuthorization();
+
+// 7a-2 — after authentication so the "orders" policy can partition on the
+// authenticated user's "sub" claim.
+app.UseRateLimiter();
 
 app.MapControllers();
 app.MapHub<MarketHub>("/hubs/market");
