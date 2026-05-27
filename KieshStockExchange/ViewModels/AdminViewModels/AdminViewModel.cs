@@ -3,7 +3,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Models;
 using System.Diagnostics;
-using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.ViewModels.AdminViewModels.Tables;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -35,11 +34,10 @@ public partial class AdminViewModel : BaseViewModel
     #endregion
 
     #region Fields and Constructor
-    private readonly IExcelImportService ExcelService;
     private readonly IServiceProvider _services;
     private readonly IDataBaseService _db;
 
-    public AdminViewModel(IExcelImportService excelService, IServiceProvider services, IDataBaseService db,
+    public AdminViewModel(IServiceProvider services, IDataBaseService db,
         UserTableViewModel usersVm, TransactionTableViewModel transactionsVm, OrderTableViewModel ordersVm,
         StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm,
         UserDetailsViewModel userDetailsVm, TopNavBarViewModel topNavBarVm)
@@ -53,7 +51,6 @@ public partial class AdminViewModel : BaseViewModel
         FundsVm = fundsVm;
         UserDetailsVm = userDetailsVm ?? throw new ArgumentNullException(nameof(userDetailsVm));
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
-        ExcelService = excelService;
         _services = services ?? throw new ArgumentNullException(nameof(services));
         _db = db ?? throw new ArgumentNullException(nameof(db));
 

@@ -1,4 +1,3 @@
-using ExcelDataReader.Log;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;

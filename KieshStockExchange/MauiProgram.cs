@@ -108,7 +108,6 @@ public static class MauiProgram
         // IEngineCommandClient / EngineCommandClient deleted in Step 0e — the
         // 4 engine bundle endpoints were already removed in Phase 3 Step 6,
         // and the 2 portfolio bundles now route through ApiPortfolioClient.
-        builder.Services.AddSingleton<IExcelImportService, ExcelImportService>();
         builder.Services.AddSingleton<IAuthService, AuthService>();
         // Phase 3 finish — market data + candles + FX + lookups: thin proxies
         // backed by HTTP + SignalR. The in-process duplicates are dead-code
