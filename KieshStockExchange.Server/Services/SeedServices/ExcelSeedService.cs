@@ -5,6 +5,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Server.Services.SeedServices.Interfaces;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Server.Services.SeedServices;
 
@@ -17,14 +18,16 @@ namespace KieshStockExchange.Server.Services.SeedServices;
 public sealed class ExcelSeedService : IExcelSeedService
 {
     private readonly IDataBaseService _db;
+    private readonly IFxRateService _fx;
     private readonly ILogger<ExcelSeedService> _logger;
     private readonly IHostEnvironment _env;
     private readonly IConfiguration _config;
 
-    public ExcelSeedService(IDataBaseService db, ILogger<ExcelSeedService> logger,
+    public ExcelSeedService(IDataBaseService db, IFxRateService fx, ILogger<ExcelSeedService> logger,
         IHostEnvironment env, IConfiguration config)
     {
         _db = db;
+        _fx = fx;
         _logger = logger;
         _env = env;
         _config = config;
@@ -169,11 +172,12 @@ public sealed class ExcelSeedService : IExcelSeedService
         return dict;
     }
 
-    private static IReadOnlyList<StockListing> ReadListingsFromSheet(
+    private IReadOnlyList<StockListing> ReadListingsFromSheet(
         DataTable sheet, IReadOnlyDictionary<int, decimal> usdPrices)
     {
-        // EUR/USD seed rate mirrors Tools/Config.py::FX_BASE_RATES["EUR/USD"].
-        const decimal EurPerUsd = 1m / 1.08m;
+        // FX rate comes from the live IFxRateService (AR(1) walker around 1.08).
+        // GetMidRate(USD,EUR) returns the EUR-per-USD multiplier the fallback needs.
+        var eurPerUsd = _fx.GetMidRate(CurrencyType.USD, CurrencyType.EUR);
         var rows = new List<StockListing>(sheet.Rows.Count);
         foreach (DataRow row in sheet.Rows)
         {
@@ -193,7 +197,7 @@ public sealed class ExcelSeedService : IExcelSeedService
             {
                 usdPrices.TryGetValue(stockId, out var usd);
                 seedPrice = ccy == CurrencyType.EUR
-                    ? CurrencyHelper.RoundMoney(usd * EurPerUsd, CurrencyType.EUR)
+                    ? CurrencyHelper.RoundMoney(usd * eurPerUsd, CurrencyType.EUR)
                     : CurrencyHelper.RoundMoney(usd, ccy);
             }
 
