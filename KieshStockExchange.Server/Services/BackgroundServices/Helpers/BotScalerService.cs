@@ -147,7 +147,7 @@ internal sealed class BotScalerService
         {
             var c = _pendingChanges[0];
             _logger.LogInformation(
-                "Scaler: ActiveBotCap {Old}→{New} (load {Pct:P0} → target {Tgt:P0}, ewma {Ewma:F1}ms)",
+                "Scaler: ActiveBotCap {Old}→{New} (load {Pct:0%} → target {Tgt:0%}, ewma {Ewma:F1}ms)",
                 c.Old, c.New, c.Load, TargetLoadFraction, c.Ewma);
         }
         else
@@ -163,7 +163,7 @@ internal sealed class BotScalerService
                 lastEwma = c.Ewma;
             }
             _logger.LogInformation(
-                "Scaler: ActiveBotCap {First}→{Last} via {Count} steps in {Secs:F0}s (load {MinPct:P0}–{MaxPct:P0} → target {Tgt:P0}, ewma {Ewma:F1}ms)",
+                "Scaler: ActiveBotCap {First}→{Last} via {Count} steps in {Secs:F0}s (load {MinPct:0%}–{MaxPct:0%} → target {Tgt:0%}, ewma {Ewma:F1}ms)",
                 first.Old, last.New, _pendingChanges.Count,
                 (now - _lastLogAt).TotalSeconds, minLoad, maxLoad, TargetLoadFraction, lastEwma);
         }
