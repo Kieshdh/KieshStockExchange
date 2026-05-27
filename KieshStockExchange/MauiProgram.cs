@@ -198,6 +198,10 @@ public static class MauiProgram
         // - Other
         builder.Services.AddTransient<TopNavBarViewModel>();
         builder.Services.AddSingleton<ToastHostViewModel>();
+        // Phase 6c — singleton so every navbar VM shares the same connection
+        // state. Eager-resolved at app end so its StateChanged subscription
+        // is live before the first hub event.
+        builder.Services.AddSingleton<ConnectionStatusViewModel>();
 
 #if DEBUG
         builder.Logging.AddDebug();
@@ -219,6 +223,10 @@ public static class MauiProgram
         // subscription — DI would otherwise defer construction until something
         // injects it, which nothing does (it's a side-effect-only service).
         _ = app.Services.GetRequiredService<NotificationBridgeService>();
+
+        // Phase 6c — connection banner singleton. Eager-resolve so its ctor
+        // hooks IMarketHubClient.StateChanged before the first transition.
+        _ = app.Services.GetRequiredService<ConnectionStatusViewModel>();
 
         // Phase 3 finish — same pattern: ApiOrderCacheBridge subscribes to
         // SignalR "OrderUpdated" in its ctor and triggers OrderCacheService

@@ -8,7 +8,21 @@
 
     <Grid Style="{StaticResource TopNavBarStyle}"
           ColumnDefinitions="Auto,*,Auto"
+          RowDefinitions="Auto,Auto"
           IsClippedToBounds="False">
+
+        <!-- Connection-state banner: visible only when SignalR isn't Connected -->
+        <Border Grid.Row="1"
+                Grid.ColumnSpan="3"
+                IsVisible="{Binding ConnectionStatus.IsVisible}"
+                BackgroundColor="#B45309"
+                StrokeThickness="0"
+                Padding="12,4">
+            <Label Text="{Binding ConnectionStatus.StatusText}"
+                   TextColor="White"
+                   FontSize="12"
+                   HorizontalOptions="Center" />
+        </Border>
 
         <!-- Brand cluster -->
         <HorizontalStackLayout Grid.Column="0"

@@ -31,15 +31,19 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
     public bool HasUnread => UnreadCount > 0;
 
     public ObservableCollection<Notification> Inbox { get; } = new();
+
+    /// <summary>Live SignalR connection state — bound by the navbar's banner row.</summary>
+    public ConnectionStatusViewModel ConnectionStatus { get; }
     #endregion
 
     #region Constructor
     public TopNavBarViewModel(IUserPortfolioService portfolio, IUserSessionService session,
-        INotificationService notify)
+        INotificationService notify, ConnectionStatusViewModel connectionStatus)
     {
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _session   = session   ?? throw new ArgumentNullException(nameof(session));
         _notify    = notify    ?? throw new ArgumentNullException(nameof(notify));
+        ConnectionStatus = connectionStatus ?? throw new ArgumentNullException(nameof(connectionStatus));
 
         _portfolio.SnapshotChanged += OnPortfolioChanged;
         _session.SnapshotChanged   += OnSessionChanged;
