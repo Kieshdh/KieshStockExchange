@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Server.Data;
 using KieshStockExchange.Server.HealthChecks;
 using KieshStockExchange.Server.Services.SeedServices;
 using KieshStockExchange.Server.Services.SeedServices.Interfaces;
@@ -132,10 +133,14 @@ builder.Services.AddAuthorization(options =>
 // (quotes:{stockId}:{currency}, orders:{userId}, portfolio:{userId}).
 builder.Services.AddSignalR();
 
-// Persistence — owns the SQLite connection for the entire server process. Singleton:
-// DBService maintains AsyncLocal transaction stacks + a writer-serialising semaphore,
-// both of which need a single instance to function correctly.
-builder.Services.AddSingleton<IDataBaseService, DBService>();
+// Persistence — Db:Backend picks the implementation. Postgres impl is region-stubbed
+// until 7c-4f, so Sqlite remains the default while the rewrite is in flight.
+builder.Services.AddSingleton<IDbConnectionFactory, PostgresConnectionFactory>();
+var dbBackend = builder.Configuration.GetValue<string>("Db:Backend") ?? "Sqlite";
+if (string.Equals(dbBackend, "Postgres", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddSingleton<IDataBaseService, PgDBService>();
+else
+    builder.Services.AddSingleton<IDataBaseService, DBService>();
 
 // SeparatorLogger options — engine helpers construct SeparatorLogger<T> inline.
 builder.Services.Configure<SeparatorLoggerOptions>(_ => { });
