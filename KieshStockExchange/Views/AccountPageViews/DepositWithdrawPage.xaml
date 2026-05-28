@@ -11,7 +11,7 @@
     <Border Style="{StaticResource DashboardCardStyle}"
             Padding="22"
             WidthRequest="520"
-            HeightRequest="560">
+            HeightRequest="478">
         <VerticalStackLayout Spacing="14">
 
             <Label Text="Deposit / Withdraw"

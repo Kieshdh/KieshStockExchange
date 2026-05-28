@@ -11,7 +11,7 @@
     <Border Style="{StaticResource DashboardCardStyle}"
             Padding="20"
             WidthRequest="560">
-        <ScrollView MaximumHeightRequest="640">
+        <ScrollView MaximumHeightRequest="470">
             <VerticalStackLayout Spacing="10">
 
                 <Grid ColumnDefinitions="*,Auto">
