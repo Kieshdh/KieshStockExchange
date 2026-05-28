@@ -11,7 +11,7 @@
 
     <Border Style="{StaticResource DashboardCardStyle}"
             Padding="22"
-            WidthRequest="720">
+            WidthRequest="860">
         <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
               RowSpacing="10">
 
@@ -24,7 +24,7 @@
                    Style="{StaticResource MutedLabelStyle}" />
 
             <Grid Grid.Row="2"
-                  ColumnDefinitions="2*,*,*,3*"
+                  ColumnDefinitions="2.2*,1.4*,1.4*,3*"
                   Style="{StaticResource TradeTableHeaderGrid}">
                 <Label Grid.Column="0" Text="Date"   Style="{StaticResource TradeTableHeaderLabel}" />
                 <Label Grid.Column="1" Text="Kind"   Style="{StaticResource TradeTableHeaderLabel}" />
@@ -47,12 +47,12 @@
 
                     <CollectionView.ItemTemplate>
                         <DataTemplate x:DataType="models:FundTransaction">
-                            <Grid ColumnDefinitions="2*,*,*,3*"
+                            <Grid ColumnDefinitions="2.2*,1.4*,1.4*,3*"
                                   Style="{StaticResource TradeTableRowGrid}">
-                                <Label Grid.Column="0" Text="{Binding CreatedAtDisplay}"     Style="{StaticResource TradeTableRowLabel}" />
-                                <Label Grid.Column="1" Text="{Binding Kind}"                 Style="{StaticResource TradeTableKindLabel}" />
-                                <Label Grid.Column="2" Text="{Binding SignedAmountDisplay}"  Style="{StaticResource TradeTableRowLabel}" />
-                                <Label Grid.Column="3" Text="{Binding Note}"                 Style="{StaticResource TradeTableRowLabel}" />
+                                <Label Grid.Column="0" Text="{Binding CreatedAtDisplay}"     Style="{StaticResource TradeTableRowLabel}" LineBreakMode="TailTruncation" />
+                                <Label Grid.Column="1" Text="{Binding KindDisplay}"          Style="{StaticResource TradeTableKindLabel}" LineBreakMode="TailTruncation" />
+                                <Label Grid.Column="2" Text="{Binding SignedAmountDisplay}"  Style="{StaticResource TradeTableRowLabel}" LineBreakMode="TailTruncation" />
+                                <Label Grid.Column="3" Text="{Binding Note}"                 Style="{StaticResource TradeTableRowLabel}" LineBreakMode="WordWrap" />
                             </Grid>
                         </DataTemplate>
                     </CollectionView.ItemTemplate>

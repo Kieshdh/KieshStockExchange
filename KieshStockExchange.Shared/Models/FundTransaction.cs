@@ -102,6 +102,16 @@ public class FundTransaction : IValidatable
     public string SignedAmountDisplay => CurrencyHelper.Format(SignedAmount, CurrencyType);
     public string CreatedAtDisplay => CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
 
+    // Compact label for the Kind column. Storage names ("ConversionIn"/"Out")
+    // overflow the table cell width on the FundTransactionHistory popup.
+    public string KindDisplay => Kind switch
+    {
+        Kinds.ConversionIn  => "Convert In",
+        Kinds.ConversionOut => "Convert Out",
+        Kinds.Withdrawal    => "Withdraw",
+        _                   => Kind,
+    };
+
     public override string ToString() =>
         $"FundTransaction #{FundTransactionId}: User #{UserId} {Kind} {AmountDisplay} at {CreatedAtDisplay}";
 }
