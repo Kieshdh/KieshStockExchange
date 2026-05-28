@@ -346,12 +346,13 @@ public class UserPortfolioService : IUserPortfolioService
             return false;
         }
 
-        // Note tag carries the effective rate for reconciliation.
-        var rate = converted / amount;
-        var trimmedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
-        var rateTag = $"Convert {from}->{to} @ {rate:0.######}";
-        var outNote = string.IsNullOrEmpty(trimmedNote) ? rateTag : $"{rateTag} | {trimmedNote}";
-        var inNote = outNote;
+        // The Kind + Currency + Amount columns already convey direction and
+        // amounts; surfacing the same rate tag in the Note column added a
+        // visible duplicate next to whatever the user typed. Persist only
+        // the user's note (or empty).
+        var trimmedNote = string.IsNullOrWhiteSpace(note) ? string.Empty : note.Trim();
+        var outNote = trimmedNote;
+        var inNote = trimmedNote;
 
         var success = false;
         try
