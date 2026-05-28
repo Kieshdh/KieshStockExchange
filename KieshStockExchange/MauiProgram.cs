@@ -186,6 +186,7 @@ public static class MauiProgram
         builder.Services.AddTransient<PortfolioOpenOrdersViewModel>();
         builder.Services.AddTransient<PortfolioOrderHistoryViewModel>();
         builder.Services.AddTransient<PortfolioTransactionViewModel>();
+        builder.Services.AddTransient<PortfolioFundsHistoryViewModel>();
         // - Trade
         builder.Services.AddTransient<MarketViewModel>();
         builder.Services.AddTransient<TradeViewModel>();

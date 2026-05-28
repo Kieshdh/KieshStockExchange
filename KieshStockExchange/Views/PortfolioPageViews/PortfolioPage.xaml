@@ -133,6 +133,12 @@
                         </other:SegmentedTabItem.Content>
                     </other:SegmentedTabItem>
 
+                    <other:SegmentedTabItem Header="Funds History">
+                        <other:SegmentedTabItem.Content>
+                            <views:PortfolioFundsHistoryView x:Name="FundsHistoryTab" />
+                        </other:SegmentedTabItem.Content>
+                    </other:SegmentedTabItem>
+
                 </other:SegmentedTabView.Tabs>
             </other:SegmentedTabView>
         </Border>

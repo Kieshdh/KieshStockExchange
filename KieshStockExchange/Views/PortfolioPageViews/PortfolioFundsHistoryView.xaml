@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.PortfolioViewModels"
+             xmlns:models="clr-namespace:KieshStockExchange.Models;assembly=KieshStockExchange.Shared"
+             x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioFundsHistoryView"
+             x:Name="PortfolioFundsHistoryRoot"
+             x:DataType="vm:PortfolioFundsHistoryViewModel">
+
+    <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
+
+        <!-- Filter chips -->
+        <other:SegmentedTabView SelectedIndex="{Binding FilterIndex, Mode=TwoWay}"
+                                SelectedButtonStyle="{StaticResource AdminSelectedSegment}"
+                                UnselectedButtonStyle="{StaticResource AdminUnselectedSegment}"
+                                HeaderContainerHorizontalOptions="Start"
+                                MinTabWidth="0"
+                                Margin="8,4">
+            <other:SegmentedTabView.Tabs>
+                <other:SegmentedTabItem Header="All" />
+                <other:SegmentedTabItem Header="Deposits" />
+                <other:SegmentedTabItem Header="Withdrawals" />
+                <other:SegmentedTabItem Header="Conversions" />
+            </other:SegmentedTabView.Tabs>
+        </other:SegmentedTabView>
+
+        <!-- Headers -->
+        <Grid ColumnDefinitions="2.2*,1.4*,1.4*,3*"
+              Style="{StaticResource TradeTableHeaderGrid}">
+            <Label Grid.Column="0" Text="Date"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="1" Text="Kind"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="2" Text="Amount" Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="3" Text="Note"   Style="{StaticResource TradeTableHeaderLabel}" />
+        </Grid>
+
+        <!-- Rows -->
+        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
+            <CollectionView ItemsSource="{Binding CurrentView}"
+                            SelectionMode="None" Margin="0,4,0,0">
+                <CollectionView.EmptyView>
+                    <StackLayout Padding="12" Spacing="4">
+                        <Label Text="No fund movements in this filter." Opacity="0.7" />
+                    </StackLayout>
+                </CollectionView.EmptyView>
+
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="models:FundTransaction">
+                        <Grid ColumnDefinitions="2.2*,1.4*,1.4*,3*"
+                              Style="{StaticResource TradeTableRowGrid}">
+                            <Label Grid.Column="0" Text="{Binding CreatedAtDisplay}"    Style="{StaticResource TradeTableRowLabel}" LineBreakMode="TailTruncation" />
+                            <Label Grid.Column="1" Text="{Binding KindDisplay}"         Style="{StaticResource TradeTableKindLabel}" LineBreakMode="TailTruncation" />
+                            <Label Grid.Column="2" Text="{Binding SignedAmountDisplay}" Style="{StaticResource TradeTableRowLabel}" LineBreakMode="TailTruncation" />
+                            <Label Grid.Column="3" Text="{Binding Note}"                Style="{StaticResource TradeTableRowLabel}" LineBreakMode="WordWrap" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </VerticalStackLayout>
+</ContentView>

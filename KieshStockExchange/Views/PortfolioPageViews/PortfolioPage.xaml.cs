@@ -13,11 +13,12 @@ public partial class PortfolioPage : ContentPage
         BindingContext = _vm;
 
         // SegmentedTabView attaches tab 0 before BindingContext propagates.
-        CurrenciesTab.BindingContext   = _vm.CurrenciesVm;
-        HoldingsTab.BindingContext     = _vm.HoldingsVm;
-        OpenOrdersTab.BindingContext   = _vm.OpenOrdersVm;
-        OrderHistoryTab.BindingContext = _vm.OrderHistoryVm;
-        TransactionsTab.BindingContext = _vm.TransactionVm;
+        CurrenciesTab.BindingContext    = _vm.CurrenciesVm;
+        HoldingsTab.BindingContext      = _vm.HoldingsVm;
+        OpenOrdersTab.BindingContext    = _vm.OpenOrdersVm;
+        OrderHistoryTab.BindingContext  = _vm.OrderHistoryVm;
+        TransactionsTab.BindingContext  = _vm.TransactionVm;
+        FundsHistoryTab.BindingContext  = _vm.FundsHistoryVm;
     }
 
     protected override async void OnAppearing()

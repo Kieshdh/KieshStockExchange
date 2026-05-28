@@ -15,12 +15,13 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
 {
     private bool _disposed;
 
-    public PortfolioCurrenciesViewModel  CurrenciesVm   { get; }
-    public PortfolioHoldingsViewModel    HoldingsVm     { get; }
-    public PortfolioOpenOrdersViewModel  OpenOrdersVm   { get; }
+    public PortfolioCurrenciesViewModel  CurrenciesVm    { get; }
+    public PortfolioHoldingsViewModel    HoldingsVm      { get; }
+    public PortfolioOpenOrdersViewModel  OpenOrdersVm    { get; }
     public PortfolioOrderHistoryViewModel OrderHistoryVm { get; }
-    public PortfolioTransactionViewModel TransactionVm  { get; }
-    public TopNavBarViewModel            TopNavBarVm    { get; }
+    public PortfolioTransactionViewModel TransactionVm   { get; }
+    public PortfolioFundsHistoryViewModel FundsHistoryVm { get; }
+    public TopNavBarViewModel            TopNavBarVm     { get; }
 
     [ObservableProperty] private string _totalEquityDisplay       = "—";
     [ObservableProperty] private string _totalEquityChangeDisplay = "—";
@@ -45,6 +46,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         PortfolioOpenOrdersViewModel   openOrdersVm,
         PortfolioOrderHistoryViewModel orderHistoryVm,
         PortfolioTransactionViewModel  transactionVm,
+        PortfolioFundsHistoryViewModel fundsHistoryVm,
         IUserPortfolioService          portfolio,
         IMarketDataService             market,
         ITransactionService            transactions,
@@ -60,6 +62,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         OpenOrdersVm   = openOrdersVm   ?? throw new ArgumentNullException(nameof(openOrdersVm));
         OrderHistoryVm = orderHistoryVm ?? throw new ArgumentNullException(nameof(orderHistoryVm));
         TransactionVm  = transactionVm  ?? throw new ArgumentNullException(nameof(transactionVm));
+        FundsHistoryVm = fundsHistoryVm ?? throw new ArgumentNullException(nameof(fundsHistoryVm));
         _portfolio     = portfolio      ?? throw new ArgumentNullException(nameof(portfolio));
         _market        = market         ?? throw new ArgumentNullException(nameof(market));
         _transactions  = transactions   ?? throw new ArgumentNullException(nameof(transactions));
@@ -98,7 +101,8 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
                 HoldingsVm.RefreshCommand.ExecuteAsync(null),
                 OpenOrdersVm.RefreshCommand.ExecuteAsync(null),
                 OrderHistoryVm.RefreshCommand.ExecuteAsync(null),
-                TransactionVm.RefreshCommand.ExecuteAsync(null));
+                TransactionVm.RefreshCommand.ExecuteAsync(null),
+                FundsHistoryVm.RefreshCommand.ExecuteAsync(null));
 
             RefreshMetrics();
         }
