@@ -24,6 +24,7 @@ public sealed partial class ClientPager<T> : ObservableObject
     public int CurrentPageDisplay => PageNumber + 1;
     public bool CanGoPrev => PageNumber > 0;
     public bool CanGoNext => PageNumber + 1 < TotalPages;
+    public bool HasMultiplePages => TotalPages > 1;
     public string PagerSummary => TotalRows == 0
         ? "No rows"
         : $"Page {CurrentPageDisplay} of {TotalPages} · {TotalRows:N0} rows";
@@ -84,6 +85,7 @@ public sealed partial class ClientPager<T> : ObservableObject
         OnPropertyChanged(nameof(CurrentPageDisplay));
         OnPropertyChanged(nameof(CanGoPrev));
         OnPropertyChanged(nameof(CanGoNext));
+        OnPropertyChanged(nameof(HasMultiplePages));
         OnPropertyChanged(nameof(PagerSummary));
         OnPropertyChanged(nameof(VisiblePages));
     }

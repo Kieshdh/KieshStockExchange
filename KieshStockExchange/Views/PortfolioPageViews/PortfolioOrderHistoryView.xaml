@@ -52,6 +52,7 @@
         </RefreshView>
 
         <adminViews:TablePagerView
+            IsVisible="{Binding Pager.HasMultiplePages}"
             CurrentPage="{Binding Pager.CurrentPageDisplay}"
             TotalPages="{Binding Pager.TotalPages}"
             PageSize="{Binding Pager.PageSize, Mode=TwoWay}"
