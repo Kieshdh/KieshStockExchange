@@ -143,6 +143,12 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         _portfolio.SnapshotChanged       -= OnPortfolioChanged;
         _transactions.TransactionsChanged -= OnTransactionsChanged;
         _session.SnapshotChanged         -= OnSessionChanged;
+        CurrenciesVm.Dispose();
+        HoldingsVm.Dispose();
+        OpenOrdersVm.Dispose();
+        OrderHistoryVm.Dispose();
+        TransactionVm.Dispose();
+        // FundsHistoryVm has no event subscriptions, no Dispose needed.
         TopNavBarVm.Dispose();
         _disposed = true;
         GC.SuppressFinalize(this);

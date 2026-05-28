@@ -34,6 +34,17 @@ public partial class PortfolioPage : ContentPage
             await _vm.RefreshCommand.ExecuteAsync(null);
     }
 
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        // Unhook the page-level pie-refresh handler and tear down the VM
+        // tree (5 tab VMs + TopNavBar). Without this each Portfolio visit
+        // leaked the VMs into the long-lived portfolio/transaction service
+        // event handler lists.
+        _vm.AllocationChanged -= OnAllocationChanged;
+        _vm.Dispose();
+    }
+
     private void OnAllocationChanged(object? sender, EventArgs e) => RefreshPie();
 
     private void RefreshPie()
