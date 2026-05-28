@@ -29,8 +29,6 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
     [ObservableProperty] private string _totalEquityChangeDisplay = "—";
     [ObservableProperty] private string _cashDisplay              = "—";
     [ObservableProperty] private string _positionCountDisplay     = "—";
-    [ObservableProperty] private string _todayPlDisplay           = "—";
-    [ObservableProperty] private string _todayPlSubDisplay        = "—";
     [ObservableProperty] private string _allTimePlDisplay         = "—";
     [ObservableProperty] private string _allTimePlSubDisplay      = "—";
 
@@ -183,17 +181,19 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         // Liquidation-equivalent: sells already received + current value of holdings - buys paid.
         var allTimePl = ComputeAllTimePl(marketValue, baseCcy);
 
-        TotalEquityDisplay       = CurrencyHelper.Format(totalEquity, baseCcy);
-        TotalEquityChangeDisplay = FormatSigned(todayPl, baseCcy) + " today";
-        CashDisplay              = CurrencyHelper.Format(cash, baseCcy);
-        PositionCountDisplay     = count == 1 ? "1 position" : $"{count} positions";
+        TotalEquityDisplay   = CurrencyHelper.Format(totalEquity, baseCcy);
+        CashDisplay          = CurrencyHelper.Format(cash, baseCcy);
+        PositionCountDisplay = count == 1 ? "1 position" : $"{count} positions";
 
-        TodayPlDisplay = FormatSigned(todayPl, baseCcy);
-        // Today P/L % is relative to yesterday's equity (today's open value).
+        // Today's change sub-line on the Total Equity card. % is vs. the
+        // day's opening equity (totalEquity - todayPl). The Today P/L card
+        // used to surface this separately; collapsing it into the Equity
+        // card removed a redundant tile.
         var todayBase = totalEquity - todayPl;
-        TodayPlSubDisplay = todayBase != 0m
-            ? FormatSignedPct(todayPl / todayBase * 100m)
-            : "—";
+        var todaySigned = FormatSigned(todayPl, baseCcy);
+        TotalEquityChangeDisplay = todayBase != 0m
+            ? $"{todaySigned} today ({FormatSignedPct(todayPl / todayBase * 100m)})"
+            : $"{todaySigned} today";
 
         AllTimePlDisplay = FormatSigned(allTimePl, baseCcy);
         // All-time P/L % is relative to the gross capital deployed (sum of buys).

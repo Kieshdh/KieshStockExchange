@@ -11,7 +11,7 @@
              Title="Portfolio">
 
     <Grid Style="{StaticResource MainGrid}"
-          RowDefinitions="Auto,Auto,Auto,*"
+          RowDefinitions="Auto,Auto,*"
           RowSpacing="8"
           Padding="0,0,0,8">
 
@@ -25,13 +25,13 @@
                              Margin="0,8,16,0"
                              ZIndex="200" />
 
-        <!-- KPI cards row -->
+        <!-- KPI cards row: Equity, Cash, All-time P/L, Allocation (2x wide) -->
         <Grid Grid.Row="1"
-              ColumnDefinitions="*,*,*,*"
+              ColumnDefinitions="*,*,*,2*"
               ColumnSpacing="12"
               Padding="24,0,24,0">
 
-            <!-- Total Equity -->
+            <!-- Total Equity (with today's change + % on the sub-line) -->
             <Border Grid.Column="0"
                     Style="{StaticResource DashboardCardStyle}"
                     Padding="20">
@@ -59,22 +59,8 @@
                 </VerticalStackLayout>
             </Border>
 
-            <!-- Today P/L -->
-            <Border Grid.Column="2"
-                    Style="{StaticResource DashboardCardStyle}"
-                    Padding="20">
-                <VerticalStackLayout Spacing="6">
-                    <Label Text="Today P/L"
-                           Style="{StaticResource MutedLabelStyle}" />
-                    <Label Text="{Binding TodayPlDisplay}"
-                           Style="{StaticResource QuotePriceLabel}" />
-                    <Label Text="{Binding TodayPlSubDisplay}"
-                           Style="{StaticResource MutedLabelStyle}" />
-                </VerticalStackLayout>
-            </Border>
-
             <!-- All-time P/L -->
-            <Border Grid.Column="3"
+            <Border Grid.Column="2"
                     Style="{StaticResource DashboardCardStyle}"
                     Padding="20">
                 <VerticalStackLayout Spacing="6">
@@ -87,51 +73,51 @@
                 </VerticalStackLayout>
             </Border>
 
+            <!-- Allocation donut + legend (2x card width) -->
+            <Border Grid.Column="3"
+                    Style="{StaticResource DashboardCardStyle}"
+                    Padding="16">
+                <Grid ColumnDefinitions="140,*" ColumnSpacing="12">
+                    <GraphicsView x:Name="AllocationPie"
+                                  Grid.Column="0"
+                                  HeightRequest="140"
+                                  WidthRequest="140" />
+
+                    <VerticalStackLayout Grid.Column="1" Spacing="2" VerticalOptions="Start">
+                        <Label Text="Allocation"
+                               Style="{StaticResource MutedLabelStyle}" />
+                        <CollectionView ItemsSource="{Binding AllocationSlices}"
+                                        SelectionMode="None">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="vm:PortfolioAllocationSlice">
+                                    <Grid ColumnDefinitions="14,*,Auto" ColumnSpacing="6" Padding="0,1">
+                                        <BoxView Grid.Column="0"
+                                                 WidthRequest="10" HeightRequest="10"
+                                                 CornerRadius="2"
+                                                 VerticalOptions="Center"
+                                                 BackgroundColor="{Binding Color}" />
+                                        <Label Grid.Column="1"
+                                               Text="{Binding Label}"
+                                               FontSize="11"
+                                               VerticalTextAlignment="Center"
+                                               LineBreakMode="TailTruncation" />
+                                        <Label Grid.Column="2"
+                                               Text="{Binding ShareDisplay}"
+                                               Style="{StaticResource MutedLabelStyle}"
+                                               FontSize="11"
+                                               VerticalTextAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+                    </VerticalStackLayout>
+                </Grid>
+            </Border>
+
         </Grid>
 
-        <!-- Allocation pie + legend -->
-        <Border Grid.Row="2"
-                Style="{StaticResource DashboardCardStyle}"
-                Margin="24,0,24,0"
-                Padding="20">
-            <Grid ColumnDefinitions="180,*" ColumnSpacing="16">
-                <GraphicsView x:Name="AllocationPie"
-                              Grid.Column="0"
-                              HeightRequest="180"
-                              WidthRequest="180" />
-
-                <VerticalStackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
-                    <Label Text="Allocation"
-                           Style="{StaticResource MutedLabelStyle}" />
-                    <CollectionView ItemsSource="{Binding AllocationSlices}"
-                                    SelectionMode="None"
-                                    HeightRequest="160">
-                        <CollectionView.ItemTemplate>
-                            <DataTemplate x:DataType="vm:PortfolioAllocationSlice">
-                                <Grid ColumnDefinitions="14,*,Auto" ColumnSpacing="8" Padding="0,2">
-                                    <BoxView Grid.Column="0"
-                                             WidthRequest="12" HeightRequest="12"
-                                             CornerRadius="2"
-                                             VerticalOptions="Center"
-                                             BackgroundColor="{Binding Color}" />
-                                    <Label Grid.Column="1"
-                                           Text="{Binding Label}"
-                                           VerticalTextAlignment="Center"
-                                           LineBreakMode="TailTruncation" />
-                                    <Label Grid.Column="2"
-                                           Text="{Binding ShareDisplay}"
-                                           Style="{StaticResource MutedLabelStyle}"
-                                           VerticalTextAlignment="Center" />
-                                </Grid>
-                            </DataTemplate>
-                        </CollectionView.ItemTemplate>
-                    </CollectionView>
-                </VerticalStackLayout>
-            </Grid>
-        </Border>
-
         <!-- Tabbed table area -->
-        <Grid Grid.Row="3" Margin="24,0,24,0">
+        <Grid Grid.Row="2" Margin="24,0,24,0">
         <Border Style="{StaticResource TradeContentOutline}"
                 Padding="0">
             <other:SegmentedTabView
