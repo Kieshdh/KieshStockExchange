@@ -50,16 +50,32 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
             FirePriceChanged();
     }
 
+    // SelectedStockService now fires PropertyChanged on the threadpool
+    // (see SelectedStockService.Set ConfigureAwait(false) cascade). Each
+    // PropertyChanged subscriber gets called in sequence on the same thread,
+    // but multiple PropertyChanged events (StockId AND Currency change on
+    // the same Set call) can race with each other if delivery happens
+    // across different threads. Guard the cancel-and-swap so we never
+    // dispose a CTS that another thread just created.
+    private readonly object _ctsSwapLock = new();
+
     private async void FireStockChanged()
     {
+        CancellationToken ct;
+        int? stockId;
+        CurrencyType currency;
+        lock (_ctsSwapLock)
+        {
+            CtsStock?.Cancel();
+            CtsStock?.Dispose();
+            CtsStock = new CancellationTokenSource();
+            ct = CtsStock.Token;
+            stockId = _selected.StockId;
+            currency = _selected.Currency;
+        }
         try
         {
-            CtsStock?.Cancel(); CtsStock?.Dispose();
-            CtsStock = new CancellationTokenSource();
-            var ct = CtsStock!.Token;
-            var stockId = _selected.StockId;
-            var currency = _selected.Currency;
-            await OnStockChangedAsync(stockId, currency, ct);
+            await OnStockChangedAsync(stockId, currency, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { } // Ignored on cancellation
         catch (Exception ex)
@@ -71,14 +87,25 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
 
     private async void FirePriceChanged()
     {
+        CancellationToken ct;
+        int? stockId;
+        CurrencyType currency;
+        decimal price;
+        DateTime? updatedAt;
+        lock (_ctsSwapLock)
+        {
+            CtsPrice?.Cancel();
+            CtsPrice?.Dispose();
+            CtsPrice = new CancellationTokenSource();
+            ct = CtsPrice.Token;
+            stockId = _selected.StockId;
+            currency = _selected.Currency;
+            price = _selected.CurrentPrice;
+            updatedAt = _selected.PriceUpdatedAt;
+        }
         try
         {
-            CtsPrice?.Cancel(); CtsPrice?.Dispose();
-            CtsPrice = new CancellationTokenSource();
-            var ct = CtsPrice!.Token;
-            var stockId = _selected.StockId; var currency = _selected.Currency;
-            var price = _selected.CurrentPrice; var updatedAt = _selected.PriceUpdatedAt;
-            await OnPriceUpdatedAsync(stockId, currency, price, updatedAt, ct);
+            await OnPriceUpdatedAsync(stockId, currency, price, updatedAt, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { } // Ignored on cancellation
         catch (Exception ex)
@@ -110,8 +137,15 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
         if (disposing)
         {
             _selected.PropertyChanged -= Handler;
-            CtsStock?.Cancel(); CtsStock?.Dispose();
-            CtsPrice?.Cancel(); CtsPrice?.Dispose();
+            lock (_ctsSwapLock)
+            {
+                CtsStock?.Cancel();
+                CtsStock?.Dispose();
+                CtsStock = null;
+                CtsPrice?.Cancel();
+                CtsPrice?.Dispose();
+                CtsPrice = null;
+            }
         }
         _disposed = true;
     }

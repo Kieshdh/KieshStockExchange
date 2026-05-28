@@ -111,17 +111,23 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
         var requested = (stock.StockId, currency);
         _lastRequested = requested;
 
-        await _setGate.WaitAsync(ct);
+        // ConfigureAwait(false) everywhere — callers from the UI thread
+        // would otherwise re-capture the sync context after each await and
+        // pin the whole Subscribe/Unsubscribe/property-write/PropertyChanged
+        // fan-out (8 StockAware subscribers per change) to the UI thread,
+        // which is what caused the trade-page freeze on aggressive picker
+        // switching. INPC subscribers handle their own marshalling.
+        await _setGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             if (_lastRequested != requested) return; // a newer Set superseded us
 
             if (stock.StockId == StockId && currency == Currency) return;
 
-            await UnsubscribeAsync(ct);
+            await UnsubscribeAsync(ct).ConfigureAwait(false);
 
-            await _market.SubscribeAsync(stock.StockId, currency, ct);
-            await _market.BuildFromHistoryAsync(stock.StockId, currency, ct);
+            await _market.SubscribeAsync(stock.StockId, currency, ct).ConfigureAwait(false);
+            await _market.BuildFromHistoryAsync(stock.StockId, currency, ct).ConfigureAwait(false);
 
             Symbol = stock.Symbol;
             CompanyName = stock.CompanyName;
@@ -130,7 +136,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
             Currency = currency;
 
             Quote = TryGetQuote();
-            await UpdateFromLiveAsync(Quote, ct);
+            await UpdateFromLiveAsync(Quote, ct).ConfigureAwait(false);
 
             if (!_firstSelectionTcs.Task.IsCompleted)
                 _firstSelectionTcs.SetResult(stock);

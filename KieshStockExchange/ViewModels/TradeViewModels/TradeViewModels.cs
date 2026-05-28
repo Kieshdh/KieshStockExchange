@@ -40,7 +40,14 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
             }
             _pickerSelection = value;
             OnPropertyChanged();
-            _ = ApplyPickerSelectionAsync(value);
+            // Spawn on the threadpool so the SelectedStockService.Set chain
+            // (gate-wait + Unsubscribe + Subscribe + BuildFromHistory + 5
+            // property writes that each fire PropertyChanged into 8
+            // StockAware subscribers) doesn't run on the UI thread. With 5
+            // rapid picker clicks, the UI thread was queueing dozens of
+            // continuations from this chain plus the MainThread.Invoke calls
+            // the chart/order-book reload uses internally, and would freeze.
+            _ = Task.Run(() => ApplyPickerSelectionAsync(value));
         }
     }
 
@@ -48,14 +55,14 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     {
         try
         {
-            var stock = await _market.GetStockAsync(pair.StockId);
+            var stock = await _market.GetStockAsync(pair.StockId).ConfigureAwait(false);
             if (stock is null)
             {
                 _logger.LogWarning("TradingPair {Symbol} #{StockId} not resolvable on the market.",
                     pair.Symbol, pair.StockId);
                 return;
             }
-            await _selected.Set(stock, pair.Currency);
+            await _selected.Set(stock, pair.Currency).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
