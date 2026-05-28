@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace KieshStockExchange.Server.Controllers;
@@ -7,8 +8,14 @@ namespace KieshStockExchange.Server.Controllers;
 // hosted service (including BotLoopHostedService → bot loop drains, ringbuffer
 // flushes, etc.) — but is invokable from anywhere and can't be missed by VS's
 // "Stop Debugging" eating the signal. See stop-server.ps1 in the repo root.
+//
+// Anonymous because the local dev / stop-server.ps1 invocation has no token
+// and the operator is on the host machine anyway. When the server moves to
+// a public deployment in Phase 7e this needs an admin role check or to be
+// removed in favor of a host-side signal (systemd stop, docker stop).
 [ApiController]
 [Route("api/server")]
+[AllowAnonymous]
 public sealed class ServerController : ControllerBase
 {
     private readonly IHostApplicationLifetime _lifetime;
