@@ -8,6 +8,8 @@ using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Graphics;
+using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 
@@ -31,6 +33,24 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
     [ObservableProperty] private string _todayPlSubDisplay        = "—";
     [ObservableProperty] private string _allTimePlDisplay         = "—";
     [ObservableProperty] private string _allTimePlSubDisplay      = "—";
+
+    // Pie-chart slices for the Allocation card. Computed in RefreshMetrics
+    // alongside the KPI numbers so a single portfolio mutation refreshes both.
+    [ObservableProperty] private ObservableCollection<PortfolioAllocationSlice> _allocationSlices = new();
+    public event EventHandler? AllocationChanged;
+
+    // Stable, color-blind-friendly palette (Okabe-Ito). 8 hues + grey for "Other".
+    private static readonly Color[] AllocationPalette =
+    {
+        Color.FromArgb("#E69F00"), // orange
+        Color.FromArgb("#56B4E9"), // sky blue
+        Color.FromArgb("#009E73"), // bluish green
+        Color.FromArgb("#F0E442"), // yellow
+        Color.FromArgb("#0072B2"), // blue
+        Color.FromArgb("#D55E00"), // vermillion
+        Color.FromArgb("#CC79A7"), // reddish purple
+        Color.FromArgb("#999999"), // grey
+    };
 
     private readonly IUserPortfolioService       _portfolio;
     private readonly IMarketDataService          _market;
@@ -181,6 +201,74 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         AllTimePlSubDisplay = grossDeployed > 0m
             ? FormatSignedPct(allTimePl / grossDeployed * 100m)
             : "—";
+
+        RebuildAllocationSlices(totalEquity, baseCcy, positions);
+    }
+
+    // Top 7 by value + "Other" so the pie stays legible past a handful of
+    // positions. Both funds and positions contribute candidate slices; if
+    // total portfolio value is zero (e.g. fresh account), the list is empty
+    // and the drawable renders nothing.
+    private void RebuildAllocationSlices(decimal total, CurrencyType baseCcy,
+        IReadOnlyList<Position> positions)
+    {
+        var candidates = new List<(string Label, decimal Value)>();
+
+        foreach (var f in _portfolio.GetFunds())
+        {
+            var v = ConvertViaFx(f.TotalBalance, f.CurrencyType, baseCcy);
+            if (v > 0m)
+                candidates.Add(($"Cash · {CurrencyHelper.GetIsoCode(f.CurrencyType)}", v));
+        }
+
+        foreach (var pos in positions)
+        {
+            if (pos.Quantity <= 0) continue;
+            if (!_stocks.TryGetCurrency(pos.StockId, out var ccy)) continue;
+            if (!_market.Quotes.TryGetValue((pos.StockId, ccy), out var quote)) continue;
+            if (quote.LastPrice <= 0m) continue;
+
+            var local = CurrencyHelper.Notional(quote.LastPrice, pos.Quantity, ccy);
+            var v = ConvertViaFx(local, ccy, baseCcy);
+            if (v <= 0m) continue;
+            var symbol = _stocks.TryGetSymbol(pos.StockId, out var sym) ? sym : "#" + pos.StockId;
+            candidates.Add((symbol, v));
+        }
+
+        AllocationSlices.Clear();
+        if (total <= 0m || candidates.Count == 0)
+        {
+            AllocationChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        candidates.Sort((a, b) => b.Value.CompareTo(a.Value));
+
+        var top = candidates.Take(AllocationPalette.Length - 1).ToList();
+        var rest = candidates.Skip(top.Count).Sum(x => x.Value);
+
+        for (int i = 0; i < top.Count; i++)
+        {
+            AllocationSlices.Add(new PortfolioAllocationSlice
+            {
+                Label       = top[i].Label,
+                ValueInBase = top[i].Value,
+                Share       = (double)(top[i].Value / total),
+                Color       = AllocationPalette[i],
+            });
+        }
+        if (rest > 0m)
+        {
+            AllocationSlices.Add(new PortfolioAllocationSlice
+            {
+                Label       = "Other",
+                ValueInBase = rest,
+                Share       = (double)(rest / total),
+                Color       = AllocationPalette[^1],
+            });
+        }
+
+        AllocationChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private decimal ComputeAllTimePl(decimal marketValue, CurrencyType baseCcy)

@@ -1,3 +1,4 @@
+using KieshStockExchange.Helpers;
 using KieshStockExchange.ViewModels.PortfolioViewModels;
 
 namespace KieshStockExchange.Views.PortfolioPageViews;
@@ -5,6 +6,7 @@ namespace KieshStockExchange.Views.PortfolioPageViews;
 public partial class PortfolioPage : ContentPage
 {
     private readonly PortfolioViewModel _vm;
+    private readonly PortfolioAllocationDrawable _pieDrawable = new();
 
     public PortfolioPage(PortfolioViewModel vm)
     {
@@ -19,6 +21,10 @@ public partial class PortfolioPage : ContentPage
         OrderHistoryTab.BindingContext  = _vm.OrderHistoryVm;
         TransactionsTab.BindingContext  = _vm.TransactionVm;
         FundsHistoryTab.BindingContext  = _vm.FundsHistoryVm;
+
+        AllocationPie.Drawable = _pieDrawable;
+        _vm.AllocationChanged += OnAllocationChanged;
+        RefreshPie();
     }
 
     protected override async void OnAppearing()
@@ -26,5 +32,13 @@ public partial class PortfolioPage : ContentPage
         base.OnAppearing();
         if (_vm.RefreshCommand.CanExecute(null))
             await _vm.RefreshCommand.ExecuteAsync(null);
+    }
+
+    private void OnAllocationChanged(object? sender, EventArgs e) => RefreshPie();
+
+    private void RefreshPie()
+    {
+        _pieDrawable.SetSlices(_vm.AllocationSlices.ToList());
+        AllocationPie.Invalidate();
     }
 }

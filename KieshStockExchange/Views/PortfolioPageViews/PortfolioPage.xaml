@@ -11,7 +11,7 @@
              Title="Portfolio">
 
     <Grid Style="{StaticResource MainGrid}"
-          RowDefinitions="Auto,Auto,*"
+          RowDefinitions="Auto,Auto,Auto,*"
           RowSpacing="8"
           Padding="0,0,0,8">
 
@@ -89,8 +89,49 @@
 
         </Grid>
 
+        <!-- Allocation pie + legend -->
+        <Border Grid.Row="2"
+                Style="{StaticResource DashboardCardStyle}"
+                Margin="24,0,24,0"
+                Padding="20">
+            <Grid ColumnDefinitions="180,*" ColumnSpacing="16">
+                <GraphicsView x:Name="AllocationPie"
+                              Grid.Column="0"
+                              HeightRequest="180"
+                              WidthRequest="180" />
+
+                <VerticalStackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
+                    <Label Text="Allocation"
+                           Style="{StaticResource MutedLabelStyle}" />
+                    <CollectionView ItemsSource="{Binding AllocationSlices}"
+                                    SelectionMode="None"
+                                    HeightRequest="160">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PortfolioAllocationSlice">
+                                <Grid ColumnDefinitions="14,*,Auto" ColumnSpacing="8" Padding="0,2">
+                                    <BoxView Grid.Column="0"
+                                             WidthRequest="12" HeightRequest="12"
+                                             CornerRadius="2"
+                                             VerticalOptions="Center"
+                                             BackgroundColor="{Binding Color}" />
+                                    <Label Grid.Column="1"
+                                           Text="{Binding Label}"
+                                           VerticalTextAlignment="Center"
+                                           LineBreakMode="TailTruncation" />
+                                    <Label Grid.Column="2"
+                                           Text="{Binding ShareDisplay}"
+                                           Style="{StaticResource MutedLabelStyle}"
+                                           VerticalTextAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </Grid>
+        </Border>
+
         <!-- Tabbed table area -->
-        <Grid Grid.Row="2" Margin="24,0,24,0">
+        <Grid Grid.Row="3" Margin="24,0,24,0">
         <Border Style="{StaticResource TradeContentOutline}"
                 Padding="0">
             <other:SegmentedTabView
