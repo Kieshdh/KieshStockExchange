@@ -143,16 +143,13 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         IsBusy = true;
         try
         {
-            // Watchlist tab spans currencies, so subscribe to every supported one.
-            if (ShowWatchlistOnly)
-            {
-                foreach (var ccy in AvailableCurrencies)
-                    await _market.SubscribeAllAsync(ccy, forUi: true).ConfigureAwait(false);
-            }
-            else
-            {
-                await _market.SubscribeAllAsync(FilterCurrency, forUi: true).ConfigureAwait(false);
-            }
+            // The "My Watchlist" card sits above the tab and shows starred
+            // stocks across all currencies, so always subscribe to every
+            // supported currency. The cost is a few extra group joins;
+            // the benefit is the card populates on the USD tab too instead
+            // of only when the Watchlist tab is selected.
+            foreach (var ccy in AvailableCurrencies)
+                await _market.SubscribeAllAsync(ccy, forUi: true).ConfigureAwait(false);
 
             // Prime trending so the panel isn't empty until the next timer tick.
             await Trending.RecomputeMoversAsync().ConfigureAwait(false);
