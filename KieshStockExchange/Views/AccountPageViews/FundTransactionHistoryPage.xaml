@@ -15,9 +15,18 @@
         <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto"
               RowSpacing="10">
 
-            <Label Grid.Row="0"
-                   Text="Fund transaction history"
-                   Style="{StaticResource SectionHeaderLabelStyle}" />
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                <Label Grid.Column="0"
+                       Text="Fund transaction history"
+                       Style="{StaticResource SectionHeaderLabelStyle}" />
+                <Button Grid.Column="1"
+                        Text="X"
+                        Style="{StaticResource SecondaryActionButtonStyle}"
+                        WidthRequest="32"
+                        HeightRequest="32"
+                        Padding="0"
+                        Command="{Binding CloseCommand}" />
+            </Grid>
 
             <Label Grid.Row="1"
                    Text="Deposits and withdrawals for the active account, newest first."
