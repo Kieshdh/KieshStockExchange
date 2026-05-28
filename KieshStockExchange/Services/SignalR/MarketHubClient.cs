@@ -138,6 +138,12 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Singleton — only runs on app shutdown. Detach the connection
+        // lifecycle handlers before disposing so a late callback can't fire
+        // into a half-torn-down state.
+        _connection.Reconnected -= OnReconnected;
+        _connection.Closed -= OnClosed;
+        _connection.Reconnecting -= OnReconnecting;
         try { await _connection.DisposeAsync().ConfigureAwait(false); } catch { }
         _connectGate.Dispose();
     }
