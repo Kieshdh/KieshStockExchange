@@ -3,6 +3,7 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Server.Data;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace KieshStockExchange.Services.DataServices;
 
@@ -22,6 +23,12 @@ public sealed partial class PgDBService : IDataBaseService
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    // Single point where region methods acquire a connection. 7c-5 will rebind
+    // this to consult the AsyncLocal transaction stack so ambient-tx callers
+    // share the same NpgsqlConnection + NpgsqlTransaction.
+    private ValueTask<NpgsqlConnection> OpenAsync(CancellationToken ct)
+        => _factory.OpenConnectionAsync(ct);
 
     #region Generic operations
     public Task ResetTableAsync<T>(CancellationToken ct = default) where T : new()
