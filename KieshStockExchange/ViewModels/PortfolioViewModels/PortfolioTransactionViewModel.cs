@@ -13,8 +13,9 @@ using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 
-public partial class PortfolioTransactionViewModel : BaseViewModel
+public partial class PortfolioTransactionViewModel : BaseViewModel, IDisposable
 {
+    private bool _disposed;
     private readonly ITransactionService _tx;
     private readonly IStockService       _stocks;
     private readonly IAuthService        _auth;
@@ -80,5 +81,13 @@ public partial class PortfolioTransactionViewModel : BaseViewModel
     {
         try { MainThread.BeginInvokeOnMainThread(RebuildView); }
         catch (Exception ex) { _logger.LogError(ex, "Error updating transaction history."); }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _tx.TransactionsChanged -= OnTransactionsChanged;
+        GC.SuppressFinalize(this);
     }
 }

@@ -14,8 +14,9 @@ using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 
-public partial class PortfolioOpenOrdersViewModel : BaseViewModel
+public partial class PortfolioOpenOrdersViewModel : BaseViewModel, IDisposable
 {
+    private bool _disposed;
     private readonly IOrderCacheService  _cache;
     private readonly IOrderEntryService  _orders;
     private readonly IStockService       _stocks;
@@ -131,5 +132,13 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
     {
         try { MainThread.BeginInvokeOnMainThread(RebuildView); }
         catch (Exception ex) { _logger.LogError(ex, "Error updating open orders."); }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _cache.OrdersChanged -= OnOrdersChanged;
+        GC.SuppressFinalize(this);
     }
 }

@@ -14,8 +14,9 @@ using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 
-public partial class PortfolioHoldingsViewModel : BaseViewModel
+public partial class PortfolioHoldingsViewModel : BaseViewModel, IDisposable
 {
+    private bool _disposed;
     private readonly HashSet<(int StockId, CurrencyType Currency)> _subscriptions = new();
     private readonly Dictionary<int, PositionRow> _rowsByStockId = new();
 
@@ -163,5 +164,18 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
     {
         try { MainThread.BeginInvokeOnMainThread(RebuildView); }
         catch (Exception ex) { _logger.LogError(ex, "Error updating portfolio holdings."); }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _portfolio.SnapshotChanged -= OnPositionsChanged;
+        // Position rows wired into LiveQuote.PropertyChanged need to release
+        // those handlers too, otherwise quote ticks keep firing into a stale
+        // row collection after this VM is gone.
+        foreach (var row in _rowsByStockId.Values) row.Dispose();
+        _rowsByStockId.Clear();
+        GC.SuppressFinalize(this);
     }
 }

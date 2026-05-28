@@ -17,8 +17,9 @@ namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 /// Portfolio "Currencies" tab — one row per Fund with native balance, the
 /// equivalent value in the session base currency, and a relative-share bar.
 /// </summary>
-public partial class PortfolioCurrenciesViewModel : BaseViewModel
+public partial class PortfolioCurrenciesViewModel : BaseViewModel, IDisposable
 {
+    private bool _disposed;
     private readonly IUserPortfolioService _portfolio;
     private readonly IMarketDataService _market;
     private readonly IStockService _stocks;
@@ -121,6 +122,15 @@ public partial class PortfolioCurrenciesViewModel : BaseViewModel
 
         Pager.SetSource(rows);
         TotalDisplay = "Cash: " + CurrencyHelper.Format(cashTotal, baseCcy);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _portfolio.SnapshotChanged -= OnPortfolioChanged;
+        _session.SnapshotChanged   -= OnSessionChanged;
+        GC.SuppressFinalize(this);
     }
 }
 
