@@ -112,14 +112,16 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
 
         _filterCurrency = _session.BaseCurrency;
         _watchlist.Changed += OnWatchlistChanged;
-        _market.QuoteUpdated += OnQuoteUpdated;
     }
 
     // Cold-start used to show an empty grid until the 5s timer ticked. By
     // hooking the live quote stream we sweep new rows into the UI as soon
     // as they arrive; debounced via _pollPending so a burst of quotes only
-    // triggers one rebuild per UI frame.
+    // triggers one rebuild per UI frame. Subscribed only while the page is
+    // visible — staying subscribed while the user is on Trade page would
+    // saturate the UI thread with Poll() calls from 140+ live subscriptions.
     private bool _pollPending;
+    private bool _quoteSubscribed;
     private void OnQuoteUpdated(object? sender, LiveQuote quote)
     {
         if (_disposed) return;
@@ -201,6 +203,11 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     #region Polling
     private void EnsurePollTimer()
     {
+        if (!_quoteSubscribed)
+        {
+            _market.QuoteUpdated += OnQuoteUpdated;
+            _quoteSubscribed = true;
+        }
         if (_pollTimer != null) return;
         _pollTimer = _dispatcher.CreateTimer();
         _pollTimer.Interval = PollInterval;
@@ -208,15 +215,22 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         _pollTimer.Start();
     }
 
-    /// <summary>Stop the 5s polling timer without tearing down state. Page
-    /// disappearance calls this so the subscription, _byStockId rows, and
-    /// PagedStocks survive — the next OnAppearing reads from a warm cache
-    /// instead of cold-starting the subscribe + first-poll loop.</summary>
+    /// <summary>Stop the 5s polling timer and unhook the live-quote stream
+    /// without tearing down state. Page disappearance calls this so the row
+    /// cache + SignalR group memberships survive — the next OnAppearing reads
+    /// from a warm cache and only re-subscribes the cheap event handler.</summary>
     public void PausePolling()
     {
-        if (_pollTimer is null) return;
-        _pollTimer.Stop();
-        _pollTimer = null;
+        if (_pollTimer is not null)
+        {
+            _pollTimer.Stop();
+            _pollTimer = null;
+        }
+        if (_quoteSubscribed)
+        {
+            _market.QuoteUpdated -= OnQuoteUpdated;
+            _quoteSubscribed = false;
+        }
     }
 
     /// <summary> Snapshot LiveQuotes into MarketRow. Updates in place to avoid CollectionView flicker. </summary>
@@ -510,7 +524,11 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             _pollTimer = null;
         }
         _watchlist.Changed -= OnWatchlistChanged;
-        _market.QuoteUpdated -= OnQuoteUpdated;
+        if (_quoteSubscribed)
+        {
+            _market.QuoteUpdated -= OnQuoteUpdated;
+            _quoteSubscribed = false;
+        }
         TopNavBarVm.Dispose();
         _disposed = true;
         GC.SuppressFinalize(this);
