@@ -10,7 +10,7 @@
     <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
 
         <!-- Table headers -->
-        <Grid ColumnDefinitions="*,*,*,*,*,*,*"
+        <Grid ColumnDefinitions="*,*,*,*,*,*,120,*"
               Style="{StaticResource TradeTableHeaderGrid}">
             <Label Grid.Column="0" Text="Symbol"    Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="1" Text="Price"     Style="{StaticResource TradeTableHeaderLabel}" />
@@ -18,7 +18,8 @@
             <Label Grid.Column="3" Text="Reserved"  Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="4" Text="Available" Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="5" Text="Total"     Style="{StaticResource TradeTableHeaderLabel}" />
-            <Label Grid.Column="6" Text="Action"    Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="6" Text="Share"     Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="7" Text="Action"    Style="{StaticResource TradeTableHeaderLabel}" />
         </Grid>
 
         <!-- Rows -->
@@ -33,7 +34,7 @@
 
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="tradeVm:PositionRow">
-                        <Grid ColumnDefinitions="*,*,*,*,*,*,*"
+                        <Grid ColumnDefinitions="*,*,*,*,*,*,120,*"
                               Style="{StaticResource TradeTableRowGrid}">
                             <Label Grid.Column="0" Text="{Binding Symbol}"    Style="{StaticResource TradeTableSymbolLabel}" />
                             <Label Grid.Column="1" Text="{Binding Price}"     Style="{StaticResource TradeTableRowLabel}" />
@@ -42,7 +43,19 @@
                             <Label Grid.Column="4" Text="{Binding Available}" Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="5" Text="{Binding Total}"     Style="{StaticResource TradeTableRowLabel}" />
 
-                            <Button Grid.Column="6" Text="Trade"
+                            <Grid Grid.Column="6" VerticalOptions="Center" Padding="8,0">
+                                <BoxView HeightRequest="6" CornerRadius="3"
+                                         BackgroundColor="{DynamicResource CardSurfaceMuted}"
+                                         HorizontalOptions="Fill" />
+                                <BoxView HeightRequest="6" CornerRadius="3"
+                                         BackgroundColor="{DynamicResource BuyGreen}"
+                                         HorizontalOptions="Start"
+                                         WidthRequest="{Binding DepthRatio,
+                                             Converter={StaticResource DepthRatioToWidthConverter},
+                                             ConverterParameter=104}" />
+                            </Grid>
+
+                            <Button Grid.Column="7" Text="Trade"
                                     Style="{StaticResource TableActionButton}"
                                     Command="{Binding TradeCommand}"
                                     CommandParameter="{Binding .}" />

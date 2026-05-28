@@ -180,6 +180,12 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
 
     #region Live Data Property
     [ObservableProperty] private LiveQuote? _live;
+
+    // Set by the holdings VM after a portfolio rebuild — share of total
+    // portfolio value (cash + open positions) in base currency. Used by
+    // the share-bar column in the Holdings table.
+    [ObservableProperty] private double _depthRatio;
+
     private bool _disposed;
     public int StockId => Pos.StockId;
     public decimal CurrentPrice => Live?.LastPrice ?? 0m;

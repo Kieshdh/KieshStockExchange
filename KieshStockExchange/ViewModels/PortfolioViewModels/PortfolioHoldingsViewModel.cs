@@ -4,6 +4,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -21,6 +22,8 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
     private readonly IUserPortfolioService _portfolio;
     private readonly IMarketDataService    _market;
     private readonly IStockService         _stocks;
+    private readonly IFxRateService        _fx;
+    private readonly IUserSessionService   _session;
     private readonly IAuthService          _auth;
     private readonly ISelectedStockService _selected;
     private readonly ILogger<PortfolioHoldingsViewModel> _logger;
@@ -31,6 +34,8 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
         IUserPortfolioService portfolio,
         IMarketDataService    market,
         IStockService         stocks,
+        IFxRateService        fx,
+        IUserSessionService   session,
         IAuthService          auth,
         ISelectedStockService selected,
         ILogger<PortfolioHoldingsViewModel> logger)
@@ -38,6 +43,8 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
+        _fx        = fx        ?? throw new ArgumentNullException(nameof(fx));
+        _session   = session   ?? throw new ArgumentNullException(nameof(session));
         _auth      = auth      ?? throw new ArgumentNullException(nameof(auth));
         _selected  = selected  ?? throw new ArgumentNullException(nameof(selected));
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
@@ -125,6 +132,23 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
                     idx++;
                 CurrentView.Insert(idx, row);
             }
+        }
+
+        RefreshDepthRatios();
+    }
+
+    // Total denominator includes cash so the bar lengths line up with the
+    // Currencies tab — they sum to 100% across both tabs together.
+    private void RefreshDepthRatios()
+    {
+        var baseCcy = _session.BaseCurrency;
+        var total = PortfolioTotalsHelper.TotalInBase(_portfolio, _market, _stocks, _fx, baseCcy);
+        if (total <= 0m) return;
+        foreach (var row in CurrentView)
+        {
+            var localValue = row.TotalValue;
+            var inBase = PortfolioTotalsHelper.ConvertViaFx(_fx, localValue, row.Currency, baseCcy);
+            row.DepthRatio = (double)(inBase / total);
         }
     }
 

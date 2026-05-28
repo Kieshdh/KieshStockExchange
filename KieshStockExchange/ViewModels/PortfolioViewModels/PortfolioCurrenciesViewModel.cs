@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
@@ -19,6 +20,8 @@ namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 public partial class PortfolioCurrenciesViewModel : BaseViewModel
 {
     private readonly IUserPortfolioService _portfolio;
+    private readonly IMarketDataService _market;
+    private readonly IStockService _stocks;
     private readonly IFxRateService _fx;
     private readonly IUserSessionService _session;
     private readonly IAuthService _auth;
@@ -31,12 +34,16 @@ public partial class PortfolioCurrenciesViewModel : BaseViewModel
 
     public PortfolioCurrenciesViewModel(
         IUserPortfolioService portfolio,
+        IMarketDataService market,
+        IStockService stocks,
         IFxRateService fx,
         IUserSessionService session,
         IAuthService auth,
         ILogger<PortfolioCurrenciesViewModel> logger)
     {
         _portfolio = portfolio ?? throw new ArgumentNullException(nameof(portfolio));
+        _market    = market    ?? throw new ArgumentNullException(nameof(market));
+        _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _fx        = fx        ?? throw new ArgumentNullException(nameof(fx));
         _session   = session   ?? throw new ArgumentNullException(nameof(session));
         _auth      = auth      ?? throw new ArgumentNullException(nameof(auth));
@@ -76,19 +83,22 @@ public partial class PortfolioCurrenciesViewModel : BaseViewModel
         var baseCcy = _session.BaseCurrency;
         BaseCurrencyDisplay = CurrencyHelper.GetIsoCode(baseCcy);
 
+        // Bars are proportional to total portfolio value (cash + positions)
+        // so they sum to 100% across the Currencies + Holdings tabs together.
+        var totalPortfolio = PortfolioTotalsHelper.TotalInBase(
+            _portfolio, _market, _stocks, _fx, baseCcy);
+
         var funds = _portfolio.GetFunds();
         var rows = new List<CurrencyRow>(funds.Count);
 
-        decimal total = 0m;
-        decimal maxValue = 0m;
+        decimal cashTotal = 0m;
 
         foreach (var f in funds)
         {
             if (HideZeroBalances && f.TotalBalance <= 0m && f.ReservedBalance <= 0m) continue;
 
-            var valueInBase = ConvertViaFx(f.TotalBalance, f.CurrencyType, baseCcy);
-            total += valueInBase;
-            if (valueInBase > maxValue) maxValue = valueInBase;
+            var valueInBase = PortfolioTotalsHelper.ConvertViaFx(_fx, f.TotalBalance, f.CurrencyType, baseCcy);
+            cashTotal += valueInBase;
 
             rows.Add(new CurrencyRow
             {
@@ -104,20 +114,13 @@ public partial class PortfolioCurrenciesViewModel : BaseViewModel
         }
 
         rows.Sort(static (a, b) => b.ValueInBase.CompareTo(a.ValueInBase));
-        if (maxValue > 0m)
+        if (totalPortfolio > 0m)
         {
-            foreach (var r in rows) r.DepthRatio = (double)(r.ValueInBase / maxValue);
+            foreach (var r in rows) r.DepthRatio = (double)(r.ValueInBase / totalPortfolio);
         }
 
         CurrentView = new ObservableCollection<CurrencyRow>(rows);
-        TotalDisplay = "Total: " + CurrencyHelper.Format(total, baseCcy);
-    }
-
-    private decimal ConvertViaFx(decimal amount, CurrencyType from, CurrencyType to)
-    {
-        if (from == to) return CurrencyHelper.RoundMoney(amount, to);
-        var mid = _fx.GetMidRate(from, to);
-        return CurrencyHelper.RoundMoney(amount * mid, to);
+        TotalDisplay = "Cash: " + CurrencyHelper.Format(cashTotal, baseCcy);
     }
 }
 
