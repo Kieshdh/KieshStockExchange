@@ -3,9 +3,9 @@ using KieshStockExchange.ViewModels.PortfolioViewModels;
 namespace KieshStockExchange.Helpers;
 
 /// <summary>
-/// Draws the Portfolio allocation pie. Slices come from
-/// <see cref="PortfolioAllocationSlice.Share"/> (0..1); colors and labels
-/// are owned by the slice so the legend control can render them too.
+/// Draws the Portfolio allocation donut as a series of stroked arcs along a
+/// single ring, which avoids the "punch a hole in the middle" trick (that
+/// only works against a known card-surface color).
 /// </summary>
 public sealed class PortfolioAllocationDrawable : IDrawable
 {
@@ -20,36 +20,37 @@ public sealed class PortfolioAllocationDrawable : IDrawable
     {
         if (_slices.Count == 0) return;
 
-        // Square inscribed in the rect, centered.
         var side = Math.Min(dirtyRect.Width, dirtyRect.Height);
         var cx = dirtyRect.Center.X;
         var cy = dirtyRect.Center.Y;
-        var radius = side * 0.45f;
+        var outerRadius = side * 0.45f;
+        var innerRadius = outerRadius * 0.55f;
+        var ringWidth = outerRadius - innerRadius;
+        var midRadius = (outerRadius + innerRadius) / 2f;
 
-        // Donut hole keeps the slice arcs readable when shares get small.
-        var holeRadius = radius * 0.45f;
+        // MAUI angles: 0° = east, 90° = north, counterclockwise positive.
+        // Start the donut at 12 o'clock and walk clockwise so the visual
+        // order matches the legend (top-down, largest first).
+        double startAngle = 90;
 
-        double startAngle = -90; // 12 o'clock
+        canvas.StrokeLineCap = LineCap.Butt;
+        canvas.StrokeSize = ringWidth;
+
         for (int i = 0; i < _slices.Count; i++)
         {
             var slice = _slices[i];
             var sweep = slice.Share * 360.0;
             if (sweep <= 0) continue;
+            var endAngle = startAngle - sweep; // clockwise = decreasing
 
-            canvas.FillColor = slice.Color;
-            // ICanvas.FillArc draws a wedge from center; donut cutout below.
-            canvas.FillArc(
-                cx - radius, cy - radius, radius * 2, radius * 2,
-                (float)startAngle, (float)(startAngle + sweep), clockwise: false);
-            startAngle += sweep;
+            canvas.StrokeColor = slice.Color;
+            canvas.DrawArc(
+                cx - midRadius, cy - midRadius,
+                midRadius * 2, midRadius * 2,
+                (float)startAngle, (float)endAngle,
+                clockwise: true, closed: false);
+
+            startAngle = endAngle;
         }
-
-        // Donut cutout — fill with the background color so the inner ring
-        // reads as empty regardless of theme.
-        canvas.FillColor = Colors.Transparent;
-        // Workaround: ICanvas has no "subtract" but we can punch a hole by
-        // filling a solid disc in a neutral color matching the card surface.
-        canvas.FillColor = Color.FromArgb("#1F2937"); // dashboard card surface
-        canvas.FillEllipse(cx - holeRadius, cy - holeRadius, holeRadius * 2, holeRadius * 2);
     }
 }
