@@ -29,7 +29,12 @@ public abstract partial class TradeTableViewModelBase<TRow> : StockAwareViewMode
 
     protected override Task OnStockChangedAsync(int? stockId, CurrencyType currency, CancellationToken ct)
     {
-        UpdateFromCache(stockId, currency);
+        // SelectedStockService.Set now uses ConfigureAwait(false), so this
+        // can land on the threadpool. UpdateFromCache mutates an
+        // ObservableCollection (Clear + replace) which is only safe on the
+        // UI thread on Windows. Marshal via the existing helper.
+        if (MainThread.IsMainThread) UpdateFromCache(stockId, currency);
+        else MainThread.BeginInvokeOnMainThread(() => UpdateFromCache(stockId, currency));
         return Task.CompletedTask;
     }
 
