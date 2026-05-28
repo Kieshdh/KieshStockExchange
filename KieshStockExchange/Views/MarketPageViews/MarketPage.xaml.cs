@@ -24,8 +24,10 @@ public partial class MarketPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
-        // Stop the polling timer so it doesn't keep running when this page
-        // isn't on screen.
-        _vm.Dispose();
+        // Pause polling without tearing down the row cache, so coming back
+        // to this page reads from warm state instead of cold-starting the
+        // subscribe + first-poll loop. The VM Dispose() is intentionally
+        // NOT called here — DI owns its lifetime.
+        _vm.PausePolling();
     }
 }

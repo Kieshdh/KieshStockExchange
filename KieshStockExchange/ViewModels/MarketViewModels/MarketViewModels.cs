@@ -77,6 +77,12 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     private readonly ILogger<MarketViewModel> _logger;
 
     private readonly Dictionary<(int StockId, CurrencyType Currency), MarketRow> _byStockId = new();
+
+    // Watchlist card keeps its own row cache so successive RebuildWatchlistCard
+    // calls update existing rows in place instead of recreating instances. The
+    // SyncRows identity check would otherwise swap every row on every poll
+    // (every 5s), making the card visibly flicker.
+    private readonly Dictionary<int, MarketRow> _watchlistRowsById = new();
     private IDispatcherTimer? _pollTimer;
     private bool _disposed;
 
@@ -106,6 +112,26 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
 
         _filterCurrency = _session.BaseCurrency;
         _watchlist.Changed += OnWatchlistChanged;
+        _market.QuoteUpdated += OnQuoteUpdated;
+    }
+
+    // Cold-start used to show an empty grid until the 5s timer ticked. By
+    // hooking the live quote stream we sweep new rows into the UI as soon
+    // as they arrive; debounced via _pollPending so a burst of quotes only
+    // triggers one rebuild per UI frame.
+    private bool _pollPending;
+    private void OnQuoteUpdated(object? sender, LiveQuote quote)
+    {
+        if (_disposed) return;
+        if (_pollPending) return;
+        _pollPending = true;
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            _pollPending = false;
+            if (_disposed) return;
+            try { Poll(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Market live-quote poll failed."); }
+        });
     }
     #endregion
 
@@ -183,6 +209,17 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
         _pollTimer.Interval = PollInterval;
         _pollTimer.Tick += (s, e) => Poll();
         _pollTimer.Start();
+    }
+
+    /// <summary>Stop the 5s polling timer without tearing down state. Page
+    /// disappearance calls this so the subscription, _byStockId rows, and
+    /// PagedStocks survive — the next OnAppearing reads from a warm cache
+    /// instead of cold-starting the subscribe + first-poll loop.</summary>
+    public void PausePolling()
+    {
+        if (_pollTimer is null) return;
+        _pollTimer.Stop();
+        _pollTimer = null;
     }
 
     /// <summary> Snapshot LiveQuotes into MarketRow. Updates in place to avoid CollectionView flicker. </summary>
@@ -300,6 +337,8 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     {
         var ids = _watchlist.GetStockIds();
         var desired = new List<MarketRow>(ids.Count);
+        var seen = new HashSet<int>(ids.Count);
+
         foreach (var stockId in ids)
         {
             // Prefer a USD quote, else any currency this stock trades in.
@@ -309,8 +348,26 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
                 .FirstOrDefault();
             if (quote is null) continue;
 
-            desired.Add(MarketRow.FromQuote(quote, TradeCommand, ToggleWatchCommand, isWatched: true));
+            // Reuse the cached row instance so SyncRows treats it as identity
+            // match and skips the swap; only the bound property values change.
+            if (!_watchlistRowsById.TryGetValue(stockId, out var row))
+            {
+                row = MarketRow.FromQuote(quote, TradeCommand, ToggleWatchCommand, isWatched: true);
+                _watchlistRowsById[stockId] = row;
+            }
+            else
+            {
+                row.UpdateFrom(quote);
+                if (!row.IsWatched) row.IsWatched = true;
+            }
+            desired.Add(row);
+            seen.Add(stockId);
         }
+
+        // Drop cached rows that left the watchlist so the dictionary doesn't grow.
+        var stale = _watchlistRowsById.Keys.Where(id => !seen.Contains(id)).ToList();
+        foreach (var id in stale) _watchlistRowsById.Remove(id);
+
         SyncRows(Watchlist, desired);
         OnPropertyChanged(nameof(HasWatchlist));
     }
@@ -456,6 +513,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
             _pollTimer = null;
         }
         _watchlist.Changed -= OnWatchlistChanged;
+        _market.QuoteUpdated -= OnQuoteUpdated;
         TopNavBarVm.Dispose();
         _disposed = true;
         GC.SuppressFinalize(this);
