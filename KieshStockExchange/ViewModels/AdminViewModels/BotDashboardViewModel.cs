@@ -13,8 +13,9 @@ using System.Text;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-public partial class BotDashboardViewModel : BaseViewModel
+public partial class BotDashboardViewModel : BaseViewModel, IDisposable
 {
+    private bool _disposed;
     #region Live status fields
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private int _loadedBots;
@@ -171,6 +172,15 @@ public partial class BotDashboardViewModel : BaseViewModel
         _timer.Stop();
         _timer.Tick -= OnTimerTick;
         _timer = null;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        StopPolling();
+        TopNavBarVm.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     private void OnTimerTick(object? sender, EventArgs e)

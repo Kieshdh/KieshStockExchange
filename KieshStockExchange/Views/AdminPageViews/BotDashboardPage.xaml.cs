@@ -73,6 +73,10 @@ public partial class BotDashboardPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
-        _vm.StopPolling();
+        // Unhook the page-level chart-refresh handler and tear down the VM.
+        // Dispose calls StopPolling internally + disposes TopNavBarVm so
+        // its singleton-service subscriptions don't accumulate per visit.
+        _vm.ActivityRefreshed -= OnActivityRefreshed;
+        _vm.Dispose();
     }
 }
