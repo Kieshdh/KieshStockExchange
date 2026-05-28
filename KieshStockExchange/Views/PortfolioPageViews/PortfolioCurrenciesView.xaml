@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.PortfolioViewModels"
+             x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioCurrenciesView"
+             x:Name="PortfolioCurrenciesRoot"
+             x:DataType="vm:PortfolioCurrenciesViewModel">
+
+    <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
+
+        <!-- Toolbar: hide-zero toggle + running total -->
+        <Grid ColumnDefinitions="Auto,*,Auto"
+              ColumnSpacing="8"
+              Padding="8,4">
+            <HorizontalStackLayout Grid.Column="0" Spacing="6" VerticalOptions="Center">
+                <CheckBox IsChecked="{Binding HideZeroBalances, Mode=TwoWay}"
+                          VerticalOptions="Center" />
+                <Label Text="Hide zero balances"
+                       Style="{StaticResource MutedLabelStyle}"
+                       VerticalOptions="Center" />
+            </HorizontalStackLayout>
+            <Label Grid.Column="2"
+                   Text="{Binding TotalDisplay}"
+                   Style="{StaticResource MutedLabelStyle}"
+                   VerticalOptions="Center" />
+        </Grid>
+
+        <!-- Headers -->
+        <Grid ColumnDefinitions="80,*,*,140"
+              Style="{StaticResource TradeTableHeaderGrid}">
+            <Label Grid.Column="0" Text="Currency"     Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="1" Text="Balance"      Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="2" Text="Value (base)" Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="3" Text="Share"        Style="{StaticResource TradeTableHeaderLabel}" />
+        </Grid>
+
+        <!-- Rows -->
+        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
+            <CollectionView ItemsSource="{Binding CurrentView}"
+                            SelectionMode="None" Margin="0,4,0,0">
+                <CollectionView.EmptyView>
+                    <StackLayout Padding="12" Spacing="4">
+                        <Label Text="No cash balances yet." Opacity="0.7" />
+                    </StackLayout>
+                </CollectionView.EmptyView>
+
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:CurrencyRow">
+                        <Grid ColumnDefinitions="80,*,*,140"
+                              Style="{StaticResource TradeTableRowGrid}">
+
+                            <!-- Currency chip -->
+                            <Border Grid.Column="0"
+                                    Style="{StaticResource FundsChipBorder}"
+                                    HorizontalOptions="Center"
+                                    VerticalOptions="Center">
+                                <Label Text="{Binding CurrencyCode}"
+                                       Style="{StaticResource FundsChipValueLabel}"
+                                       VerticalTextAlignment="Center"
+                                       HorizontalTextAlignment="Center" />
+                            </Border>
+
+                            <!-- Balance + optional reserved sub-line -->
+                            <VerticalStackLayout Grid.Column="1" Spacing="2" VerticalOptions="Center">
+                                <Label Text="{Binding BalanceDisplay}"
+                                       Style="{StaticResource TradeTableRowLabel}"
+                                       HorizontalTextAlignment="End" />
+                                <Label Text="{Binding ReservedDisplay}"
+                                       Style="{StaticResource MutedLabelStyle}"
+                                       FontSize="10"
+                                       HorizontalTextAlignment="End"
+                                       IsVisible="{Binding HasReserved}" />
+                            </VerticalStackLayout>
+
+                            <!-- Value in base currency -->
+                            <Label Grid.Column="2"
+                                   Text="{Binding ValueInBaseDisplay}"
+                                   Style="{StaticResource TradeTableRowLabel}"
+                                   VerticalTextAlignment="Center" />
+
+                            <!-- Share bar: ratio of this currency's value to the largest in the table -->
+                            <Grid Grid.Column="3" VerticalOptions="Center" Padding="8,0">
+                                <BoxView HeightRequest="6"
+                                         CornerRadius="3"
+                                         BackgroundColor="{DynamicResource CardSurfaceMuted}"
+                                         HorizontalOptions="Fill" />
+                                <BoxView HeightRequest="6"
+                                         CornerRadius="3"
+                                         BackgroundColor="{DynamicResource BuyGreen}"
+                                         HorizontalOptions="Start"
+                                         WidthRequest="{Binding DepthRatio,
+                                             Converter={StaticResource DepthRatioToWidthConverter},
+                                             ConverterParameter=120}" />
+                            </Grid>
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+    </VerticalStackLayout>
+</ContentView>

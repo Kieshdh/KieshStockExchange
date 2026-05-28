@@ -13,6 +13,7 @@ public partial class PortfolioPage : ContentPage
         BindingContext = _vm;
 
         // SegmentedTabView attaches tab 0 before BindingContext propagates.
+        CurrenciesTab.BindingContext   = _vm.CurrenciesVm;
         HoldingsTab.BindingContext     = _vm.HoldingsVm;
         OpenOrdersTab.BindingContext   = _vm.OpenOrdersVm;
         OrderHistoryTab.BindingContext = _vm.OrderHistoryVm;

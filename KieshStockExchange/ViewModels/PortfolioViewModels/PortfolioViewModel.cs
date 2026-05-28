@@ -15,6 +15,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
 {
     private bool _disposed;
 
+    public PortfolioCurrenciesViewModel  CurrenciesVm   { get; }
     public PortfolioHoldingsViewModel    HoldingsVm     { get; }
     public PortfolioOpenOrdersViewModel  OpenOrdersVm   { get; }
     public PortfolioOrderHistoryViewModel OrderHistoryVm { get; }
@@ -39,6 +40,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
     private readonly ILogger<PortfolioViewModel> _logger;
 
     public PortfolioViewModel(
+        PortfolioCurrenciesViewModel   currenciesVm,
         PortfolioHoldingsViewModel     holdingsVm,
         PortfolioOpenOrdersViewModel   openOrdersVm,
         PortfolioOrderHistoryViewModel orderHistoryVm,
@@ -53,6 +55,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         TopNavBarViewModel             topNavBarVm)
     {
         Title          = "Portfolio";
+        CurrenciesVm   = currenciesVm   ?? throw new ArgumentNullException(nameof(currenciesVm));
         HoldingsVm     = holdingsVm     ?? throw new ArgumentNullException(nameof(holdingsVm));
         OpenOrdersVm   = openOrdersVm   ?? throw new ArgumentNullException(nameof(openOrdersVm));
         OrderHistoryVm = orderHistoryVm ?? throw new ArgumentNullException(nameof(orderHistoryVm));
@@ -91,6 +94,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
         try
         {
             await Task.WhenAll(
+                CurrenciesVm.RefreshCommand.ExecuteAsync(null),
                 HoldingsVm.RefreshCommand.ExecuteAsync(null),
                 OpenOrdersVm.RefreshCommand.ExecuteAsync(null),
                 OrderHistoryVm.RefreshCommand.ExecuteAsync(null),

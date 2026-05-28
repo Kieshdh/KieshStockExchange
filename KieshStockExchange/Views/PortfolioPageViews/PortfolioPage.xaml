@@ -103,6 +103,12 @@
                 <other:SegmentedTabView.Tabs>
 
                     <!-- Tab BindingContexts wired in code-behind. -->
+                    <other:SegmentedTabItem Header="Currencies">
+                        <other:SegmentedTabItem.Content>
+                            <views:PortfolioCurrenciesView x:Name="CurrenciesTab" />
+                        </other:SegmentedTabItem.Content>
+                    </other:SegmentedTabItem>
+
                     <other:SegmentedTabItem Header="Holdings">
                         <other:SegmentedTabItem.Content>
                             <views:PortfolioHoldingsView x:Name="HoldingsTab" />
