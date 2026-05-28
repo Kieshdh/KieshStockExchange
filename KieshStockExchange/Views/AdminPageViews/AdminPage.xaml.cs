@@ -28,4 +28,12 @@ public partial class AdminPage : ContentPage
         base.OnAppearing();
         await _vm.InitializeAsync();
     }
+
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        // Drop the VM tree so TopNavBarVm releases its handlers on
+        // IUserPortfolioService / IUserSessionService / INotificationService.
+        _vm.Dispose();
+    }
 }

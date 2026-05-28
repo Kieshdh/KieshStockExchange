@@ -11,8 +11,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels;
 
-public partial class AdminViewModel : BaseViewModel
+public partial class AdminViewModel : BaseViewModel, IDisposable
 {
+    private bool _disposed;
     #region UI state
     [ObservableProperty] private bool _isLoading = true;
     [ObservableProperty] private bool _doneLoading = false;
@@ -175,5 +176,19 @@ public partial class AdminViewModel : BaseViewModel
 
     [RelayCommand]
     private async Task RefreshActiveTabAsync() => await GetTabVm(SelectedTabIndex).RefreshAsync();
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        // Cross-tab UserSelected/OrderSelected/TransactionSelected handlers
+        // are anonymous closures stored only by the source table VM. Since
+        // the table VMs are owned by this AdminVm (held in property refs),
+        // they get GC'd together when this VM is collected — no explicit
+        // -= needed. The leak in this VM was just the dangling TopNavBarVm
+        // subscription to long-lived singletons.
+        TopNavBarVm.Dispose();
+        GC.SuppressFinalize(this);
+    }
     #endregion
 }
