@@ -60,32 +60,25 @@
                         <Border Style="{StaticResource AdminBotStatCard}">
                             <VerticalStackLayout Spacing="4">
                                 <Label Text="Active / Max" Style="{StaticResource AdminBotStatLabel}" />
-                                <Label Style="{StaticResource AdminBotStatValue}">
-                                    <Label.Text>
-                                        <MultiBinding StringFormat="{}{0} / {1}">
-                                            <Binding Path="ActiveBotCap" TargetNullValue="—" FallbackValue="—" />
-                                            <Binding Path="MaxBotCap" TargetNullValue="∞" FallbackValue="∞" />
-                                        </MultiBinding>
-                                    </Label.Text>
-                                </Label>
+                                <Label Text="{Binding BotCapDisplay}" Style="{StaticResource AdminBotStatValue}" />
                             </VerticalStackLayout>
                         </Border>
                         <Border Style="{StaticResource AdminBotStatCard}">
                             <VerticalStackLayout Spacing="4">
                                 <Label Text="Tick" Style="{StaticResource AdminBotStatLabel}" />
-                                <Label Text="{Binding TickCount}" Style="{StaticResource AdminBotStatValue}" />
+                                <Label Text="{Binding TickCount, StringFormat='{0:N0}'}" Style="{StaticResource AdminBotStatValue}" />
                             </VerticalStackLayout>
                         </Border>
                         <Border Style="{StaticResource AdminBotStatCard}">
                             <VerticalStackLayout Spacing="4">
                                 <Label Text="Trades" Style="{StaticResource AdminBotStatLabel}" />
-                                <Label Text="{Binding TradesPlaced}" Style="{StaticResource AdminBotStatValue}" />
+                                <Label Text="{Binding TradesPlaced, StringFormat='{0:N0}'}" Style="{StaticResource AdminBotStatValue}" />
                             </VerticalStackLayout>
                         </Border>
                         <Border Style="{StaticResource AdminBotStatCard}">
                             <VerticalStackLayout Spacing="4">
                                 <Label Text="Failures" Style="{StaticResource AdminBotStatLabel}" />
-                                <Label Text="{Binding Failures}" Style="{StaticResource AdminBotStatValue}" />
+                                <Label Text="{Binding Failures, StringFormat='{0:N0}'}" Style="{StaticResource AdminBotStatValue}" />
                             </VerticalStackLayout>
                         </Border>
                         <Border Style="{StaticResource AdminBotStatCard}">
@@ -217,7 +210,7 @@
                             <Label Grid.Column="0" Text="Trades"
                                    Style="{StaticResource AdminBotStatLabel}"
                                    VerticalOptions="Center" />
-                            <Label Grid.Column="1" Text="{Binding Last24hTrades}"
+                            <Label Grid.Column="1" Text="{Binding Last24hTrades, StringFormat='{0:N0}'}"
                                    Style="{StaticResource AdminMetricValue}"
                                    VerticalOptions="Center" />
                             <Label Grid.Column="2" Text="Volume"
@@ -229,7 +222,7 @@
                             <Label Grid.Column="4" Text="Active bots"
                                    Style="{StaticResource AdminBotStatLabel}"
                                    VerticalOptions="Center" />
-                            <Label Grid.Column="5" Text="{Binding Last24hActiveBots}"
+                            <Label Grid.Column="5" Text="{Binding Last24hActiveBots, StringFormat='{0:N0}'}"
                                    Style="{StaticResource AdminMetricValue}"
                                    VerticalOptions="Center" />
                         </Grid>

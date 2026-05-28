@@ -25,8 +25,18 @@ public partial class BotDashboardViewModel : BaseViewModel
     [ObservableProperty] private string _lastTradeText = "—";
     [ObservableProperty] private string _uptimeText = "—";
     [ObservableProperty] private string _statusText = "Stopped";
-    [ObservableProperty] private int? _activeBotCap;
-    [ObservableProperty] private int? _maxBotCap;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BotCapDisplay))]
+    private int? _activeBotCap;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BotCapDisplay))]
+    private int? _maxBotCap;
+
+    // Locale-aware thousand-separated "active / max". The MultiBinding in
+    // XAML would have to wrap N0 around an int? that may be null; cleaner
+    // to format both halves here once.
+    public string BotCapDisplay =>
+        $"{(ActiveBotCap is { } a ? a.ToString("N0") : "—")} / {(MaxBotCap is { } m ? m.ToString("N0") : "∞")}";
     [ObservableProperty] private string _maxBotCapText = string.Empty;
     [ObservableProperty] private int _minBotCap;
     [ObservableProperty] private string _minBotCapText = string.Empty;
