@@ -21,7 +21,7 @@ public partial class PortfolioFundsHistoryViewModel : BaseViewModel
 
     private IReadOnlyList<FundTransaction> _all = Array.Empty<FundTransaction>();
 
-    [ObservableProperty] private ObservableCollection<FundTransaction> _currentView = new();
+    public ClientPager<FundTransaction> Pager { get; } = new();
     [ObservableProperty] private int _filterIndex; // 0 All, 1 Deposits, 2 Withdrawals, 3 Conversions
 
     public PortfolioFundsHistoryViewModel(
@@ -67,6 +67,6 @@ public partial class PortfolioFundsHistoryViewModel : BaseViewModel
             _ => _all,
         };
 
-        CurrentView = new ObservableCollection<FundTransaction>(filtered);
+        Pager.SetSource(filtered.ToList());
     }
 }

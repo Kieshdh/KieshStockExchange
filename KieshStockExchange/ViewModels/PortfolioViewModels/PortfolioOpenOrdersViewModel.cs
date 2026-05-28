@@ -24,7 +24,7 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
     private readonly IOrderEditService   _editService;
     private readonly ILogger<PortfolioOpenOrdersViewModel> _logger;
 
-    [ObservableProperty] private ObservableCollection<OpenOrderRow> _currentView = new();
+    public ClientPager<OpenOrderRow> Pager { get; } = new();
 
     public PortfolioOpenOrdersViewModel(
         IOrderCacheService  cache,
@@ -111,7 +111,7 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel
             .Select(CreateRow)
             .ToList();
 
-        CurrentView = new ObservableCollection<OpenOrderRow>(rows);
+        Pager.SetSource(rows);
     }
 
     private OpenOrderRow CreateRow(Order order)

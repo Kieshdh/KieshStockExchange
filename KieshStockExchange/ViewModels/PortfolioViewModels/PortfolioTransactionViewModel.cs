@@ -20,7 +20,7 @@ public partial class PortfolioTransactionViewModel : BaseViewModel
     private readonly IAuthService        _auth;
     private readonly ILogger<PortfolioTransactionViewModel> _logger;
 
-    [ObservableProperty] private ObservableCollection<TransactionRow> _currentView = new();
+    public ClientPager<TransactionRow> Pager { get; } = new();
 
     public PortfolioTransactionViewModel(
         ITransactionService tx,
@@ -61,7 +61,7 @@ public partial class PortfolioTransactionViewModel : BaseViewModel
             .Select(CreateRow)
             .ToList();
 
-        CurrentView = new ObservableCollection<TransactionRow>(rows);
+        Pager.SetSource(rows);
     }
 
     private TransactionRow CreateRow(Transaction tx)

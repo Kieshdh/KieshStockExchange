@@ -28,7 +28,7 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
     private readonly ISelectedStockService _selected;
     private readonly ILogger<PortfolioHoldingsViewModel> _logger;
 
-    [ObservableProperty] private ObservableCollection<PositionRow> _currentView = new();
+    public ClientPager<PositionRow> Pager { get; } = new();
 
     public PortfolioHoldingsViewModel(
         IUserPortfolioService portfolio,
@@ -77,39 +77,24 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
         await Shell.Current.GoToAsync("///TradePage");
     }
 
-    // Sync CurrentView in place rather than swapping the ObservableCollection
-    // reference. Replacing the collection causes the bound CollectionView to
-    // tear down and rebuild every row, producing a brief blank frame on every
-    // SnapshotChanged event. Now we mutate row state, add new positions, and
-    // remove closed-out positions individually so untouched rows do not flicker.
+    // Maintain _rowsByStockId in place so live-quote INPC updates the same
+    // PositionRow instances across rebuilds (no per-tick churn). The pager
+    // slices the sorted snapshot into PagedItems for the bound CollectionView.
     private void RebuildView()
     {
         var positions = _portfolio.GetPositions().Where(p => p.Quantity > 0).ToList();
         var present = new HashSet<int>(positions.Count);
         foreach (var p in positions) if (p.StockId > 0) present.Add(p.StockId);
 
-        // Remove rows whose positions disappeared (closed out / quantity → 0).
         var stale = _rowsByStockId.Keys.Where(id => !present.Contains(id)).ToList();
         foreach (var id in stale)
         {
-            if (_rowsByStockId.Remove(id, out var row))
-            {
-                CurrentView.Remove(row);
-                row.Dispose();
-            }
+            if (_rowsByStockId.Remove(id, out var row)) row.Dispose();
         }
 
-        // Add or refresh rows for each present position. Insert new rows in
-        // sorted position (TotalValue desc) so the initial order is correct;
-        // existing rows are not reordered on value drift to avoid pointless
-        // moves. The user can hit Refresh for a hard re-sort if needed.
         foreach (var pos in positions)
         {
             if (pos.StockId <= 0) continue;
-
-            // Each position trades in its stock's listed currency, so subscribe
-            // to and read the quote for that (stockId, currency) pair instead of
-            // the USD-only legacy. Falls back to USD if the catalog hasn't loaded.
             if (!_stocks.TryGetCurrency(pos.StockId, out var ccy))
                 ccy = CurrencyType.USD;
 
@@ -124,30 +109,28 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel
             }
             else
             {
-                var row = CreatePositionRow(pos, ccy);
-                _rowsByStockId[pos.StockId] = row;
-
-                int idx = 0;
-                while (idx < CurrentView.Count && CurrentView[idx].TotalValue >= row.TotalValue)
-                    idx++;
-                CurrentView.Insert(idx, row);
+                _rowsByStockId[pos.StockId] = CreatePositionRow(pos, ccy);
             }
         }
 
-        RefreshDepthRatios();
+        var sorted = _rowsByStockId.Values
+            .OrderByDescending(r => r.TotalValue)
+            .ToList();
+
+        RefreshDepthRatios(sorted);
+        Pager.SetSource(sorted);
     }
 
     // Total denominator includes cash so the bar lengths line up with the
     // Currencies tab — they sum to 100% across both tabs together.
-    private void RefreshDepthRatios()
+    private void RefreshDepthRatios(IReadOnlyList<PositionRow> rows)
     {
         var baseCcy = _session.BaseCurrency;
         var total = PortfolioTotalsHelper.TotalInBase(_portfolio, _market, _stocks, _fx, baseCcy);
         if (total <= 0m) return;
-        foreach (var row in CurrentView)
+        foreach (var row in rows)
         {
-            var localValue = row.TotalValue;
-            var inBase = PortfolioTotalsHelper.ConvertViaFx(_fx, localValue, row.Currency, baseCcy);
+            var inBase = PortfolioTotalsHelper.ConvertViaFx(_fx, row.TotalValue, row.Currency, baseCcy);
             row.DepthRatio = (double)(inBase / total);
         }
     }

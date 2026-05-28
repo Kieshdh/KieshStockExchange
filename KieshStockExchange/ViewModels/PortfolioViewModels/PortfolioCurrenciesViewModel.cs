@@ -27,7 +27,7 @@ public partial class PortfolioCurrenciesViewModel : BaseViewModel
     private readonly IAuthService _auth;
     private readonly ILogger<PortfolioCurrenciesViewModel> _logger;
 
-    [ObservableProperty] private ObservableCollection<CurrencyRow> _currentView = new();
+    public ClientPager<CurrencyRow> Pager { get; } = new() { PageSize = 25 };
     [ObservableProperty] private bool _hideZeroBalances = true;
     [ObservableProperty] private string _totalDisplay = "—";
     [ObservableProperty] private string _baseCurrencyDisplay = "USD";
@@ -119,7 +119,7 @@ public partial class PortfolioCurrenciesViewModel : BaseViewModel
             foreach (var r in rows) r.DepthRatio = (double)(r.ValueInBase / totalPortfolio);
         }
 
-        CurrentView = new ObservableCollection<CurrencyRow>(rows);
+        Pager.SetSource(rows);
         TotalDisplay = "Cash: " + CurrencyHelper.Format(cashTotal, baseCcy);
     }
 }

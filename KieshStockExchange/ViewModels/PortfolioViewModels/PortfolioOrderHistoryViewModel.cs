@@ -20,7 +20,7 @@ public partial class PortfolioOrderHistoryViewModel : BaseViewModel
     private readonly IAuthService       _auth;
     private readonly ILogger<PortfolioOrderHistoryViewModel> _logger;
 
-    [ObservableProperty] private ObservableCollection<ClosedOrderRow> _currentView = new();
+    public ClientPager<ClosedOrderRow> Pager { get; } = new();
 
     public PortfolioOrderHistoryViewModel(
         IOrderCacheService cache,
@@ -61,7 +61,7 @@ public partial class PortfolioOrderHistoryViewModel : BaseViewModel
             .Select(CreateRow)
             .ToList();
 
-        CurrentView = new ObservableCollection<ClosedOrderRow>(rows);
+        Pager.SetSource(rows);
     }
 
     private ClosedOrderRow CreateRow(Order order)

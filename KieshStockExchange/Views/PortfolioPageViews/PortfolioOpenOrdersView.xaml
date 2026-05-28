@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
              xmlns:tradeVm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.PortfolioViewModels"
              x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioOpenOrdersView"
@@ -25,7 +26,7 @@
 
         <!-- Rows -->
         <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
-            <CollectionView ItemsSource="{Binding CurrentView}"
+            <CollectionView ItemsSource="{Binding Pager.PagedItems}"
                             SelectionMode="None" Margin="0,4,0,0">
                 <CollectionView.EmptyView>
                     <StackLayout Padding="12" Spacing="4">
@@ -98,5 +99,18 @@
                 </CollectionView.ItemTemplate>
             </CollectionView>
         </RefreshView>
+
+        <adminViews:TablePagerView
+            CurrentPage="{Binding Pager.CurrentPageDisplay}"
+            TotalPages="{Binding Pager.TotalPages}"
+            PageSize="{Binding Pager.PageSize, Mode=TwoWay}"
+            AvailablePageSizes="{Binding Pager.AvailablePageSizes}"
+            VisiblePages="{Binding Pager.VisiblePages}"
+            CanGoPrev="{Binding Pager.CanGoPrev}"
+            CanGoNext="{Binding Pager.CanGoNext}"
+            GoToPageCommand="{Binding Pager.GoToPageCommand}"
+            GoPrevCommand="{Binding Pager.GoPrevCommand}"
+            GoNextCommand="{Binding Pager.GoNextCommand}"
+            PagerSummary="{Binding Pager.PagerSummary}" />
     </VerticalStackLayout>
 </ContentView>
