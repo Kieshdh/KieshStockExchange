@@ -191,13 +191,27 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
 
     public void Cleanup() => _ = _selected.Reset();
 
+    private bool _disposed;
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _selected.PropertyChanged -= OnSelectedChanged;
         _editService.PropertyChanged -= OnEditServiceChanged;
         _watchlist.Changed -= OnWatchlistChanged;
+        // Every child VM subscribes to long-lived singletons (selected stock
+        // service, order cache, market data, ...). Without explicit cascade
+        // each Trade-page visit accumulated handlers on those singletons.
+        PlacingVm.Dispose();
         ModifyingVm.Dispose();
+        TransactionVm.Dispose();
+        OpenOrdersVm.Dispose();
+        OrderHistoryVm.Dispose();
+        PositionsVm.Dispose();
+        ChartVm.Dispose();
+        OrderBookVm.Dispose();
         TopNavBarVm.Dispose();
+        GC.SuppressFinalize(this);
     }
     #endregion
 
