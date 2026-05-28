@@ -133,14 +133,10 @@ builder.Services.AddAuthorization(options =>
 // (quotes:{stockId}:{currency}, orders:{userId}, portfolio:{userId}).
 builder.Services.AddSignalR();
 
-// Persistence — Db:Backend picks the implementation. Postgres impl is region-stubbed
-// until 7c-4f, so Sqlite remains the default while the rewrite is in flight.
+// Persistence — Postgres via Dapper. AsyncLocal transaction stack + connection
+// pooling live inside PgDBService and PostgresConnectionFactory.
 builder.Services.AddSingleton<IDbConnectionFactory, PostgresConnectionFactory>();
-var dbBackend = builder.Configuration.GetValue<string>("Db:Backend") ?? "Sqlite";
-if (string.Equals(dbBackend, "Postgres", StringComparison.OrdinalIgnoreCase))
-    builder.Services.AddSingleton<IDataBaseService, PgDBService>();
-else
-    builder.Services.AddSingleton<IDataBaseService, DBService>();
+builder.Services.AddSingleton<IDataBaseService, PgDBService>();
 
 // SeparatorLogger options — engine helpers construct SeparatorLogger<T> inline.
 builder.Services.Configure<SeparatorLoggerOptions>(_ => { });

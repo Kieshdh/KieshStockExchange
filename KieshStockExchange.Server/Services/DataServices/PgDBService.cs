@@ -105,7 +105,7 @@ public sealed partial class PgDBService : IDataBaseService
             var spName = "sp_" + Guid.NewGuid().ToString("N");
             await ambient.Connection.ExecuteAsync(
                 $"SAVEPOINT {spName}", transaction: ambient.Transaction);
-            return new PgTransaction(this, isRoot: false, savepoint: spName);
+            return new PgTransaction(ambient.Connection, ambient.Transaction, isRoot: false, savepoint: spName);
         }
 
         // Root → fresh conn + tx, install as ambient. Released on Commit/Rollback.
@@ -121,7 +121,7 @@ public sealed partial class PgDBService : IDataBaseService
             throw;
         }
         _ambient.Value = new TxScope(conn, tx);
-        return new PgTransaction(this, isRoot: true, savepoint: null);
+        return new PgTransaction(conn, tx, isRoot: true, savepoint: null);
     }
 
     public async Task RunInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken ct = default)
@@ -196,20 +196,23 @@ public sealed partial class PgDBService : IDataBaseService
     }
 
     /// <summary>
-    /// ITransaction implementation. Root commit/rollback closes the underlying
-    /// NpgsqlTransaction; nested ones release or rollback a savepoint.
+    /// ITransaction implementation. Each instance captures its own conn+tx
+    /// references so Commit/Rollback don't depend on AsyncLocal still being
+    /// in scope at the time they run.
     /// </summary>
     private sealed class PgTransaction : ITransaction
     {
-        private readonly PgDBService _owner;
+        private readonly NpgsqlConnection _conn;
+        private readonly NpgsqlTransaction _tx;
         private readonly string? _savepoint;
         private bool _completed;
 
         public bool IsRoot { get; }
 
-        public PgTransaction(PgDBService owner, bool isRoot, string? savepoint)
+        public PgTransaction(NpgsqlConnection conn, NpgsqlTransaction tx, bool isRoot, string? savepoint)
         {
-            _owner = owner;
+            _conn = conn;
+            _tx = tx;
             IsRoot = isRoot;
             _savepoint = savepoint;
         }
@@ -219,24 +222,21 @@ public sealed partial class PgDBService : IDataBaseService
             if (_completed) return;
             _completed = true;
 
-            var scope = _ambient.Value
-                ?? throw new InvalidOperationException("Transaction scope missing.");
-
             if (IsRoot)
             {
                 try
                 {
-                    await scope.Transaction.CommitAsync(ct).ConfigureAwait(false);
+                    await _tx.CommitAsync(ct).ConfigureAwait(false);
                 }
                 finally
                 {
-                    await DisposeRootScopeAsync(scope).ConfigureAwait(false);
+                    await DisposeRootAsync().ConfigureAwait(false);
                 }
             }
             else
             {
-                await scope.Connection.ExecuteAsync(
-                    $"RELEASE SAVEPOINT {_savepoint}", transaction: scope.Transaction)
+                await _conn.ExecuteAsync(
+                    $"RELEASE SAVEPOINT {_savepoint}", transaction: _tx)
                     .ConfigureAwait(false);
             }
         }
@@ -246,24 +246,21 @@ public sealed partial class PgDBService : IDataBaseService
             if (_completed) return;
             _completed = true;
 
-            var scope = _ambient.Value
-                ?? throw new InvalidOperationException("Transaction scope missing.");
-
             if (IsRoot)
             {
                 try
                 {
-                    await scope.Transaction.RollbackAsync(ct).ConfigureAwait(false);
+                    await _tx.RollbackAsync(ct).ConfigureAwait(false);
                 }
                 finally
                 {
-                    await DisposeRootScopeAsync(scope).ConfigureAwait(false);
+                    await DisposeRootAsync().ConfigureAwait(false);
                 }
             }
             else
             {
-                await scope.Connection.ExecuteAsync(
-                    $"ROLLBACK TO SAVEPOINT {_savepoint}", transaction: scope.Transaction)
+                await _conn.ExecuteAsync(
+                    $"ROLLBACK TO SAVEPOINT {_savepoint}", transaction: _tx)
                     .ConfigureAwait(false);
             }
         }
@@ -273,10 +270,10 @@ public sealed partial class PgDBService : IDataBaseService
             if (!_completed) await RollbackAsync().ConfigureAwait(false);
         }
 
-        private static async ValueTask DisposeRootScopeAsync(TxScope scope)
+        private async ValueTask DisposeRootAsync()
         {
-            await scope.Transaction.DisposeAsync().ConfigureAwait(false);
-            await scope.Connection.DisposeAsync().ConfigureAwait(false);
+            await _tx.DisposeAsync().ConfigureAwait(false);
+            await _conn.DisposeAsync().ConfigureAwait(false);
             _ambient.Value = null;
         }
     }
