@@ -17,6 +17,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.BackgroundServices.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
@@ -187,6 +188,12 @@ builder.Services.AddSingleton<IEngineAdminService, EngineAdminService>();
 // Phase 3 Step 5: bot loop + helpers move server-side.
 builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
 
+// BotDashboard telemetry cache: TTL+single-flight wrapper around the two
+// expensive admin reads (last-24h-stats, activity-buckets). Without it,
+// every dashboard poll re-scans every transaction in the last 24h on a
+// multi-GB DB — visibly slow on cold start.
+builder.Services.AddSingleton<BotTelemetryCache>();
+
 // 7b — Excel seed service + auto-seed-on-empty host. Registered BEFORE the bot
 // loop so a fresh DB is populated before any bot trades (hosted services start
 // in registration order and the host awaits each StartAsync in turn).
@@ -197,6 +204,10 @@ builder.Services.AddHostedService<SeedOnEmptyHostedService>();
 // Bots:AutoStart is true. Default is false in appsettings.json so the client
 // still owns the bot loop until Step 7 deletes the client side.
 builder.Services.AddHostedService<BotLoopHostedService>();
+
+// Warm the BotTelemetryCache shortly after boot so the first dashboard
+// poll doesn't pay the cold DB-scan cost.
+builder.Services.AddHostedService<BotTelemetryWarmupHostedService>();
 
 // Phase 3 Step 6: subscribe to engine events and push them onto SignalR groups.
 builder.Services.AddHostedService<MarketHubBroadcaster>();
