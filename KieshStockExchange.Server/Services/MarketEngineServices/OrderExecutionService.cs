@@ -1109,9 +1109,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
             for (int i = 0; i < liveToCancel.Count; i++)
                 _registry.Remove(liveToCancel[i].OrderId);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             _logger.LogError(ex, "CancelOrdersBatchAsync: tx failed for {Count} orders", liveToCancel.Count);
 
             // Restore book state for the orders we removed; status mutation on the in-memory

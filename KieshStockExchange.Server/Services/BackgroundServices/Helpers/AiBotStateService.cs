@@ -272,7 +272,7 @@ internal sealed class AiBotStateService
         {
             results = await _orders.CancelOrdersBatchAsync(ids, ct).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogError(ex, "PruneWorstOrders: CancelOrdersBatchAsync failed for {Count} orders", ids.Count);
             return;
