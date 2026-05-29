@@ -183,9 +183,12 @@ public sealed partial class PgDBService
         order.OrderId = row.OrderId;
     }
 
+    // No IsValid() — engine-driven updates legitimately produce states the
+    // single-shot domain check would reject (e.g. BuyBudget = 0 after a
+    // TrueMarketBuy fully fills). CreateOrder still validates at the entry
+    // point. Matches OLD DBService.UpdateAllAsync's row-bulk semantics.
     public async Task UpdateOrder(Order order, CancellationToken ct = default)
     {
-        if (!order.IsValid()) throw new ArgumentException("Order entity is not valid", nameof(order));
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(@"
             UPDATE ""Orders"" SET

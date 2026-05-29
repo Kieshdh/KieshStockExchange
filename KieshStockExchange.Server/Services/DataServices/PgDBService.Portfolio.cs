@@ -98,9 +98,9 @@ public sealed partial class PgDBService
         position.PositionId = row.PositionId;
     }
 
+    // Engine-driven path; CHECK constraint enforces the invariant.
     public async Task UpdatePosition(Position position, CancellationToken ct = default)
     {
-        if (!position.IsValid()) throw new ArgumentException("Position entity is not valid", nameof(position));
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(@"
             UPDATE ""Positions"" SET ""UserId"" = @UserId, ""StockId"" = @StockId,
@@ -296,9 +296,9 @@ public sealed partial class PgDBService
         fund.FundId = row.FundId;
     }
 
+    // Engine-driven path; CHECK constraint enforces the invariant.
     public async Task UpdateFund(Fund fund, CancellationToken ct = default)
     {
-        if (!fund.IsValid()) throw new ArgumentException("Fund entity is not valid", nameof(fund));
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(@"
             UPDATE ""Funds"" SET ""UserId"" = @UserId, ""TotalBalance"" = @TotalBalance,
