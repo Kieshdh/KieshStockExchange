@@ -87,8 +87,8 @@ public sealed class ExcelSeedService : IExcelSeedService
     {
         var stockTable = RequireSheet(ds, "Stocks");
 
+        // Prices live on the Listings sheet; SeedListings owns all StockPrice rows.
         List<Stock> stocks = new();
-        List<StockPrice> stockPrices = new();
         foreach (DataRow row in stockTable.Rows)
         {
             if (!ParsingHelper.TryToInt(row["StockId"].ToString(), out var stockId))
@@ -105,11 +105,6 @@ public sealed class ExcelSeedService : IExcelSeedService
                 _logger.LogWarning("Skipping stock #{StockId} with missing required fields", stockId);
                 continue;
             }
-            if (!ParsingHelper.TryToDecimal(row["Price (USD)"].ToString(), out var price))
-            {
-                _logger.LogWarning("Invalid Price for Stock ID {StockId}: '{PriceString}'.", stockId, row["Price (USD)"]);
-                continue;
-            }
 
             Stock stock = new Stock { StockId = stockId, Symbol = symbol, CompanyName = companyName };
             if (!stock.IsValid())
@@ -118,16 +113,13 @@ public sealed class ExcelSeedService : IExcelSeedService
                 continue;
             }
 
-            stockPrices.Add(new StockPrice { StockId = stockId, Price = price, CurrencyType = CurrencyType.USD });
             stocks.Add(stock);
         }
 
         await _db.RunInTransactionAsync(async c =>
         {
             await _db.ResetTableAsync<Stock>(c);
-            await _db.ResetTableAsync<StockPrice>(c);
             await _db.InsertAllAsync(stocks, c);
-            await _db.InsertAllAsync(stockPrices, c);
         }, ct).ConfigureAwait(false);
 
         _logger.LogInformation("Loaded in total {StockCount} stocks.", stocks.Count);
@@ -278,9 +270,6 @@ public sealed class ExcelSeedService : IExcelSeedService
 
             if (!ParsingHelper.TryToInt(row["Seed"].ToString(), out var seed) ||
                 !ParsingHelper.TryToInt(row["DecisionIntervalSeconds"].ToString(), out var intervalSeconds) ||
-                !ParsingHelper.TryToInt(row["MinOpenPositions"].ToString(), out var minOpenPositions) ||
-                !ParsingHelper.TryToInt(row["MaxOpenPositions"].ToString(), out var maxOpenPositions) ||
-                !ParsingHelper.TryToInt(row["MaxDailyTrades"].ToString(), out var maxDailyTrades) ||
                 !ParsingHelper.TryToInt(row["MaxOpenOrders"].ToString(), out var maxOpenOrders) ||
                 !ParsingHelper.TryToInt(row["Strategy"].ToString(), out var strategyCode))
             {
@@ -330,8 +319,7 @@ public sealed class ExcelSeedService : IExcelSeedService
                     PerPositionMaxPrc = perPositionMaxPrc, MinCashReservePrc = minCashReservePrc,
                     MaxCashReservePrc = maxCashReservePrc, SlippageTolerancePrc = slippageTolerancePrc,
                     MinLimitOffsetPrc = minLimitOffsetPrc, MaxLimitOffsetPrc = maxLimitOffsetPrc,
-                    AggressivenessPrc = aggressivenessPrc, MinOpenPositions = minOpenPositions,
-                    MaxOpenPositions = maxOpenPositions, MaxDailyTrades = maxDailyTrades,
+                    AggressivenessPrc = aggressivenessPrc,
                     MaxOpenOrders = maxOpenOrders, WatchlistCsv = watchlistCsv, StrategyCode = strategyCode,
                     ExtremeReactionRandomnessPrc = extremeRandomnessPrc,
                     CashInjectionFrequencyPrc = cashInjectionFrequencyPrc,

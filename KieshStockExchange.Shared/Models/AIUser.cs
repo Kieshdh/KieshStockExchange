@@ -171,15 +171,6 @@ public class AIUser : IValidatable
         }
     }
 
-    private int _minOpenPositions = 0;
-    public int MinOpenPositions { get => _minOpenPositions; set => _minOpenPositions = value < 0 ? 0 : value; }
-
-    private int _maxOpenPositions = 15;
-    public int MaxOpenPositions { get => _maxOpenPositions; set => _maxOpenPositions = value < 0 ? 0 : value; }
-
-    private int _maxDailyTrades = 50;
-    public int MaxDailyTrades { get => _maxDailyTrades; set => _maxDailyTrades = value < 0 ? 0 : value; }
-
     private int _maxOpenOrders = 20;
     public int MaxOpenOrders { get => _maxOpenOrders; set => _maxOpenOrders = value < 0 ? 0 : value; }
 
@@ -215,8 +206,8 @@ public class AIUser : IValidatable
     public DateTime LastTradeTime { get; private set; } = DateTime.MinValue;
     public HashSet<int> StocksTouchedToday { get; } = new();
 
-    public bool IsValid() => UserId > 0 && Seed > 0 && DecisionIntervalSeconds > 0 && MaxDailyTrades >= 0 && MaxOpenOrders >= 0 &&
-        IsValidPercentages() && ValidateSizing() && ValidatePositions() && IsValidWatchlist() && IsValidTimestamps() &&
+    public bool IsValid() => UserId > 0 && Seed > 0 && DecisionIntervalSeconds > 0 && MaxOpenOrders >= 0 &&
+        IsValidPercentages() && ValidateSizing() && IsValidWatchlist() && IsValidTimestamps() &&
         CurrencyHelper.IsSupported(HomeCurrency);
 
     public bool IsInvalid => !IsValid();
@@ -231,8 +222,6 @@ public class AIUser : IValidatable
 
     private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc;
 
-    private bool ValidatePositions() => MinOpenPositions >= 0 && MaxOpenPositions >= MinOpenPositions;
-
     private bool IsValidWatchlist() => Watchlist.Count > 0 && Watchlist.All(id => id > 0);
 
     private bool IsValidTimestamps() => CreatedAt > DateTime.MinValue && CreatedAt <= TimeHelper.NowUtc() &&
@@ -245,11 +234,11 @@ public class AIUser : IValidatable
 
     public string SummaryActivity =>
         $"Interval {IntervalString()} • " +
-        $"Trades {TradesToday}/{MaxDailyTrades} • Errors {ErrorsToday}";
+        $"Trades {TradesToday} • Errors {ErrorsToday}";
 
     public string SummarySizing =>
         $"TradeProb {TradeProbDisplay} • Size {TradeAmountDisplay} • " +
-        $"PerPosMax {PerPositionMaxDisplay} • Pos {OpenPositionsDisplay}";
+        $"PerPosMax {PerPositionMaxDisplay}";
 
     public string SummaryRisk =>
         $"Cash {CashReserveTargetPrc} • Slippage {SlippageToleranceDisplay} • " +
@@ -270,7 +259,6 @@ public class AIUser : IValidatable
     public string TradeProbDisplay => $"{TradeProb:P0}";
     public string UseMarketProbDisplay => $"{UseMarketProb:P0}";
     public string TradeAmountDisplay => $"{MinTradeAmountPrc:P0} - {MaxTradeAmountPrc:P0}";
-    public string OpenPositionsDisplay => $"{MinOpenPositions} - {MaxOpenPositions}";
     public string PerPositionMaxDisplay => $"{PerPositionMaxPrc:P0}";
     public string CashReserveTargetPrc => $"{MinCashReservePrc:P0} - {MaxCashReservePrc:P0}";
     public string SlippageToleranceDisplay => $"{SlippageTolerancePrc:P0}";

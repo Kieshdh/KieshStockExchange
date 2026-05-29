@@ -268,9 +268,6 @@ class Person:
             round(self.min_limit_offset, 4),                # float: min limit offset
             round(self.max_limit_offset, 4),                # float: max limit offset
             round(self.aggressive, 4),                      # float: aggressiveness
-            self.min_stocks,                                # int: minimum stocks held
-            self.max_stocks,                                # int: maximum stocks held
-            self.max_daily_trades,                          # int: max daily trades
             self.max_orders,                                # int: max open orders
             self.watchlist_csv,                             # str: watchlist CSV of stock IDs
             self.strategy,                                  # int: strategy id

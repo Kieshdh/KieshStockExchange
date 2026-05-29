@@ -22,7 +22,7 @@ public sealed partial class PgDBService
         ""MinCashReservePrc"",""MaxCashReservePrc"",""SlippageTolerancePrc"",
         ""MinLimitOffsetPrc"",""MaxLimitOffsetPrc"",""AggressivenessPrc"",
         ""ExtremeReactionRandomnessPrc"",""CashInjectionFrequencyPrc"",""CashInjectionAmountPrc"",
-        ""WatchlistCsv"",""MinOpenPositions"",""MaxOpenPositions"",""MaxDailyTrades"",
+        ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy"" AS ""StrategyCode""";
 
     private const string AIUserInsertCols = @"
@@ -32,7 +32,7 @@ public sealed partial class PgDBService
         ""MinCashReservePrc"",""MaxCashReservePrc"",""SlippageTolerancePrc"",
         ""MinLimitOffsetPrc"",""MaxLimitOffsetPrc"",""AggressivenessPrc"",
         ""ExtremeReactionRandomnessPrc"",""CashInjectionFrequencyPrc"",""CashInjectionAmountPrc"",
-        ""WatchlistCsv"",""MinOpenPositions"",""MaxOpenPositions"",""MaxDailyTrades"",
+        ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy""";
 
     private const string AIUserInsertVals = @"
@@ -42,7 +42,7 @@ public sealed partial class PgDBService
         @MinCashReservePrc,@MaxCashReservePrc,@SlippageTolerancePrc,
         @MinLimitOffsetPrc,@MaxLimitOffsetPrc,@AggressivenessPrc,
         @ExtremeReactionRandomnessPrc,@CashInjectionFrequencyPrc,@CashInjectionAmountPrc,
-        @WatchlistCsv,@MinOpenPositions,@MaxOpenPositions,@MaxDailyTrades,
+        @WatchlistCsv,
         @MaxOpenOrders,@HomeCurrency,@StrategyCode";
 
     #region Candle operations
@@ -404,8 +404,7 @@ public sealed partial class PgDBService
               ""CashInjectionFrequencyPrc"" = @CashInjectionFrequencyPrc,
               ""CashInjectionAmountPrc"" = @CashInjectionAmountPrc,
               ""WatchlistCsv"" = @WatchlistCsv,
-              ""MinOpenPositions"" = @MinOpenPositions, ""MaxOpenPositions"" = @MaxOpenPositions,
-              ""MaxDailyTrades"" = @MaxDailyTrades, ""MaxOpenOrders"" = @MaxOpenOrders,
+              ""MaxOpenOrders"" = @MaxOpenOrders,
               ""HomeCurrency"" = @HomeCurrency, ""Strategy"" = @StrategyCode
             WHERE ""AiUserId"" = @AiUserId", AIUserMapper.ToRow(aiUser));
     }

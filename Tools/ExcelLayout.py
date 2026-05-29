@@ -45,7 +45,8 @@ def reset_or_create_sheet(wb: Workbook, name: str) -> Worksheet:
 def prepare_stocks_sheet(wb: Workbook) -> Worksheet:
     """Create/reset the Stocks sheet and write its header row."""
     ws = reset_or_create_sheet(wb, "Stocks")
-    ws.append(["StockId", "Ticker", "CompanyName", "Price (USD)"])
+    # Price lives on the Listings sheet (per-currency SeedPrice); not duplicated here.
+    ws.append(["StockId", "Ticker", "CompanyName"])
     return ws
 
 
@@ -74,8 +75,8 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         "BuyBiasPrc", "MinTradeAmountPrc", "MaxTradeAmountPrc",
         "PerPositionMaxPrc", "MinCashReservePrc", "MaxCashReservePrc",
         "SlippageTolerancePrc", "MinLimitOffsetPrc", "MaxLimitOffsetPrc",
-        "AggressivenessPrc", "MinOpenPositions", "MaxOpenPositions",
-        "MaxDailyTrades", "MaxOpenOrders", "WatchlistCsv", "Strategy",
+        "AggressivenessPrc",
+        "MaxOpenOrders", "WatchlistCsv", "Strategy",
         "ExtremeReactionRandomnessPrc",
         "CashInjectionFrequencyPrc", "CashInjectionAmountPrc",
         "HomeCurrency",

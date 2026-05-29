@@ -39,9 +39,6 @@ public class AIUserRow
 
     [Column("WatchlistCsv")] public string WatchlistCsv { get; set; } = string.Empty;
 
-    [Column("MinOpenPositions")] public int MinOpenPositions { get; set; }
-    [Column("MaxOpenPositions")] public int MaxOpenPositions { get; set; } = 15;
-    [Column("MaxDailyTrades")] public int MaxDailyTrades { get; set; } = 50;
     [Column("MaxOpenOrders")] public int MaxOpenOrders { get; set; } = 20;
 
     [Column("HomeCurrency")] public string HomeCurrency { get; set; } = nameof(CurrencyType.USD);
@@ -78,9 +75,6 @@ public static class AIUserMapper
             ExtremeReactionRandomnessPrc = r.ExtremeReactionRandomnessPrc,
             CashInjectionFrequencyPrc = r.CashInjectionFrequencyPrc,
             CashInjectionAmountPrc = r.CashInjectionAmountPrc,
-            MinOpenPositions = r.MinOpenPositions,
-            MaxOpenPositions = r.MaxOpenPositions,
-            MaxDailyTrades = r.MaxDailyTrades,
             MaxOpenOrders = r.MaxOpenOrders,
             HomeCurrency = r.HomeCurrency,
             StrategyCode = r.StrategyCode,
@@ -116,9 +110,6 @@ public static class AIUserMapper
         CashInjectionFrequencyPrc = a.CashInjectionFrequencyPrc,
         CashInjectionAmountPrc = a.CashInjectionAmountPrc,
         WatchlistCsv = a.WatchlistCsv,
-        MinOpenPositions = a.MinOpenPositions,
-        MaxOpenPositions = a.MaxOpenPositions,
-        MaxDailyTrades = a.MaxDailyTrades,
         MaxOpenOrders = a.MaxOpenOrders,
         HomeCurrency = a.HomeCurrency,
         StrategyCode = a.StrategyCode,
