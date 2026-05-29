@@ -228,7 +228,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment,
-                        new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions));
+                        new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
+                        fatTails:           _configuration.GetValue("Bots:FatTails", true),
+                        tradeSizeTailShape: _configuration.GetValue("Bots:TradeSizeTailShape", 0.5m),
+                        blockTradeProb:     _configuration.GetValue("Bots:BlockTradeProb", 0.01m),
+                        blockTradeMultiple: _configuration.GetValue("Bots:BlockTradeMultiple", 4m));
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
         _market.QuoteUpdated += OnQuoteUpdated;

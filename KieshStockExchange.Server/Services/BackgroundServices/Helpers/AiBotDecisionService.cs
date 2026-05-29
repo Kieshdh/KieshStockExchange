@@ -22,6 +22,9 @@ internal sealed class AiBotDecisionService
     private const decimal OverflowGain     = 0.25m;
     // Cash kept un-spent on every buy so tiny rounding/race gaps don't trip Phase 1.6.
     private const decimal BuySafetyBuffer  = 5m;
+    // Fat tails: tailShape∈[0,1] maps to a power exponent 1..(1+this) applied to the
+    // uniform size draw. 1 = uniform (today); higher = more mass near Min, longer tail.
+    private const double  TailExponentScale = 4.0;
 
     private readonly IMarketDataService _market;
     private readonly IAccountsCache _accounts;
@@ -30,9 +33,17 @@ internal sealed class AiBotDecisionService
     private readonly BotSentimentService _sentiment;
     private readonly ILogger<AiBotDecisionService> _logger;
 
+    // §1 order-size fat tails (shared config; per-bot variation comes from the draw).
+    private readonly bool    _fatTails;
+    private readonly decimal _tradeSizeTailShape;
+    private readonly decimal _blockTradeProb;
+    private readonly decimal _blockTradeMultiple;
+
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
-        ILogger<AiBotDecisionService> logger)
+        ILogger<AiBotDecisionService> logger,
+        bool fatTails = true, decimal tradeSizeTailShape = 0.5m,
+        decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -40,6 +51,10 @@ internal sealed class AiBotDecisionService
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
+        _fatTails           = fatTails;
+        _tradeSizeTailShape = tradeSizeTailShape;
+        _blockTradeProb     = blockTradeProb;
+        _blockTradeMultiple = blockTradeMultiple;
     }
     #endregion
 
@@ -269,9 +284,18 @@ internal sealed class AiBotDecisionService
         var portfolio = ctx.PortfolioValueByCurrency(user.UserId, currency);
         if (portfolio <= 0m) return 0;
 
-        var tradePrc = Lerp(user.MinTradeAmountPrc, user.MaxTradeAmountPrc, ctx.Decimal01(user.AiUserId));
+        // Fat tails: skew the uniform draw so typical orders sit near Min with a heavy
+        // right tail to Max. tailShape 0 (or feature off) = uniform, as before.
+        var u = ctx.Decimal01(user.AiUserId);
+        if (_fatTails && _tradeSizeTailShape > 0m)
+            u = (decimal)Math.Pow((double)u, 1.0 + (double)_tradeSizeTailShape * TailExponentScale);
+        var tradePrc = Lerp(user.MinTradeAmountPrc, user.MaxTradeAmountPrc, u);
         var jitter   = ctx.Decimal01(user.AiUserId) * user.AggressivenessPrc;
         tradePrc     = Math.Min(tradePrc * (1m + jitter), user.MaxTradeAmountPrc);
+        // Rare block trade: an occasional outsized order past the per-bot Max. The
+        // downstream room/cash/position clamps truncate it to actual capacity.
+        if (_fatTails && _blockTradeProb > 0m && ctx.Decimal01(user.AiUserId) < _blockTradeProb)
+            tradePrc *= _blockTradeMultiple;
         if (tradePrc <= 0m) return 0;
 
         var marketPrice = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
