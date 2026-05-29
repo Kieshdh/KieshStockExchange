@@ -21,7 +21,15 @@ public sealed class PostgresConnectionFactory : IDbConnectionFactory, IAsyncDisp
             config.GetConnectionString("DefaultConnection")
             ?? Environment.GetEnvironmentVariable("KSE_DB_CONNECTION_STRING")
             ?? LocalDevDefault;
-        _dataSource = NpgsqlDataSource.Create(connectionString);
+
+        // Apply a default pool ceiling only when the resolved string didn't set one,
+        // so an explicit production value is always honored. Kept below Postgres
+        // max_connections, with headroom above the engine's MaxConcurrentGroups cap.
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        if (!connectionString.Contains("Pool Size", StringComparison.OrdinalIgnoreCase))
+            builder.MaxPoolSize = config.GetValue("Db:MaxPoolSize", 50);
+
+        _dataSource = NpgsqlDataSource.Create(builder.ConnectionString);
     }
 
     public async ValueTask<NpgsqlConnection> OpenConnectionAsync(CancellationToken ct = default)

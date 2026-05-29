@@ -31,12 +31,15 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly IReservationLedger _ledger;
     private readonly IOrderRegistry _registry;
     private readonly ILogger<OrderExecutionService> _logger;
+    // Caps concurrent per-group settlement txs so the fan-out can't exhaust the Npgsql pool.
+    private readonly SemaphoreSlim _groupGate;
 
     public OrderExecutionService(IDataBaseService db, IOrderBookEngine books,
         IMatchingEngine matching, IOrderValidator validator, ISettlementEngine settlement,
         IMarketDataService marketData, IAccountsCache accounts,
         IOrderCacheService orderCache, IReservationLedger ledger,
         IOrderRegistry registry,
+        IConfiguration config,
         ILogger<OrderExecutionService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -50,6 +53,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _groupGate = new SemaphoreSlim(Math.Max(1, config.GetValue("Db:MaxConcurrentGroups", 24)));
     }
 
     // User ids touched in this settlement, for real-time order-cache refresh
@@ -681,23 +685,32 @@ public sealed class OrderExecutionService : IOrderExecutionService
         List<(int index, Order order)> groupItems,
         OrderResult[] results, CancellationToken ct)
     {
+        // Acquire outside the try — a canceled wait must not hit the Release in finally.
+        await _groupGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await RunGroupTxAsync(stockId, currency, groupItems, results, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
-        {
-            _logger.LogError(ex,
-                "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
-                stockId, currency);
+            try
+            {
+                return await RunGroupTxAsync(stockId, currency, groupItems, results, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+            {
+                _logger.LogError(ex,
+                    "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
+                    stockId, currency);
 
-            // The group tx already rolled back any settle DB writes. The orders for this
-            // group are still in DB (inserted in Phase 2) but they aren't on the book and
-            // the engine doesn't know about them. Cancel them and release the Phase 1.5/1.6
-            // reservations they consumed so the books don't get ghost open rows that the
-            // bot's next refresh treats as still-pending.
-            await RecoverFailedGroupAsync(groupItems, results, ex.Message, ct).ConfigureAwait(false);
-            return new List<Transaction>();
+                // The group tx already rolled back any settle DB writes. The orders for this
+                // group are still in DB (inserted in Phase 2) but they aren't on the book and
+                // the engine doesn't know about them. Cancel them and release the Phase 1.5/1.6
+                // reservations they consumed so the books don't get ghost open rows that the
+                // bot's next refresh treats as still-pending.
+                await RecoverFailedGroupAsync(groupItems, results, ex.Message, ct).ConfigureAwait(false);
+                return new List<Transaction>();
+            }
+        }
+        finally
+        {
+            _groupGate.Release();
         }
     }
 
