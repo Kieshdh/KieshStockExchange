@@ -195,11 +195,11 @@ builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
 // multi-GB DB — visibly slow on cold start.
 builder.Services.AddSingleton<BotTelemetryCache>();
 
-// 7b — Excel seed service + auto-seed-on-empty host. Registered BEFORE the bot
-// loop so a fresh DB is populated before any bot trades (hosted services start
-// in registration order and the host awaits each StartAsync in turn).
+// 7b — Excel seed service. The auto-seed-on-empty run is invoked inline after
+// app.Build() (below), BEFORE the catalogue/candle warm-up reads the DB. It must
+// NOT be a hosted service: those only start at app.Run(), by which point the
+// warm-up has already snapshotted an empty DB into the in-memory caches.
 builder.Services.AddSingleton<IExcelSeedService, ExcelSeedService>();
-builder.Services.AddHostedService<SeedOnEmptyHostedService>();
 
 // Phase 3 bot-loop host. Starts AiTradeService.StartBotAsync when
 // Bots:AutoStart is true. Default is false in appsettings.json so the client
@@ -269,6 +269,27 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
 var app = builder.Build();
+
+// Seed-ordering fix — a fresh DB must be seeded BEFORE the warm-up below reads
+// it. The stock cold-load and candle ring priming snapshot the DB into in-memory
+// caches; seeding any later (it used to be a hosted service, which only starts at
+// app.Run()) left those caches frozen empty on a fresh DB, so every bot order
+// failed stock validation until a second boot. Order is now strict: seed → warm → run.
+if (builder.Configuration.GetValue("Seed:AutoOnEmptyDb", false))
+{
+    var seed = app.Services.GetRequiredService<IExcelSeedService>();
+    var seedLog = app.Services.GetRequiredService<ILogger<Program>>();
+    if (await seed.IsDatabaseEmptyAsync().ConfigureAwait(false))
+    {
+        seedLog.LogInformation("Seed:AutoOnEmptyDb true and database empty; seeding from embedded workbook.");
+        if (!await seed.SeedAllFromEmbeddedAsync().ConfigureAwait(false))
+            seedLog.LogWarning("Auto-seed requested but the embedded workbook was not found.");
+    }
+    else
+    {
+        seedLog.LogInformation("Seed:AutoOnEmptyDb is on but the database is already populated; skipping.");
+    }
+}
 
 // Cold-load the stock catalogue before the first request hits OrderValidator —
 // otherwise IStockService.TryGetById returns false for every stock and the
