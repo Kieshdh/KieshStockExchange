@@ -29,7 +29,14 @@ flowchart TD
 
 ---
 
-## §1 — Order-size fat tails
+## §1 — Order-size fat tails ✅ DONE (config-constant scope, `7184463`)
+
+Shipped as shared config constants (`Bots:FatTails / TradeSizeTailShape /
+BlockTradeProb / BlockTradeMultiple`) rather than per-bot `AIUser` knobs — no schema
+or `/Tools` change. Power-skew reshape + rare block multiplier in
+`ComputeOrderQuantityAsync`; downstream clamps cap blocks. Per-bot knobs (the §5
+seeding chain below) remain deferred. Original design follows.
+
 
 ### Why
 Real order flow is heavy-tailed: most orders are small, but a long upper tail of
@@ -184,7 +191,12 @@ two-sided book exists); fall back to current single-sided behavior otherwise.
 
 ---
 
-## §3 — News / earnings events (discrete shocks)
+## §3 — News / earnings events (discrete shocks) ✅ DONE (`a3bb6f9`)
+
+Shipped in `BotSentimentService` as a per-stock Poisson shock layer (arrival + decay +
+inject + `Shock` telemetry column), config-driven (`Bots:NewsEvents` +
+`ShockMeanIntervalHours/Magnitude/DecayPerTick`). Original design follows.
+
 
 ### Why
 Sentiment today is smoothly mean-reverting AR(1) noise — there are no discrete,
