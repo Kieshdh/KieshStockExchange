@@ -212,12 +212,17 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (loggerFactory  is null) throw new ArgumentNullException(nameof(loggerFactory));
         if (loggerOptions  is null) throw new ArgumentNullException(nameof(loggerOptions));
 
-        _ctx       = new AiBotContext(accounts);
+        _ctx       = new AiBotContext(accounts,
+                        personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true));
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions));
         _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, fxRates, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
-        _sentiment = new BotSentimentService(stocks, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions));
+        _sentiment = new BotSentimentService(stocks, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
+                        newsEvents:             _configuration.GetValue("Bots:NewsEvents", true),
+                        shockMeanIntervalHours: _configuration.GetValue("Bots:ShockMeanIntervalHours", 6.0),
+                        shockMagnitude:         _configuration.GetValue("Bots:ShockMagnitude", 1.3m),
+                        shockDecayPerTick:      _configuration.GetValue("Bots:ShockDecayPerTick", 0.999m));
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,

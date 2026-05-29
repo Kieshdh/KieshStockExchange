@@ -68,7 +68,7 @@ internal sealed class AiBotDecisionService
         // into a TrueMarket{Buy,Sell} in the bot's style-appropriate direction
         // with probability proportional to the overflow. No-op when the
         // override would point at zero shares (sell with no position).
-        type = ApplyExtremeReaction(ctx, user, stockId, type);
+        type = ApplyExtremeReaction(ctx, user, stockId, currency, type);
 
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
         var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
@@ -135,7 +135,7 @@ internal sealed class AiBotDecisionService
         // broad mood for stocks this bot cares about, not any single name.
         // Clamped to ±1 here — extremes drive the forced market order
         // applied later in ComputeOrderAsync.
-        var sentimentClamped = ClampSigned(AverageWatchlistSentiment(user), 1m);
+        var sentimentClamped = ClampSigned(AverageWatchlistSentiment(ctx, user, currency), 1m);
         buyProb += sentimentClamped * SentimentMaxBias;
         buyProb = Clamp01(buyProb);
 
@@ -358,23 +358,23 @@ internal sealed class AiBotDecisionService
     #endregion
 
     #region Sentiment Integration
-    private decimal AverageWatchlistSentiment(AIUser user)
+    private decimal AverageWatchlistSentiment(AiBotContext ctx, AIUser user, CurrencyType currency)
     {
         if (user.Watchlist == null || user.Watchlist.Count == 0) return 0m;
         decimal sum = 0m;
         int count = 0;
         foreach (var sid in user.Watchlist)
         {
-            sum += _sentiment.GetSentiment(sid);
+            sum += _sentiment.GetSentiment(sid) + ctx.PersonalSentiment(user, sid, currency);
             count++;
         }
         return count > 0 ? sum / count : 0m;
     }
 
     private OrderType ApplyExtremeReaction(AiBotContext ctx, AIUser user,
-        int stockId, OrderType currentType)
+        int stockId, CurrencyType currency, OrderType currentType)
     {
-        var raw = _sentiment.GetSentiment(stockId);
+        var raw = _sentiment.GetSentiment(stockId) + ctx.PersonalSentiment(user, stockId, currency);
         var absRaw = Math.Abs(raw);
         if (absRaw <= 1m) return currentType;
 

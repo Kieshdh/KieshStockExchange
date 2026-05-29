@@ -16,10 +16,12 @@ internal sealed class AiBotContext
 {
     #region Services and Constructor
     private readonly IAccountsCache _accounts;
+    private readonly bool _personalSentiment;
 
-    internal AiBotContext(IAccountsCache accounts)
+    internal AiBotContext(IAccountsCache accounts, bool personalSentiment = true)
     {
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
+        _personalSentiment = personalSentiment;
     }
     #endregion
 
@@ -88,6 +90,77 @@ internal sealed class AiBotContext
             return h & int.MaxValue;
         }
     }
+    #endregion
+
+    #region Personal sentiment
+    // Idiosyncratic per-(bot,stock) mood added on top of the shared market sentiment.
+    // Stateless and pure (hash-based) so it scales to all bots × watchlists with no
+    // stored AR(1) matrix and no per-tick reroll loop.
+    private const decimal PersonalLeanAmp     = 0.10m;  // fixed disposition
+    private const decimal PersonalDriftAmp    = 0.10m;  // slow time-varying drift
+    private const decimal PersonalReactAmp    = 0.12m;  // price-reaction weight
+    private const decimal ReturnGain          = 20m;    // ±5% recent move → ±1
+    private static readonly TimeSpan PersonalDriftPeriod = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Per-bot idiosyncratic sentiment for one stock: a fixed lean, a slow drift, and
+    /// a price-reaction whose sign follows the bot's strategy (contrarian buys dips,
+    /// momentum/panic follow the move). Returns 0 when the feature is disabled.
+    /// </summary>
+    internal decimal PersonalSentiment(AIUser user, int stockId, CurrencyType currency)
+    {
+        if (!_personalSentiment) return 0m;
+
+        long bucket = TimeHelper.NowUtc().Ticks / PersonalDriftPeriod.Ticks;
+        var lean  = HashUnit(user.Seed, user.AiUserId, stockId, 0);
+        var drift = HashUnit(user.Seed, user.AiUserId, stockId, bucket);
+
+        decimal react = 0m;
+        var sign = PriceReactionSign(user.Strategy);
+        if (sign != 0m &&
+            SmoothedPrices.TryGetValue((stockId, currency), out var cur) && cur > 0m &&
+            PreviousPrices.TryGetValue((stockId, currency), out var prev) && prev > 0m)
+        {
+            var ret = (cur - prev) / prev;
+            react = sign * ClampSigned(ret * ReturnGain, 1m);
+        }
+
+        return PersonalLeanAmp * lean + PersonalDriftAmp * drift + PersonalReactAmp * react;
+    }
+
+    // Pure hash → [-1, +1]. Same mix as DailySeed, extended with stockId + bucket.
+    // Does NOT advance any Random, so it's call-order-independent and reproducible.
+    private static decimal HashUnit(int baseSeed, int userId, int stockId, long bucket)
+    {
+        unchecked
+        {
+            long h = 17;
+            h = h * 31 + baseSeed;
+            h = h * 31 + userId;
+            h = h * 31 + stockId;
+            h = h * 31 + bucket;
+            // Final avalanche so adjacent buckets/stocks don't correlate.
+            h ^= h >> 33; h *= unchecked((long)0xff51afd7ed558ccd); h ^= h >> 33;
+            // Map the low 32 bits to [-1, +1].
+            var u = (double)((ulong)h & 0xFFFFFFFF) / 0xFFFFFFFF;  // [0,1]
+            return (decimal)(u * 2.0 - 1.0);
+        }
+    }
+
+    // Sign of the price-reaction, from the deterministic default extreme-reaction
+    // style for the strategy (NOT PickExtremeReactionStyle — that advances RNG).
+    // +1 = follow price (FOMO/Panic), -1 = fade price (Contrarian), 0 = none.
+    private static decimal PriceReactionSign(AiStrategy strategy) => strategy switch
+    {
+        AiStrategy.TrendFollower => 1m,
+        AiStrategy.Scalper       => 1m,
+        AiStrategy.MeanReversion => -1m,
+        AiStrategy.MarketMaker   => -1m,
+        _                        => 0m,
+    };
+
+    private static decimal ClampSigned(decimal x, decimal mag) =>
+        x < -mag ? -mag : x > mag ? mag : x;
     #endregion
 
     #region Financial Computations

@@ -39,18 +39,31 @@ internal sealed class BotSentimentService
 
     // 50 stocks × 60s sampling × ~33 hours of runway. Each row is small.
     private const int RecentSamplesMax = 100_000;
+
+    // News/earnings shocks: drop a decaying shock once it shrinks below this.
+    private const decimal ShockFloor = 0.01m;
     #endregion
 
     #region Services and Constructor
     private readonly IStockService _stocks;
     private readonly ILogger<BotSentimentService> _logger;
+    private readonly bool _newsEvents;
+    private readonly decimal _shockMagnitude;
+    private readonly decimal _shockDecayPerTick;
+    private readonly double  _shockArrivalProbPerTick; // per stock per ~1s tick
 
     private readonly RingBufferStore<SentimentSample> _store;
 
-    internal BotSentimentService(IStockService stocks, ILogger<BotSentimentService> logger)
+    internal BotSentimentService(IStockService stocks, ILogger<BotSentimentService> logger,
+        bool newsEvents = true, double shockMeanIntervalHours = 6.0,
+        decimal shockMagnitude = 1.3m, decimal shockDecayPerTick = 0.999m)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _newsEvents = newsEvents;
+        _shockMagnitude    = shockMagnitude;
+        _shockDecayPerTick = shockDecayPerTick;
+        _shockArrivalProbPerTick = 1.0 / (Math.Max(0.0001, shockMeanIntervalHours) * 3600.0);
         _store  = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
         var prior = _store.LoadTail(RecentSamplesMax);
@@ -72,6 +85,9 @@ internal sealed class BotSentimentService
     private readonly Dictionary<int, decimal> _perStock1m  = new();
     private decimal _global24h;
     private decimal _global1h;
+
+    // Per-stock transient news shock; non-zero only while an event decays.
+    private readonly Dictionary<int, decimal> _shock = new();
 
     private DateTime _next1m;
     private DateTime _next10m;
@@ -119,8 +135,43 @@ internal sealed class BotSentimentService
             rolled24h = true;
         }
 
+        if (_newsEvents) StepShocks(now);
+
         if (rolled1m || rolled10m || rolled1h || rolled24h)
             LogChangedSentiment(now, rolled24h, rolled1h, rolled10m, rolled1m);
+    }
+
+    /// <summary>
+    /// Decay any active news shocks, then roll a low-rate Poisson arrival per stock.
+    /// A fired shock jumps the stock's sentiment past ±1 (sign random) and fades over
+    /// minutes. Rolls advance <see cref="_rng"/> only when news events are enabled, so
+    /// the disabled path leaves the AR(1) sequence bit-for-bit unchanged.
+    /// </summary>
+    private void StepShocks(DateTime now)
+    {
+        if (_shock.Count > 0)
+        {
+            foreach (var sid in _shock.Keys.ToList())
+            {
+                var v = _shock[sid] * _shockDecayPerTick;
+                if (Math.Abs(v) < ShockFloor) _shock.Remove(sid);
+                else _shock[sid] = v;
+            }
+        }
+
+        foreach (var sid in _stocks.ById.Keys)
+        {
+            if (_rng.NextDouble() >= _shockArrivalProbPerTick) continue;
+            var sign = _rng.NextDouble() < 0.5 ? -1m : 1m;
+            _shock.TryGetValue(sid, out var cur);
+            _shock[sid] = cur + sign * _shockMagnitude;
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                var sym = _stocks.TryGetSymbol(sid, out var s) ? s : sid.ToString();
+                _logger.LogInformation("News shock: {Symbol} {Delta:+0.0;-0.0}",
+                    sym, sign * _shockMagnitude);
+            }
+        }
     }
 
     /// <summary>
@@ -179,8 +230,10 @@ internal sealed class BotSentimentService
 
     /// <summary>
     /// Combined sentiment for <paramref name="stockId"/>. Sum of per-stock
-    /// factors (24h / 1h / 10m / 1m) plus the global 24h and 1h moods.
-    /// Returned UN-CLAMPED — typical range is ±1 but can reach ±1.85.
+    /// factors (24h / 1h / 10m / 1m), the global 24h and 1h moods, and any
+    /// active transient news shock.
+    /// Returned UN-CLAMPED — typical range is ±1 but can reach ±1.85 (more
+    /// during a news shock, which is intentional — it trips the extreme path).
     /// Callers clamp to ±1 for linear bias; the overflow drives v2's
     /// style-dependent extreme-reaction market orders.
     /// </summary>
@@ -191,6 +244,7 @@ internal sealed class BotSentimentService
         if (_perStock1h.TryGetValue(stockId,  out var v1h)) sum += v1h;
         if (_perStock10m.TryGetValue(stockId, out var v10)) sum += v10;
         if (_perStock1m.TryGetValue(stockId,  out var v1m)) sum += v1m;
+        if (_shock.TryGetValue(stockId,       out var vsh)) sum += vsh;
         return sum;
     }
     #endregion
@@ -230,6 +284,7 @@ internal sealed class BotSentimentService
         _perStock1h.Clear();
         _perStock10m.Clear();
         _perStock1m.Clear();
+        _shock.Clear();
         lock (_samples) _samples.Clear();
 
         foreach (var sid in _stocks.ById.Keys)
@@ -275,6 +330,7 @@ internal sealed class BotSentimentService
                 _perStock1h.TryGetValue(sid,  out var v1h);
                 _perStock10m.TryGetValue(sid, out var v10);
                 _perStock1m.TryGetValue(sid,  out var v1m);
+                _shock.TryGetValue(sid,       out var vsh);
 
                 var sample = new SentimentSample(
                     TimestampUtc: now,
@@ -284,7 +340,8 @@ internal sealed class BotSentimentService
                     PerStock10m:  v10,
                     PerStock1m:   v1m,
                     Global24h:    _global24h,
-                    Global1h:     _global1h);
+                    Global1h:     _global1h,
+                    Shock:        vsh);
                 _samples.Enqueue(sample);
                 _store.Append(sample);
             }
@@ -309,14 +366,14 @@ internal sealed class BotSentimentService
 
         var sb = new StringBuilder(512 + snapshot.Length * 96);
         sb.AppendLine("TimestampUtc,StockId,PerStock24h,PerStock1h,PerStock10m,PerStock1m," +
-                      "Global24h,Global1h,Combined");
+                      "Global24h,Global1h,Shock,Combined");
         var inv = CultureInfo.InvariantCulture;
         for (int i = 0; i < snapshot.Length; i++)
         {
             ct.ThrowIfCancellationRequested();
             var r = snapshot[i];
             var combined = r.PerStock24h + r.PerStock1h + r.PerStock10m + r.PerStock1m
-                         + r.Global24h + r.Global1h;
+                         + r.Global24h + r.Global1h + r.Shock;
             sb.Append(r.TimestampUtc.ToString("O", inv)).Append(',')
               .Append(r.StockId).Append(',')
               .Append(r.PerStock24h.ToString(inv)).Append(',')
@@ -325,6 +382,7 @@ internal sealed class BotSentimentService
               .Append(r.PerStock1m.ToString(inv)).Append(',')
               .Append(r.Global24h.ToString(inv)).Append(',')
               .Append(r.Global1h.ToString(inv)).Append(',')
+              .Append(r.Shock.ToString(inv)).Append(',')
               .Append(combined.ToString(inv))
               .Append('\n');
         }
@@ -351,4 +409,5 @@ internal readonly record struct SentimentSample(
     decimal  PerStock10m,
     decimal  PerStock1m,
     decimal  Global24h,
-    decimal  Global1h);
+    decimal  Global1h,
+    decimal  Shock);
