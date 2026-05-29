@@ -46,6 +46,26 @@ public sealed partial class PgDBService : IDataBaseService
         await c.ExecuteAsync($@"TRUNCATE TABLE ""{table}"" RESTART IDENTITY CASCADE");
     }
 
+    // Postgres caps a statement at 65535 bind params; chunk so cols×rows stays under.
+    private const int BatchChunkSize = 2000;
+
+    private static async Task ChunkedBatchAsync<TItem>(
+        IReadOnlyList<TItem> list, Func<IReadOnlyList<TItem>, Task> batch)
+    {
+        if (list.Count <= BatchChunkSize)
+        {
+            await batch(list).ConfigureAwait(false);
+            return;
+        }
+        for (int start = 0; start < list.Count; start += BatchChunkSize)
+        {
+            var take = Math.Min(BatchChunkSize, list.Count - start);
+            var slice = new List<TItem>(take);
+            for (int i = 0; i < take; i++) slice.Add(list[start + i]);
+            await batch(slice).ConfigureAwait(false);
+        }
+    }
+
     // Hot types (Order/Transaction/Position/Fund/FundTransaction) get a
     // single multi-row VALUES statement when N>1 so a bot trade group's
     // ~20 round-trips collapses to ~5. Cold types and N==1 fall through to
@@ -61,16 +81,16 @@ public sealed partial class PgDBService : IDataBaseService
             switch (list)
             {
                 case IReadOnlyList<Order> orders:
-                    await InsertOrdersBatchAsync(orders, ct).ConfigureAwait(false);
+                    await ChunkedBatchAsync(orders, c => InsertOrdersBatchAsync(c, ct)).ConfigureAwait(false);
                     return;
                 case IReadOnlyList<Transaction> txs:
-                    await InsertTransactionsBatchAsync(txs, ct).ConfigureAwait(false);
+                    await ChunkedBatchAsync(txs, c => InsertTransactionsBatchAsync(c, ct)).ConfigureAwait(false);
                     return;
                 case IReadOnlyList<Position> positions:
-                    await InsertPositionsBatchAsync(positions, ct).ConfigureAwait(false);
+                    await ChunkedBatchAsync(positions, c => InsertPositionsBatchAsync(c, ct)).ConfigureAwait(false);
                     return;
                 case IReadOnlyList<FundTransaction> fts:
-                    await InsertFundTransactionsBatchAsync(fts, ct).ConfigureAwait(false);
+                    await ChunkedBatchAsync(fts, c => InsertFundTransactionsBatchAsync(c, ct)).ConfigureAwait(false);
                     return;
             }
         }
@@ -110,13 +130,13 @@ public sealed partial class PgDBService : IDataBaseService
             switch (list)
             {
                 case IReadOnlyList<Order> orders:
-                    await UpdateOrdersBatchAsync(orders, ct).ConfigureAwait(false);
+                    await ChunkedBatchAsync(orders, c => UpdateOrdersBatchAsync(c, ct)).ConfigureAwait(false);
                     return;
                 case IReadOnlyList<Fund> funds:
-                    await UpdateFundsBatchAsync(funds, ct).ConfigureAwait(false);
+                    await ChunkedBatchAsync(funds, c => UpdateFundsBatchAsync(c, ct)).ConfigureAwait(false);
                     return;
                 case IReadOnlyList<Position> positions:
-                    await UpdatePositionsBatchAsync(positions, ct).ConfigureAwait(false);
+                    await ChunkedBatchAsync(positions, c => UpdatePositionsBatchAsync(c, ct)).ConfigureAwait(false);
                     return;
             }
         }

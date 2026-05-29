@@ -72,56 +72,6 @@ public sealed class ApiDataBaseService : IDataBaseService
         resp.EnsureSuccessStatusCode();
     }
 
-    // Bulk passthrough helpers — paired 1:1 with AdminController endpoints. For Insert, the
-    // server returns the list with auto-assigned PKs; walk it positionally and copy each PK
-    // back to the corresponding source instance so the in-process contract for InsertAllAsync
-    // (mutates input items) is preserved over HTTP.
-    //
-    // Requests are chunked so a single bulk call can never exceed Kestrel's body-size limit.
-    // At ~700 bytes per Order JSON the 2000-item chunk stays under ~1.5MB — comfortably below
-    // both the default 30MB request limit and any reverse-proxy default. The atomicity loss
-    // (each chunk is its own server tx) is acceptable for the bulk admin/cancel paths.
-    private const int BulkChunkSize = 2000;
-
-    private async Task BulkInsertRouteAsync<T>(IEnumerable<T> items, string resource, Action<T, T> writeback, CancellationToken ct)
-    {
-        var list = items as IList<T> ?? items.ToList();
-        if (list.Count == 0) return;
-        for (int offset = 0; offset < list.Count; offset += BulkChunkSize)
-        {
-            var take = Math.Min(BulkChunkSize, list.Count - offset);
-            var chunk = new List<T>(take);
-            for (int i = 0; i < take; i++) chunk.Add(list[offset + i]);
-
-            var resp = await _http.PostAsJsonAsync($"api/admin/insert-all/{resource}", chunk, ApiJsonOptions.Default, ct).ConfigureAwait(false);
-            resp.EnsureSuccessStatusCode();
-            var assigned = await resp.Content.ReadFromJsonAsync<List<T>>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
-            if (assigned == null) continue;
-            for (int i = 0; i < chunk.Count && i < assigned.Count; i++) writeback(list[offset + i], assigned[i]);
-        }
-    }
-
-    private async Task BulkUpdateRouteAsync<T>(IEnumerable<T> items, string resource, CancellationToken ct)
-    {
-        var list = items as IList<T> ?? items.ToList();
-        if (list.Count == 0) return;
-        for (int offset = 0; offset < list.Count; offset += BulkChunkSize)
-        {
-            var take = Math.Min(BulkChunkSize, list.Count - offset);
-            var chunk = new List<T>(take);
-            for (int i = 0; i < take; i++) chunk.Add(list[offset + i]);
-
-            var resp = await _http.PostAsJsonAsync($"api/admin/update-all/{resource}", chunk, ApiJsonOptions.Default, ct).ConfigureAwait(false);
-            resp.EnsureSuccessStatusCode();
-        }
-    }
-
-    private async Task BulkResetRouteAsync(string resource, CancellationToken ct)
-    {
-        var resp = await _http.PostAsync($"api/admin/reset/{resource}", content: null, ct).ConfigureAwait(false);
-        resp.EnsureSuccessStatusCode();
-    }
-
     // Tiny URL-encoded query-string builder for the paged endpoints. Skips null/empty values
     // so callers can pass nullable filters straight in without ceremony. Returns "" when empty
     // so caller can concat unconditionally; first key gets "?", subsequent get "&".
@@ -148,70 +98,15 @@ public sealed class ApiDataBaseService : IDataBaseService
     }
 
     #region Generic operations
-    // Dispatch the IDataBaseService<T> generic bulk methods to typed AdminController endpoints.
-    // Mirrors the in-process dispatch table in DBService — same 14 entity types, same PK-writeback
-    // lambdas. Unknown T throws NotSupportedException; the in-process DBService falls through to
-    // a passthrough, but over HTTP there's no equivalent route to fall through to.
-
+    // Bulk writes + resets are server-only; the client never bulk-writes, so these throw.
     public Task ResetTableAsync<T>(CancellationToken ct = default) where T : new()
-    {
-        var t = typeof(T);
-        if (t == typeof(User))                return BulkResetRouteAsync("users", ct);
-        if (t == typeof(Stock))               return BulkResetRouteAsync("stocks", ct);
-        if (t == typeof(StockListing))        return BulkResetRouteAsync("stock-listings", ct);
-        if (t == typeof(StockPrice))          return BulkResetRouteAsync("stock-prices", ct);
-        if (t == typeof(Order))               return BulkResetRouteAsync("orders", ct);
-        if (t == typeof(Transaction))         return BulkResetRouteAsync("transactions", ct);
-        if (t == typeof(Position))            return BulkResetRouteAsync("positions", ct);
-        if (t == typeof(Fund))                return BulkResetRouteAsync("funds", ct);
-        if (t == typeof(FundTransaction))     return BulkResetRouteAsync("fund-transactions", ct);
-        if (t == typeof(Candle))              return BulkResetRouteAsync("candles", ct);
-        if (t == typeof(Message))             return BulkResetRouteAsync("messages", ct);
-        if (t == typeof(UserPreferences))     return BulkResetRouteAsync("user-preferences", ct);
-        if (t == typeof(UserWatchlistEntry))  return BulkResetRouteAsync("user-watchlist", ct);
-        if (t == typeof(AIUser))              return BulkResetRouteAsync("ai-users", ct);
-        throw new NotSupportedException($"ResetTableAsync<{t.Name}>: no HTTP route registered");
-    }
+        => throw new NotSupportedException("ResetTableAsync is server-only; the client does not bulk-reset tables.");
 
     public Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
-    {
-        var t = typeof(T);
-        if (t == typeof(Order))              return BulkInsertRouteAsync((IEnumerable<Order>)items,              "orders",            (d, r) => d.OrderId = r.OrderId, ct);
-        if (t == typeof(Transaction))        return BulkInsertRouteAsync((IEnumerable<Transaction>)items,        "transactions",      (d, r) => d.TransactionId = r.TransactionId, ct);
-        if (t == typeof(Position))           return BulkInsertRouteAsync((IEnumerable<Position>)items,           "positions",         (d, r) => d.PositionId = r.PositionId, ct);
-        if (t == typeof(Fund))               return BulkInsertRouteAsync((IEnumerable<Fund>)items,               "funds",             (d, r) => d.FundId = r.FundId, ct);
-        if (t == typeof(FundTransaction))    return BulkInsertRouteAsync((IEnumerable<FundTransaction>)items,    "fund-transactions", (d, r) => d.FundTransactionId = r.FundTransactionId, ct);
-        if (t == typeof(Stock))              return BulkInsertRouteAsync((IEnumerable<Stock>)items,              "stocks",            (d, r) => d.StockId = r.StockId, ct);
-        if (t == typeof(StockListing))       return BulkInsertRouteAsync((IEnumerable<StockListing>)items,       "stock-listings",    (d, r) => d.ListingId = r.ListingId, ct);
-        if (t == typeof(StockPrice))         return BulkInsertRouteAsync((IEnumerable<StockPrice>)items,         "stock-prices",      (d, r) => d.PriceId = r.PriceId, ct);
-        if (t == typeof(User))               return BulkInsertRouteAsync((IEnumerable<User>)items,               "users",             (d, r) => d.UserId = r.UserId, ct);
-        if (t == typeof(AIUser))             return BulkInsertRouteAsync((IEnumerable<AIUser>)items,             "ai-users",          (d, r) => d.AiUserId = r.AiUserId, ct);
-        if (t == typeof(Candle))             return BulkInsertRouteAsync((IEnumerable<Candle>)items,             "candles",           (d, r) => d.CandleId = r.CandleId, ct);
-        if (t == typeof(Message))            return BulkInsertRouteAsync((IEnumerable<Message>)items,            "messages",          (d, r) => d.MessageId = r.MessageId, ct);
-        if (t == typeof(UserPreferences))    return BulkInsertRouteAsync((IEnumerable<UserPreferences>)items,    "user-preferences",  (_, _) => { }, ct);
-        if (t == typeof(UserWatchlistEntry)) return BulkInsertRouteAsync((IEnumerable<UserWatchlistEntry>)items, "user-watchlist",    (d, r) => d.Id = r.Id, ct);
-        throw new NotSupportedException($"InsertAllAsync<{t.Name}>: no HTTP route registered");
-    }
+        => throw new NotSupportedException("InsertAllAsync is server-only; the client does not bulk-insert.");
 
     public Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
-    {
-        var t = typeof(T);
-        if (t == typeof(Order))              return BulkUpdateRouteAsync((IEnumerable<Order>)items,              "orders", ct);
-        if (t == typeof(Transaction))        return BulkUpdateRouteAsync((IEnumerable<Transaction>)items,        "transactions", ct);
-        if (t == typeof(Position))           return BulkUpdateRouteAsync((IEnumerable<Position>)items,           "positions", ct);
-        if (t == typeof(Fund))               return BulkUpdateRouteAsync((IEnumerable<Fund>)items,               "funds", ct);
-        if (t == typeof(FundTransaction))    return BulkUpdateRouteAsync((IEnumerable<FundTransaction>)items,    "fund-transactions", ct);
-        if (t == typeof(Stock))              return BulkUpdateRouteAsync((IEnumerable<Stock>)items,              "stocks", ct);
-        if (t == typeof(StockListing))       return BulkUpdateRouteAsync((IEnumerable<StockListing>)items,       "stock-listings", ct);
-        if (t == typeof(StockPrice))         return BulkUpdateRouteAsync((IEnumerable<StockPrice>)items,         "stock-prices", ct);
-        if (t == typeof(User))               return BulkUpdateRouteAsync((IEnumerable<User>)items,               "users", ct);
-        if (t == typeof(AIUser))             return BulkUpdateRouteAsync((IEnumerable<AIUser>)items,             "ai-users", ct);
-        if (t == typeof(Candle))             return BulkUpdateRouteAsync((IEnumerable<Candle>)items,             "candles", ct);
-        if (t == typeof(Message))            return BulkUpdateRouteAsync((IEnumerable<Message>)items,            "messages", ct);
-        if (t == typeof(UserPreferences))    return BulkUpdateRouteAsync((IEnumerable<UserPreferences>)items,    "user-preferences", ct);
-        if (t == typeof(UserWatchlistEntry)) return BulkUpdateRouteAsync((IEnumerable<UserWatchlistEntry>)items, "user-watchlist", ct);
-        throw new NotSupportedException($"UpdateAllAsync<{t.Name}>: no HTTP route registered");
-    }
+        => throw new NotSupportedException("UpdateAllAsync is server-only; the client does not bulk-update.");
 
     public async Task DropAndRecreateAsync(bool keepBackup = false, CancellationToken ct = default)
     {
