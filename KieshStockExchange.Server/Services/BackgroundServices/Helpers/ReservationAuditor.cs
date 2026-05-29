@@ -15,6 +15,8 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// </summary>
 internal sealed class ReservationAuditor
 {
+    private int _sampleSize = 0; // Tunable: how many mismatches to include in the log details (top by |delta|)
+
     #region Services and Constructor
     private readonly IAccountsCache _accounts;
     private readonly IReservationLedger _ledger;
@@ -30,18 +32,16 @@ internal sealed class ReservationAuditor
     #endregion
 
     #region Audit
-    internal async Task AuditAsync(CancellationToken ct)
+    internal async Task AuditAsync(bool clamp, CancellationToken ct)
     {
         IReadOnlyList<ReservationMismatch> mismatches;
         try
         {
-            // clamp:false — report only. clamp:true was unsafe: transient
-            // SlippageMarket/TrueMarket orders mid-Phase-3 are missed by the
-            // expected calc, so legitimate reservations got zeroed and entire
-            // batch groups failed downstream with "Reservation drift". Until
-            // the reconciler can snapshot atomically under per-user gates AND
-            // include in-flight market orders, stay passive.
-            mismatches = await _accounts.ReconcileReservationsAsync(clamp: false, ct).ConfigureAwait(false);
+            // Safe to clamp now: caller fires this at the post-batch quiescent frame
+            // (no in-flight market orders) and ReconcileReservationsAsync corrects the
+            // phantom direction under per-user gates — the two prerequisites that made
+            // the old clamp unsafe.
+            mismatches = await _accounts.ReconcileReservationsAsync(clamp, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -76,7 +76,7 @@ internal sealed class ReservationAuditor
             mismatches.Count, phantomCount, underCount, phantomTotal);
 
         var sb = new StringBuilder();
-        int sample = Math.Min(6, ordered.Count);
+        int sample = Math.Min(_sampleSize, ordered.Count);
         for (int i = 0; i < sample; i++)
         {
             var m = ordered[i];

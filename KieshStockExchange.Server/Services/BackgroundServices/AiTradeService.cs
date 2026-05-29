@@ -424,6 +424,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             if (scalerTarget.HasValue) SetActiveBotCap(scalerTarget.Value);
             else                       StatsChanged?.Invoke(this, EventArgs.Empty);
 
+            // Reconcile at the post-batch quiescent frame: this tick's market orders are
+            // terminal, so only resting limit reservations remain and the clamp is safe.
+            // After RecordTickLatency so this maintenance pass doesn't skew the scaler EWMA.
+            if (now >= _nextReconcileTime)
+            {
+                _nextReconcileTime = now + ReconcileInterval;
+                var clamp = _configuration.GetValue("Bots:ReconcileClamp", true);
+                try { await _auditor.AuditAsync(clamp, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+                catch (Exception ex) { _logger.LogError(ex, "Reservation reconcile pass failed."); }
+            }
+
             try { await Task.Delay(TradeInterval, ct).ConfigureAwait(false); }
             catch (TaskCanceledException) { /* breaking loop */ }
         }
@@ -611,18 +623,6 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         {
             await _injector.RunAsync(ct).ConfigureAwait(false);
             _nextCashInjectionTime = now + CashInjectionInterval;
-        }
-        if (now >= _nextReconcileTime)
-        {
-            _nextReconcileTime = now + ReconcileInterval;
-            // Off-thread: a 200k+ order walk shouldn't block the tick loop. Concurrent
-            // state changes during the walk are acceptable for a passive diagnostic.
-            _ = Task.Run(async () =>
-            {
-                try { await _auditor.AuditAsync(ct).ConfigureAwait(false); }
-                catch (OperationCanceledException) { }
-                catch (Exception ex) { _logger.LogError(ex, "Reservation reconcile pass failed (off-thread)."); }
-            }, ct);
         }
     }
 

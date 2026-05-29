@@ -328,7 +328,7 @@ public sealed class AccountsCache : IAccountsCache
     #endregion
 
     #region Reservation Reconciler
-    public Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
+    public async Task<IReadOnlyList<ReservationMismatch>> ReconcileReservationsAsync(
         bool clamp = false, CancellationToken ct = default)
     {
         // Single O(N) pass over the registry: aggregate expected sums per (user, resource)
@@ -422,7 +422,6 @@ public sealed class AccountsCache : IAccountsCache
             mismatches.Add(new ReservationMismatch(
                 kv.Key.UserId, kv.Key.StockId, null,
                 expected, actual, actual - expected, count));
-            if (clamp) kv.Value.ReservedQuantity = expected;
 
             if (posOffenders is not null
                 && posOffenders.TryGetValue(kv.Key, out var offenders)
@@ -464,7 +463,6 @@ public sealed class AccountsCache : IAccountsCache
             mismatches.Add(new ReservationMismatch(
                 kv.Key.UserId, null, kv.Key.Ccy,
                 expected, actual, actual - expected, count));
-            if (clamp) kv.Value.ReservedBalance = expected;
 
             if (fundOffenders is not null
                 && fundOffenders.TryGetValue(kv.Key, out var offenders)
@@ -490,7 +488,54 @@ public sealed class AccountsCache : IAccountsCache
             }
         }
 
-        return Task.FromResult<IReadOnlyList<ReservationMismatch>>(mismatches);
+        // Phase 2: phantom-only clamp under per-user gates. Delta > 0 means the cache
+        // aggregate over-reserves vs the live open-order sum; reduce it to match. Each
+        // clamp re-derives that one user's expected under their gate so the read-modify-
+        // write is atomic against a concurrent settle. Under-reserve (Delta < 0) stays
+        // report-only — fabricating reserved balance would be a money bug.
+        if (clamp)
+        {
+            for (int i = 0; i < mismatches.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var m = mismatches[i];
+                if (m.Delta <= 0m) continue;
+                if (m.StockId is int sid)        await ClampPositionAsync(m.UserId, sid, ct).ConfigureAwait(false);
+                else if (m.Currency is CurrencyType ccy) await ClampFundAsync(m.UserId, ccy, ct).ConfigureAwait(false);
+            }
+        }
+
+        return mismatches;
+    }
+
+    // Re-derive the user's true reserved balance from their open buys under the gate,
+    // then snap the cache + DB down if it still over-reserves.
+    private async Task ClampFundAsync(int userId, CurrencyType ccy, CancellationToken ct)
+    {
+        await using var gate = await AcquireFundGateAsync(userId, ccy, ct).ConfigureAwait(false);
+        if (!_funds.TryGetValue((userId, ccy), out var fund)) return;
+
+        decimal expected = 0m;
+        foreach (var o in _registry.GetOpenBuysForUser(userId, ccy))
+            if (o.IsOpen && o.CurrentBuyReservation > 0m) expected += o.CurrentBuyReservation;
+
+        if (fund.ReservedBalance <= expected) return; // resolved or reversed since the pass
+        fund.ReservedBalance = expected;
+        await _db.UpdateFund(fund, ct).ConfigureAwait(false);
+    }
+
+    private async Task ClampPositionAsync(int userId, int stockId, CancellationToken ct)
+    {
+        await using var gate = await AcquirePositionGateAsync(userId, stockId, ct).ConfigureAwait(false);
+        if (!_positions.TryGetValue((userId, stockId), out var pos)) return;
+
+        int expected = 0;
+        foreach (var o in _registry.GetOpenSellsForUser(userId, stockId))
+            if (o.IsOpen && o.IsLimitOrder && o.CurrentSellReservedQty > 0) expected += o.CurrentSellReservedQty;
+
+        if (pos.ReservedQuantity <= expected) return;
+        pos.ReservedQuantity = expected;
+        await _db.UpdatePosition(pos, ct).ConfigureAwait(false);
     }
     #endregion
 
