@@ -128,8 +128,9 @@ TRADE_PROB_JITTER         = 0.15
 # Strategy options (_trade_properties).
 STRATEGY_CHOICES          = (1, 2, 3, 4)
 
-# Starting balance (_portfolio): log-distributed.
-BALANCE_MIN               = 100_000.0
+# Starting balance (_portfolio): log-distributed. 10x larger so small order
+# fractions still clear ≥1 share on high-priced stocks and deepen the book.
+BALANCE_MIN               = 1_000_000.0
 BALANCE_MAX_FACTOR        = 10.0
 
 # Cash reserves (_portfolio): aggressive bots keep less cash.
@@ -161,7 +162,7 @@ WATCHLIST_EXTRA_HI        = 8
 WATCHLIST_WEIGHT_ALPHA    = 1.2
 
 # Order types (_order_types).
-USE_MARKET_BASE           = 0.10
+USE_MARKET_BASE           = 0.20
 USE_MARKET_RANGE          = 0.30
 USE_MARKET_SKEW           = 1.5
 USE_SLIP_BASE             = 0.50
@@ -195,9 +196,9 @@ SLIP_TOL_BASE             = 0.005
 SLIP_TOL_SLOPE            = 0.025
 SLIP_TOL_JITTER           = 0.20
 
-# Limit offsets (_trade_limits).
-MAX_LIMIT_BASE            = 0.005
-MAX_LIMIT_SLOPE           = 0.015
+# Limit offsets (_trade_limits). Tight so resting orders cluster near market and fill.
+MAX_LIMIT_BASE            = 0.003
+MAX_LIMIT_SLOPE           = 0.005
 MAX_LIMIT_JITTER          = 0.20
 MIN_LIMIT_FRACTION_LO     = 0.05    # min_limit = max_limit * U(LO, HI)
 MIN_LIMIT_FRACTION_HI     = 0.30
@@ -208,11 +209,12 @@ PER_POS_BASE              = 0.08
 PER_POS_SLOPE             = 0.22
 PER_POS_JITTER            = 0.15
 
-# Trade amount fractions of per_pos_max (_trade_limits).
-MIN_TRADE_FRACTION_LO     = 0.10
-MIN_TRADE_FRACTION_HI     = 0.30
-MAX_TRADE_FRACTION_LO     = 0.40
-MAX_TRADE_FRACTION_HI     = 0.80
+# Trade amount fractions of per_pos_max (_trade_limits). Small so each order is
+# ~0.1-1% of portfolio and many small orders form a granular ladder, not paywalls.
+MIN_TRADE_FRACTION_LO     = 0.005
+MIN_TRADE_FRACTION_HI     = 0.015
+MAX_TRADE_FRACTION_LO     = 0.025
+MAX_TRADE_FRACTION_HI     = 0.05
 
 # Daily limits (_trade_limits).
 MAX_DAILY_TRADES_BASE     = 500
@@ -220,10 +222,11 @@ MAX_DAILY_TRADES_SLOPE    = 2500
 MAX_DAILY_TRADES_JITTER   = 0.20
 MAX_DAILY_TRADES_FLOOR    = 500
 
-MAX_OPEN_ORDERS_BASE      = 10
-MAX_OPEN_ORDERS_SLOPE     = 40
+# More resting rungs per bot to keep the book deep now that each order is small.
+MAX_OPEN_ORDERS_BASE      = 50
+MAX_OPEN_ORDERS_SLOPE     = 100
 MAX_OPEN_ORDERS_JITTER    = 0.20
-MAX_OPEN_ORDERS_FLOOR     = 10
+MAX_OPEN_ORDERS_FLOOR     = 50
 
 
 # ──────────────────────────── Invariant validation ───────────────────────────

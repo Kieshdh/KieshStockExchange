@@ -17,7 +17,7 @@ internal sealed class AiBotDecisionService
 {
     #region Services and Constructor
     // Max nudge applied to buyProb by the clamped sentiment value.
-    private const decimal SentimentMaxBias = 0.10m;
+    private const decimal SentimentMaxBias = 0.20m;
     // Probability of forcing a market order, per unit of |sentiment| > 1.
     private const decimal OverflowGain     = 0.25m;
     // Cash kept un-spent on every buy so tiny rounding/race gaps don't trip Phase 1.6.
@@ -52,8 +52,8 @@ internal sealed class AiBotDecisionService
         if (ctx.OpenOrders.TryGetValue(user.UserId, out var orders) && orders.Count >= user.MaxOpenOrders)
             return false;
 
-        if (user.TradesToday >= user.MaxDailyTrades) return false;
-
+        // No daily-trades cap — it would only force churning bots dormant mid-session;
+        // MaxOpenOrders + ErrorsToday throttle instead. TradesToday still counts for the UI.
         return true;
     }
 
@@ -305,7 +305,12 @@ internal sealed class AiBotDecisionService
             var spendableBalance  = Math.Max(0m, freeBalance - BuySafetyBuffer);
             var allowedBalance    = Math.Min(Math.Min(spendableBalance, rawTrade), roomValue);
             var qty = (int)Math.Floor(allowedBalance / estimatePrice);
-            return qty > 0 ? qty : 0;
+            // Floor at 1 share when the intended notional rounds to zero but the bot can
+            // still afford a share within its spendable + position room — mirrors the sell
+            // branch's max(1, …) so small order fractions don't silently vanish.
+            if (qty == 0 && spendableBalance >= estimatePrice && roomValue >= estimatePrice)
+                qty = 1;
+            return qty;
         }
         else
         {
