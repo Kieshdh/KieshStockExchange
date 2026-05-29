@@ -640,34 +640,25 @@ public sealed class OrderExecutionService : IOrderExecutionService
             return results;
         }
 
-        // Phase 3: one root tx per group. Sequential — book locks are independent
-        // semaphores, but the SQLite writer is shared so we'd serialise anyway.
-        var allFills = new List<Transaction>();
+        // Phase 3: one root tx per group. Postgres MVCC lets concurrent
+        // writers commit independently and book locks are per
+        // (stockId, currency), so the groups run in parallel. The pre-Pg
+        // comment ("SQLite writer is shared so we'd serialise anyway") was
+        // stale. Each group's catch is wrapped in RunGroupWithRecoveryAsync
+        // so a single group failure doesn't tear down the WhenAll.
+        var groupTasks = new List<Task<List<Transaction>>>(groups.Count);
         foreach (var kv in groups)
         {
             var (stockId, currency) = kv.Key;
             var groupItems = kv.Value;
-
-            try
-            {
-                var groupFills = await RunGroupTxAsync(
-                    stockId, currency, groupItems, results, ct).ConfigureAwait(false);
-                if (groupFills.Count > 0) allFills.AddRange(groupFills);
-            }
-            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
-            {
-                _logger.LogError(ex,
-                    "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
-                    stockId, currency);
-
-                // The group tx already rolled back any settle DB writes. The orders for
-                // this group are still in DB (inserted in Phase 2) but they aren't on the
-                // book and the engine doesn't know about them. Cancel them and release
-                // the Phase 1.5/1.6 reservations they consumed so the books don't get
-                // ghost open rows that the bot's next refresh treats as still-pending.
-                await RecoverFailedGroupAsync(groupItems, results, ex.Message, ct).ConfigureAwait(false);
-            }
+            groupTasks.Add(RunGroupWithRecoveryAsync(stockId, currency, groupItems, results, ct));
         }
+
+        var groupResults = await Task.WhenAll(groupTasks).ConfigureAwait(false);
+
+        var allFills = new List<Transaction>();
+        for (int i = 0; i < groupResults.Length; i++)
+            if (groupResults[i].Count > 0) allFills.AddRange(groupResults[i]);
 
         // Phase 4: publish ticks outside all locks. Per-group NotifyOrdersMutated already
         // fired inside RunGroupTxAsync; this is the cross-group coalesced tick publish.
@@ -675,6 +666,38 @@ public sealed class OrderExecutionService : IOrderExecutionService
             await _marketData.OnTicksAsync(allFills, ct).ConfigureAwait(false);
 
         return results;
+    }
+
+    /// <summary>
+    /// Per-task wrapper around <see cref="RunGroupTxAsync"/>. Catches settlement failures
+    /// and runs the recovery path inline, so the parallel <c>Task.WhenAll</c> in
+    /// <see cref="PlaceAndMatchBatchAsync"/> sees a successful task even when a group's
+    /// matcher/settle pass fails. The shutdown-OCE filter mirrors the sequential
+    /// implementation that lived in PlaceAndMatchBatchAsync before P2.
+    /// </summary>
+    private async Task<List<Transaction>> RunGroupWithRecoveryAsync(
+        int stockId, CurrencyType currency,
+        List<(int index, Order order)> groupItems,
+        OrderResult[] results, CancellationToken ct)
+    {
+        try
+        {
+            return await RunGroupTxAsync(stockId, currency, groupItems, results, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+        {
+            _logger.LogError(ex,
+                "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
+                stockId, currency);
+
+            // The group tx already rolled back any settle DB writes. The orders for this
+            // group are still in DB (inserted in Phase 2) but they aren't on the book and
+            // the engine doesn't know about them. Cancel them and release the Phase 1.5/1.6
+            // reservations they consumed so the books don't get ghost open rows that the
+            // bot's next refresh treats as still-pending.
+            await RecoverFailedGroupAsync(groupItems, results, ex.Message, ct).ConfigureAwait(false);
+            return new List<Transaction>();
+        }
     }
 
     /// <summary>
