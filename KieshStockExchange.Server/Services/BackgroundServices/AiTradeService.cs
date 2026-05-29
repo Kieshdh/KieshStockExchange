@@ -9,6 +9,7 @@ using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Diagnostics;
@@ -148,7 +149,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // gates each bot's actual deposit within the cycle.
     private static readonly TimeSpan CashInjectionInterval = TimeSpan.FromHours(1);
 
-    private CancellationTokenSource? _cts;
+    // Schedule fires on drain signal; engine only fires if drain times out.
+    private CancellationTokenSource? _schedulingCts;
+    private CancellationTokenSource? _engineCts;
     private Task? _runner;
     private long _tickCount = 0;
     private long _tradesPlacedThisSession = 0;
@@ -178,6 +181,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly IAccountsCache         _accounts;
     private readonly IFxRateService         _fxRates;
     private readonly ILogger<AiTradeService> _logger;
+    private readonly IConfiguration         _configuration;
 
     public AiTradeService(
         IOrderExecutionService marketOrders,
@@ -191,7 +195,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IFxRateService fxRates,
         ILogger<AiTradeService> logger,
         ILoggerFactory loggerFactory,
-        IOptions<SeparatorLoggerOptions> loggerOptions)
+        IOptions<SeparatorLoggerOptions> loggerOptions,
+        IConfiguration configuration)
     {
         _marketOrders = marketOrders ?? throw new ArgumentNullException(nameof(marketOrders));
         _market       = market       ?? throw new ArgumentNullException(nameof(market));
@@ -199,6 +204,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _accounts     = accounts     ?? throw new ArgumentNullException(nameof(accounts));
         _fxRates      = fxRates      ?? throw new ArgumentNullException(nameof(fxRates));
         _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         if (db          is null) throw new ArgumentNullException(nameof(db));
         if (ledger      is null) throw new ArgumentNullException(nameof(ledger));
         if (books       is null) throw new ArgumentNullException(nameof(books));
@@ -310,8 +316,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             await _market.SubscribeAllAsync(currency, forUi: false, ct).ConfigureAwait(false);
 
         ResetSessionState();
-        _cts    = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _runner = Task.Run(() => RunLoopAsync(_cts.Token));
+        _schedulingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _engineCts     = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _runner = Task.Run(() => RunLoopAsync(_schedulingCts.Token));
     }
 
     public async Task StopBotAsync()
@@ -319,8 +326,25 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (_runner == null) return;
         try
         {
-            _cts?.Cancel();
-            await _runner.ConfigureAwait(false);
+            _schedulingCts?.Cancel();
+
+            var graceMs = _configuration.GetValue("Bots:GracefulStopMs", 8000);
+            var sw = Stopwatch.StartNew();
+            var winner = await Task.WhenAny(_runner, Task.Delay(Math.Max(0, graceMs))).ConfigureAwait(false);
+            sw.Stop();
+
+            if (winner == _runner)
+            {
+                _logger.LogInformation("Bot loop drained cleanly in {Ms}ms.", sw.ElapsedMilliseconds);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Bot loop drain timeout after {Ms}ms; hard-canceling in-flight engine work.",
+                    graceMs);
+                _engineCts?.Cancel();
+                await _runner.ConfigureAwait(false);
+            }
 
             foreach (var currency in CurrenciesToTrade)
                 await _market.UnsubscribeAllAsync(currency, forUi: false).ConfigureAwait(false);
@@ -328,8 +352,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         finally
         {
             _runner = null;
-            _cts?.Dispose();
-            _cts = null;
+            _schedulingCts?.Dispose();
+            _schedulingCts = null;
+            _engineCts?.Dispose();
+            _engineCts = null;
             LoopStartedAtUtc = null;
             StatsChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -385,7 +411,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
             var pending = await CollectPendingOrdersAsync(now, ct).ConfigureAwait(false);
             if (pending.Count > 0)
-                await SubmitAndApplyBatchAsync(pending, ct).ConfigureAwait(false);
+                await SubmitAndApplyBatchAsync(pending, _engineCts?.Token ?? ct).ConfigureAwait(false);
 
             RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
             Interlocked.Increment(ref _tickCount);

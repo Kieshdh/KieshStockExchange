@@ -654,7 +654,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     stockId, currency, groupItems, results, ct).ConfigureAwait(false);
                 if (groupFills.Count > 0) allFills.AddRange(groupFills);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 _logger.LogError(ex,
                     "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
@@ -774,7 +774,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
             catch
             {
-                await groupTx.RollbackAsync(ct).ConfigureAwait(false);
+                // Use CancellationToken.None so the rollback completes even when the
+                // outer ct was canceled at shutdown.
+                await groupTx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
 
                 // Undo book mutations recorded this group, in reverse order. Upserts come
                 // off first so RollbackMatch only has to put maker fills back.
@@ -852,6 +854,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
         string failureReason,
         CancellationToken ct)
     {
+        // Shutdown cancellation: original tx never committed, nothing to recover.
+        if (ct.IsCancellationRequested) return;
         try
         {
             await using var recoveryTx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
