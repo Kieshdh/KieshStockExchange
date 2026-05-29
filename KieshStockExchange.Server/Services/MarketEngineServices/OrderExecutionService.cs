@@ -9,6 +9,7 @@ using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using Npgsql;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
@@ -712,6 +713,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
         OrderResult[] results,
         CancellationToken ct)
     {
+        // Parallel groups (P2) can deadlock in Postgres when two group txs lock the same
+        // rows in opposite order. 40P01/40001 are transient — the inner catch rolls back
+        // and restores book + cache, so we re-match from clean state after a short backoff.
+        for (int attempt = 1; ; attempt++)
+        {
         // Fresh scope for THIS group only. Restoring it on failure rolls back the settle-pass
         // mutations; Phase 1.5/1.6 reservations are recovered separately by
         // RecoverFailedGroupAsync because they were taken outside any tx.
@@ -722,6 +728,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
         var groupOrdersById = new Dictionary<int, Order>(groupItems.Count * 2);
 
         bool committed = false;
+        try
+        {
         await _books.WithBookLockAsync(stockId, currency, ct, async book =>
         {
             // Match every item in this group while we hold the book lock. The book is
@@ -813,6 +821,17 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 throw;
             }
         }).ConfigureAwait(false);
+        }
+        catch (PostgresException pg)
+            when (IsTransientConflict(pg) && attempt < MaxGroupTxAttempts && !ct.IsCancellationRequested)
+        {
+            // Book + cache already restored by the inner catch; back off and re-match.
+            _logger.LogWarning(
+                "RunGroupTxAsync: transient {SqlState} on ({StockId},{Currency}) attempt {Attempt}; retrying.",
+                pg.SqlState, stockId, currency, attempt);
+            await Task.Delay(RetryBackoffMs(attempt), ct).ConfigureAwait(false);
+            continue;
+        }
 
         if (!committed) return groupFills; // unreachable in practice — throw above covers it
 
@@ -862,7 +881,18 @@ public sealed class OrderExecutionService : IOrderExecutionService
         }
 
         return groupFills;
+        }
     }
+
+    // 40P01 deadlock_detected, 40001 serialization_failure — Postgres aborts one tx of a
+    // conflicting pair; the survivor commits, so retrying the victim almost always lands.
+    private const int MaxGroupTxAttempts = 4;
+    private static bool IsTransientConflict(PostgresException pg)
+        => pg.SqlState is "40P01" or "40001";
+
+    // Small escalating backoff with jitter so retried groups don't re-collide in lock-step.
+    private static int RetryBackoffMs(int attempt)
+        => attempt * 5 + Random.Shared.Next(0, 5);
 
     /// <summary>
     /// Group tx failed after Phase 2 already committed the group's orders. Mark them
