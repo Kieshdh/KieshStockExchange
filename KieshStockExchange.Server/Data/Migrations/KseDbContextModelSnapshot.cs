@@ -58,16 +58,10 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<decimal>("MaxCashReservePrc")
                         .HasColumnType("numeric(20,10)");
 
-                    b.Property<int>("MaxDailyTrades")
-                        .HasColumnType("integer");
-
                     b.Property<decimal>("MaxLimitOffsetPrc")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<int>("MaxOpenOrders")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("MaxOpenPositions")
                         .HasColumnType("integer");
 
                     b.Property<decimal>("MaxTradeAmountPrc")
@@ -78,9 +72,6 @@ namespace KieshStockExchange.Server.Data.Migrations
 
                     b.Property<decimal>("MinLimitOffsetPrc")
                         .HasColumnType("numeric(20,10)");
-
-                    b.Property<int>("MinOpenPositions")
-                        .HasColumnType("integer");
 
                     b.Property<decimal>("MinTradeAmountPrc")
                         .HasColumnType("numeric(20,10)");
