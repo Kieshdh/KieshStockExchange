@@ -1,3 +1,4 @@
+using System.Text;
 using Dapper;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
@@ -354,6 +355,170 @@ public sealed partial class PgDBService
             VALUES (@UserId,@Currency,@Amount,@Kind,@Note,@CreatedAt)
             RETURNING ""FundTransactionId""", row);
         tx.FundTransactionId = row.FundTransactionId;
+    }
+    #endregion
+
+    #region Batched hot-type writes (P1)
+    // Multi-row INSERT/UPDATE for Position / Fund / FundTransaction. Same
+    // per-row SQL as CreatePosition/UpdatePosition/UpdateFund/CreateFundTransaction,
+    // unrolled into one VALUES statement so each bot trade group settles in
+    // ~5 round-trips instead of ~20.
+    private async Task InsertPositionsBatchAsync(IReadOnlyList<Position> positions, CancellationToken ct)
+    {
+        for (int i = 0; i < positions.Count; i++)
+            if (!positions[i].IsValid())
+                throw new ArgumentException("Position entity is not valid", nameof(positions));
+
+        var sql = new StringBuilder(@"
+            INSERT INTO ""Positions"" (""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""CreatedAt"",""UpdatedAt"")
+            VALUES ", capacity: 192 + positions.Count * 64);
+        var p = new DynamicParameters();
+        for (int i = 0; i < positions.Count; i++)
+        {
+            if (i > 0) sql.Append(',');
+            sql.Append("(@UserId_").Append(i)
+               .Append(",@StockId_").Append(i)
+               .Append(",@Quantity_").Append(i)
+               .Append(",@ReservedQuantity_").Append(i)
+               .Append(",@CreatedAt_").Append(i)
+               .Append(",@UpdatedAt_").Append(i)
+               .Append(')');
+
+            var r = PositionMapper.ToRow(positions[i]);
+            p.Add($"UserId_{i}",           r.UserId);
+            p.Add($"StockId_{i}",          r.StockId);
+            p.Add($"Quantity_{i}",         r.Quantity);
+            p.Add($"ReservedQuantity_{i}", r.ReservedQuantity);
+            p.Add($"CreatedAt_{i}",        r.CreatedAt);
+            p.Add($"UpdatedAt_{i}",        r.UpdatedAt);
+        }
+        sql.Append(@" RETURNING ""PositionId""");
+
+        await using var c = await OpenAsync(ct);
+        var ids = (await c.QueryAsync<int>(sql.ToString(), p)).ToList();
+        if (ids.Count != positions.Count)
+            throw new InvalidOperationException(
+                $"InsertPositionsBatch: RETURNING produced {ids.Count} ids for {positions.Count} rows.");
+        for (int i = 0; i < positions.Count; i++) positions[i].PositionId = ids[i];
+    }
+
+    // No IsValid() — engine-driven; CHECK constraint enforces the invariant.
+    private async Task UpdatePositionsBatchAsync(IReadOnlyList<Position> positions, CancellationToken ct)
+    {
+        var sql = new StringBuilder(@"
+            UPDATE ""Positions"" SET
+              ""UserId"" = data.""UserId"", ""StockId"" = data.""StockId"",
+              ""Quantity"" = data.""Quantity"", ""ReservedQuantity"" = data.""ReservedQuantity"",
+              ""CreatedAt"" = data.""CreatedAt"", ""UpdatedAt"" = data.""UpdatedAt""
+            FROM (VALUES ", capacity: 384 + positions.Count * 96);
+        var p = new DynamicParameters();
+        for (int i = 0; i < positions.Count; i++)
+        {
+            if (i > 0) sql.Append(',');
+            if (i == 0)
+                sql.Append("(@PositionId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@ReservedQuantity_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
+            else
+                sql.Append("(@PositionId_").Append(i)
+                   .Append(",@UserId_").Append(i)
+                   .Append(",@StockId_").Append(i)
+                   .Append(",@Quantity_").Append(i)
+                   .Append(",@ReservedQuantity_").Append(i)
+                   .Append(",@CreatedAt_").Append(i)
+                   .Append(",@UpdatedAt_").Append(i)
+                   .Append(')');
+
+            var r = PositionMapper.ToRow(positions[i]);
+            p.Add($"PositionId_{i}",       r.PositionId);
+            p.Add($"UserId_{i}",           r.UserId);
+            p.Add($"StockId_{i}",          r.StockId);
+            p.Add($"Quantity_{i}",         r.Quantity);
+            p.Add($"ReservedQuantity_{i}", r.ReservedQuantity);
+            p.Add($"CreatedAt_{i}",        r.CreatedAt);
+            p.Add($"UpdatedAt_{i}",        r.UpdatedAt);
+        }
+        sql.Append(@") AS data(""PositionId"",""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""CreatedAt"",""UpdatedAt"") WHERE ""Positions"".""PositionId"" = data.""PositionId""");
+
+        await using var c = await OpenAsync(ct);
+        await c.ExecuteAsync(sql.ToString(), p);
+    }
+
+    // No IsValid() — engine-driven; CHECK constraint enforces the invariant.
+    private async Task UpdateFundsBatchAsync(IReadOnlyList<Fund> funds, CancellationToken ct)
+    {
+        var sql = new StringBuilder(@"
+            UPDATE ""Funds"" SET
+              ""UserId"" = data.""UserId"", ""TotalBalance"" = data.""TotalBalance"",
+              ""ReservedBalance"" = data.""ReservedBalance"", ""Currency"" = data.""Currency"",
+              ""CreatedAt"" = data.""CreatedAt"", ""UpdatedAt"" = data.""UpdatedAt""
+            FROM (VALUES ", capacity: 384 + funds.Count * 96);
+        var p = new DynamicParameters();
+        for (int i = 0; i < funds.Count; i++)
+        {
+            if (i > 0) sql.Append(',');
+            if (i == 0)
+                sql.Append("(@FundId_0::int,@UserId_0::int,@TotalBalance_0::numeric,@ReservedBalance_0::numeric,@Currency_0::text,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
+            else
+                sql.Append("(@FundId_").Append(i)
+                   .Append(",@UserId_").Append(i)
+                   .Append(",@TotalBalance_").Append(i)
+                   .Append(",@ReservedBalance_").Append(i)
+                   .Append(",@Currency_").Append(i)
+                   .Append(",@CreatedAt_").Append(i)
+                   .Append(",@UpdatedAt_").Append(i)
+                   .Append(')');
+
+            var r = FundMapper.ToRow(funds[i]);
+            p.Add($"FundId_{i}",          r.FundId);
+            p.Add($"UserId_{i}",          r.UserId);
+            p.Add($"TotalBalance_{i}",    r.TotalBalance);
+            p.Add($"ReservedBalance_{i}", r.ReservedBalance);
+            p.Add($"Currency_{i}",        r.Currency);
+            p.Add($"CreatedAt_{i}",       r.CreatedAt);
+            p.Add($"UpdatedAt_{i}",       r.UpdatedAt);
+        }
+        sql.Append(@") AS data(""FundId"",""UserId"",""TotalBalance"",""ReservedBalance"",""Currency"",""CreatedAt"",""UpdatedAt"") WHERE ""Funds"".""FundId"" = data.""FundId""");
+
+        await using var c = await OpenAsync(ct);
+        await c.ExecuteAsync(sql.ToString(), p);
+    }
+
+    private async Task InsertFundTransactionsBatchAsync(IReadOnlyList<FundTransaction> txs, CancellationToken ct)
+    {
+        for (int i = 0; i < txs.Count; i++)
+            if (!txs[i].IsValid())
+                throw new ArgumentException("FundTransaction entity is not valid", nameof(txs));
+
+        var sql = new StringBuilder(@"
+            INSERT INTO ""FundTransactions"" (""UserId"",""Currency"",""Amount"",""Kind"",""Note"",""CreatedAt"")
+            VALUES ", capacity: 192 + txs.Count * 64);
+        var p = new DynamicParameters();
+        for (int i = 0; i < txs.Count; i++)
+        {
+            if (i > 0) sql.Append(',');
+            sql.Append("(@UserId_").Append(i)
+               .Append(",@Currency_").Append(i)
+               .Append(",@Amount_").Append(i)
+               .Append(",@Kind_").Append(i)
+               .Append(",@Note_").Append(i)
+               .Append(",@CreatedAt_").Append(i)
+               .Append(')');
+
+            var r = FundTransactionMapper.ToRow(txs[i]);
+            p.Add($"UserId_{i}",    r.UserId);
+            p.Add($"Currency_{i}",  r.Currency);
+            p.Add($"Amount_{i}",    r.Amount);
+            p.Add($"Kind_{i}",      r.Kind);
+            p.Add($"Note_{i}",      r.Note);
+            p.Add($"CreatedAt_{i}", r.CreatedAt);
+        }
+        sql.Append(@" RETURNING ""FundTransactionId""");
+
+        await using var c = await OpenAsync(ct);
+        var ids = (await c.QueryAsync<int>(sql.ToString(), p)).ToList();
+        if (ids.Count != txs.Count)
+            throw new InvalidOperationException(
+                $"InsertFundTransactionsBatch: RETURNING produced {ids.Count} ids for {txs.Count} rows.");
+        for (int i = 0; i < txs.Count; i++) txs[i].FundTransactionId = ids[i];
     }
     #endregion
 }

@@ -1,3 +1,4 @@
+using System.Text;
 using Dapper;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
@@ -374,6 +375,166 @@ public sealed partial class PgDBService
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(@"DELETE FROM ""Transactions"" WHERE ""TransactionId"" = @TransactionId",
             new { transaction.TransactionId });
+    }
+    #endregion
+
+    #region Batched hot-type writes (P1)
+    // Multi-row INSERT/UPDATE for Order + Transaction. Same per-row SQL as
+    // CreateOrder/UpdateOrder/CreateTransaction, just unrolled across all rows
+    // in a single statement so the bot trade group's settle phase issues one
+    // round-trip per call instead of N. Postgres preserves VALUES order in
+    // RETURNING within a single statement, so PK writeback is index-aligned.
+    private async Task InsertOrdersBatchAsync(IReadOnlyList<Order> orders, CancellationToken ct)
+    {
+        for (int i = 0; i < orders.Count; i++)
+            if (!orders[i].IsValid())
+                throw new ArgumentException("Order entity is not valid", nameof(orders));
+
+        var sql = new StringBuilder(@"
+            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",
+                                   ""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
+            VALUES ", capacity: 256 + orders.Count * 96);
+        var p = new DynamicParameters();
+        for (int i = 0; i < orders.Count; i++)
+        {
+            if (i > 0) sql.Append(',');
+            sql.Append("(@UserId_").Append(i)
+               .Append(",@StockId_").Append(i)
+               .Append(",@Quantity_").Append(i)
+               .Append(",@Price_").Append(i)
+               .Append(",@SlippagePercent_").Append(i)
+               .Append(",@BuyBudget_").Append(i)
+               .Append(",@Currency_").Append(i)
+               .Append(",@OrderType_").Append(i)
+               .Append(",@Status_").Append(i)
+               .Append(",@AmountFilled_").Append(i)
+               .Append(",@CreatedAt_").Append(i)
+               .Append(",@UpdatedAt_").Append(i)
+               .Append(')');
+
+            var r = OrderMapper.ToRow(orders[i]);
+            p.Add($"UserId_{i}",          r.UserId);
+            p.Add($"StockId_{i}",         r.StockId);
+            p.Add($"Quantity_{i}",        r.Quantity);
+            p.Add($"Price_{i}",           r.Price);
+            p.Add($"SlippagePercent_{i}", r.SlippagePercent);
+            p.Add($"BuyBudget_{i}",       r.BuyBudget);
+            p.Add($"Currency_{i}",        r.Currency);
+            p.Add($"OrderType_{i}",       r.OrderType);
+            p.Add($"Status_{i}",          r.Status);
+            p.Add($"AmountFilled_{i}",    r.AmountFilled);
+            p.Add($"CreatedAt_{i}",       r.CreatedAt);
+            p.Add($"UpdatedAt_{i}",       r.UpdatedAt);
+        }
+        sql.Append(@" RETURNING ""OrderId""");
+
+        await using var c = await OpenAsync(ct);
+        var ids = (await c.QueryAsync<int>(sql.ToString(), p)).ToList();
+        if (ids.Count != orders.Count)
+            throw new InvalidOperationException(
+                $"InsertOrdersBatch: RETURNING produced {ids.Count} ids for {orders.Count} rows.");
+        for (int i = 0; i < orders.Count; i++) orders[i].OrderId = ids[i];
+    }
+
+    // No IsValid() — same reason as per-row UpdateOrder (engine-driven
+    // updates legitimately produce states the single-shot validators reject).
+    private async Task UpdateOrdersBatchAsync(IReadOnlyList<Order> orders, CancellationToken ct)
+    {
+        var sql = new StringBuilder(@"
+            UPDATE ""Orders"" SET
+              ""UserId"" = data.""UserId"", ""StockId"" = data.""StockId"", ""Quantity"" = data.""Quantity"",
+              ""Price"" = data.""Price"", ""SlippagePercent"" = data.""SlippagePercent"", ""BuyBudget"" = data.""BuyBudget"",
+              ""Currency"" = data.""Currency"", ""OrderType"" = data.""OrderType"", ""Status"" = data.""Status"",
+              ""AmountFilled"" = data.""AmountFilled"", ""CreatedAt"" = data.""CreatedAt"", ""UpdatedAt"" = data.""UpdatedAt""
+            FROM (VALUES ", capacity: 512 + orders.Count * 128);
+        var p = new DynamicParameters();
+        for (int i = 0; i < orders.Count; i++)
+        {
+            if (i > 0) sql.Append(',');
+            // First row carries explicit casts; Postgres infers subsequent rows.
+            if (i == 0)
+                sql.Append("(@OrderId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@Price_0::numeric,@SlippagePercent_0::numeric,@BuyBudget_0::numeric,@Currency_0::text,@OrderType_0::text,@Status_0::text,@AmountFilled_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
+            else
+                sql.Append("(@OrderId_").Append(i)
+                   .Append(",@UserId_").Append(i)
+                   .Append(",@StockId_").Append(i)
+                   .Append(",@Quantity_").Append(i)
+                   .Append(",@Price_").Append(i)
+                   .Append(",@SlippagePercent_").Append(i)
+                   .Append(",@BuyBudget_").Append(i)
+                   .Append(",@Currency_").Append(i)
+                   .Append(",@OrderType_").Append(i)
+                   .Append(",@Status_").Append(i)
+                   .Append(",@AmountFilled_").Append(i)
+                   .Append(",@CreatedAt_").Append(i)
+                   .Append(",@UpdatedAt_").Append(i)
+                   .Append(')');
+
+            var r = OrderMapper.ToRow(orders[i]);
+            p.Add($"OrderId_{i}",         r.OrderId);
+            p.Add($"UserId_{i}",          r.UserId);
+            p.Add($"StockId_{i}",         r.StockId);
+            p.Add($"Quantity_{i}",        r.Quantity);
+            p.Add($"Price_{i}",           r.Price);
+            p.Add($"SlippagePercent_{i}", r.SlippagePercent);
+            p.Add($"BuyBudget_{i}",       r.BuyBudget);
+            p.Add($"Currency_{i}",        r.Currency);
+            p.Add($"OrderType_{i}",       r.OrderType);
+            p.Add($"Status_{i}",          r.Status);
+            p.Add($"AmountFilled_{i}",    r.AmountFilled);
+            p.Add($"CreatedAt_{i}",       r.CreatedAt);
+            p.Add($"UpdatedAt_{i}",       r.UpdatedAt);
+        }
+        sql.Append(@") AS data(""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"") WHERE ""Orders"".""OrderId"" = data.""OrderId""");
+
+        await using var c = await OpenAsync(ct);
+        await c.ExecuteAsync(sql.ToString(), p);
+    }
+
+    private async Task InsertTransactionsBatchAsync(IReadOnlyList<Transaction> txs, CancellationToken ct)
+    {
+        for (int i = 0; i < txs.Count; i++)
+            if (!txs[i].IsValid())
+                throw new ArgumentException("Transaction entity is not valid", nameof(txs));
+
+        var sql = new StringBuilder(@"
+            INSERT INTO ""Transactions"" (""StockId"",""BuyOrderId"",""SellOrderId"",""BuyerId"",""SellerId"",
+                                          ""Quantity"",""Price"",""Currency"",""Timestamp"")
+            VALUES ", capacity: 256 + txs.Count * 80);
+        var p = new DynamicParameters();
+        for (int i = 0; i < txs.Count; i++)
+        {
+            if (i > 0) sql.Append(',');
+            sql.Append("(@StockId_").Append(i)
+               .Append(",@BuyOrderId_").Append(i)
+               .Append(",@SellOrderId_").Append(i)
+               .Append(",@BuyerId_").Append(i)
+               .Append(",@SellerId_").Append(i)
+               .Append(",@Quantity_").Append(i)
+               .Append(",@Price_").Append(i)
+               .Append(",@Currency_").Append(i)
+               .Append(",@Timestamp_").Append(i)
+               .Append(')');
+
+            var r = TransactionMapper.ToRow(txs[i]);
+            p.Add($"StockId_{i}",     r.StockId);
+            p.Add($"BuyOrderId_{i}",  r.BuyOrderId);
+            p.Add($"SellOrderId_{i}", r.SellOrderId);
+            p.Add($"BuyerId_{i}",     r.BuyerId);
+            p.Add($"SellerId_{i}",    r.SellerId);
+            p.Add($"Quantity_{i}",    r.Quantity);
+            p.Add($"Price_{i}",       r.Price);
+            p.Add($"Currency_{i}",    r.Currency);
+            p.Add($"Timestamp_{i}",   r.Timestamp);
+        }
+        sql.Append(@" RETURNING ""TransactionId""");
+
+        await using var c = await OpenAsync(ct);
+        var ids = (await c.QueryAsync<int>(sql.ToString(), p)).ToList();
+        if (ids.Count != txs.Count)
+            throw new InvalidOperationException(
+                $"InsertTransactionsBatch: RETURNING produced {ids.Count} ids for {txs.Count} rows.");
+        for (int i = 0; i < txs.Count; i++) txs[i].TransactionId = ids[i];
     }
     #endregion
 }

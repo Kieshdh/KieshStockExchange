@@ -46,9 +46,36 @@ public sealed partial class PgDBService : IDataBaseService
         await c.ExecuteAsync($@"TRUNCATE TABLE ""{table}"" RESTART IDENTITY CASCADE");
     }
 
+    // Hot types (Order/Transaction/Position/Fund/FundTransaction) get a
+    // single multi-row VALUES statement when N>1 so a bot trade group's
+    // ~20 round-trips collapses to ~5. Cold types and N==1 fall through to
+    // the per-row loop below — batch SQL has measurable overhead at N=1
+    // and 14 settlement sites pass single-element arrays.
     public async Task InsertAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
     {
-        foreach (var item in items)
+        var list = items as IReadOnlyList<T> ?? items.ToList();
+        if (list.Count == 0) return;
+
+        if (list.Count > 1)
+        {
+            switch (list)
+            {
+                case IReadOnlyList<Order> orders:
+                    await InsertOrdersBatchAsync(orders, ct).ConfigureAwait(false);
+                    return;
+                case IReadOnlyList<Transaction> txs:
+                    await InsertTransactionsBatchAsync(txs, ct).ConfigureAwait(false);
+                    return;
+                case IReadOnlyList<Position> positions:
+                    await InsertPositionsBatchAsync(positions, ct).ConfigureAwait(false);
+                    return;
+                case IReadOnlyList<FundTransaction> fts:
+                    await InsertFundTransactionsBatchAsync(fts, ct).ConfigureAwait(false);
+                    return;
+            }
+        }
+
+        foreach (var item in list)
         {
             ct.ThrowIfCancellationRequested();
             switch (item)
@@ -75,7 +102,26 @@ public sealed partial class PgDBService : IDataBaseService
 
     public async Task UpdateAllAsync<T>(IEnumerable<T> items, CancellationToken ct = default)
     {
-        foreach (var item in items)
+        var list = items as IReadOnlyList<T> ?? items.ToList();
+        if (list.Count == 0) return;
+
+        if (list.Count > 1)
+        {
+            switch (list)
+            {
+                case IReadOnlyList<Order> orders:
+                    await UpdateOrdersBatchAsync(orders, ct).ConfigureAwait(false);
+                    return;
+                case IReadOnlyList<Fund> funds:
+                    await UpdateFundsBatchAsync(funds, ct).ConfigureAwait(false);
+                    return;
+                case IReadOnlyList<Position> positions:
+                    await UpdatePositionsBatchAsync(positions, ct).ConfigureAwait(false);
+                    return;
+            }
+        }
+
+        foreach (var item in list)
         {
             ct.ThrowIfCancellationRequested();
             switch (item)
