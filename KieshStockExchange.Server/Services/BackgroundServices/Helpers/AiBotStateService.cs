@@ -279,6 +279,9 @@ internal sealed class AiBotStateService
         }
 
         int pruned = 0;
+        int failed = 0;
+        int firstFailedId = 0;
+        OrderStatus firstFailedStatus = default;
         for (int i = 0; i < results.Count; i++)
         {
             var orderId = ids[i];
@@ -296,10 +299,15 @@ internal sealed class AiBotStateService
             }
             else
             {
-                _logger.LogWarning("PruneWorstOrders: cancel of {OrderId} returned {Status}",
-                    orderId, result.Status);
+                // Expected at high bot load: the order is mid-fill/mid-cancel in a
+                // concurrent group. Aggregate — one line per pass, not per order.
+                if (failed++ == 0) { firstFailedId = orderId; firstFailedStatus = result.Status; }
             }
         }
+
+        if (failed > 0)
+            _logger.LogWarning("PruneWorstOrders: {Failed}/{Total} cancels failed (e.g. #{OrderId}: {Status})",
+                failed, results.Count, firstFailedId, firstFailedStatus);
 
         if (pruned > 0) _stats.AddCancelled(pruned);
     }
