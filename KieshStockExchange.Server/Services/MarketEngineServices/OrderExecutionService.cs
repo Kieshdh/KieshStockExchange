@@ -763,6 +763,33 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }
             }
 
+            // Gate every user this group will mutate — fill participants (buyer+seller of
+            // each fill) plus open non-limit takers whose remainder we cancel below. A
+            // concurrent parallel group settling the same user's shared Fund/Position would
+            // otherwise interleave a non-atomic balance write (the P2 money-conservation
+            // race). Book lock stays outermost (book → gates → tx); AcquireUserGatesAsync
+            // sorts the keys so parallel groups can't AB/BA. Held across settle + commit.
+            var gateUsers = new HashSet<int>();
+            for (int gf = 0; gf < groupFills.Count; gf++)
+            {
+                gateUsers.Add(groupFills[gf].BuyerId);
+                gateUsers.Add(groupFills[gf].SellerId);
+            }
+            for (int r = 0; r < outcome.Records.Count; r++)
+            {
+                var ro = outcome.Records[r].Order;
+                if (ro.IsOpen && !ro.IsOpenLimitOrder) gateUsers.Add(ro.UserId);
+            }
+            var gateFundKeys = new List<(int, CurrencyType)>(gateUsers.Count);
+            var gatePosKeys = new List<(int, int)>(gateUsers.Count);
+            foreach (var u in gateUsers)
+            {
+                gateFundKeys.Add((u, currency));
+                gatePosKeys.Add((u, stockId));
+            }
+            await using var gates = await _accounts
+                .AcquireUserGatesAsync(gateFundKeys, gatePosKeys, ct).ConfigureAwait(false);
+
             await using var groupTx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
@@ -809,7 +836,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
                     }
                     else if (rec.Order.IsOpen)
                     {
-                        await _settlement.CancelRemainderAsync(rec.Order, ct).ConfigureAwait(false);
+                        // callerHoldsGate: this group already holds rec.Order's user gate
+                        // (added to gateUsers above), so OrderCanceller must not re-acquire it.
+                        await _settlement.CancelRemainderAsync(rec.Order, ct, callerHoldsGate: true).ConfigureAwait(false);
                     }
                 }
 
@@ -1065,237 +1094,155 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         if (toCancel.Count == 0) return results;
 
-        // Per-user gates held across re-read + book mutations + DB write + release.
-        // Mirrors CancelRemainderAsync's gate scope so a concurrent settle on the same
-        // user can't slip a fill in between our read and write. AcquireUserGatesAsync
-        // sorts keys to avoid AB/BA deadlocks against any other multi-gate acquirer.
-        var fundKeys = new HashSet<(int, CurrencyType)>();
-        var posKeys  = new HashSet<(int, int)>();
-        var userIds  = new HashSet<int>();
+        // Group by (stockId, currency) up front using the DB-loaded rows' fields. Each
+        // group is processed as its own book → gates → tx unit, matching the engine-wide
+        // lock order (book lock outermost, per-user gates inner) so the batch-cancel path
+        // can't AB/BA-deadlock against the parallel settle groups, which acquire the same
+        // gates inside their book locks. Per-group txs mean an earlier group stays
+        // committed if a later one fails; per-order outcomes are still reported via
+        // results[]. The §8.9 reservation release (ReleaseReservationInline) runs inside
+        // each group's gate+tx so a prune never leaves phantom Reserved on Fund/Position.
+        var groups = new Dictionary<(int StockId, CurrencyType Currency), List<Order>>();
         for (int i = 0; i < toCancel.Count; i++)
         {
             var o = toCancel[i];
-            userIds.Add(o.UserId);
-            if (o.IsBuyOrder)  fundKeys.Add((o.UserId, o.CurrencyType));
-            if (o.IsSellOrder) posKeys.Add((o.UserId, o.StockId));
-        }
-        var userIdList = new List<int>(userIds);
-        await _accounts.EnsureLoadedAsync(userIdList, ct).ConfigureAwait(false);
-        await using var userGates = await _accounts.AcquireUserGatesAsync(
-            fundKeys, posKeys, ct).ConfigureAwait(false);
-
-        // Re-read order rows under the gate. Concurrent fills either already committed
-        // (visible here) or are blocked on a gate we hold.
-        var liveOrders = await _db.GetOrdersByIds(idList, ct).ConfigureAwait(false);
-        var liveById = new Dictionary<int, Order>(liveOrders.Count);
-        for (int i = 0; i < liveOrders.Count; i++) liveById[liveOrders[i].OrderId] = liveOrders[i];
-
-        // Skip orders a peer path already closed (fill or cancel landed before we got the gate).
-        var liveToCancel = new List<Order>(toCancel.Count);
-        for (int i = 0; i < toCancel.Count; i++)
-        {
-            var staleId = toCancel[i].OrderId;
-            if (!liveById.TryGetValue(staleId, out var live) || !live.IsOpen)
-            {
-                if (resultIdxByOrderId.TryGetValue(staleId, out var idx))
-                    results[idx] = OrderResultFactory.AlreadyClosed();
-                continue;
-            }
-            liveToCancel.Add(live);
-        }
-        if (liveToCancel.Count == 0) return results;
-
-        // Hand-rolled grouping; avoids LINQ allocations on a path the bot prune timer hits.
-        var groups = new Dictionary<(int, CurrencyType), List<Order>>();
-        for (int i = 0; i < liveToCancel.Count; i++)
-        {
-            var o = liveToCancel[i];
             var key = (o.StockId, o.CurrencyType);
-            if (!groups.TryGetValue(key, out var list))
+            if (!groups.TryGetValue(key, out var glist))
             {
-                list = new List<Order>();
-                groups[key] = list;
+                glist = new List<Order>();
+                groups[key] = glist;
             }
-            list.Add(o);
+            glist.Add(o);
         }
 
-        // Reservation releases land per-order inside the same gate scope the batch
-        // already holds (we acquired user gates via AcquireUserGatesAsync above), so
-        // we can't call OrderCanceller.CancelAsync — it would try to re-acquire the
-        // same SemaphoreSlim and deadlock. Inline the same Fund/Position release
-        // logic OrderCanceller uses, then batch-persist the touched rows alongside
-        // the cancelled orders inside one root tx.
-        //
-        // This is the §8.9 fix: pre-fix, the batch path marked orders Cancelled
-        // without releasing the reservation, so every prune left phantom Reserved
-        // on the user's Fund/Position. Drift accumulated and surfaced as the
-        // "Insufficient reserved balance" errors during settlement.
-        var touchedFunds = new Dictionary<(int UserId, CurrencyType Ccy), Fund>();
-        var touchedPositions = new Dictionary<(int UserId, int StockId), Position>();
+        // Collected across groups for the post-commit order-cache refresh.
+        var allCancelled = new List<Order>(toCancel.Count);
 
-        await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-        try
+        foreach (var kv in groups)
         {
-            foreach (var kv in groups)
+            var (stockId, currency) = kv.Key;
+            var groupOrders = kv.Value;
+
+            // Gate keys for this group's owners: buys gate the fund, sells gate the position.
+            var fundKeys = new HashSet<(int, CurrencyType)>();
+            var posKeys  = new HashSet<(int, int)>();
+            var userIds  = new HashSet<int>();
+            var groupIds = new List<int>(groupOrders.Count);
+            for (int i = 0; i < groupOrders.Count; i++)
             {
-                var (stockId, currency) = kv.Key;
-                var list = kv.Value;
-                await _books.WithBookLockAsync(stockId, currency, ct, book =>
+                var o = groupOrders[i];
+                userIds.Add(o.UserId);
+                groupIds.Add(o.OrderId);
+                if (o.IsBuyOrder)  fundKeys.Add((o.UserId, o.CurrencyType));
+                if (o.IsSellOrder) posKeys.Add((o.UserId, o.StockId));
+            }
+            await _accounts.EnsureLoadedAsync(new List<int>(userIds), ct).ConfigureAwait(false);
+
+            var touchedFunds = new Dictionary<(int UserId, CurrencyType Ccy), Fund>();
+            var touchedPositions = new Dictionary<(int UserId, int StockId), Position>();
+            var liveToCancel = new List<Order>(groupOrders.Count);
+
+            try
+            {
+                await _books.WithBookLockAsync(stockId, currency, ct, async book =>
                 {
-                    for (int i = 0; i < list.Count; i++)
+                    // book → gates: gates inner, sorted in AcquireUserGatesAsync (no AB/BA).
+                    // Held across re-read + book mutation + DB write + commit so a concurrent
+                    // settle on the same user can't slip a fill between our read and write.
+                    await using var gates = await _accounts.AcquireUserGatesAsync(
+                        fundKeys, posKeys, ct).ConfigureAwait(false);
+
+                    // Re-read under the gate. Concurrent fills/cancels are either committed
+                    // (visible here) or blocked on a gate we hold.
+                    var liveOrders = await _db.GetOrdersByIds(groupIds, ct).ConfigureAwait(false);
+                    var liveById = new Dictionary<int, Order>(liveOrders.Count);
+                    for (int i = 0; i < liveOrders.Count; i++) liveById[liveOrders[i].OrderId] = liveOrders[i];
+
+                    for (int i = 0; i < groupOrders.Count; i++)
                     {
-                        var dbRow = list[i];
-                        book.RemoveById(dbRow.OrderId);
-                        // Resolve to canonical so we read the live CurrentBuyReservation /
-                        // CurrentSellReservedQty; the DB-loaded copy carries zero in those
-                        // runtime-only fields.
-                        Order target = dbRow;
-                        if (_registry.TryGet(dbRow.OrderId, out var canon))
+                        var staleId = groupOrders[i].OrderId;
+                        if (!liveById.TryGetValue(staleId, out var live) || !live.IsOpen)
                         {
-                            target = canon;
-                            if (canon.IsOpen) canon.Cancel();
+                            if (resultIdxByOrderId.TryGetValue(staleId, out var idx))
+                                results[idx] = OrderResultFactory.AlreadyClosed();
+                            continue;
                         }
-                        if (dbRow.IsOpen) dbRow.Cancel();
-
-                        ReleaseReservationInline(target, touchedFunds, touchedPositions);
+                        liveToCancel.Add(live);
                     }
-                    return Task.CompletedTask;
-                }).ConfigureAwait(false);
-            }
+                    if (liveToCancel.Count == 0) return;
 
-            await _db.UpdateAllAsync(liveToCancel, ct).ConfigureAwait(false);
-            if (touchedFunds.Count > 0)
-                await _db.UpdateAllAsync(touchedFunds.Values, ct).ConfigureAwait(false);
-            if (touchedPositions.Count > 0)
-                await _db.UpdateAllAsync(touchedPositions.Values, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-
-            // Drop terminal orders from the registry after the tx commits so the
-            // reconciler stops seeing them. Reservation is already 0 by this point.
-            for (int i = 0; i < liveToCancel.Count; i++)
-                _registry.Remove(liveToCancel[i].OrderId);
-        }
-        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
-        {
-            await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-            _logger.LogError(ex, "CancelOrdersBatchAsync: tx failed for {Count} orders", liveToCancel.Count);
-
-            // Restore book state for the orders we removed; status mutation on the in-memory
-            // Order is unchanged since we only flipped Cancel on the same instance, but the
-            // book lost its reference. Upsert puts it back at the (price, side) tail.
-            foreach (var kv in groups)
-            {
-                var (stockId, currency) = kv.Key;
-                var list = kv.Value;
-                try
-                {
-                    await _books.WithBookLockAsync(stockId, currency, ct, book =>
+                    await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+                    try
                     {
-                        for (int i = 0; i < list.Count; i++)
+                        for (int i = 0; i < liveToCancel.Count; i++)
                         {
-                            var dbRow = list[i];
-                            // Cancel() flipped status; restore Open so UpsertOrder accepts it.
+                            var dbRow = liveToCancel[i];
+                            book.RemoveById(dbRow.OrderId);
+                            // Resolve to canonical so we read the live CurrentBuyReservation /
+                            // CurrentSellReservedQty; the DB-loaded copy carries zero in those
+                            // runtime-only fields.
+                            Order target = dbRow;
+                            if (_registry.TryGet(dbRow.OrderId, out var canon))
+                            {
+                                target = canon;
+                                if (canon.IsOpen) canon.Cancel();
+                            }
+                            if (dbRow.IsOpen) dbRow.Cancel();
+                            ReleaseReservationInline(target, touchedFunds, touchedPositions);
+                        }
+
+                        await _db.UpdateAllAsync(liveToCancel, ct).ConfigureAwait(false);
+                        if (touchedFunds.Count > 0)
+                            await _db.UpdateAllAsync(touchedFunds.Values, ct).ConfigureAwait(false);
+                        if (touchedPositions.Count > 0)
+                            await _db.UpdateAllAsync(touchedPositions.Values, ct).ConfigureAwait(false);
+                        await tx.CommitAsync(ct).ConfigureAwait(false);
+
+                        // Drop terminal orders from the registry post-commit; reservation is 0.
+                        for (int i = 0; i < liveToCancel.Count; i++)
+                            _registry.Remove(liveToCancel[i].OrderId);
+                    }
+                    catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+                    {
+                        await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                        // Restore book: re-open + re-upsert the orders we removed this group.
+                        for (int i = 0; i < liveToCancel.Count; i++)
+                        {
+                            var dbRow = liveToCancel[i];
                             if (!dbRow.IsOpen) dbRow.Status = Order.Statuses.Open;
-                            // Mirror the rollback on the canonical so registry agrees.
                             if (_registry.TryGet(dbRow.OrderId, out var canon) && !canon.IsOpen)
                                 canon.Status = Order.Statuses.Open;
-                            // Re-upsert canonical (book holds canonical refs), not the
-                            // detached DB row.
                             var bookRef = _registry.TryGet(dbRow.OrderId, out var c) ? c : dbRow;
                             if (bookRef.IsOpenLimitOrder) book.UpsertOrder(bookRef);
                         }
-                        return Task.CompletedTask;
-                    }).ConfigureAwait(false);
-                }
-                catch (Exception inner)
-                {
-                    _logger.LogError(inner,
-                        "CancelOrdersBatchAsync: book restore failed for ({StockId},{Currency})",
-                        stockId, currency);
-                }
-            }
+                        throw;
+                    }
+                }).ConfigureAwait(false);
 
-            for (int i = 0; i < liveToCancel.Count; i++)
-            {
-                if (resultIdxByOrderId.TryGetValue(liveToCancel[i].OrderId, out var idx))
-                    results[idx] = OrderResultFactory.OperationFailed(
-                        $"Cancel batch failed: {ex.Message}");
-            }
-            return results;
-        }
-
-        // Release reservations post-commit. Each `o` here is the live row resolved from
-        // DB under the gate, NOT the canonical Order — so map through the registry to
-        // get the same instance the engine has been mutating. Per-order field is the
-        // source of truth; the silent-skip-on-mismatch branches that used to live here
-        // were one of the audited leak classes.
-        for (int i = 0; i < liveToCancel.Count; i++)
-        {
-            var liveRow = liveToCancel[i];
-            // Prefer canonical instance — that's the one with the live CurrentReservation.
-            var o = _registry.TryGet(liveRow.OrderId, out var canon) ? canon : liveRow;
-            try
-            {
-                if (o.IsSellOrder)
+                // Group committed (or nothing live). Record per-order Cancelled outcomes.
+                for (int i = 0; i < liveToCancel.Count; i++)
                 {
-                    var unreserve = o.CurrentSellReservedQty;
-                    if (unreserve <= 0) continue;
-                    var pos = _accounts.GetPosition(o.UserId, o.StockId);
-                    if (pos is null) continue;
-                    var toRelease = Math.Min(unreserve, pos.ReservedQuantity);
-                    if (toRelease <= 0) continue;
-                    var posResBefore = pos.ReservedQuantity;
-                    pos.UnreserveStock(toRelease);
-                    _ledger.LogPosition(o.UserId, o.StockId, o.OrderId,
-                        "CancelOrdersBatch:Unreserve",
-                        toRelease, posResBefore, pos.ReservedQuantity,
-                        pos.Quantity, pos.Quantity);
-                    var orderSellBefore = o.CurrentSellReservedQty;
-                    var released = o.ReleaseSellReservation();
-                    _ledger.LogOrder(o.UserId, o.OrderId, "CancelOrdersBatch:Unreserve",
-                        released, o.CurrentBuyReservation, o.CurrentBuyReservation,
-                        orderSellBefore, o.CurrentSellReservedQty);
-                }
-                else if (o.IsBuyOrder)
-                {
-                    var unreserve = o.CurrentBuyReservation;
-                    if (unreserve <= 0m) continue;
-                    var fund = _accounts.GetFund(o.UserId, o.CurrencyType);
-                    if (fund is null) continue;
-                    var toRelease = Math.Min(unreserve, fund.ReservedBalance);
-                    if (toRelease <= 0m) continue;
-                    var resB = fund.ReservedBalance;
-                    var totB = fund.TotalBalance;
-                    fund.UnreserveFunds(toRelease);
-                    var orderBuyBefore = o.CurrentBuyReservation;
-                    var released = o.ReleaseBuyReservation();
-                    _ledger.LogOrder(o.UserId, o.OrderId, "CancelOrdersBatch:Unreserve",
-                        released, orderBuyBefore, o.CurrentBuyReservation,
-                        o.CurrentSellReservedQty, o.CurrentSellReservedQty);
-                    _ledger.LogFund(o.UserId, o.CurrencyType, o.OrderId,
-                        "CancelOrdersBatch:Unreserve", toRelease, resB, fund.ReservedBalance,
-                        totB, fund.TotalBalance);
+                    allCancelled.Add(liveToCancel[i]);
+                    if (resultIdxByOrderId.TryGetValue(liveToCancel[i].OrderId, out var idx))
+                        results[idx] = OrderResultFactory.Cancelled(liveToCancel[i]);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
-                _logger.LogWarning(ex,
-                    "CancelOrdersBatchAsync: failed to release reservation for order #{OrderId} (user {UserId}); continuing.",
-                    o.OrderId, o.UserId);
+                _logger.LogError(ex,
+                    "CancelOrdersBatchAsync: group ({StockId},{Currency}) failed for {Count} orders",
+                    stockId, currency, liveToCancel.Count);
+                for (int i = 0; i < liveToCancel.Count; i++)
+                    if (resultIdxByOrderId.TryGetValue(liveToCancel[i].OrderId, out var idx))
+                        results[idx] = OrderResultFactory.OperationFailed($"Cancel batch failed: {ex.Message}");
             }
         }
 
-        for (int i = 0; i < liveToCancel.Count; i++)
+        // Refresh the order cache for every user a cancel touched.
+        if (allCancelled.Count > 0)
         {
-            if (resultIdxByOrderId.TryGetValue(liveToCancel[i].OrderId, out var idx))
-                results[idx] = OrderResultFactory.Cancelled(liveToCancel[i]);
-        }
-
-        // Refresh the active user's order cache if any cancels touched them.
-        if (liveToCancel.Count > 0)
-        {
-            var affected = new HashSet<int>(liveToCancel.Count);
-            for (int i = 0; i < liveToCancel.Count; i++) affected.Add(liveToCancel[i].UserId);
+            var affected = new HashSet<int>(allCancelled.Count);
+            for (int i = 0; i < allCancelled.Count; i++) affected.Add(allCancelled[i].UserId);
             _orderCache.NotifyOrdersMutated(affected);
         }
 

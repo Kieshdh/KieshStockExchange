@@ -26,7 +26,11 @@ internal sealed class OrderCanceller
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task CancelAsync(Order order, CancellationToken ct = default)
+    // callerHoldsGate: the batch settle path (RunGroupTxAsync) already holds this user's
+    // fund/position gate across its whole group tx, so re-acquiring the same non-reentrant
+    // SemaphoreSlim here would self-deadlock. When true, skip the acquisition and run the
+    // release+persist directly under the caller's gate.
+    public async Task CancelAsync(Order order, CancellationToken ct = default, bool callerHoldsGate = false)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -38,10 +42,13 @@ internal sealed class OrderCanceller
         // Load outside the gate to avoid nesting _loadGate inside a gate scope
         await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
 
-        // Per-user gate: hold across release + persist
-        await using var gate = order.IsSellOrder
-            ? await _accounts.AcquirePositionGateAsync(order.UserId, order.StockId, ct).ConfigureAwait(false)
-            : await _accounts.AcquireFundGateAsync(order.UserId, order.CurrencyType, ct).ConfigureAwait(false);
+        // Per-user gate: hold across release + persist (unless the caller already holds it)
+        IAsyncDisposable? gate = callerHoldsGate ? null
+            : order.IsSellOrder
+                ? await _accounts.AcquirePositionGateAsync(order.UserId, order.StockId, ct).ConfigureAwait(false)
+                : await _accounts.AcquireFundGateAsync(order.UserId, order.CurrencyType, ct).ConfigureAwait(false);
+        try
+        {
 
         var dbOrder = await _db.GetOrderById(order.OrderId, ct).ConfigureAwait(false)
                      ?? throw new InvalidOperationException($"Order #{order.OrderId} not found.");
@@ -78,6 +85,12 @@ internal sealed class OrderCanceller
             order.CurrentBuyReservation, order.CurrentBuyReservation,
             order.CurrentSellReservedQty, order.CurrentSellReservedQty);
         _registry.Remove(order.OrderId);
+
+        }
+        finally
+        {
+            if (gate != null) await gate.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     private async Task ReleaseSellReservationAndPersist(Order order, CancellationToken ct)

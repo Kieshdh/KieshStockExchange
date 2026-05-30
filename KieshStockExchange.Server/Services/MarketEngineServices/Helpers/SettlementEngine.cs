@@ -63,8 +63,8 @@ public sealed class SettlementEngine : ISettlementEngine
     public void RestoreCacheSnapshots(Dictionary<int, Order> ordersById, TradeBatchScope scope)
         => _tradeSettler.RestoreSnapshots(ordersById, scope);
 
-    public Task CancelRemainderAsync(Order order, CancellationToken ct = default)
-        => _orderCanceller.CancelAsync(order, ct);
+    public Task CancelRemainderAsync(Order order, CancellationToken ct = default, bool callerHoldsGate = false)
+        => _orderCanceller.CancelAsync(order, ct, callerHoldsGate);
 
     public Task ApplyOrderChangeAsync(Order order, int? newQuantity, decimal? newPrice, CancellationToken ct = default)
         => _orderModifier.ApplyChangeAsync(order, newQuantity, newPrice, ct);

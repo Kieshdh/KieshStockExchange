@@ -22,8 +22,8 @@ public interface ISettlementEngine
     /// <summary> Roll back cache mutations recorded in scope. Call from outer tx's catch. </summary>
     void RestoreCacheSnapshots(Dictionary<int, Order> ordersById, TradeBatchScope scope);
 
-    /// <summary> Mark an order as cancelled </summary>
-    Task CancelRemainderAsync(Order order, CancellationToken ct = default);
+    /// <summary> Mark an order as cancelled. Pass callerHoldsGate when already inside the user's gate. </summary>
+    Task CancelRemainderAsync(Order order, CancellationToken ct = default, bool callerHoldsGate = false);
 
     /// <summary> Update price/quantity on an existing open order </summary>
     Task ApplyOrderChangeAsync(Order order, int? newQuantity, decimal? newPrice, CancellationToken ct = default);
