@@ -88,6 +88,13 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
 
     print(f"✅ Generated {num_people} AI users (median seeded portfolio value: ${median_pv:,.2f}).")
 
+    # Human admin appended at the end — Identity + Holding only (no Profile = not a bot).
+    # Password is the seeder's shared "hallo123"; IsAdmin promotes this one row.
+    admin_id = num_people + 1
+    sheets["Identity"].append([admin_id, "admin", "Admin User", "admin@kse.local", "1990-01-01", True])
+    sheets["Holding"].append([admin_id, 1_000_000.00] + [0 for _ in STOCKS])
+    print(f"✅ Appended admin account (UserId {admin_id}, username 'admin').")
+
 
     # Apply dark theme and autofit columns
     for ws in sheets.values():

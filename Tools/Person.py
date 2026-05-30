@@ -247,7 +247,8 @@ class Person:
             self.username,
             self.full_name,
             self.email,
-            self.birthdate.isoformat() # birthdate written as ISO "YYYY-MM-DD" string
+            self.birthdate.isoformat(), # birthdate written as ISO "YYYY-MM-DD" string
+            False,                      # IsAdmin — generated bots are never admins
         ]
 
     def ToProfileList(self):

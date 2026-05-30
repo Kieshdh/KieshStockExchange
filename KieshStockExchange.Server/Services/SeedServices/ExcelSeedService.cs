@@ -231,11 +231,22 @@ public sealed class ExcelSeedService : IExcelSeedService
                 continue;
             }
 
+            bool isAdmin = false;
+            if (identityTable.Columns.Contains("IsAdmin"))
+            {
+                var raw = row["IsAdmin"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(raw))
+                {
+                    if (bool.TryParse(raw, out var bv)) isAdmin = bv;
+                    else if (int.TryParse(raw, out var iv)) isAdmin = iv != 0;
+                }
+            }
+
             User user = new User
             {
                 UserId = userId, Username = username, Email = email,
                 PasswordHash = SecurityHelper.HashPassword(password),
-                FullName = fullName, BirthDate = birthdate
+                FullName = fullName, BirthDate = birthdate, IsAdmin = isAdmin
             };
             if (!user.IsValid())
             {

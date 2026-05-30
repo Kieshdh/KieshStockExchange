@@ -53,7 +53,7 @@ def prepare_stocks_sheet(wb: Workbook) -> Worksheet:
 def prepare_identity_sheet(wb: Workbook) -> Worksheet:
     """Create/reset the Identity sheet and write its header row."""
     ws = reset_or_create_sheet(wb, "Identity")
-    ws.append(["UserId", "Username", "FullName", "Email", "Birthdate"])
+    ws.append(["UserId", "Username", "FullName", "Email", "Birthdate", "IsAdmin"])
     return ws
 
 
