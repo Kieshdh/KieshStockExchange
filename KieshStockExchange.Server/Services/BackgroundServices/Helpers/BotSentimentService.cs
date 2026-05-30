@@ -36,6 +36,8 @@ internal sealed class BotSentimentService
     // means slower mean reversion (0.7 keeps 70% of the prior value).
     private const decimal MeanReversionAlpha = 0.50m;
 
+    private const decimal InvSqrt3 = 0.5773502691896258m; // seed half-width → AR(1) steady-state std (amp/3)
+
     // Deterministic seed so the simulation is reproducible across runs.
     private const int RngSeed = 43;
 
@@ -73,7 +75,9 @@ internal sealed class BotSentimentService
 
     // News events
     private readonly bool _newsEvents;
-    private readonly decimal _shockMagnitude;
+    private readonly decimal _shockMinMagnitude;
+    private readonly decimal _shockMaxMagnitude;
+    private readonly double  _shockMagnitudeExponent; // >1 skews events toward the small end
     private readonly decimal _shockDecayPerTick;
     private readonly double  _shockArrivalProbPerTick; // per stock per ~1s tick
 
@@ -85,12 +89,15 @@ internal sealed class BotSentimentService
 
     internal BotSentimentService(IStockService stocks, ILogger<BotSentimentService> logger,
         bool newsEvents = true, double shockMeanIntervalHours = 6.0,
-        decimal shockMagnitude = 1.3m, decimal shockDecayPerTick = 0.999m)
+        decimal shockMinMagnitude = 0.3m, decimal shockMaxMagnitude = 1.5m,
+        double shockMagnitudeExponent = 3.0, decimal shockDecayPerTick = 0.999m)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _newsEvents = newsEvents;
-        _shockMagnitude    = shockMagnitude;
+        _shockMinMagnitude = shockMinMagnitude;
+        _shockMaxMagnitude = Math.Max(shockMinMagnitude, shockMaxMagnitude);
+        _shockMagnitudeExponent = Math.Max(1.0, shockMagnitudeExponent);
         _shockDecayPerTick = shockDecayPerTick;
         _shockArrivalProbPerTick = 1.0 / (Math.Max(0.0001, shockMeanIntervalHours) * 3600.0);
         _store  = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
@@ -177,13 +184,16 @@ internal sealed class BotSentimentService
         {
             if (_rng.NextDouble() >= _shockArrivalProbPerTick) continue;
             var sign = _rng.NextDouble() < 0.5 ? -1m : 1m;
+            // U^exp (exp>1) crowds the draw near the floor: many small events, few big.
+            var span = _shockMaxMagnitude - _shockMinMagnitude;
+            var mag = _shockMinMagnitude + span * (decimal)Math.Pow(_rng.NextDouble(), _shockMagnitudeExponent);
+            var delta = sign * mag;
             _shock.TryGetValue(sid, out var cur);
-            _shock[sid] = cur + sign * _shockMagnitude;
+            _shock[sid] = cur + delta;
             if (_logger.IsEnabled(LogLevel.Information))
             {
                 var sym = _stocks.TryGetSymbol(sid, out var s) ? s : sid.ToString();
-                _logger.LogInformation("News shock: {Symbol} {Delta:+0.0;-0.0}",
-                    sym, sign * _shockMagnitude);
+                _logger.LogInformation("News shock: {Symbol} {Delta:+0.00;-0.00}", sym, delta);
             }
         }
     }
@@ -271,8 +281,8 @@ internal sealed class BotSentimentService
 
     #region Reset
     /// <summary>
-    /// Re-seed all factors from their steady-state distribution
-    /// (uniform on `[-amp, +amp]`) and schedule the first reroll on each
+    /// Re-seed all factors from their AR(1) steady-state spread (std amp/3)
+    /// and schedule the first reroll on each
     /// scale one period from <paramref name="now"/>. Seeding avoids the
     /// "calm start" artifact where sentiment is 0 for the first minute /
     /// hour / day after a session start.
@@ -310,10 +320,11 @@ internal sealed class BotSentimentService
             _stocks.ById.Count);
     }
 
+    // Seed at the AR(1) steady-state spread (std amp/3), not the wider ±amp band.
     private decimal SteadyState(decimal amp)
     {
         var u = (decimal)(_rng.NextDouble() * 2.0 - 1.0);
-        return amp * u;
+        return amp * InvSqrt3 * u;
     }
     #endregion
 
