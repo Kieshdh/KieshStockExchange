@@ -1,0 +1,41 @@
+# 7e — production override, applied on top of docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production <cmd>
+#
+# Two prod-only concerns live here so local dev keeps its conveniences:
+#   1. Postgres is NOT published to the host — on a public VM the base file's
+#      "5432:5432" would expose the DB to the internet. The server reaches
+#      Postgres over the compose network by service name, so no publish is needed.
+#   2. A one-shot `migrate` service runs EF Core migrations. The runtime image is
+#      deliberately EF-free (data access is raw SQL), so migrations run from the
+#      SDK `build` stage via the existing design-time factory (KseDbContextFactory,
+#      which reads KSE_DB_CONNECTION_STRING). It is behind a profile so a normal
+#      `up` never starts it; run it explicitly once before the first seeded boot:
+#        docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#          --env-file .env.production run --rm migrate
+services:
+  postgres:
+    # Clear the base file's published port. Compose *concatenates* list fields
+    # across override files, so a plain "ports: []" would NOT drop the inherited
+    # "5432:5432" — the !reset tag (Compose >= 2.24) is required to actually
+    # remove it. The server still reaches Postgres over the compose network.
+    ports: !reset []
+
+  migrate:
+    build:
+      context: .
+      dockerfile: KieshStockExchange.Server/Dockerfile
+      target: build
+    profiles: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KSE_DB_CONNECTION_STRING: ${KSE_DB_CONNECTION_STRING}
+    command:
+      - sh
+      - -c
+      - |
+        dotnet tool install --global dotnet-ef --version 9.* && \
+        PATH="$$PATH:/root/.dotnet/tools" dotnet ef database update \
+          --project KieshStockExchange.Server \
+          --startup-project KieshStockExchange.Server

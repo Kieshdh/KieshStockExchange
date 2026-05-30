@@ -1,7 +1,16 @@
 # Deploy runbook — Phase 7e
 
-Host-agnostic steps for a Linux VM (recommendation: Hetzner CX22, Ubuntu 24.04).
-Self-hosted Postgres + server + Caddy via docker-compose on one box.
+Host-agnostic steps for a Linux VM. Primary target: Oracle Cloud Always Free ARM
+(Ampere A1), Ubuntu 24.04; documented fallback if its network storage throttles the
+write path: Hetzner CAX31 (same arm64 image, local NVMe). Self-hosted Postgres +
+server + Caddy via docker-compose on one box.
+
+> **Oracle-specific networking (⚠️):** two layers must allow tcp 80/443. (1) The VCN
+> security list / NSG ingress rules (NOT 5432). (2) The Ubuntu image ships with a
+> locked-down iptables — add ACCEPT rules for 80/443 and persist them
+> (`netfilter-persistent save`), or the Let's Encrypt challenge and all traffic
+> silently fail. A1 capacity ("Out of host capacity") is commonly exhausted — retry
+> or pick a quieter region/AD.
 
 ## One-time provisioning
 
@@ -23,24 +32,42 @@ Self-hosted Postgres + server + Caddy via docker-compose on one box.
    # KSE_DB_CONNECTION_STRING password must match POSTGRES_PASSWORD
    # DOMAIN + KSE_ALLOWED_ORIGIN: your subdomain
    ```
-5. DNS: add an A record for `$DOMAIN` → VM public IP. Wait for propagation.
+5. DNS: add an A record for `$DOMAIN` → VM public IP. Wait for propagation. A free
+   DuckDNS subdomain works (it gives a real A record you control, so Caddy's HTTP-01
+   challenge succeeds): set `DOMAIN=<sub>.duckdns.org` and point its IP at the VM.
+
+> **Prod compose invocation.** All production commands stack the prod override on
+> top of the base file:
+> ```bash
+> docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production <cmd>
+> ```
+> The override (a) does NOT publish Postgres's 5432 to the host (the server reaches
+> it over the compose network) and (b) adds a profiled, one-shot `migrate` service.
+> A bare `docker compose` (no `-f`) stays the local-dev shape (Postgres on 5432).
 
 ## First cutover
 
-6. Bring up Postgres only, then run migrations once:
+6. Bring up Postgres only, then run migrations once via the `migrate` service. The
+   runtime image is deliberately EF-free (data access is raw SQL), so migrations run
+   from the SDK build stage using the design-time factory (`KseDbContextFactory`):
    ```bash
-   docker compose --env-file .env.production up -d postgres
-   docker compose --env-file .env.production run --rm server dotnet ef database update
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d postgres
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production run --rm migrate
    ```
-   (Migrations are NOT run on every boot — this is the one-shot.)
-7. Seed a fresh DB:
-   - Create the first admin user directly in Postgres (INSERT into Users with
-     IsAdmin = true and a known password hash), OR temporarily set
-     `Seed:AutoOnEmptyDb=true` to auto-seed the embedded workbook on first boot.
-   - Then, as that admin, `POST /api/admin/seed/excel/full` (or rely on auto-seed).
+   (Migrations are NOT run on every boot — `migrate` is profiled, so a normal `up`
+   never starts it. This is the one-shot.)
+7. Seed a fresh DB. Migrations must already be applied (step 6) — the empty-check
+   queries tables. First boot the server with auto-seed on, which seeds the embedded
+   workbook (50 stocks, bots, and the human admin) with no auth needed:
+   ```bash
+   Seed__AutoOnEmptyDb=true docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d server
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production logs -f server   # confirm "seeding from embedded workbook"
+   ```
+   Then stop the server and unset the flag (the next `up` below boots without it;
+   the default `Seed:AutoOnEmptyDb=false` in appsettings.Production.json takes over).
 8. Start everything:
    ```bash
-   docker compose --env-file .env.production up -d
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d
    ```
    Caddy fetches a Let's Encrypt cert on the first HTTPS request to `$DOMAIN`.
 
@@ -63,7 +90,8 @@ Self-hosted Postgres + server + Caddy via docker-compose on one box.
 
 - Logs: `docker compose logs -f server`, plus rolling files in the `serverlogs` volume.
 - Backups: `deploy/backup.sh` (cron at 02:00 UTC) runs `pg_dump`.
-- Update: `git pull && docker compose --env-file .env.production up -d --build`.
+- Update: `git pull && docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d --build`
+  (run the `migrate` one-shot first if the pull added migrations).
 
 ## Database history retention (Wave 8 §3)
 
