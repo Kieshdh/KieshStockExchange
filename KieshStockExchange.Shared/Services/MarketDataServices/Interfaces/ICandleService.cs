@@ -60,6 +60,20 @@ public interface ICandleService
     /// </summary>
     Task BackfillUpwardAsync(IReadOnlyCollection<CurrencyType> currencies,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Gap-fills missing candles within [fromUtc, toUtc) by cascading bottom-up
+    /// through the resolution ladder (15s → 1m → 5m → 15m → 1h → 4h → 1d):
+    /// each rung synthesizes only its <em>absent</em> buckets by aggregating the
+    /// immediately-finer candles (which were themselves just gap-filled in the same
+    /// pass), so a missing 5m can be rebuilt from 1m/15s and then feed the 15m fill.
+    /// Idempotent (existing candles untouched), bounded to the window, and reuses
+    /// the same OHLCV merge as the upward backfill. Unlike <see cref="BackfillUpwardAsync"/>
+    /// (5m → up only), this can recreate fine-resolution gaps. Returns the number of
+    /// candles synthesized. Server-only; client SignalR impl throws.
+    /// </summary>
+    Task<int> FillCandleGapsAsync(IReadOnlyCollection<CurrencyType> currencies,
+        DateTime fromUtc, DateTime toUtc, CancellationToken ct = default);
     #endregion
 
     #region Candle Operations

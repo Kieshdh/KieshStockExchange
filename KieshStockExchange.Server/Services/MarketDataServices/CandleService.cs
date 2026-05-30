@@ -206,6 +206,87 @@ public sealed class CandleService : ICandleService, IDisposable
             producedCandles, WindowDays, failedCombos);
     }
 
+    // Bottom-up ladder. Each rung is built from the one directly below it; because
+    // we cascade lowest→highest, a 5m gap filled from 1m in this pass is itself a
+    // source for the 15m fill that follows. Adjacent steps are all integer multiples
+    // (60/15, 300/60, 900/300, 3600/900, 14400/3600, 86400/14400).
+    private static readonly CandleResolution[] GapLadder =
+    {
+        CandleResolution.FifteenSeconds, CandleResolution.OneMinute, CandleResolution.FiveMinutes,
+        CandleResolution.FifteenMinutes, CandleResolution.OneHour, CandleResolution.FourHours,
+        CandleResolution.OneDay,
+    };
+
+    public async Task<int> FillCandleGapsAsync(IReadOnlyCollection<CurrencyType> currencies,
+        DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+    {
+        if (currencies is null || currencies.Count == 0 || toUtc <= fromUtc) return 0;
+        await _stock.EnsureLoadedAsync(ct).ConfigureAwait(false);
+
+        int filled = 0;
+        int failedCombos = 0;
+        foreach (var s in _stock.All)
+        {
+            if (ct.IsCancellationRequested) break;
+            foreach (var ccy in currencies)
+            {
+                if (!_stock.IsListedIn(s.StockId, ccy)) continue;
+                for (int i = 1; i < GapLadder.Length; i++)
+                {
+                    if (ct.IsCancellationRequested) return filled;
+                    try
+                    {
+                        filled += await FillOneResolutionGapAsync(
+                            s.StockId, ccy, source: GapLadder[i - 1], target: GapLadder[i],
+                            fromUtc, toUtc, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        failedCombos++;
+                        _logger.LogDebug(ex, "Gap-fill failed for stock={Stock} ccy={Ccy} {Src}->{Tgt}",
+                            s.StockId, ccy, GapLadder[i - 1], GapLadder[i]);
+                    }
+                }
+            }
+        }
+        _logger.LogInformation(
+            "Candle gap-fill: synthesized {Filled} missing candle(s) over {From:u}..{To:u}. Failed combos: {Failed}.",
+            filled, fromUtc, toUtc, failedCombos);
+        return filled;
+    }
+
+    /// <summary>
+    /// Fills the <paramref name="target"/>-resolution buckets in [from, to) that have
+    /// a finer source candle but no persisted target candle. Reads the source straight
+    /// from the DB (so it sees finer rungs already filled earlier in the same cascade),
+    /// aggregates lenient (requireFullCoverage:false), and upserts only the absent
+    /// buckets — existing candles are never overwritten.
+    /// </summary>
+    private async Task<int> FillOneResolutionGapAsync(
+        int stockId, CurrencyType currency, CandleResolution source, CandleResolution target,
+        DateTime fromUtc, DateTime toUtc, CancellationToken ct)
+    {
+        var targetSpan = TimeSpan.FromSeconds((int)target);
+        var from = TimeHelper.FloorToBucketUtc(fromUtc, targetSpan);
+        var to = TimeHelper.NextBucketBoundaryUtc(toUtc, targetSpan);
+
+        var src = await _db.GetCandlesByStockIdAndTimeRange(
+            stockId, currency, TimeSpan.FromSeconds((int)source), from, to, ct).ConfigureAwait(false);
+        if (src.Count == 0) return 0;
+        src.Sort(static (a, b) => a.OpenTime.CompareTo(b.OpenTime));
+
+        var existing = await _db.GetCandlesByStockIdAndTimeRange(
+            stockId, currency, targetSpan, from, to, ct).ConfigureAwait(false);
+        var have = new HashSet<DateTime>(existing.Select(c => c.OpenTime));
+
+        var aggregated = AggregateMultipleCandles(src, target, requireFullCoverage: false, allowPartialEdges: true);
+        var missing = aggregated.Where(c => !have.Contains(c.OpenTime)).ToList();
+        if (missing.Count == 0) return 0;
+
+        await _db.UpsertCandlesAsync(missing, ct).ConfigureAwait(false);
+        return missing.Count;
+    }
+
     public async Task PrimeRingsAsync(IReadOnlyCollection<CurrencyType> currencies,
         IReadOnlyCollection<CandleResolution> resolutions, CancellationToken ct = default)
     {

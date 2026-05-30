@@ -109,6 +109,10 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
     public Task BackfillUpwardAsync(IReadOnlyCollection<CurrencyType> currencies, CancellationToken ct = default)
         => throw new NotSupportedException("Upward backfill is a server-side boot step.");
 
+    public Task<int> FillCandleGapsAsync(IReadOnlyCollection<CurrencyType> currencies,
+        DateTime fromUtc, DateTime toUtc, CancellationToken ct = default)
+        => throw new NotSupportedException("Candle gap-fill is a server-side maintenance step.");
+
     public Task OnTransactionTickAsync(Transaction tick, CancellationToken ct = default) => Task.CompletedTask;
     public void OnTransactionTick(Transaction tick) { /* no-op on client */ }
 
