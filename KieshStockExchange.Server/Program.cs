@@ -13,6 +13,7 @@ using Serilog;
 using KieshStockExchange.Models;
 using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
+using KieshStockExchange.Server.Services.RetentionServices;
 using KieshStockExchange.Server.Services.UserServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -205,6 +206,13 @@ builder.Services.AddSingleton<IExcelSeedService, ExcelSeedService>();
 // Bots:AutoStart is true. Default is false in appsettings.json so the client
 // still owns the bot loop until Step 7 deletes the client side.
 builder.Services.AddHostedService<BotLoopHostedService>();
+
+// Wave 8 §3 — database history retention. The service is stateless (runs raw
+// batched SQL via IDbConnectionFactory); the hosted service ticks it on a timer
+// when Retention:Enabled is true. The admin controller can run it on demand
+// regardless of the flag.
+builder.Services.AddSingleton<IRetentionService, RetentionService>();
+builder.Services.AddHostedService<RetentionHostedService>();
 
 // Warm the BotTelemetryCache shortly after boot so the first dashboard
 // poll doesn't pay the cold DB-scan cost.
