@@ -232,7 +232,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         fatTails:           _configuration.GetValue("Bots:FatTails", true),
                         tradeSizeTailShape: _configuration.GetValue("Bots:TradeSizeTailShape", 0.5m),
                         blockTradeProb:     _configuration.GetValue("Bots:BlockTradeProb", 0.01m),
-                        blockTradeMultiple: _configuration.GetValue("Bots:BlockTradeMultiple", 4m));
+                        blockTradeMultiple: _configuration.GetValue("Bots:BlockTradeMultiple", 4m),
+                        mmQuoting:          _configuration.GetValue("Bots:MarketMakerQuoting", true),
+                        quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m));
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
         _market.QuoteUpdated += OnQuoteUpdated;

@@ -39,11 +39,16 @@ internal sealed class AiBotDecisionService
     private readonly decimal _blockTradeProb;
     private readonly decimal _blockTradeMultiple;
 
+    // §2 market-maker quoting.
+    private readonly bool    _mmQuoting;
+    private readonly decimal _quoteHalfSpreadPrc;
+
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
         ILogger<AiBotDecisionService> logger,
         bool fatTails = true, decimal tradeSizeTailShape = 0.5m,
-        decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m)
+        decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
+        bool mmQuoting = true, decimal quoteHalfSpreadPrc = 0.003m)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -55,6 +60,8 @@ internal sealed class AiBotDecisionService
         _tradeSizeTailShape = tradeSizeTailShape;
         _blockTradeProb     = blockTradeProb;
         _blockTradeMultiple = blockTradeMultiple;
+        _mmQuoting          = mmQuoting;
+        _quoteHalfSpreadPrc = quoteHalfSpreadPrc;
     }
     #endregion
 
@@ -111,6 +118,13 @@ internal sealed class AiBotDecisionService
     #region Order Decision Logic
     private OrderType ChooseOrderType(AiBotContext ctx, AIUser user, CurrencyType currency)
     {
+        // §2 Market-maker quoting: post a resting limit on the under-represented side
+        // so the bot maintains a two-sided quote near mid over successive ticks. Skips
+        // the directional logic below — MM bots provide liquidity, not direction. They
+        // still react to shocks via ApplyExtremeReaction downstream.
+        if (_mmQuoting && user.Strategy == AiStrategy.MarketMaker)
+            return ChooseMarketMakerQuote(ctx, user);
+
         // 1. Base buy probability adjusted by cash reserve position
         var cashPrc  = ctx.FundsPercentagePortfolio(user.UserId, currency);
         var buyProb  = user.BuyBiasPrc;
@@ -180,6 +194,23 @@ internal sealed class AiBotDecisionService
                 : OrderType.LimitSell;
     }
 
+    // Quote the side with fewer resting limit orders so the bot tends toward a
+    // balanced two-sided book. A sell with no inventory is filtered out later in
+    // ChooseStockId, so the bot simply skips that tick until a bid fills.
+    private static OrderType ChooseMarketMakerQuote(AiBotContext ctx, AIUser user)
+    {
+        int buys = 0, sells = 0;
+        if (ctx.OpenOrders.TryGetValue(user.UserId, out var orders))
+        {
+            foreach (var o in orders.Values)
+            {
+                if (!o.IsLimitOrder) continue;
+                if (o.IsBuyOrder) buys++; else sells++;
+            }
+        }
+        return buys <= sells ? OrderType.LimitBuy : OrderType.LimitSell;
+    }
+
     private int ChooseStockId(AiBotContext ctx, AIUser user, OrderType type, CurrencyType currency)
     {
         var rng   = ctx.GetRandom(user.AiUserId);
@@ -237,6 +268,20 @@ internal sealed class AiBotDecisionService
         if (marketPrice <= 0m) return 0m;
 
         if (IsSlippageOrder(type)) return CurrencyHelper.RoundMoney(marketPrice, currency);
+
+        // §2 MM quoting: a symmetric two-sided quote at mid ± half-spread. Only when a
+        // real mid exists (a two-sided book); otherwise fall through to normal offsets.
+        if (_mmQuoting && user.Strategy == AiStrategy.MarketMaker)
+        {
+            var mid = await GetMidPriceAsync(stockId, currency, ct).ConfigureAwait(false);
+            if (mid is > 0m)
+            {
+                var quote = IsBuyOrder(type)
+                    ? mid.Value * (1m - _quoteHalfSpreadPrc)
+                    : mid.Value * (1m + _quoteHalfSpreadPrc);
+                return CurrencyHelper.RoundMoney(quote, currency);
+            }
+        }
 
         // Limit anchor: midprice when both sides are present, last-trade otherwise.
         // Last-trade ratchets upward whenever buys fill at the ask faster than
