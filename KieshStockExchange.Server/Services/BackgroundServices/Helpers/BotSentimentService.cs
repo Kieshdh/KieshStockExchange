@@ -46,15 +46,42 @@ internal sealed class BotSentimentService
     private const decimal ShockFloor = 0.01m;
     #endregion
 
-    #region Services and Constructor
-    private readonly IStockService _stocks;
-    private readonly ILogger<BotSentimentService> _logger;
+    #region State
+    private readonly Dictionary<int, decimal> _perStock24h = new();
+    private readonly Dictionary<int, decimal> _perStock4h  = new();
+    private readonly Dictionary<int, decimal> _perStock1h  = new();
+    private readonly Dictionary<int, decimal> _perStock10m = new();
+    private readonly Dictionary<int, decimal> _perStock1m  = new();
+    private decimal _global24h;
+    private decimal _global4h;
+    private decimal _global1h;
+
+    // Per-stock transient news shock; non-zero only while an event decays.
+    private readonly Dictionary<int, decimal> _shock = new();
+
+    private DateTime _next1m;
+    private DateTime _next10m;
+    private DateTime _next1h;
+    private DateTime _next4h;
+    private DateTime _next24h;
+
+    private Random _rng = new(RngSeed);
+
+    // Recent samples for export
+    private readonly Queue<SentimentSample> _samples = new();
+    private readonly RingBufferStore<SentimentSample> _store;
+
+    // News events
     private readonly bool _newsEvents;
     private readonly decimal _shockMagnitude;
     private readonly decimal _shockDecayPerTick;
     private readonly double  _shockArrivalProbPerTick; // per stock per ~1s tick
 
-    private readonly RingBufferStore<SentimentSample> _store;
+    #endregion
+
+    #region Services and Constructor
+    private readonly IStockService _stocks;
+    private readonly ILogger<BotSentimentService> _logger;
 
     internal BotSentimentService(IStockService stocks, ILogger<BotSentimentService> logger,
         bool newsEvents = true, double shockMeanIntervalHours = 6.0,
@@ -78,30 +105,6 @@ internal sealed class BotSentimentService
         // calls Reset before the bot loop starts.
         _next1m = _next10m = _next1h = _next4h = _next24h = DateTime.MaxValue;
     }
-    #endregion
-
-    #region State
-    private readonly Dictionary<int, decimal> _perStock24h = new();
-    private readonly Dictionary<int, decimal> _perStock4h  = new();
-    private readonly Dictionary<int, decimal> _perStock1h  = new();
-    private readonly Dictionary<int, decimal> _perStock10m = new();
-    private readonly Dictionary<int, decimal> _perStock1m  = new();
-    private decimal _global24h;
-    private decimal _global4h;
-    private decimal _global1h;
-
-    // Per-stock transient news shock; non-zero only while an event decays.
-    private readonly Dictionary<int, decimal> _shock = new();
-
-    private DateTime _next1m;
-    private DateTime _next10m;
-    private DateTime _next1h;
-    private DateTime _next4h;
-    private DateTime _next24h;
-
-    private Random _rng = new(RngSeed);
-
-    private readonly Queue<SentimentSample> _samples = new();
     #endregion
 
     #region Tick
@@ -194,26 +197,34 @@ internal sealed class BotSentimentService
     private void LogCombinedSentiment(DateTime now)
     {
         if (!_logger.IsEnabled(LogLevel.Information)) return;
-        const int PerLine = 13;
-        var inv = CultureInfo.InvariantCulture;
+        const int PerLine = 10;
+        const string NumFmt = ":+0.00;-0.00;0.00";
 
-        var sb = new StringBuilder(512);
-        sb.Append("Sentiment @ ").Append(now.ToLocalTime().ToString("HH:mm:ss"))
-          .Append(" G24=").Append(_global24h.ToString("+0.00;-0.00;0.00", inv))
-          .Append(" G4=").Append(_global4h.ToString("+0.00;-0.00;0.00", inv))
-          .Append(" G1h=").Append(_global1h.ToString("+0.00;-0.00;0.00", inv))
-          .Append(" |");
+        // One template hole per value so the console theme colours each number;
+        // a single pre-built string logs as one property and renders in one colour.
+        var tpl = new StringBuilder(1024);
+        var args = new List<object>(128);
+
+        void Num(decimal v) { tpl.Append('{').Append(args.Count).Append(NumFmt).Append('}'); args.Add(v); }
+
+        tpl.Append("Sentiment @ {").Append(args.Count).Append('}');
+        args.Add(now.ToLocalTime().ToString("HH:mm:ss"));
+        tpl.Append(" G24="); Num(_global24h);
+        tpl.Append(" G4=");  Num(_global4h);
+        tpl.Append(" G1h="); Num(_global1h);
+        tpl.Append(" |\n");
 
         int onThisLine = 0;
         foreach (var sid in _stocks.ById.Keys)
         {
-            if (onThisLine == PerLine) { sb.Append('\n'); onThisLine = 0; }
+            if (onThisLine == PerLine) { tpl.Append('\n'); onThisLine = 0; }
             var symbol = _stocks.TryGetSymbol(sid, out var s) ? s : sid.ToString();
-            sb.Append(' ').Append(symbol).Append(':')
-              .Append(GetSentiment(sid).ToString("+0.00;-0.00;0.00", inv));
+            tpl.Append(' ').Append(symbol).Append(':');
+            Num(GetSentiment(sid));
             onThisLine++;
         }
-        _logger.LogInformation("{Line}", sb.ToString());
+
+        _logger.LogInformation(tpl.ToString(), args.ToArray());
     }
 
     /// <summary>
