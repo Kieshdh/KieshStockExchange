@@ -76,12 +76,28 @@ Sequence chosen to (a) finish what's already started, (b) land cheap UX wins, (c
 Triggered by the observation that after weeks of bot-driven simulation the SQLite file hit 4.1 GB + a 6.6 GB WAL (graceful shutdowns not happening → WAL never checkpoints back into the main file). See section 8 below.
 
 ### Wave 9 — Post-launch polish & UX (post-migration)
+
+**All remaining open items across the project are consolidated here** (verified item-by-item
+against code on 2026-06-01; nearly everything else in this doc is done). Items 34–37 are
+Wave 5/6 leftovers that proved unfinished when checked, moved in here.
+
 31. Notification persistence — server-generated, humans-only (`NOT EXISTS AIUsers`), reuses the `Messages` table as the persisted inbox; survives client/server restarts. ✅ DONE
 32. Deposit/withdraw/convert ↔ engine cache coherence — `IAccountsCache.ApplyExternalFundDeltaAsync` mirrors fund changes into the engine's `AccountsCache` so order validation sees them without a server restart. ✅ DONE
 33. Selectable / copyable text — make text drag-selectable + Ctrl+C, like a normal app (Windows `LabelHandler` → `IsTextSelectionEnabled`). **Open decision: which default direction —**
     - **(a) global-on, then prune:** flip selection on app-wide, then audit each label/button and *remove* it where it swallows tap gestures (order-book rows, list items, buttons). Maximises coverage, risks gesture regressions until audited.
     - **(b) off, then opt-in:** keep selection off by default, then audit each element and *add* it where it's genuinely handy (prices, IDs, message bodies). Safer, but copyable spots are missed until each is touched.
     Either way the ~5-line flip is trivial; the **per-element audit is the real work** and will take time. Decide (a) vs (b) before starting.
+34. Admin pagination scales with window height (was 4.7) — confirmed NOT done: no `PageSize`-by-viewport logic in the admin table VMs; page size is fixed. Add a computed `PageSize = max(20, floor((viewportHeight - chrome) / rowHeight))` in the table VMs. Full notes in §4.7.
+35. FundTransactions admin table (the remaining slice of 4.9) — no dedicated admin tab today; the model + data exist and `FundTransactionHistoryPage` already reads them user-side. Mirror the existing `*TableView` + pagination/sort pattern for an admin view. (AIUser data — the other half of 4.9 — is already surfaced on the Bot Dashboard, so only FundTransactions is left.) Full notes in §4.9.
+36. Responsive layout audit (was 4.5) — Trade/Portfolio/Market/Admin `Auto` vs `*` row/column distributions on small vs large windows. **Visual — needs in-app confirmation before scoping.** Full notes in §4.5.
+37. Account page proportions (was 4.6) — rebalance the lopsided two-column layout (right "Funds + Preferences" column looks lighter than the left). **Visual — needs in-app confirmation.** Full notes in §4.6.
+
+Also fixed 2026-06-01 (not a roadmap item): candle flush-loop shutdown bug. A clean stop
+discarded the last drained candle batch — `FlushLoopAsync` drained candles out of the
+aggregators then wrote them with the loop's cancellation token, so on shutdown
+`UpsertCandlesAsync` threw `OperationCanceledException` (logged at ERROR) and the batch was
+lost, leaving a hole in candle history (one source of the gaps the Wave 8 candle gap-fill
+has to reconstruct). Now persists with `CancellationToken.None` + a post-loop final drain.
 
 ### Why this order
 - Wave 1 unblocks Wave 2 mechanically (Fund tx history needs FundTransaction; volume overlay builds on the chart changes).
