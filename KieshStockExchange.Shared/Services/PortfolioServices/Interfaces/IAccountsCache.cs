@@ -81,6 +81,17 @@ public interface IAccountsCache
         bool clamp = false, CancellationToken ct = default);
 
     /// <summary>
+    /// Mirror an out-of-engine balance change (deposit / withdrawal / conversion leg)
+    /// onto the cached Fund so order validation sees the new available balance at once.
+    /// The cache loads a user's funds once and never re-reads the DB, so a deposit that
+    /// only writes the DB stays invisible to the engine until this is called.
+    /// <paramref name="delta"/> is signed (positive credits, negative debits). No-op when
+    /// the user's funds aren't cached yet — the next EnsureLoadedAsync reads the updated
+    /// DB row. Acquires the per-user fund gate so it can't race a settlement.
+    /// </summary>
+    Task ApplyExternalFundDeltaAsync(int userId, CurrencyType ccy, decimal delta, CancellationToken ct = default);
+
+    /// <summary>
     /// Drop every cached Fund / Position / loaded-user marker. Call after a DB reseed
     /// (e.g. ExcelImportService reset) so the next EnsureLoadedAsync re-reads from DB
     /// instead of returning stale instances from before the reset.

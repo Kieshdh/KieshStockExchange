@@ -309,6 +309,37 @@ public sealed class AccountsCache : IAccountsCache
     public Position? GetPosition(int userId, int stockId)
         => _positions.TryGetValue((userId, stockId), out var p) ? p : null;
 
+    public async Task ApplyExternalFundDeltaAsync(int userId, CurrencyType ccy, decimal delta, CancellationToken ct = default)
+    {
+        if (delta == 0m) return;
+        // Only meaningful once this user's funds are cached; otherwise the next
+        // EnsureLoadedAsync cold-loads the already-updated DB row.
+        if (!_funds.ContainsKey((userId, ccy))) return;
+
+        await using var gate = await AcquireFundGateAsync(userId, ccy, ct).ConfigureAwait(false);
+        if (!_funds.TryGetValue((userId, ccy), out var fund)) return;
+
+        var totBefore = fund.TotalBalance;
+        try
+        {
+            if (delta > 0m) fund.AddFunds(delta);
+            else fund.WithdrawFunds(-delta);
+        }
+        catch (ArgumentException ex)
+        {
+            // Cache diverged from the DB value the caller validated against — drop the
+            // user so the next EnsureLoadedAsync re-reads the authoritative DB balance.
+            _logger.LogWarning(ex, "ApplyExternalFundDelta {Delta} for user {UserId}/{Ccy} rejected; invalidating cache.",
+                delta, userId, ccy);
+            _funds.TryRemove((userId, ccy), out _);
+            _loadedUsers.TryRemove(userId, out _);
+            return;
+        }
+
+        _ledger.LogFund(userId, ccy, null, "ApplyExternalFundDelta",
+            delta, fund.ReservedBalance, fund.ReservedBalance, totBefore, fund.TotalBalance);
+    }
+
     public void TrackNewPosition(Position pos)
     {
         if (pos is null) return;

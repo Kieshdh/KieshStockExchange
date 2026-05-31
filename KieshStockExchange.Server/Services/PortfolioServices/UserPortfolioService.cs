@@ -18,15 +18,17 @@ public class UserPortfolioService : IUserPortfolioService
     #region Constructor & Fields
     private readonly IDataBaseService _db;
     private readonly IFxRateService _fxRates;
+    private readonly IAccountsCache _accounts;
     private readonly ILogger<UserPortfolioService> _logger;
     private readonly IAuthService _auth;
     private readonly AsyncLocal<int> _systemScopeDepth = new();
 
     public UserPortfolioService(IAuthService auth, IDataBaseService db,
-        IFxRateService fxRates, ILogger<UserPortfolioService> logger)
+        IFxRateService fxRates, IAccountsCache accounts, ILogger<UserPortfolioService> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _fxRates = fxRates ?? throw new ArgumentNullException(nameof(fxRates));
+        _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
     }
@@ -303,6 +305,12 @@ public class UserPortfolioService : IUserPortfolioService
 
         if (success)
         {
+            // Mirror the balance change into the engine's AccountsCache so order
+            // validation sees the new available balance immediately — the cache loads
+            // a user's funds once and never re-reads the DB on its own.
+            var delta = kind == FundTransaction.Kinds.Deposit ? amount : -amount;
+            await _accounts.ApplyExternalFundDeltaAsync(targetUserId, currency, delta, ct).ConfigureAwait(false);
+
             // Refresh outside the DB transaction so the snapshot reflects the new balance.
             await RefreshAsync(asUserId, ct).ConfigureAwait(false);
         }
@@ -409,6 +417,11 @@ public class UserPortfolioService : IUserPortfolioService
 
         if (success)
         {
+            // Mirror both legs into the engine cache (debit source, credit target) so a
+            // subsequent order sees the converted balances without a server restart.
+            await _accounts.ApplyExternalFundDeltaAsync(targetUserId, from, -amount, ct).ConfigureAwait(false);
+            await _accounts.ApplyExternalFundDeltaAsync(targetUserId, to, converted, ct).ConfigureAwait(false);
+
             await RefreshAsync(asUserId, ct).ConfigureAwait(false);
         }
         return success;
