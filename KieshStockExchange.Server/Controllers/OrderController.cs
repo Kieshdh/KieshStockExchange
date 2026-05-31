@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Server.Services.OtherServices;
 using KieshStockExchange.Server.Services.UserServices;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
@@ -18,14 +19,17 @@ public sealed class OrderController : ControllerBase
     private readonly IDataBaseService _db;
     private readonly IOrderEntryService _entry;
     private readonly IOrderExecutionService _execution;
+    private readonly IServerNotificationService _notifications;
     private readonly ILogger<OrderController> _logger;
 
     public OrderController(IDataBaseService db, IOrderEntryService entry,
-        IOrderExecutionService execution, ILogger<OrderController> logger)
+        IOrderExecutionService execution, IServerNotificationService notifications,
+        ILogger<OrderController> logger)
     {
         _db = db;
         _entry = entry;
         _execution = execution;
+        _notifications = notifications;
         _logger = logger;
     }
 
@@ -110,6 +114,10 @@ public sealed class OrderController : ControllerBase
             _logger.LogWarning("Place: unknown order type {Type}", req.Type);
             return BadRequest($"Unknown order type: {req.Type}");
         }
+
+        // Resting/failed placement notification (fills are notified by the engine's
+        // OnFillsAsync). Human-gated inside the service; bots produce nothing.
+        await _notifications.OnOrderResultAsync(result, caller, ct);
         return Ok(result);
     }
 

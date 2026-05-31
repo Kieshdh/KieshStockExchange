@@ -261,8 +261,9 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                     : await _orders.PlaceLimitSellOrderAsync(userId, id, Quantity, LimitPrice, cur, ct);
             }
 
-            // Show result
-            await _notification.NotifyOrderResultAsync(result, ct);
+            // The placement/fill notification is generated and pushed server-side
+            // (ServerNotificationService) and rendered via the live hub push, so we no
+            // longer raise an optimistic local toast here — that would double up.
 
             // Log result
             if (result.PlacedSuccessfully)

@@ -125,7 +125,6 @@ public static class MauiProgram
         builder.Services.AddSingleton<IStockService, StockService>();
         builder.Services.AddSingleton<ITransactionService, TransactionService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
-        builder.Services.AddSingleton<NotificationBridgeService>();
         // Phase 3 Step 7b.1: ApiBotAdminClient is the dashboard's HTTP-backed
         // replacement for the dead in-process AiTradeService.
         builder.Services.AddSingleton<ApiBotAdminClient>();
@@ -221,10 +220,11 @@ public static class MauiProgram
         // token; the first protected call happens after user login anyway.
         _ = app.Services.GetRequiredService<TokenStore>().LoadAsync();
 
-        // Eagerly resolve the bridge so its ctor wires up the OrdersChanged
-        // subscription — DI would otherwise defer construction until something
-        // injects it, which nothing does (it's a side-effect-only service).
-        _ = app.Services.GetRequiredService<NotificationBridgeService>();
+        // Eagerly resolve the notification service so its ctor subscribes to the hub's
+        // NotificationReceived push and the session's SnapshotChanged (login hydrate)
+        // before any inbox VM is constructed. Replaces the old client-side
+        // NotificationBridgeService, which is gone now that the server generates fills.
+        _ = app.Services.GetRequiredService<INotificationService>();
 
         // Phase 6c — connection banner singleton. Eager-resolve so its ctor
         // hooks IMarketHubClient.StateChanged before the first transition.

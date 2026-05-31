@@ -1,12 +1,14 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.BackgroundServices;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.SignalR;
 using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
 
 namespace KieshStockExchange.Services.OtherServices;
 
@@ -17,13 +19,21 @@ public sealed class NotificationService : INotificationService
 
     private readonly ILogger<NotificationService> _logger;
     private readonly IStockService _stock;
+    private readonly IDataBaseService _db;
+    private readonly IMarketHubClient _hub;
+    private readonly IUserSessionService _session;
 
     // Newest first. ConcurrentQueue would reverse-order; a lock + LinkedList
     // keeps Recent ordering trivial and bounded.
     private readonly LinkedList<Notification> _ring = new();
     private readonly object _ringLock = new();
 
+    // Guards against re-hydrating the inbox on every SnapshotChanged (currency edits,
+    // etc.). Only an actual user change triggers a reload.
+    private int _hydratedUserId;
+
     public event EventHandler<Notification>? NotificationAdded;
+    public event EventHandler? RecentReset;
 
     public IReadOnlyList<Notification> Recent
     {
@@ -33,10 +43,119 @@ public sealed class NotificationService : INotificationService
         }
     }
 
-    public NotificationService(ILogger<NotificationService> logger, IStockService stock)
+    public NotificationService(ILogger<NotificationService> logger, IStockService stock,
+        IDataBaseService db, IMarketHubClient hub, IUserSessionService session)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _stock = stock ?? throw new ArgumentNullException(nameof(stock));
+        _db = db ?? throw new ArgumentNullException(nameof(db));
+        _hub = hub ?? throw new ArgumentNullException(nameof(hub));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+
+        // Server is the source of truth: live pushes arrive here, and a login replaces
+        // the ring with persisted history (replacing the old silent-baseline behaviour).
+        _hub.NotificationReceived += OnServerNotification;
+        _session.SnapshotChanged += OnSessionChanged;
+
+        // If a session is already active when we're constructed, hydrate immediately.
+        if (_session.IsAuthenticated && _session.UserId > 0)
+            _ = HydrateAsync(_session.UserId);
+    }
+    #endregion
+
+    #region Server sync (push + hydrate + read-state)
+    private void OnSessionChanged(object? _, SessionSnapshot snapshot)
+    {
+        if (_session.IsAuthenticated && _session.UserId > 0)
+        {
+            if (_session.UserId != _hydratedUserId)
+                _ = HydrateAsync(_session.UserId);
+        }
+        else if (_hydratedUserId != 0)
+        {
+            _hydratedUserId = 0;
+            lock (_ringLock) _ring.Clear();
+            RaiseRecentReset();
+        }
+    }
+
+    private async Task HydrateAsync(int userId, CancellationToken ct = default)
+    {
+        try
+        {
+            // GetMessagesByUserId returns newest-first; take a ring's worth.
+            var msgs = await _db.GetMessagesByUserId(userId, onlyUnread: false, ct).ConfigureAwait(false);
+            var notes = msgs.Take(MaxBuffered).Select(MapToNotification).ToList();
+
+            lock (_ringLock)
+            {
+                _ring.Clear();
+                foreach (var n in notes) _ring.AddLast(n);
+            }
+            _hydratedUserId = userId;
+            _logger.LogInformation("Notification inbox hydrated for user {UserId}: {Count} items.", userId, notes.Count);
+            RaiseRecentReset();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to hydrate notification inbox for user {UserId}.", userId);
+        }
+    }
+
+    private void OnServerNotification(object? _, Message m)
+    {
+        if (m is null) return;
+        AddAndRaise(MapToNotification(m));
+    }
+
+    public async Task MarkAllReadAsync(CancellationToken ct = default)
+    {
+        var uid = _session.UserId;
+        if (uid > 0)
+        {
+            try { await _db.MarkAllMessagesRead(uid, null, ct).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogError(ex, "MarkAllMessagesRead failed for user {UserId}.", uid); }
+        }
+        lock (_ringLock)
+            foreach (var n in _ring) n.IsRead = true;
+    }
+
+    public async Task MarkReadAsync(Notification notification, CancellationToken ct = default)
+    {
+        if (notification is null) return;
+        notification.IsRead = true;
+        if (notification.MessageId <= 0) return; // local-only toast, nothing to persist
+        try { await _db.MarkMessageRead(notification.MessageId, null, ct).ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogError(ex, "MarkMessageRead failed for message {MessageId}.", notification.MessageId); }
+    }
+
+    private static Notification MapToNotification(Message m) => new()
+    {
+        MessageId = m.MessageId,
+        Title = m.Title,
+        Message = m.Content,
+        Severity = KindToSeverity(m.Kind),
+        IsRead = m.IsRead,
+        TimestampUtc = m.CreatedAt,
+    };
+
+    private static NotificationSeverity KindToSeverity(Message.MessageType kind) => kind switch
+    {
+        Message.MessageType.Fill => NotificationSeverity.Success,
+        Message.MessageType.Warning => NotificationSeverity.Warning,
+        Message.MessageType.Error => NotificationSeverity.Error,
+        _ => NotificationSeverity.Info,
+    };
+
+    private void RaiseRecentReset()
+    {
+        var handler = RecentReset;
+        if (handler is null) return;
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            try { handler.Invoke(this, EventArgs.Empty); }
+            catch (Exception ex) { _logger.LogError(ex, "RecentReset handler threw."); }
+        });
     }
     #endregion
 
@@ -79,6 +198,15 @@ public sealed class NotificationService : INotificationService
             Severity = severity
         };
 
+        AddAndRaise(note);
+        return Task.CompletedTask;
+    }
+
+    // Shared by local PushNotificationAsync and the server NotificationReceived push:
+    // append newest-first, evict past the cap, and raise NotificationAdded on the UI
+    // thread so ToastHost / TopNavBar can mutate ObservableCollections directly.
+    private void AddAndRaise(Notification note)
+    {
         Notification? evicted = null;
         lock (_ringLock)
         {
@@ -90,12 +218,10 @@ public sealed class NotificationService : INotificationService
             }
         }
 
-        _logger.LogInformation("Notify [{Severity}]: {Title} - {Message}", severity, title, message);
+        _logger.LogInformation("Notify [{Severity}]: {Title} - {Message}", note.Severity, note.Title, note.Message);
         if (evicted is not null)
             _logger.LogDebug("Notification ring evicted oldest: {EvictedTitle}", evicted.Title);
 
-        // Raise on the UI thread so subscribers (ToastHost, TopNavBar inbox)
-        // can mutate ObservableCollections without dispatcher gymnastics.
         var handler = NotificationAdded;
         if (handler is not null)
         {
@@ -105,8 +231,6 @@ public sealed class NotificationService : INotificationService
                 catch (Exception ex) { _logger.LogError(ex, "NotificationAdded handler threw."); }
             });
         }
-
-        return Task.CompletedTask;
     }
 
     public void Clear()

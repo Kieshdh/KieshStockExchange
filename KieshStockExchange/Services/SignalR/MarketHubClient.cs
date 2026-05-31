@@ -34,6 +34,7 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     public event EventHandler<LiveQuote>? QuoteUpdated;
     public event EventHandler<Candle>? CandleClosed;
     public event EventHandler<int>? OrderUpdated;
+    public event EventHandler<Message>? NotificationReceived;
     public event EventHandler<PortfolioSnapshot>? PortfolioChanged;
     public event EventHandler<OrderBookSnapshot>? OrderBookSnapshotReceived;
 
@@ -55,6 +56,7 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
         _connection.On<LiveQuote>("QuoteUpdated", q => QuoteUpdated?.Invoke(this, q));
         _connection.On<Candle>("CandleClosed", c => CandleClosed?.Invoke(this, c));
         _connection.On<OrderUpdatedEnvelope>("OrderUpdated", evt => OrderUpdated?.Invoke(this, evt.UserId));
+        _connection.On<Message>("NotificationReceived", m => NotificationReceived?.Invoke(this, m));
         _connection.On<PortfolioSnapshot>("PortfolioChanged", s => PortfolioChanged?.Invoke(this, s));
         _connection.On<OrderBookSnapshot>("OrderBookSnapshot", s => OrderBookSnapshotReceived?.Invoke(this, s));
 

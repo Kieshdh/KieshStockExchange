@@ -9,6 +9,7 @@ using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Server.Services.OtherServices;
 using Npgsql;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
@@ -30,6 +31,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly IOrderCacheService _orderCache;
     private readonly IReservationLedger _ledger;
     private readonly IOrderRegistry _registry;
+    private readonly IServerNotificationService _notifications;
     private readonly ILogger<OrderExecutionService> _logger;
     // Caps concurrent per-group settlement txs so the fan-out can't exhaust the Npgsql pool.
     private readonly SemaphoreSlim _groupGate;
@@ -39,6 +41,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         IMarketDataService marketData, IAccountsCache accounts,
         IOrderCacheService orderCache, IReservationLedger ledger,
         IOrderRegistry registry,
+        IServerNotificationService notifications,
         IConfiguration config,
         ILogger<OrderExecutionService> logger)
     {
@@ -52,6 +55,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+        _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _groupGate = new SemaphoreSlim(Math.Max(1, config.GetValue("Db:MaxConcurrentGroups", 24)));
     }
@@ -197,7 +201,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         // Publish ticks to market data (outside lock)
         if (trades.Count > 0)
+        {
             await _marketData.OnTicksAsync(trades, ct).ConfigureAwait(false);
+            await _notifications.OnFillsAsync(trades, ct).ConfigureAwait(false);
+        }
 
         // Refresh the order cache for the active user if they're in the affected set.
         // No-op when the cache hasn't been refreshed yet (cold start) or when the
@@ -341,7 +348,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
         }
 
         if (txs.Count > 0)
+        {
             await _marketData.OnTicksAsync(txs, ct).ConfigureAwait(false);
+            await _notifications.OnFillsAsync(txs, ct).ConfigureAwait(false);
+        }
 
         if (affectedUsers is not null)
             _orderCache.NotifyOrdersMutated(affectedUsers);
@@ -668,7 +678,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // Phase 4: publish ticks outside all locks. Per-group NotifyOrdersMutated already
         // fired inside RunGroupTxAsync; this is the cross-group coalesced tick publish.
         if (allFills.Count > 0)
+        {
             await _marketData.OnTicksAsync(allFills, ct).ConfigureAwait(false);
+            await _notifications.OnFillsAsync(allFills, ct).ConfigureAwait(false);
+        }
 
         return results;
     }

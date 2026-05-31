@@ -48,11 +48,11 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
         _portfolio.SnapshotChanged += OnPortfolioChanged;
         _session.SnapshotChanged   += OnSessionChanged;
         _notify.NotificationAdded  += OnNotificationAdded;
+        _notify.RecentReset        += OnRecentReset;
 
         // Hydrate from the service ring buffer so a freshly-navigated page
         // doesn't show an empty inbox just because its VM was constructed late.
-        foreach (var n in _notify.Recent) Inbox.Add(n);
-        UnreadCount = Inbox.Count(n => !n.IsRead);
+        RebuildInboxFromRecent();
 
         UpdateFundsDisplay();
     }
@@ -82,14 +82,26 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
         Inbox.Insert(0, n);
         while (Inbox.Count > InboxCapacity)
             Inbox.RemoveAt(Inbox.Count - 1);
-        UnreadCount++;
+        if (!n.IsRead) UnreadCount++;
+    }
+
+    // Raised when the service replaces the whole ring (login hydrate / logout clear).
+    private void OnRecentReset(object? _, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(RebuildInboxFromRecent);
+
+    private void RebuildInboxFromRecent()
+    {
+        Inbox.Clear();
+        foreach (var n in _notify.Recent) Inbox.Add(n);
+        UnreadCount = Inbox.Count(n => !n.IsRead);
     }
 
     [RelayCommand]
     private async Task ShowInboxAsync()
     {
-        // Mark before showing so the badge clears the instant the popup appears.
-        MarkAllRead();
+        // Mark before showing so the badge clears the instant the popup appears;
+        // persisted server-side so the read state survives a reload.
+        await MarkAllReadAsync();
 
         var page = Shell.Current?.CurrentPage
             ?? Application.Current?.Windows?.FirstOrDefault()?.Page;
@@ -98,9 +110,9 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
         await page.ShowPopupAsync(new InboxPopup(this));
     }
 
-    [RelayCommand]
-    private void MarkAllRead()
+    private async Task MarkAllReadAsync()
     {
+        await _notify.MarkAllReadAsync();
         foreach (var n in Inbox) n.IsRead = true;
         UnreadCount = 0;
     }
@@ -130,6 +142,7 @@ public partial class TopNavBarViewModel : BaseViewModel, IDisposable
         _portfolio.SnapshotChanged -= OnPortfolioChanged;
         _session.SnapshotChanged   -= OnSessionChanged;
         _notify.NotificationAdded  -= OnNotificationAdded;
+        _notify.RecentReset        -= OnRecentReset;
         _disposed = true;
         GC.SuppressFinalize(this);
     }

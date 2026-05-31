@@ -9,6 +9,13 @@ public interface INotificationService
     /// <summary> Raised when a new Notification is appended to the ring buffer. </summary>
     event EventHandler<Notification>? NotificationAdded;
 
+    /// <summary>
+    /// Raised when the whole ring is replaced wholesale (login hydrate / logout clear),
+    /// so subscribers can rebuild their list from <see cref="Recent"/> instead of
+    /// reacting to individual adds.
+    /// </summary>
+    event EventHandler? RecentReset;
+
     /// <summary> Snapshot of the most recent notifications (newest first). </summary>
     IReadOnlyList<Notification> Recent { get; }
 
@@ -31,6 +38,18 @@ public interface INotificationService
         NotificationSeverity severity = NotificationSeverity.Info,
         CancellationToken ct = default);
 
-    /// <summary> Clear the inbox ring buffer. </summary>
+    /// <summary>
+    /// Persist read-state for every notification of the active user
+    /// (server MarkAllMessagesRead) and mark the local ring read.
+    /// </summary>
+    Task MarkAllReadAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Persist read-state for a single server-backed notification
+    /// (no-op for local-only toasts where <see cref="Notification.MessageId"/> is 0).
+    /// </summary>
+    Task MarkReadAsync(Notification notification, CancellationToken ct = default);
+
+    /// <summary> Clear the inbox ring buffer (local view only; server rows persist). </summary>
     void Clear();
 }

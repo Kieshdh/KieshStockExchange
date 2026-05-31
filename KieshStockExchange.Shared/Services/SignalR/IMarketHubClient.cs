@@ -29,6 +29,12 @@ public interface IMarketHubClient
     /// <summary>OrderUpdated push from server-side SignalROrderCacheService. Payload is the userId whose orders changed.</summary>
     event EventHandler<int>? OrderUpdated;
 
+    /// <summary>
+    /// NotificationReceived push from server-side ServerNotificationService. Payload is
+    /// the persisted Message (Kind=Fill etc.) for the active user's orders:{userId} group.
+    /// </summary>
+    event EventHandler<Message>? NotificationReceived;
+
     /// <summary>PortfolioChanged push from server-side IUserPortfolioService.</summary>
     event EventHandler<PortfolioSnapshot>? PortfolioChanged;
 

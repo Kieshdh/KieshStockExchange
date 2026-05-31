@@ -13,6 +13,7 @@ using Serilog;
 using KieshStockExchange.Models;
 using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
+using KieshStockExchange.Server.Services.OtherServices;
 using KieshStockExchange.Server.Services.RetentionServices;
 using KieshStockExchange.Server.Services.UserServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -171,6 +172,11 @@ builder.Services.AddSingleton<IFxRateService, FxRateService>();
 // server uses SignalROrderCacheService which forwards NotifyOrdersMutated
 // to each user's orders:{userId} SignalR group.
 builder.Services.AddSingleton<IOrderCacheService, SignalROrderCacheService>();
+
+// Server-side notification generator: persists Messages (humans only) for fills /
+// placement results and pushes them to the orders:{userId} group as
+// "NotificationReceived". The engine + OrderController feed it.
+builder.Services.AddSingleton<IServerNotificationService, ServerNotificationService>();
 
 // Server-side IAuthService is a no-op until Phase 5 adds JWT-derived identity.
 // Bots run in BeginSystemScope; admin endpoints will get a real auth path later.
