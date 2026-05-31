@@ -75,6 +75,14 @@ Sequence chosen to (a) finish what's already started, (b) land cheap UX wins, (c
 
 Triggered by the observation that after weeks of bot-driven simulation the SQLite file hit 4.1 GB + a 6.6 GB WAL (graceful shutdowns not happening → WAL never checkpoints back into the main file). See section 8 below.
 
+### Wave 9 — Post-launch polish & UX (post-migration)
+31. Notification persistence — server-generated, humans-only (`NOT EXISTS AIUsers`), reuses the `Messages` table as the persisted inbox; survives client/server restarts. ✅ DONE
+32. Deposit/withdraw/convert ↔ engine cache coherence — `IAccountsCache.ApplyExternalFundDeltaAsync` mirrors fund changes into the engine's `AccountsCache` so order validation sees them without a server restart. ✅ DONE
+33. Selectable / copyable text — make text drag-selectable + Ctrl+C, like a normal app (Windows `LabelHandler` → `IsTextSelectionEnabled`). **Open decision: which default direction —**
+    - **(a) global-on, then prune:** flip selection on app-wide, then audit each label/button and *remove* it where it swallows tap gestures (order-book rows, list items, buttons). Maximises coverage, risks gesture regressions until audited.
+    - **(b) off, then opt-in:** keep selection off by default, then audit each element and *add* it where it's genuinely handy (prices, IDs, message bodies). Safer, but copyable spots are missed until each is touched.
+    Either way the ~5-line flip is trivial; the **per-element audit is the real work** and will take time. Decide (a) vs (b) before starting.
+
 ### Why this order
 - Wave 1 unblocks Wave 2 mechanically (Fund tx history needs FundTransaction; volume overlay builds on the chart changes).
 - Wave 3 is the most important discipline call: a race that's "low probability" with one user is "every minute" with fifty. Fix engine bugs *before* going multi-user.
