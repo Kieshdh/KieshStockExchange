@@ -705,73 +705,83 @@ public sealed class CandleService : ICandleService, IDisposable
         {
             try
             {
-                var now = TimeHelper.NowUtc();
-
-                // Phase 1: drain every aggregator's closed candles (in-memory only).
-                var perKeyClosed = new List<((int, CurrencyType, CandleResolution) key, List<Candle> closed)>();
-                foreach (var (key, agg) in _aggs)
-                {
-                    if (ct.IsCancellationRequested) break;
-                    agg.FlushIfElapsed(now);
-                    var closed = agg.DrainClosedCandles();
-                    if (closed.Count > 0) perKeyClosed.Add((key, closed));
-                }
-
-                // Phase 2: persist everything in a single DB transaction (batched across keys).
-                if (perKeyClosed.Count > 0)
-                {
-                    // Flatten valid candles across all keys into one batch — one tx, one
-                    // ON CONFLICT upsert per candle, no per-candle SELECT.
-                    var batch = new List<Candle>();
-                    foreach (var (_, closed) in perKeyClosed)
-                    {
-                        for (int i = 0; i < closed.Count; i++)
-                        {
-                            var c = closed[i];
-                            if (c.IsValid()) batch.Add(c);
-                            else _logger.LogError("Dropping invalid candle in flush loop: {Summary}", c.Summary);
-                        }
-                    }
-
-                    if (batch.Count > 0)
-                    {
-                        try
-                        {
-                            await _db.UpsertCandlesAsync(batch, ct).ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Error persisting closed candles in flush loop.");
-                        }
-                    }
-
-                    // Phase 3: cache closed candles in the per-key hot ring,
-                    // publish to live streams, and raise CandleClosed for the hub.
-                    foreach (var (key, closed) in perKeyClosed)
-                    {
-                        if (ct.IsCancellationRequested) break;
-                        _streams.TryGetValue(key, out var stream);
-                        var ring = GetOrAddRing(key);
-                        for (int i = 0; i < closed.Count; i++)
-                        {
-                            var candle = closed[i];
-                            ring.Push(candle);
-                            stream?.Writer.TryWrite(candle);
-                            try { CandleClosed?.Invoke(this, candle); }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "CandleClosed handler threw for {Summary}", candle.Summary);
-                            }
-                        }
-                    }
-                }
-
+                await FlushClosedCandlesAsync(TimeHelper.NowUtc(), publish: true).ConfigureAwait(false);
                 await timer.WaitForNextTickAsync(ct).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) { } // Ignore
+            catch (OperationCanceledException) { } // shutdown — fall through to final drain
             catch (Exception ex) { _logger.LogError(ex, "Error in candle flush loop."); }
         }
 
+        // Final drain: buckets that closed since the last tick are still in the
+        // aggregators. Persist them on the way out (no publish — no live consumers
+        // during shutdown) so a clean stop doesn't leave a hole in history.
+        try { await FlushClosedCandlesAsync(TimeHelper.NowUtc(), publish: false).ConfigureAwait(false); }
+        catch (Exception ex) { _logger.LogError(ex, "Error in final candle flush on shutdown."); }
+    }
+
+    /// <summary>
+    /// Drains every aggregator's closed candles, persists them, and (when
+    /// <paramref name="publish"/>) caches + streams them. Persistence always uses
+    /// CancellationToken.None: once a candle is drained from its aggregator it lives
+    /// only here, so abandoning the write on cancellation would lose it for good.
+    /// </summary>
+    private async Task FlushClosedCandlesAsync(DateTime now, bool publish)
+    {
+        // Phase 1: drain every aggregator's closed candles (in-memory only).
+        var perKeyClosed = new List<((int, CurrencyType, CandleResolution) key, List<Candle> closed)>();
+        foreach (var (key, agg) in _aggs)
+        {
+            agg.FlushIfElapsed(now);
+            var closed = agg.DrainClosedCandles();
+            if (closed.Count > 0) perKeyClosed.Add((key, closed));
+        }
+        if (perKeyClosed.Count == 0) return;
+
+        // Phase 2: flatten valid candles across all keys into one batch — one
+        // ON CONFLICT upsert per candle, no per-candle SELECT.
+        var batch = new List<Candle>();
+        foreach (var (_, closed) in perKeyClosed)
+        {
+            for (int i = 0; i < closed.Count; i++)
+            {
+                var c = closed[i];
+                if (c.IsValid()) batch.Add(c);
+                else _logger.LogError("Dropping invalid candle in flush loop: {Summary}", c.Summary);
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            try
+            {
+                // None, not the loop token: drained candles must survive a shutdown.
+                await _db.UpsertCandlesAsync(batch, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error persisting closed candles in flush loop.");
+            }
+        }
+
+        // Phase 3: cache closed candles in the per-key hot ring, publish to live
+        // streams, and raise CandleClosed for the hub. Skipped during shutdown.
+        if (!publish) return;
+        foreach (var (key, closed) in perKeyClosed)
+        {
+            _streams.TryGetValue(key, out var stream);
+            var ring = GetOrAddRing(key);
+            for (int i = 0; i < closed.Count; i++)
+            {
+                var candle = closed[i];
+                ring.Push(candle);
+                stream?.Writer.TryWrite(candle);
+                try { CandleClosed?.Invoke(this, candle); }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "CandleClosed handler threw for {Summary}", candle.Summary);
+                }
+            }
+        }
     }
 
     /// <summary>
