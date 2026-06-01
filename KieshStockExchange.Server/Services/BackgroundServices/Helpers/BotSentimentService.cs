@@ -32,8 +32,7 @@ internal sealed class BotSentimentService
     private const decimal AmpGlobal4h    = 0.25m;
     private const decimal AmpGlobal1h    = 0.20m;
 
-    // AR(1) mean-reversion: x_new = α·x_old + (1-α)·amp·U(-1,+1). Higher α
-    // means slower mean reversion (0.7 keeps 70% of the prior value).
+    // AR(1) mean-reversion: x_new = α·x_old + (1-α)·amp·U(-1,+1). Higher α means slower mean reversion.
     private const decimal MeanReversionAlpha = 0.50m;
 
     private const decimal InvSqrt3 = 0.5773502691896258m; // seed half-width → AR(1) steady-state std (amp/3)
