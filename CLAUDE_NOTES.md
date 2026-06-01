@@ -105,12 +105,14 @@ Fix every compiler/build warning that lives in **our own code**, leaving only th
 third-party `NETSDK1206` (SQLitePCLRaw RID-specific assets) which can't be fixed on our
 side. Split by effort:
 
-38. **Safe C# warnings** (low-risk, do first):
-    - `CS0219` unused locals `rolled10m` / `rolled1h` / `rolled24h` — `BotSentimentService.cs:124`.
-    - `CS0169` unused field `_suppressedApplyCapCount` — `AiBotStateService.cs:33`.
-    - `CS8619` nullability `Task<T?>` vs `Task<T>` — `PgDBService.cs:252,255`.
-    - `CS0067` unused event `UserDetailsViewModel.UserSelected`.
-    Each is a delete or a small signature/nullability tweak; no behaviour change.
+38. **Safe C# warnings** — ✅ DONE (commit 3687b11). Cleared all four; both projects build
+    with zero CS warnings.
+    - `CS0219` unused locals `rolled10m` / `rolled1h` / `rolled24h` — `BotSentimentService.cs`.
+    - `CS0169` unused field `_suppressedApplyCapCount` — `AiBotStateService.cs`.
+    - `CS8619` nullability — `DbScope.QuerySingleOrDefaultAsync`/`ExecuteScalarAsync` now
+      return `Task<T?>` (matches Dapper; value-type callers unaffected) — `PgDBService.cs`.
+    - `CS0067` unused event `UserDetailsViewModel.UserSelected` (+ its dead subscription in
+      `AdminViewModel`) — never raised, removed.
 39. **XAML `XC0025` "binding has explicit Source, not compiled"** (larger, separate pass):
     project-wide across MarketPage / ToastHostView / SortableHeader / TablePagerView /
     UserDetailsView. Resolve by enabling `<MauiEnableXamlCBindingWithSourceCompilation>true`
