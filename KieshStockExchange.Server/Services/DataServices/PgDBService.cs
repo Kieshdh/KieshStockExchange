@@ -248,10 +248,13 @@ public sealed partial class PgDBService : IDataBaseService
         public Task<IEnumerable<T>> QueryAsync<T>(string sql, object? param = null) =>
             _conn.QueryAsync<T>(sql, param, _tx);
 
-        public Task<T> QuerySingleOrDefaultAsync<T>(string sql, object? param = null) =>
+        // T? mirrors Dapper's own signatures (a missing row / null scalar yields null).
+        // For an unconstrained T the annotation is erased for value types, so existing
+        // ExecuteScalarAsync<int> callers still receive a non-nullable int.
+        public Task<T?> QuerySingleOrDefaultAsync<T>(string sql, object? param = null) =>
             _conn.QuerySingleOrDefaultAsync<T>(sql, param, _tx);
 
-        public Task<T> ExecuteScalarAsync<T>(string sql, object? param = null) =>
+        public Task<T?> ExecuteScalarAsync<T>(string sql, object? param = null) =>
             _conn.ExecuteScalarAsync<T>(sql, param, _tx);
 
         public Task<int> ExecuteAsync(string sql, object? param = null) =>

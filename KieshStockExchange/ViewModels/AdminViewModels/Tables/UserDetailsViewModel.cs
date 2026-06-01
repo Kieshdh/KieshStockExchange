@@ -17,7 +17,6 @@ public partial class UserDetailsViewModel : BaseViewModel, ILazyTab
 {
     private const int ActivityWindow = 25;
 
-    public event EventHandler<int>? UserSelected;
     public event EventHandler<int>? OrderSelected;
     public event EventHandler<int>? TransactionSelected;
 

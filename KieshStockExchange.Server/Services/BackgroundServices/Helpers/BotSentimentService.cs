@@ -121,7 +121,7 @@ internal sealed class BotSentimentService
     /// </summary>
     internal void Tick(DateTime now)
     {
-        bool rolled1m = false, rolled10m = false, rolled1h = false, rolled24h = false;
+        bool rolled1m = false; // drives the once-per-minute combined snapshot below
 
         if (now >= _next1m)
         {
@@ -133,14 +133,12 @@ internal sealed class BotSentimentService
         {
             RerollPerStock(_perStock10m, AmpPerStock10m);
             _next10m = now + TimeSpan.FromMinutes(10);
-            rolled10m = true;
         }
         if (now >= _next1h)
         {
             RerollPerStock(_perStock1h, AmpPerStock1h);
             _global1h = Step(_global1h, AmpGlobal1h);
             _next1h = now + TimeSpan.FromHours(1);
-            rolled1h = true;
         }
         if (now >= _next4h)
         {
@@ -153,7 +151,6 @@ internal sealed class BotSentimentService
             RerollPerStock(_perStock24h, AmpPerStock24h);
             _global24h = Step(_global24h, AmpGlobal24h);
             _next24h = now + TimeSpan.FromHours(24);
-            rolled24h = true;
         }
 
         if (_newsEvents) StepShocks(now);

@@ -30,7 +30,6 @@ internal sealed class AiBotStateService
     private DateTime _lastApplyCapLogAt = DateTime.MinValue;
     private int? _lastLoggedCap;
     private int _lastLoggedEnabled = -1;
-    private int _suppressedApplyCapCount;
 
     // Prune knobs: how stale before forced cancel, what fraction of MaxOpenOrders
     // triggers capacity culling, how far off market a limit must be to qualify,

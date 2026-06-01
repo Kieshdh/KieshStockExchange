@@ -65,7 +65,6 @@ public partial class AdminViewModel : BaseViewModel, IDisposable
         ordersVm.TransactionSelected += async (_, txId) => await OpenTransactionDetailsAsync(txId);
         transactionsVm.UserSelected += async (_, userId) => await OpenUserDetailsAsync(userId);
         transactionsVm.OrderSelected += async (_, orderId) => await OpenOrderDetailsAsync(orderId);
-        userDetailsVm.UserSelected += async (_, userId) => await OpenUserDetailsAsync(userId);
         userDetailsVm.OrderSelected += async (_, orderId) => await OpenOrderDetailsAsync(orderId);
         userDetailsVm.TransactionSelected += async (_, txId) => await OpenTransactionDetailsAsync(txId);
     }
