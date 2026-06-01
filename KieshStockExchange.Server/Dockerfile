@@ -12,6 +12,10 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 RUN groupadd -g 1000 appgroup && useradd -m -u 1000 -g appgroup appuser
 WORKDIR /app
 COPY --from=build --chown=appuser:appgroup /app/publish ./
+# WORKDIR /app was created as root; pre-create + chown the dirs the app writes to
+# (ReservationLedger -> /app/data, serilog -> /app/logs volume mount point) so the
+# non-root runtime user can create files there.
+RUN mkdir -p /app/data /app/logs && chown -R appuser:appgroup /app
 USER appuser
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
