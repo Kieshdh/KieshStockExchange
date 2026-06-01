@@ -153,6 +153,7 @@ public interface IDataBaseService
 
     #region FundTransaction operations
     Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default);
+    Task<(List<FundTransaction> Items, int Total)> GetFundTransactionsPageAsync(int skip, int take, string sortKey, bool desc, int? userIdFilter = null, CancellationToken ct = default);
     Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default);
     #endregion
 

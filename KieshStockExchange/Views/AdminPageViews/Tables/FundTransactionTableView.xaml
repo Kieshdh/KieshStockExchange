@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.AdminViewModels.Tables"
+             xmlns:adminViews="clr-namespace:KieshStockExchange.Views.AdminPageViews.Tables"
+             x:Class="KieshStockExchange.Views.AdminPageViews.Tables.FundTransactionTableView"
+             x:Name="FundTransactionTableRoot"
+             x:DataType="vm:FundTransactionTableViewModel">
+    <Grid RowDefinitions="Auto,*">
+    <BoxView Grid.Row="0" Style="{StaticResource TableHorizontalSeparator}" VerticalOptions="Start" />
+    <Grid Grid.Row="1" RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- Header row: ID • User ID • Owner • Kind • Amount • Currency • Date -->
+        <Grid ColumnDefinitions="70, 80, 2*, 1.4*, 1.6*, 80, 2*, 3"
+              Style="{StaticResource TableHeaderGrid}">
+            <adminViews:SortableHeader Grid.Column="0"
+                Text="ID" SortKey="FundTransactionId"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="1"
+                Text="User ID" SortKey="UserId"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <Label Text="Owner" Grid.Column="2" Style="{StaticResource TableHeaderLabel}" />
+            <adminViews:SortableHeader Grid.Column="3"
+                Text="Kind" SortKey="Kind"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="4"
+                Text="Amount" SortKey="Amount"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="5"
+                Text="Currency" SortKey="Currency"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+            <adminViews:SortableHeader Grid.Column="6"
+                Text="Date" SortKey="CreatedAt"
+                CurrentSortKey="{Binding SortKey}" IsDescending="{Binding SortDesc}"
+                Command="{Binding ToggleSortCommand}" />
+        </Grid>
+
+        <!-- Search row: numeric matches UserId exactly; text matches username. -->
+        <Entry Grid.Row="1"
+               Text="{Binding SearchText, Mode=TwoWay}"
+               Placeholder="Search by user-id or username…"
+               Margin="10,4" />
+
+        <!-- CollectionView with a centred loading spinner overlay while a page loads -->
+        <Grid Grid.Row="2">
+            <CollectionView ItemsSource="{Binding PagedItems}" Margin="10">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FundTransactionTableObject">
+                        <Grid ColumnDefinitions="70, 80, 2*, 1.4*, 1.6*, 80, 2*, 3"
+                              Style="{StaticResource TableRowGrid}">
+                            <Label Text="{Binding Transaction.FundTransactionId}" Grid.Column="0" Style="{StaticResource TableRowLabelNumeric}" />
+                            <Label Text="{Binding Transaction.UserId}"            Grid.Column="1" Style="{StaticResource TableRowLabelNumeric}" />
+                            <Label Text="{Binding OwnerName}"                     Grid.Column="2" Style="{StaticResource TableRowLabel}" />
+                            <Label Text="{Binding Transaction.KindDisplay}"       Grid.Column="3" Style="{StaticResource TableRowLabel}" />
+                            <Label Text="{Binding Transaction.SignedAmountDisplay}" Grid.Column="4" Style="{StaticResource TableRowLabelNumeric}" />
+                            <Label Text="{Binding Transaction.Currency}"          Grid.Column="5" Style="{StaticResource TableRowLabel}" />
+                            <Label Text="{Binding Transaction.CreatedAtDisplay}"  Grid.Column="6" Style="{StaticResource TableRowLabel}" />
+
+                            <!-- Vertical Lines -->
+                            <BoxView Grid.Column="0" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="1" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="2" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="3" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="4" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="5" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="6" Style="{StaticResource TableVerticalSeparator}"/>
+                            <BoxView Grid.Column="7" Style="{StaticResource TableVerticalSeparator}"/>
+
+                            <BoxView Style="{StaticResource TableHorizontalSeparator}" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+            <ActivityIndicator IsVisible="{Binding IsBusy}" IsRunning="{Binding IsBusy}"
+                               HorizontalOptions="Center" VerticalOptions="Center"
+                               WidthRequest="40" HeightRequest="40" />
+        </Grid>
+
+        <!-- Pager -->
+        <adminViews:TablePagerView Grid.Row="3"
+            CurrentPage="{Binding CurrentPageDisplay}"
+            TotalPages="{Binding TotalPages}"
+            PagerSummary="{Binding PagerSummary}"
+            PageSize="{Binding PageSize, Mode=TwoWay}"
+            AvailablePageSizes="{Binding AvailablePageSizes}"
+            VisiblePages="{Binding VisiblePages}"
+            CanGoPrev="{Binding CanGoPrev}"
+            CanGoNext="{Binding CanGoNext}"
+            GoToPageCommand="{Binding GoToPageCommand}"
+            GoPrevCommand="{Binding GoPrevCommand}"
+            GoNextCommand="{Binding GoNextCommand}" />
+    </Grid>
+    </Grid>
+</ContentView>

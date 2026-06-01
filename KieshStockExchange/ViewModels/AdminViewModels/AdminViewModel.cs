@@ -26,12 +26,14 @@ public partial class AdminViewModel : BaseViewModel, IDisposable
     public OrderTableViewModel OrdersVm { get; }
     public PositionTableViewModel PositionsVm { get; }
     public FundTableViewModel FundsVm { get; }
+    public FundTransactionTableViewModel FundTransactionsVm { get; }
     public UserDetailsViewModel UserDetailsVm { get; }
     public TopNavBarViewModel TopNavBarVm { get; }
 
     public const int OrdersTabIndex = 2;
     public const int TransactionsTabIndex = 3;
-    public const int UserDetailsTabIndex = 6;
+    // Fund Tx is inserted after Funds (index 5), pushing Positions to 6 and UserDetails to 7.
+    public const int UserDetailsTabIndex = 7;
     #endregion
 
     #region Fields and Constructor
@@ -41,6 +43,7 @@ public partial class AdminViewModel : BaseViewModel, IDisposable
     public AdminViewModel(IServiceProvider services, IDataBaseService db,
         UserTableViewModel usersVm, TransactionTableViewModel transactionsVm, OrderTableViewModel ordersVm,
         StockTableViewModel stocksVm, PositionTableViewModel positionsVm, FundTableViewModel fundsVm,
+        FundTransactionTableViewModel fundTransactionsVm,
         UserDetailsViewModel userDetailsVm, TopNavBarViewModel topNavBarVm)
     {
         Title = "Admin Dashboard";
@@ -50,6 +53,7 @@ public partial class AdminViewModel : BaseViewModel, IDisposable
         OrdersVm = ordersVm;
         PositionsVm = positionsVm;
         FundsVm = fundsVm;
+        FundTransactionsVm = fundTransactionsVm ?? throw new ArgumentNullException(nameof(fundTransactionsVm));
         UserDetailsVm = userDetailsVm ?? throw new ArgumentNullException(nameof(userDetailsVm));
         TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
         _services = services ?? throw new ArgumentNullException(nameof(services));
@@ -151,6 +155,7 @@ public partial class AdminViewModel : BaseViewModel, IDisposable
             OrdersVm.ApplyViewportHeightAsync(dataAreaHeightPx),
             TransactionsVm.ApplyViewportHeightAsync(dataAreaHeightPx),
             FundsVm.ApplyViewportHeightAsync(dataAreaHeightPx),
+            FundTransactionsVm.ApplyViewportHeightAsync(dataAreaHeightPx),
             PositionsVm.ApplyViewportHeightAsync(dataAreaHeightPx));
 
     public async Task InitializeAsync()
@@ -183,8 +188,9 @@ public partial class AdminViewModel : BaseViewModel, IDisposable
         2 => OrdersVm,
         3 => TransactionsVm,
         4 => FundsVm,
-        5 => PositionsVm,
-        6 => UserDetailsVm,
+        5 => FundTransactionsVm,
+        6 => PositionsVm,
+        7 => UserDetailsVm,
         _ => UsersVm
     };
 

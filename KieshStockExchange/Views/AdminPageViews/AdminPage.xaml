@@ -79,6 +79,12 @@
                             </other:SegmentedTabItem.Content>
                         </other:SegmentedTabItem>
 
+                        <other:SegmentedTabItem Header="Fund Tx">
+                            <other:SegmentedTabItem.Content>
+                                <adminViews:FundTransactionTableView x:Name="FundTransactionsTab" />
+                            </other:SegmentedTabItem.Content>
+                        </other:SegmentedTabItem>
+
                         <other:SegmentedTabItem Header="Positions">
                             <other:SegmentedTabItem.Content>
                                 <adminViews:PositionTableView x:Name="PositionsTab" />

@@ -493,6 +493,14 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<FundTransaction>>($"api/fund-transactions/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
 
+    public async Task<(List<FundTransaction> Items, int Total)> GetFundTransactionsPageAsync(int skip, int take, string sortKey, bool desc, int? userIdFilter = null, CancellationToken ct = default)
+    {
+        var q = new Q().Add("skip", skip).Add("take", take).Add("sortKey", sortKey).Add("desc", desc)
+            .Add("userIdFilter", userIdFilter);
+        var page = await _http.GetFromJsonAsync<PageResponse<FundTransaction>>($"api/fund-transactions/page{q}", ApiJsonOptions.Default, ct);
+        return (page?.Items.ToList() ?? new(), page?.Total ?? 0);
+    }
+
     public Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default)
         => PostWriteBackAsync("api/fund-transactions", tx, (d, r) => { if (d.FundTransactionId == 0) d.FundTransactionId = r.FundTransactionId; }, ct);
     #endregion

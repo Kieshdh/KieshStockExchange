@@ -345,6 +345,34 @@ public sealed partial class PgDBService
         return rows.Select(FundTransactionMapper.ToDomain).ToList();
     }
 
+    public async Task<(List<FundTransaction> Items, int Total)> GetFundTransactionsPageAsync(
+        int skip, int take, string sortKey, bool desc, int? userIdFilter = null, CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        var dp = new DynamicParameters();
+        var where = "";
+        if (userIdFilter is int uid) { where = @"WHERE ""UserId"" = @uid"; dp.Add("uid", uid); }
+
+        var total = await c.ExecuteScalarAsync<int>($@"SELECT COUNT(*) FROM ""FundTransactions"" {where}", dp);
+
+        var orderCol = sortKey switch
+        {
+            "FundTransactionId" => "\"FundTransactionId\"",
+            "UserId"            => "\"UserId\"",
+            "Amount"            => "\"Amount\"",
+            "Currency"          => "\"Currency\"",
+            "Kind"              => "\"Kind\"",
+            _                   => "\"CreatedAt\"",
+        };
+        var dir = desc ? "DESC" : "ASC";
+        dp.Add("skip", skip); dp.Add("take", take);
+        var rows = await c.QueryAsync<FundTransactionRow>($@"
+            SELECT {FundTxCols} FROM ""FundTransactions"" {where}
+            ORDER BY {orderCol} {dir}, ""FundTransactionId"" DESC
+            OFFSET @skip LIMIT @take", dp);
+        return (rows.Select(FundTransactionMapper.ToDomain).ToList(), total);
+    }
+
     public async Task CreateFundTransaction(FundTransaction tx, CancellationToken ct = default)
     {
         if (!tx.IsValid()) throw new ArgumentException("FundTransaction entity is not valid", nameof(tx));

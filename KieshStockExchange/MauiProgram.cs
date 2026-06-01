@@ -169,6 +169,7 @@ public static class MauiProgram
         builder.Services.AddTransient<PositionEditViewModel>();
         builder.Services.AddTransient<PositionEditPopup>();
         builder.Services.AddTransient<FundTableViewModel>();
+        builder.Services.AddTransient<FundTransactionTableViewModel>();
         builder.Services.AddTransient<FundAdjustViewModel>();
         builder.Services.AddTransient<FundAdjustPopup>();
         builder.Services.AddTransient<BotDashboardViewModel>();
