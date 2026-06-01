@@ -99,25 +99,43 @@ aggregators then wrote them with the loop's cancellation token, so on shutdown
 lost, leaving a hole in candle history (one source of the gaps the Wave 8 candle gap-fill
 has to reconstruct). Now persists with `CancellationToken.None` + a post-loop final drain.
 
-### Wave 10 — Warnings cleanup
+### Wave 10 — Debugging & verification round
 
-Fix every compiler/build warning that lives in **our own code**, leaving only the
-third-party `NETSDK1206` (SQLitePCLRaw RID-specific assets) which can't be fixed on our
-side. Split by effort:
+A dedicated pass to make the whole system **provably clean**: surface and check every
+error and warning across build, runtime logs, and the running app — not just the compiler.
+The principle is "leave nothing unexplained": every diagnostic is either fixed or
+deliberately documented as expected (e.g. third-party `NETSDK1206`). Work the items in
+order; each should end at a zero-noise baseline so a *new* error stands out immediately.
 
-38. **Safe C# warnings** — ✅ DONE (commit 3687b11). Cleared all four; both projects build
-    with zero CS warnings.
+38. **Safe C# build warnings** — ✅ DONE (commit 3687b11). Cleared all four; both projects
+    build with zero CS warnings.
     - `CS0219` unused locals `rolled10m` / `rolled1h` / `rolled24h` — `BotSentimentService.cs`.
     - `CS0169` unused field `_suppressedApplyCapCount` — `AiBotStateService.cs`.
     - `CS8619` nullability — `DbScope.QuerySingleOrDefaultAsync`/`ExecuteScalarAsync` now
       return `Task<T?>` (matches Dapper; value-type callers unaffected) — `PgDBService.cs`.
     - `CS0067` unused event `UserDetailsViewModel.UserSelected` (+ its dead subscription in
       `AdminViewModel`) — never raised, removed.
-39. **XAML `XC0025` "binding has explicit Source, not compiled"** (larger, separate pass):
-    project-wide across MarketPage / ToastHostView / SortableHeader / TablePagerView /
-    UserDetailsView. Resolve by enabling `<MauiEnableXamlCBindingWithSourceCompilation>true`
-    and adding the correct `x:DataType` to each flagged binding. The flip is one line; the
-    **real work is the per-binding `x:DataType` audit**, so scope it on its own.
+39. **XAML `XC0025` "binding has explicit Source, not compiled"** — project-wide across
+    MarketPage / ToastHostView / SortableHeader / TablePagerView / UserDetailsView. Resolve
+    by enabling `<MauiEnableXamlCBindingWithSourceCompilation>true` and adding the correct
+    `x:DataType` to each flagged binding. The flip is one line; the **real work is the
+    per-binding `x:DataType` audit**, so scope it on its own.
+40. **Server runtime-log sweep** — run a bot soak and read the server logs end to end.
+    Catalogue every `[ERR]`/`[WRN]` line; for each, decide fix vs. expected-and-documented.
+    Known starting points: the conservation/reservation probes (regression detectors —
+    should stay silent), graceful-shutdown OCE filters, transient `40P01/40001` retry logs.
+    Goal: a clean steady-state log where any error is a real signal.
+41. **Client/MAUI runtime sweep** — run the app, exercise each page (Trade, Portfolio,
+    Market, Admin tabs, Account modals), and watch the debug output for binding errors,
+    unhandled-exception traces, threading/`MainThread` warnings, and `Application.Current`
+    null-ref noise. Fix or document each.
+42. **Unhandled-exception & silent-catch audit** — grep the codebase for `catch (Exception)`
+    / empty catch blocks / `catch { }` that may be swallowing real errors (esp. in
+    background loops and event handlers). Confirm each either logs or is a deliberate,
+    commented no-op. Pairs with the silent-failure-hunter review style.
+43. **Final baseline** — both projects build with **0 errors / 0 warnings** except the
+    documented third-party `NETSDK1206`; a representative soak produces a clean log. Record
+    the baseline here so future regressions are obvious.
 
 ### Why this order
 - Wave 1 unblocks Wave 2 mechanically (Fund tx history needs FundTransaction; volume overlay builds on the chart changes).
