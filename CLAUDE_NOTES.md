@@ -88,7 +88,7 @@ Wave 5/6 leftovers that proved unfinished when checked, moved in here.
     - **(b) off, then opt-in:** keep selection off by default, then audit each element and *add* it where it's genuinely handy (prices, IDs, message bodies). Safer, but copyable spots are missed until each is touched.
     Either way the ~5-line flip is trivial; the **per-element audit is the real work** and will take time. Decide (a) vs (b) before starting.
 34. Admin pagination scales with window height (was 4.7) — ✅ DONE (commit 9097f4b). `BaseTableViewModel.ApplyViewportHeightAsync` sets `PageSize = max(20, floor(dataAreaHeight / rowHeight))`; `AdminViewModel` fans the height to the six paged tables; `AdminPage` pushes `Height - chrome` on a 200ms-debounced `SizeChanged`. Lazy tabs pick the size up on first show. Builds clean; in-app resize behaviour still wants a manual eyeball (RowHeightPx≈40 / chrome≈210 are estimates). Full notes in §4.7.
-35. FundTransactions admin table (the remaining slice of 4.9) — no dedicated admin tab today; the model + data exist and `FundTransactionHistoryPage` already reads them user-side. Mirror the existing `*TableView` + pagination/sort pattern for an admin view. (AIUser data — the other half of 4.9 — is already surfaced on the Bot Dashboard, so only FundTransactions is left.) Full notes in §4.9.
+35. FundTransactions admin table (the remaining slice of 4.9) — ✅ DONE (commit 56f905e). Read-only "Fund Tx" admin tab (after Funds) listing deposits/withdrawals/conversions; conversions show as two rows (ConversionIn/Out), no edit affordance (audit log). `IDataBaseService.GetFundTransactionsPageAsync` impl'd in `PgDBService.Portfolio` (optional UserId filter, whitelisted sort) + `ApiDataBaseService`; `FundTransactionController` page endpoint; owner names resolved in-VM via `GetUsersByIds` (no model change, no JOIN). Tab insert shifted Positions→6, UserDetails→7. Both projects build clean; in-app eyeball (column widths) still unverified. (AIUser data — the other half of 4.9 — is already on the Bot Dashboard.) Full notes in §4.9.
 36. Responsive layout audit (was 4.5) — Trade/Portfolio/Market/Admin `Auto` vs `*` row/column distributions on small vs large windows. **Visual — needs in-app confirmation before scoping.** Full notes in §4.5.
 37. Account page proportions (was 4.6) — rebalance the lopsided two-column layout (right "Funds + Preferences" column looks lighter than the left). **Visual — needs in-app confirmation.** Full notes in §4.6.
 
@@ -98,6 +98,24 @@ aggregators then wrote them with the loop's cancellation token, so on shutdown
 `UpsertCandlesAsync` threw `OperationCanceledException` (logged at ERROR) and the batch was
 lost, leaving a hole in candle history (one source of the gaps the Wave 8 candle gap-fill
 has to reconstruct). Now persists with `CancellationToken.None` + a post-loop final drain.
+
+### Wave 10 — Warnings cleanup
+
+Fix every compiler/build warning that lives in **our own code**, leaving only the
+third-party `NETSDK1206` (SQLitePCLRaw RID-specific assets) which can't be fixed on our
+side. Split by effort:
+
+38. **Safe C# warnings** (low-risk, do first):
+    - `CS0219` unused locals `rolled10m` / `rolled1h` / `rolled24h` — `BotSentimentService.cs:124`.
+    - `CS0169` unused field `_suppressedApplyCapCount` — `AiBotStateService.cs:33`.
+    - `CS8619` nullability `Task<T?>` vs `Task<T>` — `PgDBService.cs:252,255`.
+    - `CS0067` unused event `UserDetailsViewModel.UserSelected`.
+    Each is a delete or a small signature/nullability tweak; no behaviour change.
+39. **XAML `XC0025` "binding has explicit Source, not compiled"** (larger, separate pass):
+    project-wide across MarketPage / ToastHostView / SortableHeader / TablePagerView /
+    UserDetailsView. Resolve by enabling `<MauiEnableXamlCBindingWithSourceCompilation>true`
+    and adding the correct `x:DataType` to each flagged binding. The flip is one line; the
+    **real work is the per-binding `x:DataType` audit**, so scope it on its own.
 
 ### Why this order
 - Wave 1 unblocks Wave 2 mechanically (Fund tx history needs FundTransaction; volume overlay builds on the chart changes).
