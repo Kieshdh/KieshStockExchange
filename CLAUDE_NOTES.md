@@ -99,13 +99,17 @@ aggregators then wrote them with the loop's cancellation token, so on shutdown
 lost, leaving a hole in candle history (one source of the gaps the Wave 8 candle gap-fill
 has to reconstruct). Now persists with `CancellationToken.None` + a post-loop final drain.
 
-### Wave 10 — Debugging & verification round
+### Wave 10 — Break the server & client (adversarial debugging round)
 
-A dedicated pass to make the whole system **provably clean**: surface and check every
-error and warning across build, runtime logs, and the running app — not just the compiler.
-The principle is "leave nothing unexplained": every diagnostic is either fixed or
-deliberately documented as expected (e.g. third-party `NETSDK1206`). Work the items in
-order; each should end at a zero-noise baseline so a *new* error stands out immediately.
+A wave whose explicit goal is to **try to break the running system** — server and client —
+and fix whatever breaks, *before* real users or a full bot fleet hit it in production. This
+is adversarial, not passive: throw bad input, hostile timing, and edge-case load at every
+surface and see what falls over. Anything that errors gets fixed or deliberately documented
+as expected (e.g. third-party `NETSDK1206`). Each item ends at a zero-noise baseline so the
+*next* break stands out immediately.
+
+Build-warning cleanup (38–39) comes first only because a quiet build makes runtime breakage
+legible; the heart of the wave is 40–44.
 
 38. **Safe C# build warnings** — ✅ DONE (commit 3687b11). Cleared all four; both projects
     build with zero CS warnings.
@@ -120,22 +124,32 @@ order; each should end at a zero-noise baseline so a *new* error stands out imme
     by enabling `<MauiEnableXamlCBindingWithSourceCompilation>true` and adding the correct
     `x:DataType` to each flagged binding. The flip is one line; the **real work is the
     per-binding `x:DataType` audit**, so scope it on its own.
-40. **Server runtime-log sweep** — run a bot soak and read the server logs end to end.
-    Catalogue every `[ERR]`/`[WRN]` line; for each, decide fix vs. expected-and-documented.
-    Known starting points: the conservation/reservation probes (regression detectors —
-    should stay silent), graceful-shutdown OCE filters, transient `40P01/40001` retry logs.
-    Goal: a clean steady-state log where any error is a real signal.
-41. **Client/MAUI runtime sweep** — run the app, exercise each page (Trade, Portfolio,
-    Market, Admin tabs, Account modals), and watch the debug output for binding errors,
-    unhandled-exception traces, threading/`MainThread` warnings, and `Application.Current`
-    null-ref noise. Fix or document each.
-42. **Unhandled-exception & silent-catch audit** — grep the codebase for `catch (Exception)`
-    / empty catch blocks / `catch { }` that may be swallowing real errors (esp. in
-    background loops and event handlers). Confirm each either logs or is a deliberate,
-    commented no-op. Pairs with the silent-failure-hunter review style.
-43. **Final baseline** — both projects build with **0 errors / 0 warnings** except the
-    documented third-party `NETSDK1206`; a representative soak produces a clean log. Record
-    the baseline here so future regressions are obvious.
+40. **Break the server — API & engine fuzzing.** Hit every endpoint with hostile input:
+    malformed/oversized JSON, missing/extra fields, bad auth tokens, out-of-range paging
+    (`skip=-1`, `take=0`, huge `take`), unknown sort keys, invalid currency/stock ids,
+    SQL-ish strings in filters. Place illegal orders (negative qty/price, zero, overflow,
+    nonexistent stock/currency, self-trade). Confirm each returns a clean 4xx, never a 500
+    or a wedged book/gate. Watch for unhandled exceptions escaping into the request pipeline.
+41. **Break the server — concurrency & load.** Push the bot fleet hard (raise
+    `MaxConcurrentGroups`, bot count, trade rate) and watch the conservation/reservation
+    probes — they are the regression detectors and **must stay silent**. Hammer the cancel
+    path against settle (the §money-race lock-order surface) looking for deadlocks/stalls;
+    kill and restart mid-soak to exercise graceful-shutdown (candle flush drain, WAL/PG
+    state). Any probe hit, deadlock, tick stall, or shutdown error wall is a bug.
+42. **Break the client — MAUI/UI.** Run the app and actively misuse it: rapid tab/page
+    switching, resize spam (the item-34 debounce), submit empty/invalid forms, double-click
+    commands, open/close popups fast, lose & restore the server connection mid-action.
+    Watch debug output for binding errors, unhandled exceptions, threading/`MainThread`
+    violations, and `Application.Current` null-refs. Fix or document each.
+43. **Unhandled-exception & silent-catch audit.** Grep for `catch (Exception)` / `catch { }`
+    / empty catches that may swallow real errors (esp. background loops, event handlers,
+    fire-and-forget `_ = …Async()`). Confirm each either logs or is a deliberate, commented
+    no-op. Add a global handler where an escaped exception currently just vanishes. Pairs
+    with the silent-failure-hunter review style.
+44. **Final baseline.** Both projects build with **0 errors / 0 warnings** except the
+    documented third-party `NETSDK1206`; a representative soak + a UI misuse pass produce a
+    clean log with no unexplained error. Record the baseline here so future regressions are
+    obvious.
 
 ### Why this order
 - Wave 1 unblocks Wave 2 mechanically (Fund tx history needs FundTransaction; volume overlay builds on the chart changes).
