@@ -139,6 +139,20 @@ public partial class AdminViewModel : BaseViewModel, IDisposable
     #endregion
 
     #region Lifecycle and commands
+    /// <summary>
+    /// Push the available data-area height to every paged table so each repages to fill
+    /// the window. Called from the page on (debounced) resize. UserDetails is a fixed
+    /// activity window, not a paged table, so it's intentionally excluded.
+    /// </summary>
+    public Task ApplyViewportHeightAsync(double dataAreaHeightPx) =>
+        Task.WhenAll(
+            UsersVm.ApplyViewportHeightAsync(dataAreaHeightPx),
+            StocksVm.ApplyViewportHeightAsync(dataAreaHeightPx),
+            OrdersVm.ApplyViewportHeightAsync(dataAreaHeightPx),
+            TransactionsVm.ApplyViewportHeightAsync(dataAreaHeightPx),
+            FundsVm.ApplyViewportHeightAsync(dataAreaHeightPx),
+            PositionsVm.ApplyViewportHeightAsync(dataAreaHeightPx));
+
     public async Task InitializeAsync()
     {
         IsBusy = true;
