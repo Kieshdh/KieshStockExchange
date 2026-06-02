@@ -16,14 +16,14 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 | A2 | `ObservableCollection` / bound property mutated off the UI thread (SignalR/timer callbacks) → cross-thread crash | VM event handlers for hub/service events | 🟢 **(sweep 2)** clean — all subscriber VM handlers marshal. Hot paths (`OrderBookViewModel`, `MarketViewModels`) guard `MainThread`+`_disposed`; Portfolio*/TopNavBar/PlaceOrder/Chart marshal directly (`MainThread.BeginInvokeOnMainThread`/`_dispatcher.Dispatch`); OpenOrders/OrderHistory/UserPositions go through `TradeTableViewModelBase.PostUpdateFromCache` which marshals. Event sources (`ApiPortfolioClient`, `ApiOrderCacheBridge`) raise on thread-pool, so per-consumer marshaling is the (correctly-followed) contract. |
 | A3 | Event subscription without unsubscribe → leak + callback into disposed VM | VMs subscribing to singleton services (`IMarketHubClient`, `IUserSessionService`, `IOrderCacheService`, `IUserPortfolioService`) | 🟢 **(sweep 2)** clean. `ChartViewModel`'s only external-singleton sub (`_orderCache.OrdersChanged`) is unsubscribed in `Dispose`; its other `+=` are to VM-owned collections (self-referential cycles, GC'd with the VM). `NotificationService` 2`+=`/0`-=` is singleton↔singleton (harmless). |
 | A4 | Hub lifecycle: invoke on inactive connection; subscriptions not replayed after reconnect/restart | `MarketHubClient` | ✅ fixed (commits 3e852db, 1f513f5): state-guard on all joins, `ReplayGroupsAsync` from both auto-reconnect and manual restart, clear all group sets on disconnect. |
-| A5 | Fire-and-forget `_ = …Async()` swallowing failures | client services/VMs | 🔲 not swept |
-| A6 | Timers/`IDispatcherTimer` not stopped on disappear/dispose | VMs with polling timers | 🔲 not swept |
+| A5 | Fire-and-forget `_ = …Async()` swallowing failures | client services/VMs | ✅ **(sweep 2)** ~30 sites; hub-related ones already use `…SafelyAsync`. Rather than wrap each, added a client `TaskScheduler.UnobservedTaskException` logger in `MauiProgram` (commit b2f15d1) so a swallowed background fault leaves a trace. |
+| A6 | Timers/`IDispatcherTimer` not stopped on disappear/dispose | VMs with polling timers | 🟢 **(sweep 2)** clean — `MarketViewModels._pollTimer` (PausePolling), `BotDashboardViewModel._timer` (StopPolling/Dispose), `PlaceOrderViewModel._assetsTimer` (Dispose), `TrendingService`/`ApiFxRateClient` PeriodicTimers (Dispose/`using`) all stopped+disposed on teardown. |
 
 ## B. SignalR / server real-time
 
 | # | Bug class | Where to look | Status |
 |---|---|---|---|
-| B1 | JWT expiry mid-session → reconnect with stale token → silent 401 loop | `MarketHubClient` token provider, `TokenStore` | 🔲 not swept |
+| B1 | JWT expiry mid-session → reconnect with stale token → silent 401 loop | `MarketHubClient` token provider, `TokenStore` | 🟡 **(sweep 2)** known **deferred-feature** gap — no refresh token (Phase-6 per AuthController), no 401→re-login interceptor. After 168h, protected calls 401 + reconnect fails, but it now degrades gracefully (no crash, via the OnAppearing guards + null-returning fetches); user just isn't auto-prompted to re-login. **Fix = feature** (add a 401 `DelegatingHandler` → navigate to Login), not a bug-sweep change. |
 | B2 | Server broadcast fan-out blocking the engine tick | `MarketHubBroadcaster`, `TelemetryBroadcaster` | 🟢 both fire-and-forget with `ContinueWith` fault logging |
 
 ## C. Server concurrency / async
@@ -39,7 +39,7 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 | # | Bug class | Where to look | Status |
 |---|---|---|---|
 | D1 | SQL injection via string-interpolated identifiers | `PgDBService.*` dynamic ORDER BY / WHERE | 🟢 `sortKey` whitelisted everywhere; filters parameterized. |
-| D2 | Unbounded query (no LIMIT) → memory/DoS | `PgDBService` list queries | ✅ paging clamped (c3a48fd); ✅ **(sweep 2)** `by-stock-range` now server-capped at 50k most-recent rows via an optional `maxRows` param threaded through `IDataBaseService`/`PgDBService`/`ApiDataBaseService`/`TransactionController` — the candle/backfill callers (`CandleService`, `MarketLookupService`) pass null for the full window, so aggregation is unaffected. 🟡 still open: `GetTransactionsByUserId` / `GetOrdersByUserId` have no cap (consumers are per-human, so lower risk). |
+| D2 | Unbounded query (no LIMIT) → memory/DoS | `PgDBService` list queries | ✅ paging clamped (c3a48fd); ✅ **(sweep 2)** `by-stock-range` now server-capped at 50k most-recent rows via an optional `maxRows` param threaded through `IDataBaseService`/`PgDBService`/`ApiDataBaseService`/`TransactionController` — the candle/backfill callers (`CandleService`, `MarketLookupService`) pass null for the full window, so aggregation is unaffected. 🟢 **(sweep 2)** `GetTransactionsByUserId`/`GetOrdersByUserId` reviewed — **deliberately not capped**: `GetOrdersByUserId` feeds `OrderCacheService` which needs the full open-order set (a cap would drop old open orders from the cache), and the admin UI views other users via the already-clamped *paged* endpoints. Self-consumers are human-bounded; residual risk is only a hand-crafted admin API call against a bot id (trusted). |
 | D3 | Decimal overflow / money rounding | `OrderValidator`, `CurrencyHelper`, settlement | ✅ notional-overflow guard (commit c3a48fd); rounding via `CurrencyHelper`. |
 | D4 | Connection/transaction leaks | `PgDBService` `OpenAsync`/`RunInTransactionAsync` | 🟢 `await using` scope pattern. 🔲 deeper audit not done. |
 
@@ -61,9 +61,14 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 
 ---
 
-## Next sweeps (priority order)
-1. **A5 / A6** — fire-and-forget (`_ = …Async()`) + timer-stop-on-disappear audit in client VMs/services. *Top.*
-2. **B1** — token-expiry / reconnect behavior (stale JWT → silent 401 loop).
-3. **D2 tail** — `GetTransactionsByUserId` / `GetOrdersByUserId` caps (lower risk).
-4. **D4 / E4** — deeper connection-leak + DTO-bind review.
+## Status after sweep 2
+Sweeps 1–2 covered every high/medium bug class for this stack. Real bugs found were all
+fixed + deployed (async-void crash class, hub lifecycle, write+read IDOR, paging clamp,
+notional overflow, server+client global exception nets, unbounded `by-stock-range`). The
+rest audited clean (UI-thread marshaling, subscription leaks, sync-over-async, timers).
+
+### Remaining (not bugs — feature work or deferred deep-dives)
+1. **B1** — add a 401 `DelegatingHandler` → re-login (real **feature**, ties into Phase-6 refresh tokens).
+2. **D4 / E4** — deeper connection/transaction-leak audit + remaining DTO-bind review (low priority; `await using` + admin-gated raw binds already in place).
+3. **C** server concurrency under *new* load shapes — re-run the conservation/reservation soak after any engine change.
 6. **B1** — token-expiry/reconnect behavior.
