@@ -418,35 +418,47 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         while (!ct.IsCancellationRequested)
         {
-            var tickStart = Stopwatch.GetTimestamp();
-            var now = TimeHelper.NowUtc();
-            await CheckTimers(now, ct).ConfigureAwait(false);
-
-            var pending = await CollectPendingOrdersAsync(now, ct).ConfigureAwait(false);
-            if (pending.Count > 0)
-                await SubmitAndApplyBatchAsync(pending, _engineCts?.Token ?? ct).ConfigureAwait(false);
-
-            RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
-            Interlocked.Increment(ref _tickCount);
-            RecordActivitySample();
-
-            // The scaler may move the cap based on the fresh EWMA. SetActiveBotCap
-            // fires StatsChanged itself, so only emit the unchanged event when the
-            // scaler decides to stay put.
-            var scalerTarget = _scaler.OnTick(this);
-            if (scalerTarget.HasValue) SetActiveBotCap(scalerTarget.Value);
-            else                       StatsChanged?.Invoke(this, EventArgs.Empty);
-
-            // Reconcile at the post-batch quiescent frame: this tick's market orders are
-            // terminal, so only resting limit reservations remain and the clamp is safe.
-            // After RecordTickLatency so this maintenance pass doesn't skew the scaler EWMA.
-            if (now >= _nextReconcileTime)
+            // Whole-tick guard: a transient failure (e.g. a prod DB command timeout) must
+            // not end the loop. Before this, an unhandled tick exception escaped RunLoopAsync,
+            // faulting the fire-and-forget runner — the bots silently stopped and never
+            // recovered. Now we log and continue so volume self-heals.
+            try
             {
-                _nextReconcileTime = now + ReconcileInterval;
-                var clamp = _configuration.GetValue("Bots:ReconcileClamp", true);
-                try { await _auditor.AuditAsync(clamp, ct).ConfigureAwait(false); }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-                catch (Exception ex) { _logger.LogError(ex, "Reservation reconcile pass failed."); }
+                var tickStart = Stopwatch.GetTimestamp();
+                var now = TimeHelper.NowUtc();
+                await CheckTimers(now, ct).ConfigureAwait(false);
+
+                var pending = await CollectPendingOrdersAsync(now, ct).ConfigureAwait(false);
+                if (pending.Count > 0)
+                    await SubmitAndApplyBatchAsync(pending, _engineCts?.Token ?? ct).ConfigureAwait(false);
+
+                RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
+                Interlocked.Increment(ref _tickCount);
+                RecordActivitySample();
+
+                // The scaler may move the cap based on the fresh EWMA. SetActiveBotCap
+                // fires StatsChanged itself, so only emit the unchanged event when the
+                // scaler decides to stay put.
+                var scalerTarget = _scaler.OnTick(this);
+                if (scalerTarget.HasValue) SetActiveBotCap(scalerTarget.Value);
+                else                       StatsChanged?.Invoke(this, EventArgs.Empty);
+
+                // Reconcile at the post-batch quiescent frame: this tick's market orders are
+                // terminal, so only resting limit reservations remain and the clamp is safe.
+                // After RecordTickLatency so this maintenance pass doesn't skew the scaler EWMA.
+                if (now >= _nextReconcileTime)
+                {
+                    _nextReconcileTime = now + ReconcileInterval;
+                    var clamp = _configuration.GetValue("Bots:ReconcileClamp", true);
+                    try { await _auditor.AuditAsync(clamp, ct).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+                    catch (Exception ex) { _logger.LogError(ex, "Reservation reconcile pass failed."); }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Bot tick failed; loop continuing after the interval delay.");
             }
 
             try { await Task.Delay(TradeInterval, ct).ConfigureAwait(false); }

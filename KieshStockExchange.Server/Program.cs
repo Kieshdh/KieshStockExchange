@@ -76,7 +76,15 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 // Bump shutdown timeout above the default 30s. Bot loop's clean stop needs to
 // finish the in-flight tick + flush ringbuffers; under load the longest path
 // is the AiTradeService dispose + ReservationLedger CSV flush. 60s is plenty.
-builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(60));
+builder.Services.Configure<HostOptions>(o =>
+{
+    o.ShutdownTimeout = TimeSpan.FromSeconds(60);
+    // A faulting BackgroundService must NOT take down the whole host: the default
+    // (StopHost) turns one background exception into a full process exit — which on prod
+    // produced a silent ~2-minute graceful-restart loop. Keep the host alive and let the
+    // service's own logging surface the fault.
+    o.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+});
 
 // OpenAPI surface for dev.
 builder.Services.AddOpenApi();
@@ -412,4 +420,17 @@ app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<MarketHub>("/hubs/market");
 
-app.Run();
+// Flush Serilog on shutdown. Without this the stop reason (a BackgroundService fault, a
+// signal, an explicit StopApplication) is written but lost before the process exits — which
+// is exactly why a silent prod restart loop was undiagnosable. The marker + CloseAndFlush
+// guarantee the reason lands in the log.
+app.Lifetime.ApplicationStopping.Register(() =>
+    Log.Warning("Application is stopping (ApplicationStopping fired) — flushing logs."));
+try
+{
+    app.Run();
+}
+finally
+{
+    Log.CloseAndFlush();
+}

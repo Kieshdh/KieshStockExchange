@@ -24,6 +24,9 @@ COPY --from=build --chown=appuser:appgroup /app/publish ./
 RUN mkdir -p /app/data /app/logs && chown -R appuser:appgroup /app
 USER appuser
 EXPOSE 8080
+# Liveness, not readiness: /healthz/live is process-up only (no checks), so a slow or
+# contended DB can't mark the container unhealthy. /healthz/ready (DatabaseHealthCheck)
+# is for orchestration readiness, not for the restart decision.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=5 \
-    CMD curl -fsS http://localhost:8080/healthz/ready || exit 1
+    CMD curl -fsS http://localhost:8080/healthz/live || exit 1
 ENTRYPOINT ["dotnet", "KieshStockExchange.Server.dll"]

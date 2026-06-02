@@ -9,13 +9,12 @@ namespace KieshStockExchange.Server.Controllers;
 // flushes, etc.) — but is invokable from anywhere and can't be missed by VS's
 // "Stop Debugging" eating the signal. See stop-server.ps1 in the repo root.
 //
-// Anonymous because the local dev / stop-server.ps1 invocation has no token
-// and the operator is on the host machine anyway. When the server moves to
-// a public deployment in Phase 7e this needs an admin role check or to be
-// removed in favor of a host-side signal (systemd stop, docker stop).
+// Admin-gated: on the public Phase-7e deployment an anonymous shutdown endpoint lets
+// anyone stop the server. Operators on the host use `docker stop` / `docker compose stop`;
+// remote admins authenticate. (Was [AllowAnonymous] for local dev / stop-server.ps1.)
 [ApiController]
 [Route("api/server")]
-[AllowAnonymous]
+[Authorize(Roles = "admin")]
 public sealed class ServerController : ControllerBase
 {
     private readonly IHostApplicationLifetime _lifetime;
