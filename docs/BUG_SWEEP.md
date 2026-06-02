@@ -72,3 +72,11 @@ rest audited clean (UI-thread marshaling, subscription leaks, sync-over-async, t
 2. **D4 / E4** — deeper connection/transaction-leak audit + remaining DTO-bind review (low priority; `await using` + admin-gated raw binds already in place).
 3. **C** server concurrency under *new* load shapes — re-run the conservation/reservation soak after any engine change.
 6. **B1** — token-expiry/reconnect behavior.
+
+## G. Ops / deploy (found during connection-debug, sweep 2)
+
+| # | Bug class | Where | Status |
+|---|---|---|---|
+| G1 | Docker HEALTHCHECK uses a tool absent from the image → permanent "unhealthy" → autoheal restart loop | `KieshStockExchange.Server/Dockerfile` | ✅ **fixed** (commit 1431e93). `wget` (not in aspnet image) → `curl` (installed) + `--start-period=120s` for the slow candle-backfill boot. Was RestartCount=55, ~every 1-2 min; now healthy & stable. Manifested to users as reconnect-every-30s + 502s + "server slow". |
+| G2 | Healthcheck has no start-period vs a ~60-90s boot → flagged unhealthy mid-startup | same | ✅ fixed (start-period=120s). |
+| G3 | Single-VPS capacity (4 vCPU / 8 GB) for the 20k-bot sim | infra | 🟢 fine once stable — server+PG idle ~13% CPU each after the restart loop was fixed. Revisit only if real users + full fleet are added. |
