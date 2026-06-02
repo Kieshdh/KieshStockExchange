@@ -12,11 +12,11 @@
         <HorizontalStackLayout Grid.Column="0" Spacing="4" VerticalOptions="Center">
             <Button Text="‹ Prev"
                     Style="{StaticResource PagerNavButton}"
-                    IsEnabled="{Binding CanGoPrev, Source={x:Reference Root}}"
-                    Command="{Binding GoPrevCommand, Source={x:Reference Root}}" />
+                    IsEnabled="{Binding CanGoPrev, Source={x:Reference Root}, x:DataType=adminViews:TablePagerView}"
+                    Command="{Binding GoPrevCommand, Source={x:Reference Root}, x:DataType=adminViews:TablePagerView}" />
 
             <HorizontalStackLayout Spacing="4" VerticalOptions="Center"
-                                   BindableLayout.ItemsSource="{Binding Entries, Source={x:Reference Root}}">
+                                   BindableLayout.ItemsSource="{Binding Entries, Source={x:Reference Root}, x:DataType=adminViews:TablePagerView}">
                 <BindableLayout.ItemTemplate>
                     <DataTemplate x:DataType="adminViews:PagerEntry">
                         <Grid>
@@ -29,7 +29,7 @@
                             <Button Text="{Binding Page}"
                                     IsVisible="{Binding IsButton}"
                                     CommandParameter="{Binding Page}"
-                                    Command="{Binding GoToPageCommand, Source={x:Reference Root}}"
+                                    Command="{Binding GoToPageCommand, Source={x:Reference Root}, x:DataType=adminViews:TablePagerView}"
                                     Style="{StaticResource PagerPageButton}">
                                 <Button.Triggers>
                                     <DataTrigger TargetType="Button"
@@ -49,13 +49,13 @@
 
             <Button Text="Next ›"
                     Style="{StaticResource PagerNavButton}"
-                    IsEnabled="{Binding CanGoNext, Source={x:Reference Root}}"
-                    Command="{Binding GoNextCommand, Source={x:Reference Root}}" />
+                    IsEnabled="{Binding CanGoNext, Source={x:Reference Root}, x:DataType=adminViews:TablePagerView}"
+                    Command="{Binding GoNextCommand, Source={x:Reference Root}, x:DataType=adminViews:TablePagerView}" />
         </HorizontalStackLayout>
 
         <!-- Middle: summary label -->
         <Label Grid.Column="1"
-               Text="{Binding PagerSummary, Source={x:Reference Root}}"
+               Text="{Binding PagerSummary, Source={x:Reference Root}, x:DataType=adminViews:TablePagerView}"
                Style="{StaticResource PagerSummaryLabel}"
                HorizontalOptions="Center"
                VerticalOptions="Center" />
@@ -66,7 +66,7 @@
                    Style="{StaticResource PagerSummaryLabel}"
                    VerticalOptions="Center" />
             <Picker x:Name="SizePicker"
-                    ItemsSource="{Binding AvailablePageSizes, Source={x:Reference Root}}"
+                    ItemsSource="{Binding AvailablePageSizes, Source={x:Reference Root}, x:DataType=adminViews:TablePagerView}"
                     SelectedIndexChanged="OnSizePickerSelectionChanged"
                     Style="{StaticResource PagerSizePicker}" />
         </HorizontalStackLayout>

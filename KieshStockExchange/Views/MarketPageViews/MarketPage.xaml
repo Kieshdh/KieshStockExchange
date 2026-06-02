@@ -89,14 +89,14 @@
                                         Style="{StaticResource WatchStarButton}"
                                         WidthRequest="32"
                                         FontSize="12"
-                                        Command="{Binding Source={x:Reference MarketPageRoot}, Path=BindingContext.MoveWatchUpCommand, x:DataType=vm:MarketViewModel}"
+                                        Command="{Binding MoveWatchUpCommand, Source={RelativeSource AncestorType={x:Type vm:MarketViewModel}}, x:DataType=vm:MarketViewModel}"
                                         CommandParameter="{Binding .}" />
                                 <Button Grid.Column="4"
                                         Text="&#x25BC;"
                                         Style="{StaticResource WatchStarButton}"
                                         WidthRequest="32"
                                         FontSize="12"
-                                        Command="{Binding Source={x:Reference MarketPageRoot}, Path=BindingContext.MoveWatchDownCommand, x:DataType=vm:MarketViewModel}"
+                                        Command="{Binding MoveWatchDownCommand, Source={RelativeSource AncestorType={x:Type vm:MarketViewModel}}, x:DataType=vm:MarketViewModel}"
                                         CommandParameter="{Binding .}" />
                                 <Button Grid.Column="5"
                                         Text="Trade"

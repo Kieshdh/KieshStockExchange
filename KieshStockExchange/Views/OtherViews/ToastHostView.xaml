@@ -23,7 +23,7 @@
                 <Border Style="{StaticResource ToastBorder}">
                     <Border.GestureRecognizers>
                         <TapGestureRecognizer
-                            Command="{Binding Source={RelativeSource AncestorType={x:Type vm:ToastHostViewModel}}, Path=DismissCommand}"
+                            Command="{Binding DismissCommand, Source={RelativeSource AncestorType={x:Type vm:ToastHostViewModel}}, x:DataType=vm:ToastHostViewModel}"
                             CommandParameter="{Binding .}" />
                     </Border.GestureRecognizers>
                     <Grid ColumnDefinitions="4,*" ColumnSpacing="10">

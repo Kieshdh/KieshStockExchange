@@ -119,11 +119,15 @@ legible; the heart of the wave is 40–44.
       return `Task<T?>` (matches Dapper; value-type callers unaffected) — `PgDBService.cs`.
     - `CS0067` unused event `UserDetailsViewModel.UserSelected` (+ its dead subscription in
       `AdminViewModel`) — never raised, removed.
-39. **XAML `XC0025` "binding has explicit Source, not compiled"** — project-wide across
-    MarketPage / ToastHostView / SortableHeader / TablePagerView / UserDetailsView. Resolve
-    by enabling `<MauiEnableXamlCBindingWithSourceCompilation>true` and adding the correct
-    `x:DataType` to each flagged binding. The flip is one line; the **real work is the
-    per-binding `x:DataType` audit**, so scope it on its own.
+39. **XAML `XC0025` "binding has explicit Source, not compiled"** — ✅ DONE. Enabled
+    `<MauiEnableXamlCBindingWithSourceCompilation>true` and gave every Source-bearing binding
+    a resolvable `x:DataType` across MarketPage / ToastHostView / SortableHeader /
+    TablePagerView / UserDetailsView. Client builds 0 warnings / 0 errors. Flipping the flag
+    surfaced a latent **XC0045**: four bindings (`MoveWatch{Up,Down}`, `DismissCommand`,
+    `PickUserCommand`) only worked via runtime reflection and were resolving against the row
+    item, not the page VM — rewrote them to `RelativeSource AncestorType={x:Type vm:…}` with
+    matching `x:DataType`. Runtime ancestor-walk for those four wants an in-app eyeball under
+    item 42 (watchlist ▲/▼, toast click-dismiss, UserDetails search-pick).
 40. **Break the server — API & engine fuzzing.** Hit every endpoint with hostile input:
     malformed/oversized JSON, missing/extra fields, bad auth tokens, out-of-range paging
     (`skip=-1`, `take=0`, huge `take`), unknown sort keys, invalid currency/stock ids,

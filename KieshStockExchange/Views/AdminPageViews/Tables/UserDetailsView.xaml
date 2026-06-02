@@ -31,7 +31,7 @@
                             <Grid Padding="14,8" ColumnDefinitions="*,Auto">
                                 <Grid.GestureRecognizers>
                                     <TapGestureRecognizer NumberOfTapsRequired="1"
-                                        Command="{Binding Source={x:Reference UserDetailsRoot}, Path=BindingContext.PickUserCommand}"
+                                        Command="{Binding PickUserCommand, Source={RelativeSource AncestorType={x:Type vm:UserDetailsViewModel}}, x:DataType=vm:UserDetailsViewModel}"
                                         CommandParameter="{Binding .}" />
                                 </Grid.GestureRecognizers>
                                 <Label Grid.Column="0" Text="{Binding Username}" Style="{StaticResource FormLabelStyle}" />

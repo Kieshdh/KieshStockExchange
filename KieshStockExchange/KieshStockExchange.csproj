@@ -20,6 +20,10 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 
+		<!-- Compile bindings that carry an explicit Source (x:Reference / RelativeSource);
+		     each such binding must declare a resolvable x:DataType. Silences XC0025. -->
+		<MauiEnableXamlCBindingWithSourceCompilation>true</MauiEnableXamlCBindingWithSourceCompilation>
+
 		<!-- Display name -->
 		<ApplicationTitle>KieshStockExchange</ApplicationTitle>
 
