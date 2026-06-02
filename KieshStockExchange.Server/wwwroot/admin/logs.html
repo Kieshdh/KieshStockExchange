@@ -32,6 +32,13 @@
     .src-BotScalerService { color: #569cd6; }     /* blue (keyword) */
     .src-FxRateService { color: #ce9178; }        /* orange (string) */
     .src-ReservationAuditor { color: #9cdcfe; }   /* light blue (variable) */
+    /* Per-source filter bar. Each chip inherits its source color (text + dot); a
+       disabled source is dimmed + struck through and its rows are hidden client-side. */
+    #filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 14px; background: #252526; border-bottom: 1px solid #333333; position: sticky; top: 49px; }
+    #filters .flabel { font-size: 12px; opacity: .6; margin-right: 2px; }
+    .chip { font: inherit; font-size: 12px; padding: 2px 10px; background: #3c3c3c; border: 1px solid #3c3c3c; border-radius: 11px; cursor: pointer; }
+    .chip::before { content: "\25CF"; margin-right: 5px; }
+    .chip.off { opacity: .4; text-decoration: line-through; }
   </style>
 </head>
 <body>
@@ -40,6 +47,7 @@
     <button id="connect">Connect</button>
     <span id="status">idle</span>
   </header>
+  <div id="filters"><span class="flabel">Sources:</span></div>
   <div id="log"></div>
 
   <script>
@@ -49,6 +57,36 @@
     const logEl = document.getElementById('log');
     let source = null;
     let retry = 1000;
+
+    // Per-source filter. The six telemetry sources the server's sink emits; the
+    // label is a short display name, the key matches evt.source (and the .src-* color).
+    const SOURCES = [
+      ['BotStatsLogger', 'BotStats'],
+      ['BotEconomyTelemetry', 'Economy'],
+      ['BotSentimentService', 'Sentiment'],
+      ['BotScalerService', 'Scaler'],
+      ['FxRateService', 'FX'],
+      ['ReservationAuditor', 'ReservationAuditor'],
+    ];
+    const SOURCE_LABEL = Object.fromEntries(SOURCES);  // source key -> short display name
+    const disabled = new Set();          // sources the user has toggled off
+    const filtersEl = document.getElementById('filters');
+    for (const [src, label] of SOURCES) {
+      const chip = document.createElement('button');
+      chip.className = 'chip src-' + src;
+      chip.dataset.src = src;
+      chip.textContent = label;
+      chip.title = src;
+      chip.addEventListener('click', () => {
+        if (disabled.delete(src)) chip.classList.remove('off');
+        else { disabled.add(src); chip.classList.add('off'); }
+        // Re-apply to rows already on screen so the toggle is retroactive.
+        logEl.querySelectorAll('.row').forEach(r => {
+          if (r.dataset.src === src) r.style.display = disabled.has(src) ? 'none' : '';
+        });
+      });
+      filtersEl.appendChild(chip);
+    }
 
     // Persist the token across reloads so a phone stays connected after a sleep.
     tokenInput.value = localStorage.getItem('kse_admin_token') || '';
@@ -76,13 +114,15 @@
     function append(evt) {
       const row = document.createElement('div');
       row.className = 'row';
+      row.dataset.src = evt.source;
+      if (disabled.has(evt.source)) row.style.display = 'none';
       const ts = new Date(evt.timestamp).toLocaleTimeString();
       row.innerHTML =
         `<span class="ts">${ts}</span>` +
         `<span class="lvl-${evt.level}">${evt.level.slice(0, 3).toUpperCase()}</span>` +
         `<span class="src src-${evt.source}"></span>` +
         `<span class="msg"></span>`;
-      row.querySelector('.src').textContent = evt.source;
+      row.querySelector('.src').textContent = SOURCE_LABEL[evt.source] || evt.source;
       row.querySelector('.msg').innerHTML = highlight(evt.message);
       logEl.appendChild(row);
       // Cap the DOM at 500 rows so a long session doesn't bloat memory.
