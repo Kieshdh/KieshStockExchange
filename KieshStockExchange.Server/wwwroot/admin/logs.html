@@ -17,6 +17,10 @@
     .row { display: grid; grid-template-columns: 88px 56px 160px 1fr; gap: 10px; padding: 2px 0; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid #2a2a2a; }
     .ts { color: #808080; }
     .msg { color: #d4d4d4; }
+    /* Message value tokens — mimics Serilog's console theme over the rendered text. */
+    .tok-num { color: #b5cea8; }  /* numbers / money / percent (VS Code number) */
+    .tok-str { color: #ce9178; }  /* quoted strings (VS Code string) */
+    .tok-sym { color: #4ec9b0; }  /* tickers / currency codes (VS Code type) */
     /* Log level — VS Code editor severities. */
     .lvl-Information { color: #808080; }
     .lvl-Warning { color: #cca700; }
@@ -51,6 +55,24 @@
 
     function setStatus(text) { statusEl.textContent = text; }
 
+    // Re-color the rendered message the way Serilog's console theme did: the
+    // structured values (numbers, money, percentages, quoted strings, ticker /
+    // currency symbols) stand out from the literal label text. Quoted strings
+    // come first so money/timestamps inside quotes aren't split.
+    const TOKEN_RE = /("[^"]*")|(-?\$[\d,]+(?:\.\d+)?)|([+-]?\d[\d,]*(?:\.\d+)?\s*%)|(\b[A-Z]{2,6}(?:\/[A-Z]{2,6})?\b)|([+-]?\d[\d,]*(?:\.\d+)?)/g;
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    }
+
+    function highlight(message) {
+      return escapeHtml(message).replace(TOKEN_RE, (m, str, money, pct, sym, num) => {
+        if (str) return `<span class="tok-str">${m}</span>`;
+        if (sym) return `<span class="tok-sym">${m}</span>`;
+        return `<span class="tok-num">${m}</span>`; // money / pct / num
+      });
+    }
+
     function append(evt) {
       const row = document.createElement('div');
       row.className = 'row';
@@ -61,7 +83,7 @@
         `<span class="src src-${evt.source}"></span>` +
         `<span class="msg"></span>`;
       row.querySelector('.src').textContent = evt.source;
-      row.querySelector('.msg').textContent = evt.message;
+      row.querySelector('.msg').innerHTML = highlight(evt.message);
       logEl.appendChild(row);
       // Cap the DOM at 500 rows so a long session doesn't bloat memory.
       while (logEl.childElementCount > 500) logEl.removeChild(logEl.firstChild);
