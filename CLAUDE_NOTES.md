@@ -149,12 +149,20 @@ legible; the heart of the wave is 40–44.
     IDOR** — `GET /api/orders/by-user/{id}`, `by-stock`, `/{id}`, and the other read
     endpoints return any user's data with no per-resource/role authorization. The whole
     authenticated-but-not-authorized GET surface wants a deliberate authz-design pass.
-41. **Break the server — concurrency & load.** Push the bot fleet hard (raise
-    `MaxConcurrentGroups`, bot count, trade rate) and watch the conservation/reservation
-    probes — they are the regression detectors and **must stay silent**. Hammer the cancel
-    path against settle (the §money-race lock-order surface) looking for deadlocks/stalls;
-    kill and restart mid-soak to exercise graceful-shutdown (candle flush drain, WAL/PG
-    state). Any probe hit, deadlock, tick stall, or shutdown error wall is a bug.
+41. **Break the server — concurrency & load.** — ✅ DONE (no code changes; soak validation).
+    Local Postgres-backed soak at **doubled settle parallelism** (`Db:MaxConcurrentGroups=48`).
+    Fleet sustained **~23.7k trades/min and 20k+ cancels/min** (bot prune hammering the
+    cancel-vs-settle §money-race lock-order surface). Across the whole window: **zero**
+    ConservationProbe errors, reservation mismatches, deadlocks, tick stalls, or unhandled
+    exceptions — every reconcile pass reported "no mismatches". Then **abrupt-killed the
+    server mid-load** (hard TerminateProcess, no graceful stop) and restarted: candle
+    gap-fill reconstructed cleanly (13,785 candles, Failed combos: 0), no error wall on
+    recovery, and the **first post-crash reservation reconcile was clean** — atomic settle
+    transactions held, no half-settled state. PG/cache state consistent across the crash.
+    **Not exercised here:** the *graceful* Ctrl+C drain path (can't target a windowless
+    console child from the non-interactive harness without risking the driving shell). Its
+    candle-flush-on-shutdown bug is already fixed + documented; re-verify with an interactive
+    Ctrl+C in the server's own terminal if desired.
 42. **Break the client — MAUI/UI.** Run the app and actively misuse it: rapid tab/page
     switching, resize spam (the item-34 debounce), submit empty/invalid forms, double-click
     commands, open/close popups fast, lose & restore the server connection mid-action.
