@@ -215,6 +215,16 @@ public static class MauiProgram
 
         var app = builder.Build();
 
+        // Last-resort net for the client's fire-and-forget work (the `_ = …Async()`
+        // refreshes / hub joins below and across the VMs). .NET swallows an unobserved
+        // task fault by default, so a failed background refresh would vanish without a
+        // trace — log it here instead.
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            System.Diagnostics.Debug.WriteLine($"[UnobservedTaskException] {e.Exception}");
+            e.SetObserved();
+        };
+
         // Step 3b — populate the in-memory token cache from SecureStorage
         // before any HTTP call goes out. Synchronous-but-fire-and-forget is
         // fine because anonymous endpoints (login + healthz) don't need a
