@@ -123,7 +123,7 @@
       row.className = 'row';
       row.dataset.src = evt.source;
       if (disabled.has(evt.source)) row.style.display = 'none';
-      const ts = new Date(evt.timestamp).toLocaleTimeString(undefined, { timeZone: TZ });
+      const ts = new Date(evt.timestamp).toLocaleTimeString(undefined, { timeZone: TZ, hour12: false });
       row.innerHTML =
         `<span class="ts">${ts}</span>` +
         `<span class="lvl-${evt.level}">${evt.level.slice(0, 3).toUpperCase()}</span>` +
