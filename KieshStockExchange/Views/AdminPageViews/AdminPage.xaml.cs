@@ -52,7 +52,9 @@ public partial class AdminPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        await _vm.InitializeAsync();
+        // Best-effort load — a load failure must not crash the app via async void.
+        try { await _vm.InitializeAsync(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"AdminPage.OnAppearing load failed: {ex}"); }
     }
 
     protected override void OnDisappearing()

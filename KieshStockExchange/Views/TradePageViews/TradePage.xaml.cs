@@ -21,7 +21,10 @@ public partial class TradePage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        await _vm.InitializeAsync(1);
+        // Best-effort load — a failure (server down / mid-reconnect) must not crash the
+        // app through the async-void path. Log it, don't throw.
+        try { await _vm.InitializeAsync(1); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"TradePage.OnAppearing load failed: {ex}"); }
     }
 
     protected override void OnDisappearing()

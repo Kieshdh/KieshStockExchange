@@ -12,6 +12,8 @@ public partial class RegisterPage : ContentPage
 
     private async void OnSignInClicked(object sender, TappedEventArgs e)
     {
-        await Shell.Current.GoToAsync("..");
+        // async void — a failed navigation must not crash the app.
+        try { await Shell.Current.GoToAsync(".."); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"RegisterPage.OnSignInClicked nav failed: {ex}"); }
     }
 }

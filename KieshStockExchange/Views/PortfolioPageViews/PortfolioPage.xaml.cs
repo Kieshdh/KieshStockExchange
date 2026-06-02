@@ -30,8 +30,13 @@ public partial class PortfolioPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        if (_vm.RefreshCommand.CanExecute(null))
-            await _vm.RefreshCommand.ExecuteAsync(null);
+        // Best-effort load — a load failure must not crash the app via async void.
+        try
+        {
+            if (_vm.RefreshCommand.CanExecute(null))
+                await _vm.RefreshCommand.ExecuteAsync(null);
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"PortfolioPage.OnAppearing load failed: {ex}"); }
     }
 
     protected override void OnDisappearing()

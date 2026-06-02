@@ -16,13 +16,17 @@ public partial class LoginPage : ContentPage
 
     private async void OnRegisterClicked(object sender, TappedEventArgs e)
     {
-        await Shell.Current.GoToAsync("RegisterPage");
+        // async void — a failed navigation must not crash the app.
+        try { await Shell.Current.GoToAsync("RegisterPage"); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"LoginPage.OnRegisterClicked nav failed: {ex}"); }
     }
 
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        await _vm.AutoLogin();
+        // Best-effort auto-login — a failure must not crash the app via async void.
+        try { await _vm.AutoLogin(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"LoginPage.OnAppearing auto-login failed: {ex}"); }
     }
 
 }

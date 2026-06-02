@@ -16,9 +16,14 @@ public partial class MarketPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        // Subscribe-all + first poll, then start the 5 s timer.
-        if (_vm.RefreshCommand.CanExecute(null))
-            await _vm.RefreshCommand.ExecuteAsync(null);
+        // Subscribe-all + first poll, then start the 5 s timer. Best-effort — a load
+        // failure must not crash the app through the async-void path.
+        try
+        {
+            if (_vm.RefreshCommand.CanExecute(null))
+                await _vm.RefreshCommand.ExecuteAsync(null);
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"MarketPage.OnAppearing load failed: {ex}"); }
     }
 
     protected override void OnDisappearing()

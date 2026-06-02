@@ -12,5 +12,9 @@ public partial class InboxPopup : Popup
     }
 
     private async void OnCloseClicked(object? sender, EventArgs e)
-        => await CloseAsync();
+    {
+        // async void — a failed close must not crash the app.
+        try { await CloseAsync(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"InboxPopup.OnCloseClicked failed: {ex}"); }
+    }
 }
