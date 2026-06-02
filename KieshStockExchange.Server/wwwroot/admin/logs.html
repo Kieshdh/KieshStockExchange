@@ -58,6 +58,13 @@
     let source = null;
     let retry = 1000;
 
+    // Show timestamps in the viewer's local time zone; if the browser can't resolve one,
+    // fall back to Amsterdam rather than drifting to UTC.
+    const TZ = (() => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Amsterdam'; }
+      catch { return 'Europe/Amsterdam'; }
+    })();
+
     // Per-source filter. The six telemetry sources the server's sink emits; the
     // label is a short display name, the key matches evt.source (and the .src-* color).
     const SOURCES = [
@@ -116,7 +123,7 @@
       row.className = 'row';
       row.dataset.src = evt.source;
       if (disabled.has(evt.source)) row.style.display = 'none';
-      const ts = new Date(evt.timestamp).toLocaleTimeString();
+      const ts = new Date(evt.timestamp).toLocaleTimeString(undefined, { timeZone: TZ });
       row.innerHTML =
         `<span class="ts">${ts}</span>` +
         `<span class="lvl-${evt.level}">${evt.level.slice(0, 3).toUpperCase()}</span>` +
