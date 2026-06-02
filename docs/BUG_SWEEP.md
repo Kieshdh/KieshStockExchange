@@ -14,7 +14,7 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 |---|---|---|---|
 | A1 | `async void` handlers without try/catch → exception escapes to sync context → app crash | View code-behind `OnAppearing`/tap/nav handlers | ✅ all 5 `OnAppearing` + 3 nav/close handlers guarded (commit 52207ce). AdminPage resize handler already guarded. |
 | A2 | `ObservableCollection` / bound property mutated off the UI thread (SignalR/timer callbacks) → cross-thread crash | VM event handlers for hub/service events | 🟢 high-frequency paths verified marshaled (`OrderBookViewModel.OnFeedSnapshot`, `MarketViewModels.OnQuoteUpdated` both `MainThread`+`_disposed` guarded). 🟡 remaining ~10 subscriber VMs (Portfolio*, OpenOrders, OrderHistory, UserPositions, Account, TopNavBar, Chart) not yet line-audited. |
-| A3 | Event subscription without unsubscribe → leak + callback into disposed VM | VMs subscribing to singleton services (`IMarketHubClient`, `IUserSessionService`, `IOrderCacheService`, `IUserPortfolioService`) | 🟢 sub/unsub balanced across subscribers. 🟡 `ChartViewModel` shows 4 `+=` / 2 `-=` — verify. `NotificationService` 2`+=`/0`-=` is singleton↔singleton (harmless). |
+| A3 | Event subscription without unsubscribe → leak + callback into disposed VM | VMs subscribing to singleton services (`IMarketHubClient`, `IUserSessionService`, `IOrderCacheService`, `IUserPortfolioService`) | 🟢 **(sweep 2)** clean. `ChartViewModel`'s only external-singleton sub (`_orderCache.OrdersChanged`) is unsubscribed in `Dispose`; its other `+=` are to VM-owned collections (self-referential cycles, GC'd with the VM). `NotificationService` 2`+=`/0`-=` is singleton↔singleton (harmless). |
 | A4 | Hub lifecycle: invoke on inactive connection; subscriptions not replayed after reconnect/restart | `MarketHubClient` | ✅ fixed (commits 3e852db, 1f513f5): state-guard on all joins, `ReplayGroupsAsync` from both auto-reconnect and manual restart, clear all group sets on disconnect. |
 | A5 | Fire-and-forget `_ = …Async()` swallowing failures | client services/VMs | 🔲 not swept |
 | A6 | Timers/`IDispatcherTimer` not stopped on disappear/dispose | VMs with polling timers | 🔲 not swept |
@@ -30,7 +30,7 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 
 | # | Bug class | Where to look | Status |
 |---|---|---|---|
-| C1 | sync-over-async (`.Result`/`.Wait()`/`GetResult()`) → thread starvation/deadlock | grep across server | 🟢 `StockService` `.Result` is post-`WhenAll` (safe). 🟡 `MauiProgram.cs:252` + `OrderBookBroadcaster.cs:146` `GetResult()` — review (server has no sync ctx, so starvation not deadlock). |
+| C1 | sync-over-async (`.Result`/`.Wait()`/`GetResult()`) → thread starvation/deadlock | grep across server | 🟢 **(sweep 2)** all clear. `StockService` `.Result` is post-`WhenAll`; `OrderBookBroadcaster:146` is a deliberate commented sync-in-ticker (server, no sync ctx, try/catch, warm snapshots); `MauiProgram:252` is one-time startup config load before any UI sync context. No deadlock risk. |
 | C2 | Shared mutable cache without locking under the bot fleet | engine caches, `AccountsCache`, order books | 🟢 covered by conservation/reservation probes — silent through the sweep-1 load soak (item 41). |
 | C3 | Escaped background-loop exception vanishes | hosted services, bot loop | ✅ global net added (`Program.cs` TaskScheduler/AppDomain handlers, commit fa153df). |
 
@@ -63,8 +63,7 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 
 ## Next sweeps (priority order)
 1. **A2** — line-audit the remaining ~10 subscriber VM handlers for off-thread mutation. *Top.*
-2. **A3** — confirm `ChartViewModel` unsubscribes everything it subscribes.
-3. **A5 / A6** — fire-and-forget + timer-stop audit in client VMs.
-4. **C1** — review the two `GetResult()` sites.
-5. **D2 tail** — `GetTransactionsByUserId` / `GetOrdersByUserId` caps (lower risk).
+2. **A5 / A6** — fire-and-forget + timer-stop audit in client VMs.
+3. **B1** — token-expiry / reconnect behavior.
+4. **D2 tail** — `GetTransactionsByUserId` / `GetOrdersByUserId` caps (lower risk).
 6. **B1** — token-expiry/reconnect behavior.
