@@ -20,24 +20,44 @@ public sealed class OrderEntryService : IOrderEntryService
     private readonly IMarketDataService _data;
     private readonly ILogger<OrderEntryService> _logger;
     private readonly IOrderValidator _validator;
+    private readonly IDataBaseService _db;
 
-    public OrderEntryService(IOrderExecutionService engine, ILogger<OrderEntryService> logger, 
-        IOrderValidator validator, IMarketDataService data)
+    public OrderEntryService(IOrderExecutionService engine, ILogger<OrderEntryService> logger,
+        IOrderValidator validator, IMarketDataService data, IDataBaseService db)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _data = data ?? throw new ArgumentNullException(nameof(data));
+        _db = db ?? throw new ArgumentNullException(nameof(db));
     }
     #endregion
 
     #region Order Operations
-    public Task<OrderResult> CancelOrderAsync(int userId, int orderId, CancellationToken ct = default)
-        => _engine.CancelOrderAsync(orderId, ct);
+    public async Task<OrderResult> CancelOrderAsync(int userId, int orderId, CancellationToken ct = default)
+    {
+        var denied = await VerifyOwnershipAsync(userId, orderId, ct).ConfigureAwait(false);
+        return denied ?? await _engine.CancelOrderAsync(orderId, ct).ConfigureAwait(false);
+    }
 
-    public Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
+    public async Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default)
-        => _engine.ModifyOrderAsync(orderId, newQuantity, newPrice, ct);
+    {
+        var denied = await VerifyOwnershipAsync(userId, orderId, ct).ConfigureAwait(false);
+        return denied ?? await _engine.ModifyOrderAsync(orderId, newQuantity, newPrice, ct).ConfigureAwait(false);
+    }
+
+    // The engine cancels/modifies purely by orderId and is shared with system callers,
+    // so it can't tell whose order it is. This is the user-facing entry, so gate here:
+    // reject anything the caller doesn't own as a uniform "not found" — never reveal
+    // that someone else's order exists. Returns null when the caller owns the order.
+    private async Task<OrderResult?> VerifyOwnershipAsync(int userId, int orderId, CancellationToken ct)
+    {
+        var order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
+        return order is null || order.UserId != userId
+            ? OrderResultFactory.InvalidParams("Order not found.")
+            : null;
+    }
     #endregion
 
     #region Place Orders

@@ -139,8 +139,29 @@ public sealed class OrderController : ControllerBase
         return Ok(await _entry.CancelOrderAsync(caller, id, ct));
     }
 
+    // Upper bound on a single user-initiated cancel batch — a person clearing their
+    // open orders never needs more, and it caps the ownership lookup below.
+    private const int MaxCancelBatch = 500;
+
     [HttpPost("cancel-batch")]
     [EnableRateLimiting("orders")]
     public async Task<ActionResult<IReadOnlyList<OrderResult>>> CancelBatch([FromBody] CancelBatchRequest req, CancellationToken ct)
-        => Ok(await _execution.CancelOrdersBatchAsync(req.OrderIds, ct));
+    {
+        if (req?.OrderIds is null) return BadRequest();
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.OrderIds.Count == 0) return Ok(Array.Empty<OrderResult>());
+        if (req.OrderIds.Count > MaxCancelBatch)
+            return BadRequest($"Cannot cancel more than {MaxCancelBatch} orders at once.");
+
+        // The engine batch path is shared with the bot pruner and takes no caller, so
+        // enforce ownership here: every requested id must be one of the caller's orders.
+        // Reject (not silently drop) so a user can't cancel another user's resting
+        // orders by guessing ids.
+        var ids = req.OrderIds.Distinct().ToList();
+        var orders = await _db.GetOrdersByIds(ids, ct);
+        if (orders.Count != ids.Count || orders.Any(o => o.UserId != caller))
+            return Forbid();
+
+        return Ok(await _execution.CancelOrdersBatchAsync(ids, ct));
+    }
 }
