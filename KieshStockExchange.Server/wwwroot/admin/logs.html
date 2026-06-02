@@ -5,20 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>KSE — Live telemetry</title>
   <style>
+    /* VS Code Dark+ palette. */
     :root { color-scheme: dark; }
-    body { margin: 0; font-family: Consolas, "Cascadia Mono", monospace; background: #14181d; color: #d6dde4; }
-    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #1c2229; border-bottom: 1px solid #2a323b; position: sticky; top: 0; }
-    header input { flex: 1; min-width: 0; padding: 6px 8px; background: #0f1318; color: #d6dde4; border: 1px solid #2a323b; border-radius: 4px; font: inherit; }
-    header button { padding: 6px 14px; background: #2563eb; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font: inherit; }
-    header button.stop { background: #b91c1c; }
+    body { margin: 0; font-family: Consolas, "Cascadia Mono", monospace; background: #1e1e1e; color: #d4d4d4; }
+    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #252526; border-bottom: 1px solid #333333; position: sticky; top: 0; }
+    header input { flex: 1; min-width: 0; padding: 6px 8px; background: #3c3c3c; color: #d4d4d4; border: 1px solid #333333; border-radius: 4px; font: inherit; }
+    header button { padding: 6px 14px; background: #0e639c; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font: inherit; }
+    header button.stop { background: #a1260d; }
     #status { font-size: 12px; opacity: .75; white-space: nowrap; }
     #log { padding: 8px 14px; }
-    .row { display: grid; grid-template-columns: 88px 44px 150px 1fr; gap: 10px; padding: 2px 0; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid #1c2229; }
-    .ts { opacity: .6; }
-    .src { opacity: .85; }
-    .lvl-Information { color: #9aa7b3; }
-    .lvl-Warning { color: #f59e0b; }
-    .lvl-Error, .lvl-Fatal { color: #ef4444; }
+    .row { display: grid; grid-template-columns: 88px 56px 160px 1fr; gap: 10px; padding: 2px 0; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid #2a2a2a; }
+    .ts { color: #808080; }
+    .msg { color: #d4d4d4; }
+    /* Log level — VS Code editor severities. */
+    .lvl-Information { color: #808080; }
+    .lvl-Warning { color: #cca700; }
+    .lvl-Error, .lvl-Fatal { color: #f44747; }
+    /* One VS Code token color per telemetry source. */
+    .src-BotStatsLogger { color: #4ec9b0; }      /* teal (type) */
+    .src-BotEconomyTelemetry { color: #dcdcaa; }  /* yellow (function) */
+    .src-BotSentimentService { color: #c586c0; }  /* purple (control) */
+    .src-BotScalerService { color: #569cd6; }     /* blue (keyword) */
+    .src-FxRateService { color: #ce9178; }        /* orange (string) */
+    .src-ReservationAuditor { color: #9cdcfe; }   /* light blue (variable) */
   </style>
 </head>
 <body>
@@ -49,8 +58,9 @@
       row.innerHTML =
         `<span class="ts">${ts}</span>` +
         `<span class="lvl-${evt.level}">${evt.level.slice(0, 3).toUpperCase()}</span>` +
-        `<span class="src">${evt.source}</span>` +
+        `<span class="src src-${evt.source}"></span>` +
         `<span class="msg"></span>`;
+      row.querySelector('.src').textContent = evt.source;
       row.querySelector('.msg').textContent = evt.message;
       logEl.appendChild(row);
       // Cap the DOM at 500 rows so a long session doesn't bloat memory.
