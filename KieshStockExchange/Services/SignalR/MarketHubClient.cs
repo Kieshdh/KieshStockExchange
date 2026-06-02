@@ -100,6 +100,9 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     {
         await EnsureConnectedAsync(ct).ConfigureAwait(false);
         lock (_groupsLock) _quoteGroups.Add((stockId, currency));
+        // Mid-reconnect the connection isn't active and InvokeAsync would throw; the group
+        // is tracked above so OnReconnected replays it once the connection is back.
+        if (_connection.State != HubConnectionState.Connected) return;
         await _connection.InvokeAsync("JoinQuotes", stockId, currency, ct).ConfigureAwait(false);
     }
 
@@ -114,6 +117,8 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     {
         await EnsureConnectedAsync(ct).ConfigureAwait(false);
         lock (_groupsLock) _candleGroups.Add((stockId, currency, resolution));
+        // See JoinQuotesAsync: skip the invoke mid-reconnect; OnReconnected replays it.
+        if (_connection.State != HubConnectionState.Connected) return;
         await _connection.InvokeAsync("JoinCandles", stockId, currency, resolution, ct).ConfigureAwait(false);
     }
 
@@ -128,6 +133,8 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     {
         await EnsureConnectedAsync(ct).ConfigureAwait(false);
         lock (_groupsLock) _activeUserId = userId;
+        // See JoinQuotesAsync: skip the invoke mid-reconnect; OnReconnected replays it.
+        if (_connection.State != HubConnectionState.Connected) return;
         await _connection.InvokeAsync("JoinUserGroups", userId, ct).ConfigureAwait(false);
     }
 
