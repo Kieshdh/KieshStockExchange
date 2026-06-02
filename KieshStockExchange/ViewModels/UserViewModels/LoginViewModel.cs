@@ -51,9 +51,8 @@ public partial class LoginViewModel : BaseViewModel
         Username = "admin";
         Password = "hallo123";
 
-        // Add default admin user if not exists
-        await AddAdminUser();
-        // Perform login
+        // Admin is seeded server-side from the embedded workbook (Wave 8),
+        // so the client no longer bootstraps one — just authenticate.
         await ExecuteLogin();
 #else
         // Auto-login is a development convenience and is disabled in Release builds.
@@ -89,10 +88,5 @@ public partial class LoginViewModel : BaseViewModel
         }
     }
 
-    private async Task AddAdminUser()
-    {
-        await _auth.RegisterAsync("admin", "Admin User",
-            "admin@gmail.com", "hallo123", DateTime.Parse("17-1-2000"));
-    }
     #endregion
 }
