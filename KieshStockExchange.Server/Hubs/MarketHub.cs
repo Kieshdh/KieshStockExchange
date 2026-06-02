@@ -66,7 +66,21 @@ public sealed class MarketHub : Hub
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNamePortfolio(claim.Value));
     }
 
+    // Admin-only: the telemetry group carries operator heartbeats (bot stats,
+    // economy, sentiment, scaler, FX, reservation audit). The role claim is
+    // the only admin gate on the server today — the class [Authorize] only
+    // proves authenticated, not admin.
+    public Task JoinTelemetry()
+    {
+        if (Context.User?.IsInRole("admin") != true) throw new HubException("Admin required.");
+        return Groups.AddToGroupAsync(Context.ConnectionId, GroupNameTelemetry);
+    }
+
+    public Task LeaveTelemetry() =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNameTelemetry);
+
     public static string GroupNameQuotes(int stockId, CurrencyType currency) => $"quotes:{stockId}:{currency}";
     public static string GroupNameOrders(int userId) => $"orders:{userId}";
     public static string GroupNamePortfolio(int userId) => $"portfolio:{userId}";
+    public const string GroupNameTelemetry = "telemetry";
 }

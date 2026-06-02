@@ -15,6 +15,7 @@ using KieshStockExchange.Server.Hubs;
 using KieshStockExchange.Server.Services.HostedServices;
 using KieshStockExchange.Server.Services.OtherServices;
 using KieshStockExchange.Server.Services.RetentionServices;
+using KieshStockExchange.Server.Services.Telemetry;
 using KieshStockExchange.Server.Services.UserServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -45,7 +46,13 @@ var builder = WebApplication.CreateBuilder(args);
 // 7a-3 — Serilog reads its sinks from the "Serilog" config section: console in
 // dev, a rolling daily file (logs/server-.log, 7-day retention) everywhere, and
 // a Warning-only JSON file in Production (see appsettings.Production.json).
-builder.Host.UseSerilog((ctx, cfg) => cfg.ReadFrom.Configuration(ctx.Configuration));
+// The extra in-memory sink lifts operator heartbeats onto the TelemetryBus for
+// the live BotDashboard panel + web viewer (resolved lazily at host build, so
+// the bus singleton below need only be registered before builder.Build()).
+builder.Services.AddSingleton<TelemetryBus>();
+builder.Host.UseSerilog((ctx, sp, cfg) => cfg
+    .ReadFrom.Configuration(ctx.Configuration)
+    .WriteTo.Sink(new InMemoryTelemetrySink(sp.GetRequiredService<TelemetryBus>())));
 
 // Lift Kestrel's request body cap above the 30MB default. The bulk passthrough
 // endpoints (insert-all / update-all) are chunked client-side at 2000 items per
@@ -227,6 +234,10 @@ builder.Services.AddHostedService<BotTelemetryWarmupHostedService>();
 // Phase 3 Step 6: subscribe to engine events and push them onto SignalR groups.
 builder.Services.AddHostedService<MarketHubBroadcaster>();
 
+// Bridges the TelemetryBus onto the admin-only "telemetry" SignalR group so the
+// BotDashboard live panel mirrors the operator heartbeats from the dev console.
+builder.Services.AddHostedService<TelemetryBroadcaster>();
+
 // Step 0g-4: on-change order-book snapshot push, throttled to max 1/100ms
 // per (stockId, currency) key. Same quotes group the chart already joins;
 // the client's OrderBookFeed (0g-6) listens for "OrderBookSnapshot".
@@ -375,6 +386,10 @@ app.UseAuthorization();
 // 7a-2 — after authentication so the "orders" policy can partition on the
 // authenticated user's "sub" claim.
 app.UseRateLimiter();
+
+// Serves the admin web log viewer (wwwroot/admin/logs.html); no other static
+// assets exist yet. Its SSE endpoint is auth-gated in AdminLogsController.
+app.UseStaticFiles();
 
 app.MapControllers();
 app.MapHub<MarketHub>("/hubs/market");

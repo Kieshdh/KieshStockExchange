@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KSE — Live telemetry</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: Consolas, "Cascadia Mono", monospace; background: #14181d; color: #d6dde4; }
+    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #1c2229; border-bottom: 1px solid #2a323b; position: sticky; top: 0; }
+    header input { flex: 1; min-width: 0; padding: 6px 8px; background: #0f1318; color: #d6dde4; border: 1px solid #2a323b; border-radius: 4px; font: inherit; }
+    header button { padding: 6px 14px; background: #2563eb; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font: inherit; }
+    header button.stop { background: #b91c1c; }
+    #status { font-size: 12px; opacity: .75; white-space: nowrap; }
+    #log { padding: 8px 14px; }
+    .row { display: grid; grid-template-columns: 88px 44px 150px 1fr; gap: 10px; padding: 2px 0; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid #1c2229; }
+    .ts { opacity: .6; }
+    .src { opacity: .85; }
+    .lvl-Information { color: #9aa7b3; }
+    .lvl-Warning { color: #f59e0b; }
+    .lvl-Error, .lvl-Fatal { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <header>
+    <input id="token" type="password" placeholder="Paste admin JWT (from the MAUI client's token store, or POST /api/auth/login)" />
+    <button id="connect">Connect</button>
+    <span id="status">idle</span>
+  </header>
+  <div id="log"></div>
+
+  <script>
+    const tokenInput = document.getElementById('token');
+    const connectBtn = document.getElementById('connect');
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    let source = null;
+    let retry = 1000;
+
+    // Persist the token across reloads so a phone stays connected after a sleep.
+    tokenInput.value = localStorage.getItem('kse_admin_token') || '';
+
+    function setStatus(text) { statusEl.textContent = text; }
+
+    function append(evt) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const ts = new Date(evt.timestamp).toLocaleTimeString();
+      row.innerHTML =
+        `<span class="ts">${ts}</span>` +
+        `<span class="lvl-${evt.level}">${evt.level.slice(0, 3).toUpperCase()}</span>` +
+        `<span class="src">${evt.source}</span>` +
+        `<span class="msg"></span>`;
+      row.querySelector('.msg').textContent = evt.message;
+      logEl.appendChild(row);
+      // Cap the DOM at 500 rows so a long session doesn't bloat memory.
+      while (logEl.childElementCount > 500) logEl.removeChild(logEl.firstChild);
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    function connect() {
+      const token = tokenInput.value.trim();
+      if (!token) { setStatus('enter a token'); return; }
+      localStorage.setItem('kse_admin_token', token);
+      disconnect();
+
+      setStatus('connecting…');
+      source = new EventSource('/api/admin/logs/stream?token=' + encodeURIComponent(token));
+      source.onopen = () => { setStatus('connected'); retry = 1000; };
+      source.onmessage = e => { try { append(JSON.parse(e.data)); } catch {} };
+      source.onerror = () => {
+        // EventSource auto-reconnects, but a 401 closes for good — surface it.
+        setStatus(source.readyState === EventSource.CLOSED ? 'disconnected (check token)' : 'reconnecting…');
+      };
+      connectBtn.textContent = 'Disconnect';
+      connectBtn.classList.add('stop');
+    }
+
+    function disconnect() {
+      if (source) { source.close(); source = null; }
+      connectBtn.textContent = 'Connect';
+      connectBtn.classList.remove('stop');
+    }
+
+    connectBtn.addEventListener('click', () => (source ? (disconnect(), setStatus('idle')) : connect()));
+  </script>
+</body>
+</html>
