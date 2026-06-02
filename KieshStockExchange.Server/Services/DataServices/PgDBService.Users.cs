@@ -19,6 +19,7 @@ public sealed partial class PgDBService
     public async Task<(List<User> Items, int Total)> GetUsersPageAsync(
         int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
     {
+        (skip, take) = ClampPage(skip, take);
         await using var c = await OpenAsync(ct);
 
         var where = "";

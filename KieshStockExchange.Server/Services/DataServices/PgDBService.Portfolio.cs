@@ -23,6 +23,7 @@ public sealed partial class PgDBService
     public async Task<(List<Position> Items, int Total)> GetPositionsPageAsync(
         int stockId, int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
     {
+        (skip, take) = ClampPage(skip, take);
         await using var c = await OpenAsync(ct);
         var clauses = new List<string> { @"""StockId"" = @stockId" };
         var dp = new DynamicParameters();
@@ -148,6 +149,7 @@ public sealed partial class PgDBService
     public async Task<(List<int> UserIds, int Total)> GetFundsUserIdsPageAsync(
         int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
     {
+        (skip, take) = ClampPage(skip, take);
         await using var c = await OpenAsync(ct);
         var knownCurrencies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             { "USD", "EUR", "GBP", "JPY", "CHF", "AUD" };
@@ -219,6 +221,7 @@ public sealed partial class PgDBService
         int? userIdFilter = null, bool hasNonZero = false, bool hasReserved = false,
         string? currencyFilter = null, CancellationToken ct = default)
     {
+        (skip, take) = ClampPage(skip, take);
         await using var c = await OpenAsync(ct);
         var clauses = new List<string>();
         var dp = new DynamicParameters();
@@ -348,6 +351,7 @@ public sealed partial class PgDBService
     public async Task<(List<FundTransaction> Items, int Total)> GetFundTransactionsPageAsync(
         int skip, int take, string sortKey, bool desc, int? userIdFilter = null, CancellationToken ct = default)
     {
+        (skip, take) = ClampPage(skip, take);
         await using var c = await OpenAsync(ct);
         var dp = new DynamicParameters();
         var where = "";

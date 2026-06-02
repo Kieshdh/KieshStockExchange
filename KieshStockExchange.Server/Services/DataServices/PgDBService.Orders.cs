@@ -30,6 +30,7 @@ public sealed partial class PgDBService
         string? sideFilter = null, string? typeFilter = null,
         IList<int>? excludeUserIds = null, CancellationToken ct = default)
     {
+        (skip, take) = ClampPage(skip, take);
         await using var c = await OpenAsync(ct);
 
         var clauses = new List<string> { @"""CreatedAt"" >= @fromUtc", @"""CreatedAt"" <= @toUtc" };
@@ -222,6 +223,7 @@ public sealed partial class PgDBService
         int? userIdFilter = null, int? stockIdFilter = null, string? currencyFilter = null,
         IList<int>? excludeBuyerOrSellerIds = null, CancellationToken ct = default)
     {
+        (skip, take) = ClampPage(skip, take);
         await using var c = await OpenAsync(ct);
         var clauses = new List<string> { @"""Timestamp"" >= @fromUtc", @"""Timestamp"" <= @toUtc" };
         var dp = new DynamicParameters();

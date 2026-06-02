@@ -56,6 +56,8 @@ public sealed class OrderValidator : IOrderValidator
             return OrderResultFactory.InvalidParams("Quantity must be positive.");
         if (quantity > MaxOrderQuantity)
             return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
+        if (NotionalOverflows(price, quantity))
+            return OrderResultFactory.InvalidParams("Price is too large.");
         if (!CurrencyHelper.IsSupported(currency))
             return OrderResultFactory.InvalidParams("Unsupported currency.");
         // Reject phantom (StockId, Currency) books.
@@ -102,6 +104,8 @@ public sealed class OrderValidator : IOrderValidator
         if (order.Quantity <= 0) return OrderResultFactory.InvalidParams("Quantity must be positive.");
         if (order.Quantity > MaxOrderQuantity)
             return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
+        if (NotionalOverflows(order.Price, order.Quantity))
+            return OrderResultFactory.InvalidParams("Price is too large.");
         if (!_stock.TryGetById(order.StockId, out _))
             return OrderResultFactory.InvalidParams("Invalid stock ID.");
         // Reject phantom (StockId, Currency) books.
@@ -200,5 +204,11 @@ public sealed class OrderValidator : IOrderValidator
         if (order.IsInvalid) return OrderResultFactory.InvalidParams("Order is invalid.");
         return null;
     }
+
+    // True when the reservation multiply (Notional = price × quantity) would overflow
+    // decimal and surface as a 500. quantity is capped above; the ×2 headroom absorbs a
+    // slippage order's doubled effective price (PriceWithSlippage at 100% slippage).
+    private static bool NotionalOverflows(decimal price, int quantity)
+        => quantity > 0 && Math.Abs(price) > decimal.MaxValue / (quantity * 2);
     #endregion
 }

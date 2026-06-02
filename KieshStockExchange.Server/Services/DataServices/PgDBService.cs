@@ -38,6 +38,15 @@ public sealed partial class PgDBService : IDataBaseService
         return new DbScope(conn, transaction: null, ownsConnection: true);
     }
 
+    // Paging guard for the *PageAsync queries. A negative skip/take makes Postgres
+    // raise "OFFSET/LIMIT must not be negative" (surfaces as a 500), and an unbounded
+    // take would stream the whole table. Clamp both so hostile paging degrades to an
+    // empty-or-capped page instead.
+    private const int MaxPageSize = 1000;
+
+    private static (int Skip, int Take) ClampPage(int skip, int take)
+        => (Math.Max(0, skip), Math.Clamp(take, 0, MaxPageSize));
+
     #region Generic operations
     public async Task ResetTableAsync<T>(CancellationToken ct = default) where T : new()
     {
