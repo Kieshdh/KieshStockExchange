@@ -301,7 +301,9 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<Transaction>>($"api/transactions/by-order/{orderId}", ApiJsonOptions.Default, ct) ?? new();
 
-    public async Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default)
+    // maxRows is enforced server-side by the controller (a fixed cap, not client-tunable),
+    // so it isn't sent on the wire; the parameter exists only to satisfy the interface.
+    public async Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, int? maxRows = null, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<Transaction>>(
             $"api/transactions/by-stock-range/{stockId}/{currency}{new Q().Add("from", from).Add("to", to)}",
             ApiJsonOptions.Default, ct) ?? new();

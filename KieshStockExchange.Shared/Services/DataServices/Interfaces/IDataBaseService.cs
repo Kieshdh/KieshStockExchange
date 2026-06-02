@@ -79,7 +79,7 @@ public interface IDataBaseService
     Task<Transaction?> GetTransactionById(int transactionId, CancellationToken ct = default);
     Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default);
     Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default);
-    Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default);
+    Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, int? maxRows = null, CancellationToken ct = default);
     /// <summary>
     /// All transactions since the given UTC instant, optionally capped at <paramref name="limit"/> rows.
     /// In-process callers pass <c>null</c> for unbounded behaviour (original semantics). The HTTP

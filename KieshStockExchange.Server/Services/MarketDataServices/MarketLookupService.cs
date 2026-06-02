@@ -93,7 +93,7 @@ public sealed class MarketLookupService : IMarketLookupService
         var (start, end) = TimeHelper.TodayUtcRange();
 
         var history = await _db.GetTransactionsByStockIdAndTimeRange(
-            stockId, currency, start, end, ct).ConfigureAwait(false);
+            stockId, currency, start, end, ct: ct).ConfigureAwait(false);
         if (history.Count == 0)
             _logger.LogWarning("No transactions found for stock {StockId} in {Currency}", stockId, currency);
         history.Sort(static (a, b) => a.Timestamp.CompareTo(b.Timestamp));

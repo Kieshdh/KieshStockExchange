@@ -493,7 +493,7 @@ public sealed class CandleService : ICandleService, IDisposable
         if (list.Count == 0)
         {
             var ticks = await _db.GetTransactionsByStockIdAndTimeRange(
-                stockId, currency, fromAligned, toAligned, ct).ConfigureAwait(false);
+                stockId, currency, fromAligned, toAligned, ct: ct).ConfigureAwait(false);
             if (ticks.Count > 0)
             {
                 list = ReplayTicksBuildClosed(stockId, currency, resolution, ticks, toAligned, ct);
@@ -557,7 +557,7 @@ public sealed class CandleService : ICandleService, IDisposable
 
         // Load all transactions in range
         var ticks = await _db.GetTransactionsByStockIdAndTimeRange(
-            stockId, currency, from, to, ct).ConfigureAwait(false);
+            stockId, currency, from, to, ct: ct).ConfigureAwait(false);
         if (ticks.Count == 0) return EmptyCandlesReport(stockId, currency, resolution, fromUtc, toUtc);
 
         // Build all candles using a temporary aggregator

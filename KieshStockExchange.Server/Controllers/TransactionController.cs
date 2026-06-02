@@ -52,10 +52,14 @@ public sealed class TransactionController : ControllerBase
     public Task<List<Transaction>> GetByOrderId(int orderId, CancellationToken ct)
         => _db.GetTransactionsByOrderId(orderId, ct);
 
+    // Public market-data tape — cap the row count server-side (not client-tunable) so a
+    // wide window can't stream the whole Transactions table into memory.
+    private const int MaxRangeRows = 50_000;
+
     [HttpGet("by-stock-range/{stockId:int}/{currency}")]
     public Task<List<Transaction>> GetByStockIdAndTimeRange(int stockId, CurrencyType currency,
         [FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
-        => _db.GetTransactionsByStockIdAndTimeRange(stockId, currency, from, to, ct);
+        => _db.GetTransactionsByStockIdAndTimeRange(stockId, currency, from, to, MaxRangeRows, ct);
 
     [HttpGet("since")]
     public Task<List<Transaction>> GetSinceTime([FromQuery] DateTime since, [FromQuery] int? limit, CancellationToken ct)

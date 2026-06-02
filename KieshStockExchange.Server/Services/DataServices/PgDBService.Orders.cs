@@ -299,13 +299,16 @@ public sealed partial class PgDBService
     }
 
     public async Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(
-        int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default)
+        int stockId, CurrencyType currency, DateTime from, DateTime to, int? maxRows = null, CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
+        // maxRows caps the public endpoint — a wide window would otherwise stream the whole
+        // tape into memory. Internal candle/backfill callers pass null for the full window.
+        var cap = maxRows is int n && n > 0 ? $@" ORDER BY ""Timestamp"" DESC LIMIT {n}" : "";
         var rows = await c.QueryAsync<TransactionRow>(
             $@"SELECT {TransactionCols} FROM ""Transactions""
                WHERE ""StockId"" = @stockId AND ""Currency"" = @currency
-                 AND ""Timestamp"" >= @from AND ""Timestamp"" < @to",
+                 AND ""Timestamp"" >= @from AND ""Timestamp"" < @to{cap}",
             new { stockId, currency = currency.ToString(), from, to });
         return rows.Select(TransactionMapper.ToDomain).ToList();
     }

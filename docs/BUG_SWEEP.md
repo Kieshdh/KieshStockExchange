@@ -39,7 +39,7 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 | # | Bug class | Where to look | Status |
 |---|---|---|---|
 | D1 | SQL injection via string-interpolated identifiers | `PgDBService.*` dynamic ORDER BY / WHERE | 🟢 `sortKey` whitelisted everywhere; filters parameterized. |
-| D2 | Unbounded query (no LIMIT) → memory/DoS | `PgDBService` list queries | ✅ paging clamped (commit c3a48fd). 🟡 **OPEN, top priority:** `GetTransactionsByStockIdAndTimeRange` (`/transactions/by-stock-range`) takes from/to with no row cap — a wide window streams the whole tape. **Constraint found:** the same DB method is reused internally by `CandleService:495/559` + `MarketLookupService:95` for candle building over full windows, so a blanket data-layer `LIMIT` would corrupt candle aggregation. **Fix plan:** add an optional `int? maxRows = null` param (mirror `GetTransactionsSinceTime`) → most-recent `ORDER BY Timestamp DESC LIMIT n` only when set; controller passes a cap, internal candle callers pass none. Touches `IDataBaseService` + `PgDBService` + `ApiDataBaseService` + `TransactionController`. Also re-check `GetTransactionsByUserId`, `GetOrdersByUserId` (no cap; consumers are per-human so lower risk). |
+| D2 | Unbounded query (no LIMIT) → memory/DoS | `PgDBService` list queries | ✅ paging clamped (c3a48fd); ✅ **(sweep 2)** `by-stock-range` now server-capped at 50k most-recent rows via an optional `maxRows` param threaded through `IDataBaseService`/`PgDBService`/`ApiDataBaseService`/`TransactionController` — the candle/backfill callers (`CandleService`, `MarketLookupService`) pass null for the full window, so aggregation is unaffected. 🟡 still open: `GetTransactionsByUserId` / `GetOrdersByUserId` have no cap (consumers are per-human, so lower risk). |
 | D3 | Decimal overflow / money rounding | `OrderValidator`, `CurrencyHelper`, settlement | ✅ notional-overflow guard (commit c3a48fd); rounding via `CurrencyHelper`. |
 | D4 | Connection/transaction leaks | `PgDBService` `OpenAsync`/`RunInTransactionAsync` | 🟢 `await using` scope pattern. 🔲 deeper audit not done. |
 
@@ -62,9 +62,9 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 ---
 
 ## Next sweeps (priority order)
-1. **D2** — cap the unbounded transaction/user-scoped list queries (server, deployable). *Top.*
-2. **A2** — line-audit the remaining ~10 subscriber VM handlers for off-thread mutation.
-3. **A3** — confirm `ChartViewModel` unsubscribes everything it subscribes.
-4. **A5 / A6** — fire-and-forget + timer-stop audit in client VMs.
-5. **C1** — review the two `GetResult()` sites.
+1. **A2** — line-audit the remaining ~10 subscriber VM handlers for off-thread mutation. *Top.*
+2. **A3** — confirm `ChartViewModel` unsubscribes everything it subscribes.
+3. **A5 / A6** — fire-and-forget + timer-stop audit in client VMs.
+4. **C1** — review the two `GetResult()` sites.
+5. **D2 tail** — `GetTransactionsByUserId` / `GetOrdersByUserId` caps (lower risk).
 6. **B1** — token-expiry/reconnect behavior.
