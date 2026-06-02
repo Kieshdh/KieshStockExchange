@@ -367,6 +367,12 @@ await app.Services.GetRequiredService<IStockService>().EnsureLoadedAsync().Confi
 // middleware and rate-limit partitioning see the proxied values.
 app.UseForwardedHeaders();
 
+// Before auth: the admin web log viewer (wwwroot/admin/logs.html) is a public
+// static asset — its SSE endpoint is the auth-gated part. Placing it after
+// UseAuthorization would trip the RequireAuthenticatedUser fallback policy
+// (no endpoint matches a static file) and 401 the page.
+app.UseStaticFiles();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -387,10 +393,6 @@ app.UseAuthorization();
 // 7a-2 — after authentication so the "orders" policy can partition on the
 // authenticated user's "sub" claim.
 app.UseRateLimiter();
-
-// Serves the admin web log viewer (wwwroot/admin/logs.html); no other static
-// assets exist yet. Its SSE endpoint is auth-gated in AdminLogsController.
-app.UseStaticFiles();
 
 app.MapControllers();
 app.MapHub<MarketHub>("/hubs/market");
