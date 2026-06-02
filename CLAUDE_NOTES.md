@@ -128,12 +128,27 @@ legible; the heart of the wave is 40–44.
     item, not the page VM — rewrote them to `RelativeSource AncestorType={x:Type vm:…}` with
     matching `x:DataType`. Runtime ancestor-walk for those four wants an in-app eyeball under
     item 42 (watchlist ▲/▼, toast click-dismiss, UserDetails search-pick).
-40. **Break the server — API & engine fuzzing.** Hit every endpoint with hostile input:
-    malformed/oversized JSON, missing/extra fields, bad auth tokens, out-of-range paging
-    (`skip=-1`, `take=0`, huge `take`), unknown sort keys, invalid currency/stock ids,
-    SQL-ish strings in filters. Place illegal orders (negative qty/price, zero, overflow,
-    nonexistent stock/currency, self-trade). Confirm each returns a clean 4xx, never a 500
-    or a wedged book/gate. Watch for unhandled exceptions escaping into the request pipeline.
+40. **Break the server — API & engine fuzzing.** — ✅ DONE (commits c3a48fd, 5a50ffe).
+    Static hardening pass + live fuzz battery (13 hostile-input checks) against a local
+    Postgres-backed server, all green; no 500 / unhandled exception / wedged book in the
+    server log. Three findings fixed:
+    - **Paging 500/DoS:** negative `skip`/`take` made Postgres raise "OFFSET/LIMIT must not
+      be negative" (→500) and a huge `take` streamed whole tables. Added `ClampPage`
+      (`skip>=0`, `take∈[0,1000]`) to all 7 `*PageAsync` in PgDBService. (`sortKey` was
+      already whitelisted everywhere — no injection.)
+    - **Order notional overflow → 500:** `Notional = price × quantity` is an unguarded
+      decimal multiply; quantity was capped at 1M but price wasn't. Added `NotionalOverflows`
+      guard to `OrderValidator` (both entry points) → clean "Price is too large" failure.
+    - **Write-side IDOR (the headline find):** engine cancel/modify acted purely by orderId
+      with no ownership check, and cancel-batch had none at all — any authenticated user
+      could cancel/modify anyone's orders by id. Gated single cancel/modify in
+      `OrderEntryService` (uniform "Order not found", no id enumeration) and cancel-batch in
+      `OrderController` (per-id ownership + 500 cap), keeping the bot-shared engine batch
+      path untouched.
+    Still open as a **separate follow-up** (out of this input-validation scope): **read-side
+    IDOR** — `GET /api/orders/by-user/{id}`, `by-stock`, `/{id}`, and the other read
+    endpoints return any user's data with no per-resource/role authorization. The whole
+    authenticated-but-not-authorized GET surface wants a deliberate authz-design pass.
 41. **Break the server — concurrency & load.** Push the bot fleet hard (raise
     `MaxConcurrentGroups`, bot count, trade rate) and watch the conservation/reservation
     probes — they are the regression detectors and **must stay silent**. Hammer the cancel
