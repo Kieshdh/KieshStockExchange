@@ -57,14 +57,17 @@ server + Caddy via docker-compose on one box.
    (Migrations are NOT run on every boot — `migrate` is profiled, so a normal `up`
    never starts it. This is the one-shot.)
 7. Seed a fresh DB. Migrations must already be applied (step 6) — the empty-check
-   queries tables. First boot the server with auto-seed on, which seeds the embedded
-   workbook (50 stocks, bots, and the human admin) with no auth needed:
+   queries tables. Use `docker compose run -e` to pass the seed flag to the container
+   (a bash-prefix `Seed__AutoOnEmptyDb=true docker compose up` sets the var for the
+   compose process, NOT the container, so the server boots without seeding — silent
+   failure). Run the server interactively so you can watch the seed banner, then
+   stop and switch to detached:
    ```bash
-   Seed__AutoOnEmptyDb=true docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d server
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production logs -f server   # confirm "seeding from embedded workbook"
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production \
+     run --rm -e Seed__AutoOnEmptyDb=true server   # logs stream; look for "seeding from embedded workbook"
    ```
-   Then stop the server and unset the flag (the next `up` below boots without it;
-   the default `Seed:AutoOnEmptyDb=false` in appsettings.Production.json takes over).
+   Ctrl+C once seeded. The default `Seed:AutoOnEmptyDb=false` in
+   appsettings.Production.json takes over for the persistent `up -d` in step 8.
 8. Start everything:
    ```bash
    docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d
