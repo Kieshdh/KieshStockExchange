@@ -1,7 +1,9 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Server.Services.UserServices;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace KieshStockExchange.Server.Controllers;
@@ -13,10 +15,15 @@ public sealed class TransactionController : ControllerBase
     private readonly IDataBaseService _db;
     public TransactionController(IDataBaseService db) => _db = db;
 
+    // Cross-user reads (all transactions, paged admin tables, raw CRUD) are admin-only;
+    // a user reads only their own trades via by-user. The stock-/order-keyed endpoints
+    // below are market data (trade tape) and stay open to any authenticated client.
     [HttpGet]
+    [Authorize(Roles = "admin")]
     public Task<List<Transaction>> GetAll(CancellationToken ct) => _db.GetTransactionsAsync(ct);
 
     [HttpGet("page")]
+    [Authorize(Roles = "admin")]
     public async Task<PageResponse<Transaction>> GetPage(
         [FromQuery] int skip, [FromQuery] int take, [FromQuery] string sortKey, [FromQuery] bool desc,
         [FromQuery] DateTime fromUtc, [FromQuery] DateTime toUtc,
@@ -30,12 +37,16 @@ public sealed class TransactionController : ControllerBase
     }
 
     [HttpGet("{id:int}")]
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<Transaction>> GetById(int id, CancellationToken ct)
         => await _db.GetTransactionById(id, ct) is { } t ? Ok(t) : NotFound();
 
     [HttpGet("by-user/{userId:int}")]
-    public Task<List<Transaction>> GetByUserId(int userId, CancellationToken ct)
-        => _db.GetTransactionsByUserId(userId, ct);
+    public async Task<ActionResult<List<Transaction>>> GetByUserId(int userId, CancellationToken ct)
+    {
+        if (!User.CanAccessUser(userId)) return Forbid();
+        return Ok(await _db.GetTransactionsByUserId(userId, ct));
+    }
 
     [HttpGet("by-order/{orderId:int}")]
     public Task<List<Transaction>> GetByOrderId(int orderId, CancellationToken ct)
@@ -59,14 +70,17 @@ public sealed class TransactionController : ControllerBase
         => await _db.GetLatestTransactionBeforeTime(stockId, currency, time, ct) is { } t ? Ok(t) : NotFound();
 
     [HttpPost]
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<Transaction>> Create([FromBody] Transaction tx, CancellationToken ct)
     { await _db.CreateTransaction(tx, ct); return Ok(tx); }
 
     [HttpPut]
+    [Authorize(Roles = "admin")]
     public async Task<IActionResult> Update([FromBody] Transaction tx, CancellationToken ct)
     { await _db.UpdateTransaction(tx, ct); return NoContent(); }
 
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "admin")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     { await _db.DeleteTransaction(new Transaction { TransactionId = id }, ct); return NoContent(); }
 }

@@ -7,6 +7,7 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -33,10 +34,15 @@ public sealed class OrderController : ControllerBase
         _logger = logger;
     }
 
+    // Read endpoints below expose orders across all users (admin tables) or write raw
+    // rows bypassing the engine. They carry no per-user authorization of their own, so
+    // gate the cross-user ones to admins; per-user reads use an ownership check instead.
     [HttpGet]
+    [Authorize(Roles = "admin")]
     public Task<List<Order>> GetAll(CancellationToken ct) => _db.GetOrdersAsync(ct);
 
     [HttpGet("page")]
+    [Authorize(Roles = "admin")]
     public async Task<PageResponse<Order>> GetPage(
         [FromQuery] int skip, [FromQuery] int take, [FromQuery] string sortKey, [FromQuery] bool desc,
         [FromQuery] DateTime fromUtc, [FromQuery] DateTime toUtc,
@@ -52,38 +58,52 @@ public sealed class OrderController : ControllerBase
     }
 
     [HttpGet("{id:int}")]
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<Order>> GetById(int id, CancellationToken ct)
         => await _db.GetOrderById(id, ct) is { } o ? Ok(o) : NotFound();
 
     [HttpPost("by-ids")]
+    [Authorize(Roles = "admin")]
     public Task<List<Order>> GetByIds([FromBody] List<int> ids, CancellationToken ct)
         => _db.GetOrdersByIds(ids, ct);
 
     [HttpGet("by-user/{userId:int}")]
-    public Task<List<Order>> GetByUserId(int userId, CancellationToken ct)
-        => _db.GetOrdersByUserId(userId, ct);
+    public async Task<ActionResult<List<Order>>> GetByUserId(int userId, CancellationToken ct)
+    {
+        if (!User.CanAccessUser(userId)) return Forbid();
+        return Ok(await _db.GetOrdersByUserId(userId, ct));
+    }
 
     [HttpGet("by-stock/{stockId:int}")]
+    [Authorize(Roles = "admin")]
     public Task<List<Order>> GetByStockId(int stockId, CancellationToken ct)
         => _db.GetOrdersByStockId(stockId, ct);
 
     [HttpGet("open-limit/{stockId:int}/{currency}")]
+    [Authorize(Roles = "admin")]
     public Task<List<Order>> GetOpenLimit(int stockId, CurrencyType currency, CancellationToken ct)
         => _db.GetOpenLimitOrders(stockId, currency, ct);
 
     [HttpPost("open-for-users")]
+    [Authorize(Roles = "admin")]
     public Task<List<Order>> GetOpenForUsers([FromBody] List<int> userIds, CancellationToken ct)
         => _db.GetOpenOrdersForUsersAsync(userIds, ct);
 
+    // Raw CRUD writes bypass the engine (no validation/matching/reservation), so they must
+    // never be reachable by a normal client — admin-only. Order placement goes through
+    // /place, /modify, /cancel below.
     [HttpPost]
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<Order>> Create([FromBody] Order order, CancellationToken ct)
     { await _db.CreateOrder(order, ct); return Ok(order); }
 
     [HttpPut]
+    [Authorize(Roles = "admin")]
     public async Task<IActionResult> Update([FromBody] Order order, CancellationToken ct)
     { await _db.UpdateOrder(order, ct); return NoContent(); }
 
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "admin")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     { await _db.DeleteOrder(new Order { OrderId = id }, ct); return NoContent(); }
 

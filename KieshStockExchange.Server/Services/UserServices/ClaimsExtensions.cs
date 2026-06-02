@@ -18,4 +18,13 @@ internal static class ClaimsExtensions
             ? id
             : null;
     }
+
+    /// <summary>
+    /// True if the caller may read the given user's per-user data: it's their own
+    /// (token id == userId) or they're an admin. The single gate behind every
+    /// <c>by-user</c> endpoint so one user can't read another's orders/funds/positions.
+    /// </summary>
+    public static bool CanAccessUser(this ClaimsPrincipal? principal, int userId)
+        => principal is not null && principal.GetUserId() is int caller
+           && (caller == userId || principal.IsInRole("admin"));
 }

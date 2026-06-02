@@ -1,7 +1,9 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Server.Services.UserServices;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace KieshStockExchange.Server.Controllers;
@@ -13,10 +15,14 @@ public sealed class FundController : ControllerBase
     private readonly IDataBaseService _db;
     public FundController(IDataBaseService db) => _db = db;
 
+    // Cross-user reads (all funds, paged admin tables, for-users, raw CRUD) are admin-only;
+    // a user reads only their own funds via the by-user* endpoints (admins may read anyone's).
     [HttpGet]
+    [Authorize(Roles = "admin")]
     public Task<List<Fund>> GetAll(CancellationToken ct) => _db.GetFundsAsync(ct);
 
     [HttpGet("user-ids-page")]
+    [Authorize(Roles = "admin")]
     public async Task<PageResponse<int>> GetUserIdsPage(
         [FromQuery] int skip, [FromQuery] int take, [FromQuery] string sortKey, [FromQuery] bool desc,
         [FromQuery] string? filter, CancellationToken ct)
@@ -26,6 +32,7 @@ public sealed class FundController : ControllerBase
     }
 
     [HttpGet("page")]
+    [Authorize(Roles = "admin")]
     public async Task<PageResponse<Fund>> GetPage(
         [FromQuery] int skip, [FromQuery] int take, [FromQuery] string sortKey, [FromQuery] bool desc,
         [FromQuery] int? userIdFilter, [FromQuery] bool hasNonZero, [FromQuery] bool hasReserved,
@@ -37,34 +44,46 @@ public sealed class FundController : ControllerBase
     }
 
     [HttpGet("{id:int}")]
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<Fund>> GetById(int id, CancellationToken ct)
         => await _db.GetFundById(id, ct) is { } f ? Ok(f) : NotFound();
 
     [HttpGet("by-user/{userId:int}")]
-    public Task<List<Fund>> GetByUserId(int userId, CancellationToken ct)
-        => _db.GetFundsByUserId(userId, ct);
+    public async Task<ActionResult<List<Fund>>> GetByUserId(int userId, CancellationToken ct)
+    {
+        if (!User.CanAccessUser(userId)) return Forbid();
+        return Ok(await _db.GetFundsByUserId(userId, ct));
+    }
 
     [HttpGet("by-user-currency/{userId:int}/{currency}")]
     public async Task<ActionResult<Fund>> GetByUserIdAndCurrency(int userId, CurrencyType currency, CancellationToken ct)
-        => await _db.GetFundByUserIdAndCurrency(userId, currency, ct) is { } f ? Ok(f) : NotFound();
+    {
+        if (!User.CanAccessUser(userId)) return Forbid();
+        return await _db.GetFundByUserIdAndCurrency(userId, currency, ct) is { } f ? Ok(f) : NotFound();
+    }
 
     [HttpPost("for-users")]
+    [Authorize(Roles = "admin")]
     public Task<List<Fund>> GetForUsers([FromBody] List<int> userIds, CancellationToken ct)
         => _db.GetFundsForUsersAsync(userIds, ct);
 
     [HttpPost]
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<Fund>> Create([FromBody] Fund fund, CancellationToken ct)
     { await _db.CreateFund(fund, ct); return Ok(fund); }
 
     [HttpPut]
+    [Authorize(Roles = "admin")]
     public async Task<IActionResult> Update([FromBody] Fund fund, CancellationToken ct)
     { await _db.UpdateFund(fund, ct); return NoContent(); }
 
     [HttpPut("upsert")]
+    [Authorize(Roles = "admin")]
     public async Task<ActionResult<Fund>> Upsert([FromBody] Fund fund, CancellationToken ct)
     { await _db.UpsertFund(fund, ct); return Ok(fund); }
 
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "admin")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     { await _db.DeleteFund(new Fund { FundId = id }, ct); return NoContent(); }
 }
