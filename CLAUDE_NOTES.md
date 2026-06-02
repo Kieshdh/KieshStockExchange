@@ -168,11 +168,16 @@ legible; the heart of the wave is 40–44.
     commands, open/close popups fast, lose & restore the server connection mid-action.
     Watch debug output for binding errors, unhandled exceptions, threading/`MainThread`
     violations, and `Application.Current` null-refs. Fix or document each.
-43. **Unhandled-exception & silent-catch audit.** Grep for `catch (Exception)` / `catch { }`
-    / empty catches that may swallow real errors (esp. background loops, event handlers,
-    fire-and-forget `_ = …Async()`). Confirm each either logs or is a deliberate, commented
-    no-op. Add a global handler where an escaped exception currently just vanishes. Pairs
-    with the silent-failure-hunter review style.
+43. **Unhandled-exception & silent-catch audit.** — ✅ DONE (commit fa153df). Added the
+    missing server global net in Program.cs (right after Build): `TaskScheduler
+    .UnobservedTaskException` (log + SetObserved) and `AppDomain.UnhandledException` (log
+    critical), so a faulted fire-and-forget bg task or a throwing thread always leaves a
+    Serilog trace instead of vanishing. Catch audit found **no real silent failures**:
+    server empty catches are typed/expected + commented (OperationCanceled/TaskCanceled on
+    shutdown, InsufficientFunds→business false, IOException→fallback); the client's bare
+    `catch {}` sites are all idiomatic dispose/cancel/event-invoke cleanup (DisposeAsync,
+    CTS Cancel/Dispose, `event?.Invoke` swallowing a bad subscriber), not error swallowing —
+    left as-is rather than churning untested client files for cosmetic comments.
 44. **Final baseline.** Both projects build with **0 errors / 0 warnings** except the
     documented third-party `NETSDK1206`; a representative soak + a UI misuse pass produce a
     clean log with no unexplained error. Record the baseline here so future regressions are
