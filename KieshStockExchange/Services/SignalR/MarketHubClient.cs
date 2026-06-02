@@ -68,16 +68,24 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
     public async Task EnsureConnectedAsync(CancellationToken ct = default)
     {
         if (_connection.State == HubConnectionState.Connected) return;
+        bool started = false;
         await _connectGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             if (_connection.State == HubConnectionState.Disconnected)
             {
                 await _connection.StartAsync(ct).ConfigureAwait(false);
+                started = true;
                 RaiseStateChanged();
             }
         }
         finally { _connectGate.Release(); }
+
+        // A manual restart (after automatic reconnect gives up and the connection goes
+        // Disconnected) does NOT fire the Reconnected event, so replay tracked groups here
+        // too — otherwise the prior quote/candle/user subscriptions are silently lost on
+        // the fresh (empty) server-side connection.
+        if (started) await ReplayGroupsAsync().ConfigureAwait(false);
     }
 
     public async Task DisconnectAsync(CancellationToken ct = default)
@@ -89,6 +97,7 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
             lock (_groupsLock)
             {
                 _quoteGroups.Clear();
+                _candleGroups.Clear();
                 _activeUserId = null;
             }
             RaiseStateChanged();
@@ -159,7 +168,16 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
 
     private async Task OnReconnected(string? newConnectionId)
     {
-        // New connection id = fresh group membership server-side. Replay.
+        await ReplayGroupsAsync().ConfigureAwait(false);
+        RaiseStateChanged();
+    }
+
+    // Re-join every tracked group on a (re)connect. A fresh server connection id means
+    // empty server-side group membership, so both the automatic Reconnected event and a
+    // manual restart via EnsureConnectedAsync route through here. Each invoke is isolated
+    // so one failed re-join doesn't abort the rest.
+    private async Task ReplayGroupsAsync()
+    {
         (int, CurrencyType)[] quotes;
         (int, CurrencyType, CandleResolution)[] candles;
         int? user;
@@ -185,7 +203,6 @@ public sealed class MarketHubClient : IMarketHubClient, IAsyncDisposable
             try { await _connection.InvokeAsync("JoinUserGroups", uid).ConfigureAwait(false); }
             catch (Exception ex) { _logger.LogWarning(ex, "Re-join user groups for {UserId} failed", uid); }
         }
-        RaiseStateChanged();
     }
 
     private Task OnReconnecting(Exception? error)
