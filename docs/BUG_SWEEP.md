@@ -71,7 +71,6 @@ rest audited clean (UI-thread marshaling, subscription leaks, sync-over-async, t
 1. **B1** — add a 401 `DelegatingHandler` → re-login (real **feature**, ties into Phase-6 refresh tokens).
 2. **D4 / E4** — deeper connection/transaction-leak audit + remaining DTO-bind review (low priority; `await using` + admin-gated raw binds already in place).
 3. **C** server concurrency under *new* load shapes — re-run the conservation/reservation soak after any engine change.
-6. **B1** — token-expiry/reconnect behavior.
 
 ## G. Ops / deploy (found during connection-debug, sweep 2)
 
