@@ -296,6 +296,21 @@ builder.Services.AddHealthChecks().AddCheck<DatabaseHealthCheck>("database");
 
 var app = builder.Build();
 
+// Last-resort safety net. A background task that faults with no awaiter (the bot
+// loop's fire-and-forget work, broadcasters) would otherwise be swallowed by the
+// finalizer (TaskScheduler.UnobservedTaskException); a thread that throws would kill
+// the process with no server-side trace (AppDomain.UnhandledException). Route both
+// through Serilog so a soak's "silent" death always leaves evidence in the log.
+var globalLog = app.Services.GetRequiredService<ILogger<Program>>();
+TaskScheduler.UnobservedTaskException += (_, e) =>
+{
+    globalLog.LogError(e.Exception, "Unobserved task exception (no awaiter observed it).");
+    e.SetObserved();
+};
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+    globalLog.LogCritical(e.ExceptionObject as Exception,
+        "Unhandled domain exception (terminating={Terminating}).", e.IsTerminating);
+
 // Seed-ordering fix — a fresh DB must be seeded BEFORE the warm-up below reads
 // it. The stock cold-load and candle ring priming snapshot the DB into in-memory
 // caches; seeding any later (it used to be a hosted service, which only starts at
