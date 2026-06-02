@@ -13,7 +13,7 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 | # | Bug class | Where to look | Status (sweep 1) |
 |---|---|---|---|
 | A1 | `async void` handlers without try/catch → exception escapes to sync context → app crash | View code-behind `OnAppearing`/tap/nav handlers | ✅ all 5 `OnAppearing` + 3 nav/close handlers guarded (commit 52207ce). AdminPage resize handler already guarded. |
-| A2 | `ObservableCollection` / bound property mutated off the UI thread (SignalR/timer callbacks) → cross-thread crash | VM event handlers for hub/service events | 🟢 high-frequency paths verified marshaled (`OrderBookViewModel.OnFeedSnapshot`, `MarketViewModels.OnQuoteUpdated` both `MainThread`+`_disposed` guarded). 🟡 remaining ~10 subscriber VMs (Portfolio*, OpenOrders, OrderHistory, UserPositions, Account, TopNavBar, Chart) not yet line-audited. |
+| A2 | `ObservableCollection` / bound property mutated off the UI thread (SignalR/timer callbacks) → cross-thread crash | VM event handlers for hub/service events | 🟢 **(sweep 2)** clean — all subscriber VM handlers marshal. Hot paths (`OrderBookViewModel`, `MarketViewModels`) guard `MainThread`+`_disposed`; Portfolio*/TopNavBar/PlaceOrder/Chart marshal directly (`MainThread.BeginInvokeOnMainThread`/`_dispatcher.Dispatch`); OpenOrders/OrderHistory/UserPositions go through `TradeTableViewModelBase.PostUpdateFromCache` which marshals. Event sources (`ApiPortfolioClient`, `ApiOrderCacheBridge`) raise on thread-pool, so per-consumer marshaling is the (correctly-followed) contract. |
 | A3 | Event subscription without unsubscribe → leak + callback into disposed VM | VMs subscribing to singleton services (`IMarketHubClient`, `IUserSessionService`, `IOrderCacheService`, `IUserPortfolioService`) | 🟢 **(sweep 2)** clean. `ChartViewModel`'s only external-singleton sub (`_orderCache.OrdersChanged`) is unsubscribed in `Dispose`; its other `+=` are to VM-owned collections (self-referential cycles, GC'd with the VM). `NotificationService` 2`+=`/0`-=` is singleton↔singleton (harmless). |
 | A4 | Hub lifecycle: invoke on inactive connection; subscriptions not replayed after reconnect/restart | `MarketHubClient` | ✅ fixed (commits 3e852db, 1f513f5): state-guard on all joins, `ReplayGroupsAsync` from both auto-reconnect and manual restart, clear all group sets on disconnect. |
 | A5 | Fire-and-forget `_ = …Async()` swallowing failures | client services/VMs | 🔲 not swept |
@@ -62,8 +62,8 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 ---
 
 ## Next sweeps (priority order)
-1. **A2** — line-audit the remaining ~10 subscriber VM handlers for off-thread mutation. *Top.*
-2. **A5 / A6** — fire-and-forget + timer-stop audit in client VMs.
-3. **B1** — token-expiry / reconnect behavior.
-4. **D2 tail** — `GetTransactionsByUserId` / `GetOrdersByUserId` caps (lower risk).
+1. **A5 / A6** — fire-and-forget (`_ = …Async()`) + timer-stop-on-disappear audit in client VMs/services. *Top.*
+2. **B1** — token-expiry / reconnect behavior (stale JWT → silent 401 loop).
+3. **D2 tail** — `GetTransactionsByUserId` / `GetOrdersByUserId` caps (lower risk).
+4. **D4 / E4** — deeper connection-leak + DTO-bind review.
 6. **B1** — token-expiry/reconnect behavior.
