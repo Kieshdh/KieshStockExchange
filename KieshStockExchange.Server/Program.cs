@@ -50,6 +50,7 @@ var builder = WebApplication.CreateBuilder(args);
 // the live BotDashboard panel + web viewer (resolved lazily at host build, so
 // the bus singleton below need only be registered before builder.Build()).
 builder.Services.AddSingleton<TelemetryBus>();
+builder.Services.AddSingleton<TelemetryTicketStore>();
 builder.Host.UseSerilog((ctx, sp, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
     .WriteTo.Sink(new InMemoryTelemetrySink(sp.GetRequiredService<TelemetryBus>())));

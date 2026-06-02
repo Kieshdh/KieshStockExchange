@@ -1,40 +1,41 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using KieshStockExchange.Server.Services.Telemetry;
-using KieshStockExchange.Server.Services.UserServices;
 using KieshStockExchange.Services.Telemetry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
 
 namespace KieshStockExchange.Server.Controllers;
 
-// Server-Sent Events stream of live bot telemetry, for the browser viewer at
-// /admin/logs.html. AllowAnonymous because EventSource can't send an
-// Authorization header — the admin JWT rides ?token= and is validated inline.
-// This is also the first admin-role gate on the server.
+// Backs the browser log viewer at /admin/logs.html. The JWT never touches a
+// URL: an admin-gated POST mints a short-lived single-use ticket (header-bearer
+// auth), and only that ticket rides the SSE stream's query string (EventSource
+// can't set headers). This is also the first admin-role gate on the server.
 [ApiController]
 [Route("api/admin/logs")]
-[AllowAnonymous]
 public sealed class AdminLogsController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
     private readonly TelemetryBus _bus;
-    private readonly JwtSettings _jwt;
+    private readonly TelemetryTicketStore _tickets;
 
-    public AdminLogsController(TelemetryBus bus, JwtSettings jwt)
+    public AdminLogsController(TelemetryBus bus, TelemetryTicketStore tickets)
     {
         _bus = bus;
-        _jwt = jwt;
+        _tickets = tickets;
     }
 
+    [HttpPost("ticket")]
+    [Authorize(Roles = "admin")]
+    public IActionResult Ticket()
+        => Ok(new { ticket = _tickets.Issue(TimeSpan.FromSeconds(30)) });
+
     [HttpGet("stream")]
-    public async Task Stream([FromQuery] string? token, CancellationToken ct)
+    [AllowAnonymous]
+    public async Task Stream([FromQuery] string? ticket, CancellationToken ct)
     {
-        if (!IsValidAdmin(token))
+        if (!_tickets.TryConsume(ticket))
         {
             Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
@@ -76,27 +77,5 @@ public sealed class AdminLogsController : ControllerBase
             }
         }
         catch (OperationCanceledException) { /* client disconnected — expected */ }
-    }
-
-    private bool IsValidAdmin(string? token)
-    {
-        if (string.IsNullOrWhiteSpace(token)) return false;
-        var parameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = _jwt.Issuer,
-            ValidateAudience = true,
-            ValidAudience = _jwt.Audience,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.SigningKey)),
-            ClockSkew = TimeSpan.FromSeconds(30),
-        };
-        try
-        {
-            var principal = new JwtSecurityTokenHandler().ValidateToken(token, parameters, out _);
-            return principal.IsInRole("admin");
-        }
-        catch { return false; }
     }
 }

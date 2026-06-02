@@ -23,7 +23,7 @@
 </head>
 <body>
   <header>
-    <input id="token" type="password" placeholder="Paste admin JWT (from the MAUI client's token store, or POST /api/auth/login)" />
+    <input id="token" type="password" placeholder="Paste admin JWT (sent only in a POST header, never in the URL)" />
     <button id="connect">Connect</button>
     <span id="status">idle</span>
   </header>
@@ -58,31 +58,54 @@
       window.scrollTo(0, document.body.scrollHeight);
     }
 
+    let wantConnected = false;
+
+    // Mint a single-use ticket with the JWT in the POST header (never the URL),
+    // then open the stream with only that ticket. Tickets are single-use, so a
+    // dropped stream is re-minted here rather than relying on EventSource's
+    // built-in reconnect (which would replay the already-consumed ticket).
+    async function openStream() {
+      const token = tokenInput.value.trim();
+      const res = await fetch('/api/admin/logs/ticket', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      if (!res.ok) { setStatus('auth failed (check token / admin role)'); wantConnected = false; return; }
+      const { ticket } = await res.json();
+
+      source = new EventSource('/api/admin/logs/stream?ticket=' + encodeURIComponent(ticket));
+      source.onopen = () => { setStatus('connected'); retry = 1000; };
+      source.onmessage = e => { try { append(JSON.parse(e.data)); } catch {} };
+      source.onerror = () => {
+        if (source) { source.close(); source = null; }
+        if (!wantConnected) return;
+        setStatus('reconnecting…');
+        retry = Math.min(retry * 2, 15000);
+        setTimeout(() => { if (wantConnected) openStream(); }, retry);
+      };
+    }
+
     function connect() {
       const token = tokenInput.value.trim();
       if (!token) { setStatus('enter a token'); return; }
       localStorage.setItem('kse_admin_token', token);
       disconnect();
-
+      wantConnected = true;
+      retry = 1000;
       setStatus('connecting…');
-      source = new EventSource('/api/admin/logs/stream?token=' + encodeURIComponent(token));
-      source.onopen = () => { setStatus('connected'); retry = 1000; };
-      source.onmessage = e => { try { append(JSON.parse(e.data)); } catch {} };
-      source.onerror = () => {
-        // EventSource auto-reconnects, but a 401 closes for good — surface it.
-        setStatus(source.readyState === EventSource.CLOSED ? 'disconnected (check token)' : 'reconnecting…');
-      };
+      openStream();
       connectBtn.textContent = 'Disconnect';
       connectBtn.classList.add('stop');
     }
 
     function disconnect() {
+      wantConnected = false;
       if (source) { source.close(); source = null; }
       connectBtn.textContent = 'Connect';
       connectBtn.classList.remove('stop');
     }
 
-    connectBtn.addEventListener('click', () => (source ? (disconnect(), setStatus('idle')) : connect()));
+    connectBtn.addEventListener('click', () => (source || wantConnected ? (disconnect(), setStatus('idle')) : connect()));
   </script>
 </body>
 </html>
