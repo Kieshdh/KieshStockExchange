@@ -9,9 +9,8 @@ namespace KieshStockExchange.Server.Controllers;
 // flushes, etc.) — but is invokable from anywhere and can't be missed by VS's
 // "Stop Debugging" eating the signal. See stop-server.ps1 in the repo root.
 //
-// Admin-gated: on the public Phase-7e deployment an anonymous shutdown endpoint lets
-// anyone stop the server. Operators on the host use `docker stop` / `docker compose stop`;
-// remote admins authenticate. (Was [AllowAnonymous] for local dev / stop-server.ps1.)
+// Admin-gated: an anonymous shutdown endpoint would let anyone stop the public server.
+// Host operators use `docker stop`; remote admins authenticate.
 [ApiController]
 [Route("api/server")]
 [Authorize(Roles = "admin")]

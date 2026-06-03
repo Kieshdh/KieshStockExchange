@@ -418,10 +418,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         while (!ct.IsCancellationRequested)
         {
-            // Whole-tick guard: a transient failure (e.g. a prod DB command timeout) must
-            // not end the loop. Before this, an unhandled tick exception escaped RunLoopAsync,
-            // faulting the fire-and-forget runner — the bots silently stopped and never
-            // recovered. Now we log and continue so volume self-heals.
+            // Whole-tick guard: a transient failure (e.g. a DB command timeout) must not end
+            // the loop — log and continue after the interval so the fleet keeps trading.
             try
             {
                 var tickStart = Stopwatch.GetTimestamp();

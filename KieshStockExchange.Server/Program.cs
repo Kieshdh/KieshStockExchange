@@ -79,10 +79,8 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 builder.Services.Configure<HostOptions>(o =>
 {
     o.ShutdownTimeout = TimeSpan.FromSeconds(60);
-    // A faulting BackgroundService must NOT take down the whole host: the default
-    // (StopHost) turns one background exception into a full process exit — which on prod
-    // produced a silent ~2-minute graceful-restart loop. Keep the host alive and let the
-    // service's own logging surface the fault.
+    // Keep the host alive when a BackgroundService faults; the default (StopHost) turns one
+    // background exception into a full process exit. The service's own logging surfaces it.
     o.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
 });
 
@@ -420,10 +418,8 @@ app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<MarketHub>("/hubs/market");
 
-// Flush Serilog on shutdown. Without this the stop reason (a BackgroundService fault, a
-// signal, an explicit StopApplication) is written but lost before the process exits — which
-// is exactly why a silent prod restart loop was undiagnosable. The marker + CloseAndFlush
-// guarantee the reason lands in the log.
+// Flush Serilog on shutdown so the stop reason (BackgroundService fault, signal,
+// StopApplication) lands in the log instead of being lost as the process exits.
 app.Lifetime.ApplicationStopping.Register(() =>
     Log.Warning("Application is stopping (ApplicationStopping fired) — flushing logs."));
 try
