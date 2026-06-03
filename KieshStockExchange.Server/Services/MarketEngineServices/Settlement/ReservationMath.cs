@@ -33,6 +33,16 @@ public static class ReservationMath
         return CurrencyHelper.Notional(ReservationPerUnit(o), o.RemainingQuantity, o.CurrencyType);
     }
 
+    /// <summary>
+    /// Cash collateral for a short-opening fill of <paramref name="qty"/> shares at
+    /// <paramref name="fillPrice"/>. §3.6 P1 reserves collateral at fill time (not place
+    /// time) so it always equals the proceeds credited on the same fill — buying power is
+    /// unchanged at open and conservation holds. Mirror of <see cref="InitialBuyReservation"/>
+    /// for the short side.
+    /// </summary>
+    internal static decimal ShortCollateralForFill(int qty, decimal fillPrice, CurrencyType ccy)
+        => CurrencyHelper.Notional(fillPrice, qty, ccy);
+
     /// <summary> RemainingBuyReservation with hypothetical new price/qty. Pass null to keep current. </summary>
     internal static decimal ProjectedBuyReservation(Order o, int? newQty, decimal? newPrice)
     {

@@ -8,7 +8,7 @@ namespace KieshStockExchange.Services.DataServices;
 
 public sealed partial class PgDBService
 {
-    private const string PositionCols = @"""PositionId"",""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""CreatedAt"",""UpdatedAt""";
+    private const string PositionCols = @"""PositionId"",""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""ShortCollateral"",""ShortCollateralCurrency"",""CreatedAt"",""UpdatedAt""";
     private const string FundCols = @"""FundId"",""UserId"",""TotalBalance"",""ReservedBalance"",""Currency"",""CreatedAt"",""UpdatedAt""";
     private const string FundTxCols = @"""FundTransactionId"",""UserId"",""Currency"",""Amount"",""Kind"",""Note"",""CreatedAt""";
 
@@ -94,8 +94,8 @@ public sealed partial class PgDBService
         await using var c = await OpenAsync(ct);
         var row = PositionMapper.ToRow(position);
         row.PositionId = await c.ExecuteScalarAsync<int>(@"
-            INSERT INTO ""Positions"" (""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""CreatedAt"",""UpdatedAt"")
-            VALUES (@UserId,@StockId,@Quantity,@ReservedQuantity,@CreatedAt,@UpdatedAt)
+            INSERT INTO ""Positions"" (""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""ShortCollateral"",""ShortCollateralCurrency"",""CreatedAt"",""UpdatedAt"")
+            VALUES (@UserId,@StockId,@Quantity,@ReservedQuantity,@ShortCollateral,@ShortCollateralCurrency,@CreatedAt,@UpdatedAt)
             RETURNING ""PositionId""", row);
         position.PositionId = row.PositionId;
     }
@@ -107,6 +107,7 @@ public sealed partial class PgDBService
         await c.ExecuteAsync(@"
             UPDATE ""Positions"" SET ""UserId"" = @UserId, ""StockId"" = @StockId,
               ""Quantity"" = @Quantity, ""ReservedQuantity"" = @ReservedQuantity,
+              ""ShortCollateral"" = @ShortCollateral, ""ShortCollateralCurrency"" = @ShortCollateralCurrency,
               ""CreatedAt"" = @CreatedAt, ""UpdatedAt"" = @UpdatedAt
             WHERE ""PositionId"" = @PositionId", PositionMapper.ToRow(position));
     }
@@ -128,10 +129,11 @@ public sealed partial class PgDBService
         await using var c = await OpenAsync(ct);
         var row = PositionMapper.ToRow(position);
         row.PositionId = await c.ExecuteScalarAsync<int>(@"
-            INSERT INTO ""Positions"" (""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""CreatedAt"",""UpdatedAt"")
-            VALUES (@UserId,@StockId,@Quantity,@ReservedQuantity,@CreatedAt,@UpdatedAt)
+            INSERT INTO ""Positions"" (""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""ShortCollateral"",""ShortCollateralCurrency"",""CreatedAt"",""UpdatedAt"")
+            VALUES (@UserId,@StockId,@Quantity,@ReservedQuantity,@ShortCollateral,@ShortCollateralCurrency,@CreatedAt,@UpdatedAt)
             ON CONFLICT (""UserId"",""StockId"") DO UPDATE SET
               ""Quantity"" = EXCLUDED.""Quantity"", ""ReservedQuantity"" = EXCLUDED.""ReservedQuantity"",
+              ""ShortCollateral"" = EXCLUDED.""ShortCollateral"", ""ShortCollateralCurrency"" = EXCLUDED.""ShortCollateralCurrency"",
               ""UpdatedAt"" = EXCLUDED.""UpdatedAt""
             RETURNING ""PositionId""", row);
         position.PositionId = row.PositionId;
@@ -402,7 +404,7 @@ public sealed partial class PgDBService
                 throw new ArgumentException("Position entity is not valid", nameof(positions));
 
         var sql = new StringBuilder(@"
-            INSERT INTO ""Positions"" (""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""CreatedAt"",""UpdatedAt"")
+            INSERT INTO ""Positions"" (""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""ShortCollateral"",""ShortCollateralCurrency"",""CreatedAt"",""UpdatedAt"")
             VALUES ", capacity: 192 + positions.Count * 64);
         var p = new DynamicParameters();
         for (int i = 0; i < positions.Count; i++)
@@ -412,17 +414,21 @@ public sealed partial class PgDBService
                .Append(",@StockId_").Append(i)
                .Append(",@Quantity_").Append(i)
                .Append(",@ReservedQuantity_").Append(i)
+               .Append(",@ShortCollateral_").Append(i)
+               .Append(",@ShortCollateralCurrency_").Append(i)
                .Append(",@CreatedAt_").Append(i)
                .Append(",@UpdatedAt_").Append(i)
                .Append(')');
 
             var r = PositionMapper.ToRow(positions[i]);
-            p.Add($"UserId_{i}",           r.UserId);
-            p.Add($"StockId_{i}",          r.StockId);
-            p.Add($"Quantity_{i}",         r.Quantity);
-            p.Add($"ReservedQuantity_{i}", r.ReservedQuantity);
-            p.Add($"CreatedAt_{i}",        r.CreatedAt);
-            p.Add($"UpdatedAt_{i}",        r.UpdatedAt);
+            p.Add($"UserId_{i}",                 r.UserId);
+            p.Add($"StockId_{i}",                r.StockId);
+            p.Add($"Quantity_{i}",               r.Quantity);
+            p.Add($"ReservedQuantity_{i}",       r.ReservedQuantity);
+            p.Add($"ShortCollateral_{i}",        r.ShortCollateral);
+            p.Add($"ShortCollateralCurrency_{i}", r.ShortCollateralCurrency);
+            p.Add($"CreatedAt_{i}",              r.CreatedAt);
+            p.Add($"UpdatedAt_{i}",              r.UpdatedAt);
         }
         sql.Append(@" RETURNING ""PositionId""");
 
@@ -441,6 +447,7 @@ public sealed partial class PgDBService
             UPDATE ""Positions"" SET
               ""UserId"" = data.""UserId"", ""StockId"" = data.""StockId"",
               ""Quantity"" = data.""Quantity"", ""ReservedQuantity"" = data.""ReservedQuantity"",
+              ""ShortCollateral"" = data.""ShortCollateral"", ""ShortCollateralCurrency"" = data.""ShortCollateralCurrency"",
               ""CreatedAt"" = data.""CreatedAt"", ""UpdatedAt"" = data.""UpdatedAt""
             FROM (VALUES ", capacity: 384 + positions.Count * 96);
         var p = new DynamicParameters();
@@ -448,27 +455,31 @@ public sealed partial class PgDBService
         {
             if (i > 0) sql.Append(',');
             if (i == 0)
-                sql.Append("(@PositionId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@ReservedQuantity_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
+                sql.Append("(@PositionId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@ReservedQuantity_0::int,@ShortCollateral_0::numeric,@ShortCollateralCurrency_0::text,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
             else
                 sql.Append("(@PositionId_").Append(i)
                    .Append(",@UserId_").Append(i)
                    .Append(",@StockId_").Append(i)
                    .Append(",@Quantity_").Append(i)
                    .Append(",@ReservedQuantity_").Append(i)
+                   .Append(",@ShortCollateral_").Append(i)
+                   .Append(",@ShortCollateralCurrency_").Append(i)
                    .Append(",@CreatedAt_").Append(i)
                    .Append(",@UpdatedAt_").Append(i)
                    .Append(')');
 
             var r = PositionMapper.ToRow(positions[i]);
-            p.Add($"PositionId_{i}",       r.PositionId);
-            p.Add($"UserId_{i}",           r.UserId);
-            p.Add($"StockId_{i}",          r.StockId);
-            p.Add($"Quantity_{i}",         r.Quantity);
-            p.Add($"ReservedQuantity_{i}", r.ReservedQuantity);
-            p.Add($"CreatedAt_{i}",        r.CreatedAt);
-            p.Add($"UpdatedAt_{i}",        r.UpdatedAt);
+            p.Add($"PositionId_{i}",             r.PositionId);
+            p.Add($"UserId_{i}",                 r.UserId);
+            p.Add($"StockId_{i}",                r.StockId);
+            p.Add($"Quantity_{i}",               r.Quantity);
+            p.Add($"ReservedQuantity_{i}",       r.ReservedQuantity);
+            p.Add($"ShortCollateral_{i}",        r.ShortCollateral);
+            p.Add($"ShortCollateralCurrency_{i}", r.ShortCollateralCurrency);
+            p.Add($"CreatedAt_{i}",              r.CreatedAt);
+            p.Add($"UpdatedAt_{i}",              r.UpdatedAt);
         }
-        sql.Append(@") AS data(""PositionId"",""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""CreatedAt"",""UpdatedAt"") WHERE ""Positions"".""PositionId"" = data.""PositionId""");
+        sql.Append(@") AS data(""PositionId"",""UserId"",""StockId"",""Quantity"",""ReservedQuantity"",""ShortCollateral"",""ShortCollateralCurrency"",""CreatedAt"",""UpdatedAt"") WHERE ""Positions"".""PositionId"" = data.""PositionId""");
 
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(sql.ToString(), p);

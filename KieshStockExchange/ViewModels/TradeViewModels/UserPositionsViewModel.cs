@@ -89,7 +89,8 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
     #region Row Building
     protected override IEnumerable<PositionRow> BuildRows(int stockId, CurrencyType currency)
     {
-        var snapshot = _portfolio.GetPositions().Where(p => p.Quantity > 0).ToList();
+        // != 0 (not > 0) so cash-collateralized shorts (Quantity < 0) are visible too.
+        var snapshot = _portfolio.GetPositions().Where(p => p.Quantity != 0).ToList();
         var rows = new List<PositionRow>(snapshot.Count);
 
         if (ShowAll)
@@ -193,9 +194,13 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
     #endregion
 
     #region Formatted Properties
+    public bool IsShort => Pos.Quantity < 0;
     public string Price => CurrentPrice <= 0m ? "-" : CurrencyHelper.Format(CurrentPrice, Currency);
-    public string Qty => Pos.Quantity.ToString();
-    public string Reserved => Pos.ReservedQuantity.ToString();
+    // Shorts read as "SHORT N" so a negative balance is unmistakable in the table.
+    public string Qty => IsShort ? $"SHORT {-Pos.Quantity}" : Pos.Quantity.ToString();
+    public string Reserved => IsShort
+        ? CurrencyHelper.Format(Pos.ShortCollateral, Pos.ShortCollateralCurrency)
+        : Pos.ReservedQuantity.ToString();
     public string Available => Pos.AvailableQuantity.ToString();
     public string Total => CurrencyHelper.Format(TotalValue, Currency);
     #endregion

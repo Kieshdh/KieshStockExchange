@@ -106,11 +106,17 @@ public sealed class KseDbContext : DbContext
 
         modelBuilder.Entity<PositionRow>(b =>
         {
+            // §3.6 P1: Quantity may be negative (a short). ReservedQuantity is share-side
+            // (long-only), so it stays in [0, max(Quantity,0)]; ShortCollateral is the cash
+            // backing a short and only exists while Quantity < 0.
             b.ToTable("Positions", t => t.HasCheckConstraint(
                 "CK_Positions_Quantity_Invariants",
-                "\"Quantity\" >= 0 AND \"ReservedQuantity\" >= 0 AND \"ReservedQuantity\" <= \"Quantity\""));
+                "\"ReservedQuantity\" >= 0 AND \"ReservedQuantity\" <= GREATEST(\"Quantity\", 0) " +
+                "AND \"ShortCollateral\" >= 0 AND (\"Quantity\" >= 0 OR \"ReservedQuantity\" = 0) " +
+                "AND (\"Quantity\" < 0 OR \"ShortCollateral\" = 0)"));
             b.HasKey(x => x.PositionId);
             b.Property(x => x.PositionId).ValueGeneratedOnAdd();
+            b.Property(x => x.ShortCollateral).HasColumnType(Money);
             b.Property(x => x.CreatedAt).HasColumnType(TimestampTz);
             b.Property(x => x.UpdatedAt).HasColumnType(TimestampTz);
             b.HasIndex(x => new { x.UserId, x.StockId })

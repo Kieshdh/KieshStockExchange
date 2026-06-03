@@ -26,6 +26,16 @@ public sealed class TradeBatchScope
     /// </summary>
     public Dictionary<int, (decimal Buy, int Sell)> OrderReservationSnapshots { get; } = new();
 
+    /// <summary>
+    /// Pre-mutation short-collateral snapshot (<see cref="Position.ShortCollateral"/> +
+    /// its currency) for existing positions a short open/close touches. Captured on first
+    /// sight and replayed on rollback so collateral stays in lock-step with the Fund/Position
+    /// snapshots above. New (PositionId == 0) positions are dropped on rollback, so they
+    /// need no entry here.
+    /// </summary>
+    public Dictionary<(int UserId, int StockId), (decimal Collateral, CurrencyType Ccy)>
+        PosShortCollateralSnapshots { get; } = new();
+
     /// <summary> New Positions created mid-batch. Shared across settle calls in one root tx;
     /// caller registers in cache after commit. </summary>
     public Dictionary<(int UserId, int StockId), Position> PendingNewPositions { get; } = new();

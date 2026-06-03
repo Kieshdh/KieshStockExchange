@@ -89,6 +89,13 @@ public sealed class AccountsCache : IAccountsCache
             ClampSellsToPositionQuantity(sellsByPos, ordersToCancel);
             ClampBuysToFundBalance(buysByFund, ordersToCancel);
 
+            // §3.6 P1 (risk #5): short collateral is intrinsic to the position (loaded from
+            // DB, not rebuilt from open orders), so the order-driven fund rebuild above misses
+            // it. Mirror each just-loaded short's ShortCollateral back into its currency Fund's
+            // ReservedBalance so hydration reproduces the lock the live session held — without
+            // it, a restart would drop the collateral and ClampSells could cancel the short.
+            BackfillShortCollateral(missing);
+
             if (ordersToCancel.Count > 0)
                 await _db.UpdateAllAsync(ordersToCancel, ct).ConfigureAwait(false);
 
@@ -232,6 +239,25 @@ public sealed class AccountsCache : IAccountsCache
             _ledger.LogPosition(pos.UserId, pos.StockId, null, "Hydrate:SeedPosition",
                 reserved - posResBefore, posResBefore, pos.ReservedQuantity,
                 pos.Quantity, pos.Quantity);
+        }
+    }
+
+    // §3.6 P1 (risk #5): add each short position's collateral into its currency Fund's
+    // ReservedBalance for the just-loaded users. Scoped to `userIds` so a later partial
+    // load never double-counts collateral already mirrored on a prior load.
+    private void BackfillShortCollateral(List<int> userIds)
+    {
+        var set = new HashSet<int>(userIds);
+        foreach (var kv in _positions)
+        {
+            var pos = kv.Value;
+            if (!set.Contains(pos.UserId) || pos.ShortCollateral <= 0m) continue;
+            if (!_funds.TryGetValue((pos.UserId, pos.ShortCollateralCurrency), out var fund)) continue;
+            var resBefore = fund.ReservedBalance;
+            fund.ReservedBalance += pos.ShortCollateral;
+            _ledger.LogFund(pos.UserId, pos.ShortCollateralCurrency, null,
+                "Hydrate:ShortCollateral", pos.ShortCollateral,
+                resBefore, fund.ReservedBalance, fund.TotalBalance, fund.TotalBalance);
         }
     }
 
@@ -438,6 +464,19 @@ public sealed class AccountsCache : IAccountsCache
             }
         }
 
+        // §3.6 P1 (risk #8): short collateral sits in Fund.ReservedBalance but isn't backed
+        // by an open buy order — fold it into the expected fund reservation so a legitimate
+        // short doesn't read as a phantom leak (or get clamped away below).
+        foreach (var kv in _positions)
+        {
+            ct.ThrowIfCancellationRequested();
+            var pos = kv.Value;
+            if (pos.ShortCollateral <= 0m) continue;
+            var key = (pos.UserId, pos.ShortCollateralCurrency);
+            expectedBalByFund.TryGetValue(key, out var sum);
+            expectedBalByFund[key] = sum + pos.ShortCollateral;
+        }
+
         var mismatches = new List<ReservationMismatch>();
 
         foreach (var kv in _positions)
@@ -549,6 +588,15 @@ public sealed class AccountsCache : IAccountsCache
         decimal expected = 0m;
         foreach (var o in _registry.GetOpenBuysForUser(userId, ccy))
             if (o.IsOpen && o.CurrentBuyReservation > 0m) expected += o.CurrentBuyReservation;
+
+        // §3.6 P1 (risk #8): include short collateral held in this currency so the clamp
+        // re-derives the SAME expectation the reconcile pass used and never erases collateral.
+        foreach (var kv in _positions)
+        {
+            var pos = kv.Value;
+            if (pos.UserId == userId && pos.ShortCollateral > 0m && pos.ShortCollateralCurrency == ccy)
+                expected += pos.ShortCollateral;
+        }
 
         if (fund.ReservedBalance <= expected) return; // resolved or reversed since the pass
         fund.ReservedBalance = expected;

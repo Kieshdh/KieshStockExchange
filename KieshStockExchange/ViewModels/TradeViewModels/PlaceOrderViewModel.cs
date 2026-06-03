@@ -387,10 +387,24 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         OrderValue = total > 0 ? CurrencyHelper.Format(total, Selected.Currency) : "-";
 
         // Buys need a Fund in the active trading currency; sells don't.
-        var hasFund = _portfolio?.GetFundByCurrency(Selected.Currency)?.AvailableBalance > 0;
-        HintText = (IsBuySelected && Selected.HasSelectedStock && !hasFund)
-            ? $"Convert cash to {Selected.Currency} first."
-            : string.Empty;
+        if (IsBuySelected)
+        {
+            var hasFund = _portfolio?.GetFundByCurrency(Selected.Currency)?.AvailableBalance > 0;
+            HintText = (Selected.HasSelectedStock && !hasFund)
+                ? $"Convert cash to {Selected.Currency} first."
+                : string.Empty;
+        }
+        else
+        {
+            // §3.6 P1: a market sell beyond holdings opens a cash-collateralized short.
+            // A limit sell can't (resting short limits are a later patch) — guide the user.
+            var avail = UserPosition.AvailableQuantity;
+            HintText = (Selected.HasSelectedStock && Quantity > 0 && Quantity > avail)
+                ? (IsMarketSelected
+                    ? "Selling more than you hold opens a cash-collateralized short."
+                    : "Limit sells can't exceed your holdings yet — use a market order to short.")
+                : string.Empty;
+        }
     }
 
     private bool ValidateInputs()

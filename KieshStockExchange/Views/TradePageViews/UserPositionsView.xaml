@@ -36,7 +36,13 @@
                               Style="{StaticResource TradeTableRowGrid}">
                             <Label Grid.Column="0" Text="{Binding Symbol}"    Style="{StaticResource TradeTableSymbolLabel}" />
                             <Label Grid.Column="1" Text="{Binding Price}"     Style="{StaticResource TradeTableRowLabel}" />
-                            <Label Grid.Column="2" Text="{Binding Qty}"       Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="2" Text="{Binding Qty}"       Style="{StaticResource TradeTableRowLabel}">
+                                <Label.Triggers>
+                                    <DataTrigger TargetType="Label" Binding="{Binding IsShort}" Value="True">
+                                        <Setter Property="TextColor" Value="OrangeRed" />
+                                    </DataTrigger>
+                                </Label.Triggers>
+                            </Label>
                             <Label Grid.Column="3" Text="{Binding Reserved}"  Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="4" Text="{Binding Available}" Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="5" Text="{Binding Total}"     Style="{StaticResource TradeTableRowLabel}" />

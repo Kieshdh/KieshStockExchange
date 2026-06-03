@@ -86,7 +86,20 @@ internal sealed class OrderSettler
         }
         else
         {
-            sellPos = _accounts.GetPosition(incoming.UserId, incoming.StockId);
+            var existing = _accounts.GetPosition(incoming.UserId, incoming.StockId);
+
+            // §3.6 P1 short-opening sell: a market sell by a fully-flat seller (no long
+            // inventory) opens a cash-collateralized short. No share reservation here —
+            // collateral is posted at fill time in TradeSettler (where the seller's fund
+            // gate is already held and the fill price is known). Leave sellPos null so the
+            // persist/rollback blocks below skip the share path entirely; the order is
+            // still persisted so the matcher can fill it. A partial holder (Quantity > 0
+            // but < order qty) is NOT a short — it falls through to the rejection below
+            // (P1 MVP disallows mixed close-long-and-open-short).
+            bool shortOpen = incoming.IsMarketOrder && (existing is null || existing.Quantity == 0);
+            if (!shortOpen)
+            {
+            sellPos = existing;
             if (sellPos == null)
             {
                 return OrderResultFactory.InsufficientStocks(
@@ -117,6 +130,7 @@ internal sealed class OrderSettler
             _ledger.LogOrder(incoming.UserId, incoming.OrderId, "SettleOrderAsync:Reserve",
                 incoming.Quantity, incoming.CurrentBuyReservation, incoming.CurrentBuyReservation,
                 orderSellBefore, incoming.CurrentSellReservedQty);
+            } // end !shortOpen
         }
 
         await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);

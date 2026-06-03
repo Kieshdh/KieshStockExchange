@@ -25,6 +25,11 @@ internal sealed class SellerCapacityValidator
         // Two pools per seller: order's own reservation first, then top-up from AvailableQuantity
         var availableBySeller = new Dictionary<(int, int), int>(trades.Count);
         var reservedRemainingByOrder = new Dictionary<int, int>(trades.Count);
+        // Per-seller starting Quantity + whether a Position row exists, resolved once.
+        var startQtyBySeller = new Dictionary<(int, int), int>(trades.Count);
+        var posExistsBySeller = new Dictionary<(int, int), bool>(trades.Count);
+        // §3.6 P1: per sell order, is this a short-opening market sell (flat/short seller)?
+        var shortByOrder = new Dictionary<int, bool>(trades.Count);
         var rejected = new List<RejectedFill>();
         var accepted = new List<Transaction>(trades.Count);
 
@@ -34,17 +39,41 @@ internal sealed class SellerCapacityValidator
             var t = trades[ti];
             var sellerKey = (t.SellerId, t.StockId);
 
-            // Lazy-init available pool
-            if (!availableBySeller.TryGetValue(sellerKey, out var available))
+            // Resolve the seller's starting state once (pre-apply, so it's stable across
+            // this order's fills even though the apply-pass will push Quantity negative).
+            if (!startQtyBySeller.TryGetValue(sellerKey, out var startQty))
             {
                 var sellerPos = accounts.GetPosition(t.SellerId, t.StockId);
-                if (sellerPos is null && !pendingNewPositions.TryGetValue(sellerKey, out sellerPos))
-                    return (OrderResultFactory.OperationFailed(
-                        $"Position not found for seller {t.SellerId} on stock {t.StockId}."),
-                        new List<Transaction>(), new List<RejectedFill>());
-                available = sellerPos!.AvailableQuantity;
-                availableBySeller[sellerKey] = available;
+                if (sellerPos is null) pendingNewPositions.TryGetValue(sellerKey, out sellerPos);
+                startQty = sellerPos?.Quantity ?? 0;
+                startQtyBySeller[sellerKey] = startQty;
+                posExistsBySeller[sellerKey] = sellerPos is not null;
+                availableBySeller[sellerKey] = sellerPos?.AvailableQuantity ?? 0;
             }
+
+            // A market sell by a flat (or already-short) seller opens/extends a
+            // cash-collateralized short. Accept without drawing on the share pools —
+            // the cash collateral posted at fill time is the backing, not shares.
+            if (!shortByOrder.TryGetValue(t.SellOrderId, out var isShort))
+            {
+                ordersById.TryGetValue(t.SellOrderId, out var so);
+                isShort = so is not null && so.IsMarketOrder && startQty <= 0;
+                shortByOrder[t.SellOrderId] = isShort;
+            }
+            if (isShort)
+            {
+                accepted.Add(t);
+                continue;
+            }
+
+            // Long sell with no Position row should never reach matching (place-time guards
+            // it); treat as a hard batch failure, not a recoverable rejected fill.
+            if (!posExistsBySeller[sellerKey])
+                return (OrderResultFactory.OperationFailed(
+                    $"Position not found for seller {t.SellerId} on stock {t.StockId}."),
+                    new List<Transaction>(), new List<RejectedFill>());
+
+            var available = availableBySeller[sellerKey];
 
             // Lazy-init order reservation pool. Missing from ordersById = brand-new mid-batch sell with no reservation.
             if (!reservedRemainingByOrder.TryGetValue(t.SellOrderId, out var reservedThis))
