@@ -50,10 +50,17 @@ public sealed class AdminLogsController : ControllerBase
         // client sheds backlog instead of growing unbounded.
         var channel = Channel.CreateBounded<TelemetryEvent>(
             new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
-        using var sub = _bus.Subscribe(evt => channel.Writer.TryWrite(evt));
+        // Subscribe + grab the buffered history atomically (exactly-once). Live events that
+        // arrive during the history write queue in the channel and stream right after.
+        using var sub = _bus.Subscribe(evt => channel.Writer.TryWrite(evt), out var history);
 
         try
         {
+            // Backfill prior logs (oldest-first) so the viewer opens with context.
+            foreach (var past in history)
+                await Response.WriteAsync($"data: {JsonSerializer.Serialize(past, JsonOpts)}\n\n", ct).ConfigureAwait(false);
+            if (history.Length > 0) await Response.Body.FlushAsync(ct).ConfigureAwait(false);
+
             // One loop owns all writes (Response.Body is not safe for concurrent
             // writers): drain queued events, else emit a 15s keepalive so Caddy
             // and intermediaries don't time the idle connection out.

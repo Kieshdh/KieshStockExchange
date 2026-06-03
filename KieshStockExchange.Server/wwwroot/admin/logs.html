@@ -131,10 +131,12 @@
         `<span class="msg"></span>`;
       row.querySelector('.src').textContent = SOURCE_LABEL[evt.source] || evt.source;
       row.querySelector('.msg').innerHTML = highlight(evt.message);
-      logEl.appendChild(row);
-      // Cap the DOM at 500 rows so a long session doesn't bloat memory.
-      while (logEl.childElementCount > 500) logEl.removeChild(logEl.firstChild);
-      window.scrollTo(0, document.body.scrollHeight);
+      // Newest-first: prepend at the top. The server replays its buffered history
+      // (oldest-first) on connect, so after backfill the newest sits at the top and
+      // live events push in above it.
+      logEl.insertBefore(row, logEl.firstChild);
+      // Cap the DOM at 500 rows (matches the server ring buffer); drop the oldest (bottom).
+      while (logEl.childElementCount > 500) logEl.removeChild(logEl.lastChild);
     }
 
     let wantConnected = false;
