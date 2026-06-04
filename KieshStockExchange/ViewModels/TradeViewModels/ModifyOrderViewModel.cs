@@ -136,7 +136,7 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         IsBuyOrder = order.IsBuyOrder;
         IsStopOrder = order.IsStopOrder;
         IsStopLimit = order.IsStopLimitOrder;
-        PriceFieldLabel = order.IsStopOrder ? "Stop price" : "Limit price";
+        PriceFieldLabel = order.IsStopOrder ? "Trigger price" : "Limit price";
 
         // The primary (draggable) field is the trigger for a stop, the limit price otherwise.
         // The chart line for a stop is drawn at StopPrice, so a drag-derived prefill is the

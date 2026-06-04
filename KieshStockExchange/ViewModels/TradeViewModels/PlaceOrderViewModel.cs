@@ -35,9 +35,17 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     [ObservableProperty] private bool _noSlippageGuard = false; // If true, market orders have no slippage protection
     [ObservableProperty] private decimal _slippagePrc = 0.005m; // 0.5% default
     private const decimal DefaultSlippagePrc = 0.005m;
-    [ObservableProperty] private string _assetText = "Available Funds"; // Buy="Available Funds", Sell="Available Shares"
-    [ObservableProperty] private string _availableAssetsText = "-"; // Based on side and portfolio
+    // Both shown for both sides (a buy still wants to see its share holding, and vice-versa).
+    [ObservableProperty] private string _availableFundsDisplay = "-";
+    [ObservableProperty] private string _availableSharesDisplay = "-";
     [ObservableProperty] private string _orderValue = "-"; // Total order value based on quantity and price
+
+    // Blocking validation error (e.g. a trigger on the wrong side of the market), shown in red below
+    // the submit button and set only on a submit attempt; cleared as the user edits.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasValidationMessage))]
+    private string _validationMessage = string.Empty;
+    public bool HasValidationMessage => !string.IsNullOrEmpty(ValidationMessage);
 
     [ObservableProperty] private string _submitButtonText = "Buy"; // Buy="Buy {Symbol}", Sell="Sell {Symbol}"
     [ObservableProperty] private Color _submitButtonColor = Colors.ForestGreen; // Buy=ForestGreen, Sell=OrangeRed
@@ -154,10 +162,18 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         // etc.) fires SnapshotChanged. Subscribe so the Available chip updates
         // immediately instead of waiting for the AssetsRefreshInterval timer.
         _portfolio.SnapshotChanged += OnPortfolioSnapshotChanged;
+
+        // A resting order filling (e.g. a sell-limit that hits) changes the user's holdings but
+        // doesn't itself refresh the portfolio — so the "you hold N…" hint went stale until the
+        // 60s timer. Refresh on order-cache changes so the hint/assets update right after a fill.
+        _cache.OrdersChanged += OnOrdersChanged;
     }
 
     private void OnPortfolioSnapshotChanged(object? sender, EventArgs e)
         => _dispatcher.Dispatch(RecomputeUi);
+
+    private void OnOrdersChanged(object? sender, EventArgs e)
+        => _dispatcher.Dispatch(async () => { await UpdateAssetsAsync(); RecomputeUi(); });
     #endregion
 
     #region StockAware Overrides
@@ -185,6 +201,7 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         if (disposing)
         {
             _portfolio.SnapshotChanged -= OnPortfolioSnapshotChanged;
+            _cache.OrdersChanged -= OnOrdersChanged;
             StopAssetsAutoRefresh();
         }
         base.Dispose(disposing);
@@ -240,16 +257,14 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     [RelayCommand] private async Task PlaceOrderAsync()
     {
         if (IsBusy) return;
-        IsBusy = true;
 
+        // Validate BEFORE the busy/refresh block so a failed check leaves its ValidationMessage
+        // visible (the finally's RecomputeUi would otherwise clear it on the same tap).
+        if (!ValidateInputs()) return;
+
+        IsBusy = true;
         try
         {
-            if (!ValidateInputs())
-            {
-                _logger.LogWarning("Order validation failed for {Symbol}. Order not placed.", Selected.Symbol);
-                return;
-            }
-
             var userId = _auth.CurrentUserId;
             var id = Selected.StockId!.Value;
             var cur = Selected.Currency;
@@ -463,16 +478,20 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     #region Private Methods
     private void RecomputeUi()
     {
+        // A fresh edit clears any prior submit-time validation error.
+        ValidationMessage = string.Empty;
+
         // Submit button text and color
         var verb = IsBuySelected ? "Buy" : "Sell";
-        SubmitButtonText = IsStopOrder ? $"{verb} {Selected.Symbol} Stop" : $"{verb} {Selected.Symbol}";
+        SubmitButtonText = IsStopOrder ? $"{verb} {Selected.Symbol} Trigger" : $"{verb} {Selected.Symbol}";
         SubmitButtonColor = IsBuySelected ? Colors.ForestGreen : Colors.OrangeRed;
 
-        // User Asset Display
-        AssetText = IsBuySelected ? "Available Funds" : "Available shares";
-        AvailableAssetsText = IsBuySelected
-            ? (UserFund.AvailableBalance > 0 ? UserFund.AvailableBalanceDisplay : "-")
-            : ($"{UserPosition.AvailableQuantity} {Selected.Symbol}");
+        // Show BOTH available funds and available/total shares regardless of side.
+        AvailableFundsDisplay = UserFund.AvailableBalance > 0 ? UserFund.AvailableBalanceDisplay : "-";
+        var pos = UserPosition;
+        AvailableSharesDisplay = Selected.HasSelectedStock
+            ? $"{pos.AvailableQuantity}/{pos.Quantity} {Selected.Symbol}"
+            : "-";
 
         // Order value preview
         var total = PriceForOrder > 0 ? CurrencyHelper.Notional(PriceForOrder, Quantity, Selected.Currency) : 0m;
@@ -509,41 +528,52 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             else
                 HintText = string.Empty;
         }
+
+        // "Think twice": a limit priced through the market fills immediately like a market order.
+        // Non-blocking — only surfaced when no more-critical hint is showing.
+        if (HintText.Length == 0 && IsLimitSelected && Selected.CurrentPrice > 0m && LimitPrice > 0m)
+        {
+            bool marketable = IsBuySelected
+                ? LimitPrice >= Selected.CurrentPrice
+                : LimitPrice <= Selected.CurrentPrice;
+            if (marketable)
+                HintText = "This limit crosses the market — it fills immediately, like a market order.";
+        }
     }
 
+    // Returns false and sets a user-visible ValidationMessage on the first blocking problem, so a bad
+    // order (e.g. a trigger on the wrong side of the market) never reaches the engine.
     private bool ValidateInputs()
     {
+        bool Fail(string message)
+        {
+            _logger.LogWarning("Order validation failed: {Message}", message);
+            ValidationMessage = message;
+            return false;
+        }
 
-        if (!Selected.HasSelectedStock)
+        ValidationMessage = string.Empty;
+
+        if (!Selected.HasSelectedStock) return Fail("Select a stock first.");
+        if (Quantity <= 0) return Fail("Quantity must be positive.");
+        if (IsMarketSelected && Selected.CurrentPrice <= 0) return Fail("No market price available right now.");
+        if (PriceForOrder <= 0) return Fail("Enter a valid price.");
+        if (IsStopOrder && StopPrice <= 0m) return Fail("Trigger price must be positive.");
+
+        // Client-side trigger-direction guard (2.7): a sell trigger sits at/below the market, a buy
+        // trigger at/above — reject the wrong side here instead of round-tripping to the engine.
+        if (IsStopOrder && Selected.CurrentPrice > 0m)
         {
-            _logger.LogWarning("No stock selected.");
-            return false;
+            var mkt = Selected.CurrentPrice;
+            if (IsSellSelected && StopPrice > mkt)
+                return Fail($"A sell trigger must be at or below the market ({Selected.CurrentPriceDisplay}).");
+            if (IsBuySelected && StopPrice < mkt)
+                return Fail($"A buy trigger must be at or above the market ({Selected.CurrentPriceDisplay}).");
         }
-        if (Quantity <= 0)
-        {
-            _logger.LogWarning("Quantity must be positive.");
-            return false;
-        }
-        if (IsMarketSelected && Selected.CurrentPrice <= 0)
-        {
-            _logger.LogWarning("No market price available for market order.");
-            return false;
-        }
-        if (PriceForOrder <= 0)
-        {
-            _logger.LogWarning("Invalid price.");
-            return false;
-        }
-        if (IsStopOrder && StopPrice <= 0m)
-        {
-            _logger.LogWarning("Stop price must be positive.");
-            return false;
-        }
+
         if (IsBracketOrder && ShowBracket && BracketStopPrice <= 0m)
-        {
-            _logger.LogWarning("Bracket stop-loss price must be positive.");
-            return false;
-        }
+            return Fail("Bracket stop-loss price must be positive.");
+
         return true;
     }
     #endregion
