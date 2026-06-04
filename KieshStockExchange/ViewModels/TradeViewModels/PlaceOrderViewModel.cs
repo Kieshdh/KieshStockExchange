@@ -512,9 +512,9 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         }
         else
         {
-            // §3.6 P1: only a FULLY-FLAT seller can open a short, and only via a market
-            // order. A partial holder selling beyond their shares is a mixed close+short,
-            // which the MVP rejects — say so instead of promising a short that won't happen.
+            // §3.6: a short opens only via a market order. A flat seller opens outright; a
+            // long holder selling beyond their shares flips — closes the long and opens a short
+            // for the excess (risk #7) — provided the whole long is free of other reservations.
             var held  = UserPosition.Quantity;
             var avail = UserPosition.AvailableQuantity;
             if (!Selected.HasSelectedStock || Quantity <= 0)
@@ -527,10 +527,17 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                 HintText = IsMarketSelected
                     ? "Opens a cash-collateralized short position."
                     : "Limit sells can't short yet — use a market order.";
+            else if (Quantity > held)
+                // §3.6 risk #7 long→short flip: a market sell beyond the held long closes the long
+                // and opens a short for the excess. Needs the whole long free (no competing
+                // reservation), mirroring OrderSettler's flip guard.
+                HintText = IsMarketSelected
+                    ? (avail == held
+                        ? $"Closes your {held} and opens a short for the remaining {Quantity - held}."
+                        : $"You hold {held} but {held - avail} are reserved by other orders; cancel them or sell to flat first.")
+                    : "Limit sells can't short yet — use a market order.";
             else if (Quantity > avail)
-                // §3.6: the one-order long→short flip (mixed close+open) isn't supported yet (risk #7);
-                // sell to flat first, then short.
-                HintText = $"You hold {held} (available {avail}). To short, sell to flat first.";
+                HintText = $"You hold {held} (available {avail}); reduce quantity to {avail} or cancel other orders.";
             else
                 HintText = string.Empty;
         }

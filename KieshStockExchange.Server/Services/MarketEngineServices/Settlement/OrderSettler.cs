@@ -93,14 +93,12 @@ internal sealed class OrderSettler
             // collateral is posted at fill time in TradeSettler (where the seller's fund
             // gate is already held and the fill price is known). Leave sellPos null so the
             // persist/rollback blocks below skip the share path entirely; the order is
-            // still persisted so the matcher can fill it. A partial holder (Quantity > 0
-            // but < order qty) is NOT a short — it falls through to the rejection below
-            // (P1 MVP disallows mixed close-long-and-open-short).
+            // still persisted so the matcher can fill it.
             // §3.6: a market sell by a flat OR already-short seller opens/extends a short (no share
             // reservation — collateral is posted at fill). <=0 (not ==0) so adding to an existing short
             // works; the SellerCapacityValidator + TradeSettler already gate on startQty <= 0 to match.
-            // (A partial long holder selling beyond their shares — the long→short flip — is still
-            // rejected here; that mixed close+open is risk #7, a separate change.)
+            // (A partial long holder selling beyond their shares — the long→short flip — takes the
+            // !shortOpen branch below, where it reserves only the long portion; risk #7.)
             bool shortOpen = incoming.IsMarketOrder && (existing is null || existing.Quantity <= 0);
             if (!shortOpen)
             {
@@ -111,7 +109,28 @@ internal sealed class OrderSettler
                     $"Order requires {incoming.Quantity} share(s): " +
                     $"no position row for user {incoming.UserId} on stock {incoming.StockId}.");
             }
-            if (sellPos.AvailableQuantity < incoming.Quantity)
+
+            // §3.6 risk #7 long→short flip: a MARKET sell of more than the held long closes the
+            // entire long and opens a cash-collateralized short for the excess. Reserve only the
+            // long portion (the held shares); the short portion posts collateral at fill time in
+            // TradeSettler. A flip needs the whole long free — a short can't coexist with a share
+            // reservation (Position.ApplyDelta guard) — so any competing reservation keeps it out
+            // of scope; reject cleanly rather than half-fill.
+            bool isFlip = incoming.IsMarketOrder
+                && sellPos.Quantity > 0
+                && incoming.Quantity > sellPos.Quantity;
+            if (isFlip && sellPos.ReservedQuantity != 0)
+            {
+                return OrderResultFactory.InsufficientStocks(
+                    $"Order would flip user {incoming.UserId} short on stock {incoming.StockId}, but " +
+                    $"{sellPos.ReservedQuantity} share(s) are reserved by other orders; cancel them or sell to flat first.");
+            }
+
+            // Long portion to reserve now: the full order for a plain long sell, or just the held
+            // shares for a flip (the rest is the short, collateralized at fill).
+            int reserveQty = isFlip ? sellPos.Quantity : incoming.Quantity;
+
+            if (!isFlip && sellPos.AvailableQuantity < incoming.Quantity)
             {
                 return OrderResultFactory.InsufficientStocks(
                     $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available " +
@@ -119,21 +138,21 @@ internal sealed class OrderSettler
             }
 
             var posResBefore = sellPos.ReservedQuantity;
-            try { sellPos.ReserveStock(incoming.Quantity); }
+            try { sellPos.ReserveStock(reserveQty); }
             catch (ArgumentException)
             {
                 // Race against another reserver
                 return OrderResultFactory.InsufficientStocks(
-                    $"Order requires {incoming.Quantity} share(s) but only {sellPos.AvailableQuantity} available " +
+                    $"Order requires {reserveQty} share(s) but only {sellPos.AvailableQuantity} available " +
                     $"(Quantity={sellPos.Quantity}, Reserved={sellPos.ReservedQuantity}); race on ReserveStock.");
             }
             _ledger.LogPosition(incoming.UserId, incoming.StockId, incoming.OrderId, "SettleOrderAsync:Reserve",
-                incoming.Quantity, posResBefore, sellPos.ReservedQuantity,
+                reserveQty, posResBefore, sellPos.ReservedQuantity,
                 sellPos.Quantity, sellPos.Quantity);
             var orderSellBefore = incoming.CurrentSellReservedQty;
-            incoming.TakeSellReservation(incoming.Quantity);
+            incoming.TakeSellReservation(reserveQty);
             _ledger.LogOrder(incoming.UserId, incoming.OrderId, "SettleOrderAsync:Reserve",
-                incoming.Quantity, incoming.CurrentBuyReservation, incoming.CurrentBuyReservation,
+                reserveQty, incoming.CurrentBuyReservation, incoming.CurrentBuyReservation,
                 orderSellBefore, incoming.CurrentSellReservedQty);
             } // end !shortOpen
         }

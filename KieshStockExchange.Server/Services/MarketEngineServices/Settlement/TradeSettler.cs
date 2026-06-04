@@ -368,6 +368,7 @@ internal sealed class TradeSettler
             // matching SellerCapacityValidator's decision). New rows were flat ⇒ 0.
             int sellerStartQty = posSnapshots.TryGetValue(sellerPosKey, out var sps) ? sps.Quantity : 0;
             bool isShortFill = sellOrder is not null && sellOrder.IsMarketOrder && sellerStartQty <= 0;
+            bool isFlipFill = sellOrder is not null && sellOrder.IsMarketOrder && sellerStartQty > 0;
 
             if (isShortFill)
             {
@@ -390,6 +391,53 @@ internal sealed class TradeSettler
                 _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:ShortOpen",
                     -t.Quantity, sellerPos.ReservedQuantity, sellerPos.ReservedQuantity,
                     sQtyBefore, sellerPos.Quantity);
+            }
+            else if (isFlipFill)
+            {
+                // §3.6 risk #7 long→short flip: split this crossing fill at the order's remaining
+                // long reservation. CurrentSellReservedQty is the order's OWN long pool (seeded to
+                // the held shares at place time, drawn down per fill) — using it, not live
+                // Position.Quantity (which other orders' reservations also move), keeps the long
+                // part bounded to THIS order. Consume the long part FIRST so ReservedQuantity
+                // reaches 0 before ApplyDelta pushes Quantity negative (a short can't hold a share
+                // reservation — Position.ApplyDelta guards this).
+                int longPart = Math.Min(t.Quantity, sellOrder!.CurrentSellReservedQty);
+                int shortPart = t.Quantity - longPart;
+
+                if (longPart > 0)
+                {
+                    var flipResBefore = sellerPos.ReservedQuantity;
+                    var flipQtyBefore = sellerPos.Quantity;
+                    sellerPos.ConsumeReservedStock(longPart);
+                    _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:Flip:ConsumeReservedStock",
+                        longPart, flipResBefore, sellerPos.ReservedQuantity,
+                        flipQtyBefore, sellerPos.Quantity);
+                    SnapshotOrderIfNew(sellOrder);
+                    var orderBefore = sellOrder.CurrentSellReservedQty;
+                    sellOrder.ConsumeSellReservation(longPart);
+                    _ledger.LogOrder(sellOrder.UserId, sellOrder.OrderId, "ApplyPass:Flip:ConsumeSellReservation",
+                        longPart, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
+                        orderBefore, sellOrder.CurrentSellReservedQty);
+                }
+
+                if (shortPart > 0)
+                {
+                    var collateral = ReservationMath.ShortCollateralForFill(shortPart, t.Price, ccy);
+                    var cResB = sellerFund.ReservedBalance;
+                    var cTotB = sellerFund.TotalBalance;
+                    sellerFund.ReserveFunds(collateral);
+                    sellerFund.UpdatedAt = TimeHelper.NowUtc();
+                    _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
+                        "ApplyPass:Flip:ShortOpen:ReserveCollateral", collateral,
+                        cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
+
+                    var sQtyBefore = sellerPos.Quantity;
+                    sellerPos.ApplyDelta(-shortPart);
+                    sellerPos.TakeShortCollateral(collateral, ccy);
+                    _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:Flip:ShortOpen",
+                        -shortPart, sellerPos.ReservedQuantity, sellerPos.ReservedQuantity,
+                        sQtyBefore, sellerPos.Quantity);
+                }
             }
             else
             {

@@ -35,6 +35,8 @@ internal sealed class SellerCapacityValidator
         // fills draw from, decremented per accepted fill so two TP fills in one batch can't over-draw.
         var bracketTpByOrder = new Dictionary<int, bool>(trades.Count);
         var bracketPoolBySeller = new Dictionary<(int, int), int>(trades.Count);
+        // §3.6 risk #7: per sell order, is this a MARKET sell by a long holder that flips to short?
+        var flipByOrder = new Dictionary<int, bool>(trades.Count);
         var rejected = new List<RejectedFill>();
         var accepted = new List<Transaction>(trades.Count);
 
@@ -129,11 +131,30 @@ internal sealed class SellerCapacityValidator
                 reservedRemainingByOrder[t.SellOrderId] = reservedThis;
             }
 
+            // §3.6 risk #7: a MARKET sell by a long holder (startQty > 0) flips to short once its
+            // shares run out — the uncovered portion opens a collateral-backed short, exactly like
+            // the flat-seller branch above. Limit sells can't flip (out of scope). The per-fill
+            // long/short split is done in TradeSettler; here we just accept it.
+            if (!flipByOrder.TryGetValue(t.SellOrderId, out var isFlip))
+            {
+                ordersById.TryGetValue(t.SellOrderId, out var fo);
+                isFlip = fo is not null && fo.IsMarketOrder && startQty > 0;
+                flipByOrder[t.SellOrderId] = isFlip;
+            }
+
             // Reject if both pools combined can't cover; caller cancels the offending maker
             var fromReserved = Math.Min(reservedThis, t.Quantity);
             var fromAvailable = t.Quantity - fromReserved;
             if (fromAvailable > available)
             {
+                if (isFlip)
+                {
+                    // Long close draws every share both pools hold; the remainder opens the short.
+                    reservedRemainingByOrder[t.SellOrderId] = 0;
+                    availableBySeller[sellerKey] = 0;
+                    accepted.Add(t);
+                    continue;
+                }
                 rejected.Add(new RejectedFill(
                     t,
                     t.SellOrderId,
