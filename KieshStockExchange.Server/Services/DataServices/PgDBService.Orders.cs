@@ -10,7 +10,7 @@ public sealed partial class PgDBService
 {
     private const string OrderCols = @"
         ""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
-        ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",
+        ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
         ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt""";
 
     private const string TransactionCols = @"
@@ -182,10 +182,10 @@ public sealed partial class PgDBService
         var row = OrderMapper.ToRow(order);
         row.OrderId = await c.ExecuteScalarAsync<int>(@"
             INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
-                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",
+                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
                                    ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
             VALUES (@UserId,@StockId,@Quantity,@Price,@SlippagePercent,@BuyBudget,@StopPrice,
-                    @TrailOffset,@TrailIsPercent,@TrailWatermark,
+                    @TrailOffset,@TrailIsPercent,@TrailWatermark,@ParentOrderId,
                     @Currency,@Side,@Entry,@Stop,@Status,@AmountFilled,@CreatedAt,@UpdatedAt)
             RETURNING ""OrderId""", row);
         order.OrderId = row.OrderId;
@@ -203,6 +203,7 @@ public sealed partial class PgDBService
               ""UserId"" = @UserId, ""StockId"" = @StockId, ""Quantity"" = @Quantity, ""Price"" = @Price,
               ""SlippagePercent"" = @SlippagePercent, ""BuyBudget"" = @BuyBudget, ""StopPrice"" = @StopPrice,
               ""TrailOffset"" = @TrailOffset, ""TrailIsPercent"" = @TrailIsPercent, ""TrailWatermark"" = @TrailWatermark,
+              ""ParentOrderId"" = @ParentOrderId,
               ""Currency"" = @Currency, ""Side"" = @Side, ""Entry"" = @Entry, ""Stop"" = @Stop,
               ""Status"" = @Status, ""AmountFilled"" = @AmountFilled,
               ""CreatedAt"" = @CreatedAt, ""UpdatedAt"" = @UpdatedAt
@@ -405,7 +406,7 @@ public sealed partial class PgDBService
 
         var sql = new StringBuilder(@"
             INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
-                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",
+                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
                                    ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
             VALUES ", capacity: 256 + orders.Count * 96);
         var p = new DynamicParameters();
@@ -422,6 +423,7 @@ public sealed partial class PgDBService
                .Append(",@TrailOffset_").Append(i)
                .Append(",@TrailIsPercent_").Append(i)
                .Append(",@TrailWatermark_").Append(i)
+               .Append(",@ParentOrderId_").Append(i)
                .Append(",@Currency_").Append(i)
                .Append(",@Side_").Append(i)
                .Append(",@Entry_").Append(i)
@@ -443,6 +445,7 @@ public sealed partial class PgDBService
             p.Add($"TrailOffset_{i}",     r.TrailOffset);
             p.Add($"TrailIsPercent_{i}",  r.TrailIsPercent);
             p.Add($"TrailWatermark_{i}",  r.TrailWatermark);
+            p.Add($"ParentOrderId_{i}",   r.ParentOrderId);
             p.Add($"Currency_{i}",        r.Currency);
             p.Add($"Side_{i}",            r.Side);
             p.Add($"Entry_{i}",           r.Entry);

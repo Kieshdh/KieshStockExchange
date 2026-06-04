@@ -34,6 +34,10 @@ public class Order : IValidatable
         // §3.6 P2: an armed stop — persisted, reservation held, but NOT on the book and
         // invisible to the matcher until the trigger watcher promotes it to Open.
         public const string Pending = "Pending";
+        // §3.6 P4: a dormant bracket child (TP or SL) — persisted with a ParentOrderId, but
+        // reserves nothing, isn't on the book, and isn't in the watcher until the parent fills
+        // and the BracketCoordinator arms it (an SL → Pending, a TP → Open).
+        public const string Attached = "Attached";
     }
 
     private int _orderId = 0;
@@ -153,6 +157,10 @@ public class Order : IValidatable
     public bool? TrailIsPercent { get; set; }
     public decimal? TrailWatermark { get; set; }
 
+    // §3.6 P4: a bracket child (TP or SL) points at its parent entry order. Null for a parent
+    // or any standalone order. Set once when the child is created alongside the parent.
+    public int? ParentOrderId { get; set; }
+
     // Backward-compatible read-only projection of the three dimensions to the legacy 10-value
     // string vocabulary, for logs/telemetry/notifications that still read a single type string.
     // The enums are authoritative; this is derived, never set.
@@ -180,7 +188,8 @@ public class Order : IValidatable
         set
         {
             if (value == Statuses.Open || value == Statuses.Filled ||
-                value == Statuses.Cancelled || value == Statuses.Pending)
+                value == Statuses.Cancelled || value == Statuses.Pending ||
+                value == Statuses.Attached)
                 _status = value;
             else throw new ArgumentException("Invalid Status.");
         }
@@ -223,12 +232,15 @@ public class Order : IValidatable
     private bool IsValidOrderType() => true;
     private bool IsValidStatus() =>
         Status == Statuses.Open || Status == Statuses.Filled ||
-        Status == Statuses.Cancelled || Status == Statuses.Pending;
+        Status == Statuses.Cancelled || Status == Statuses.Pending ||
+        Status == Statuses.Attached;
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
-    // An armed (Pending) stop has nothing filled yet; otherwise the normal rules apply.
+    // An armed (Pending) stop or a dormant (Attached) bracket child has nothing filled yet;
+    // otherwise the normal rules apply.
     private bool IsValidAmount() => (IsFilled && AmountFilled == Quantity) ||
         (IsOpen && RemainingQuantity > 0) || (IsArmed && AmountFilled == 0 && Quantity > 0) ||
+        (IsAttached && AmountFilled == 0 && Quantity > 0) ||
         (IsCancelled && AmountFilled >= 0 && AmountFilled < Quantity);
 
     // Price rules per dimension: a stop/trailing needs a positive StopPrice (a promoted stop may
@@ -323,6 +335,9 @@ public class Order : IValidatable
     public bool IsStopLimitOrder => Stop != StopKind.None && Entry == EntryType.Limit;
     public bool IsOpen => Status == Statuses.Open;
     public bool IsArmed => Status == Statuses.Pending;
+    // §3.6 P4: a dormant bracket child (armed onto the book/watcher only once the parent fills).
+    public bool IsAttached => Status == Statuses.Attached;
+    public bool IsBracketChild => ParentOrderId is not null;
     public bool IsFilled => Status == Statuses.Filled;
     public bool IsCancelled => Status == Statuses.Cancelled;
     // Terminal only — Pending (armed) is NOT closed, so retention/registry cleanup leave it be.
@@ -428,6 +443,7 @@ public class Order : IValidatable
             TrailOffset = this.TrailOffset,
             TrailIsPercent = this.TrailIsPercent,
             TrailWatermark = this.TrailWatermark,
+            ParentOrderId = this.ParentOrderId,
             Status = this.Status,
             AmountFilled = this.AmountFilled,
             CreatedAt = this.CreatedAt,

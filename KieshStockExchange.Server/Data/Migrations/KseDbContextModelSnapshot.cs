@@ -313,6 +313,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int?>("ParentOrderId")
+                        .HasColumnType("integer");
+
                     b.Property<decimal>("Price")
                         .HasColumnType("numeric(20,10)");
 
@@ -356,6 +359,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("OrderId");
+
+                    b.HasIndex("ParentOrderId")
+                        .HasDatabaseName("IX_Orders_ParentOrderId");
 
                     b.HasIndex("StockId", "Status")
                         .HasDatabaseName("IX_Orders_Stock_Status");

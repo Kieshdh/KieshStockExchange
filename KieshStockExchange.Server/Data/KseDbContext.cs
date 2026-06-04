@@ -93,6 +93,10 @@ public sealed class KseDbContext : DbContext
              .HasDatabaseName("IX_Orders_User_Status");
             b.HasIndex(x => new { x.StockId, x.Status })
              .HasDatabaseName("IX_Orders_Stock_Status");
+            // §3.6 P4: bracket children look up by parent; index it for the coordinator's
+            // child queries + cold-load rehydration.
+            b.HasIndex(x => x.ParentOrderId)
+             .HasDatabaseName("IX_Orders_ParentOrderId");
         });
 
         modelBuilder.Entity<TransactionRow>(b =>
