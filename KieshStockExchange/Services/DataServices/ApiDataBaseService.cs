@@ -271,6 +271,12 @@ public sealed class ApiDataBaseService : IDataBaseService
     public Task<List<Order>> GetAllArmedStopsAsync(CancellationToken ct = default)
         => throw new NotSupportedException("GetAllArmedStopsAsync is server-only (stop watcher runs server-side).");
 
+    public Task<List<Order>> GetBracketChildrenAsync(int parentOrderId, CancellationToken ct = default)
+        => throw new NotSupportedException("GetBracketChildrenAsync is server-only (bracket coordinator runs server-side).");
+
+    public Task<List<Order>> GetActiveBracketChildrenAsync(CancellationToken ct = default)
+        => throw new NotSupportedException("GetActiveBracketChildrenAsync is server-only (bracket coordinator runs server-side).");
+
     public Task CreateOrder(Order order, CancellationToken ct = default)
         => PostWriteBackAsync("api/orders", order, (d, r) => { if (d.OrderId == 0) d.OrderId = r.OrderId; }, ct);
 

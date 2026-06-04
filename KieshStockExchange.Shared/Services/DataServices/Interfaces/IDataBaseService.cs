@@ -70,6 +70,11 @@ public interface IDataBaseService
     Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default);
     // §3.6 P2: armed (Pending) stop orders across all users, for the trigger watcher cold-load.
     Task<List<Order>> GetAllArmedStopsAsync(CancellationToken ct = default);
+    // §3.6 P4: a bracket's child legs (TP + SL) by parent order id.
+    Task<List<Order>> GetBracketChildrenAsync(int parentOrderId, CancellationToken ct = default);
+    // §3.6 P4: every non-terminal bracket child across all users, for the coordinator's cold-load
+    // index rebuild on server start (Attached dormant + already-armed/open legs).
+    Task<List<Order>> GetActiveBracketChildrenAsync(CancellationToken ct = default);
     Task CreateOrder(Order order, CancellationToken ct = default);
     Task UpdateOrder(Order order, CancellationToken ct = default);
     Task DeleteOrder(Order order, CancellationToken ct = default);

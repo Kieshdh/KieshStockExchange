@@ -175,6 +175,29 @@ public sealed partial class PgDBService
         return rows.Select(OrderMapper.ToDomain).ToList();
     }
 
+    // §3.6 P4: a bracket's child legs by parent id (any status — the coordinator filters).
+    public async Task<List<Order>> GetBracketChildrenAsync(int parentOrderId, CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        var rows = await c.QueryAsync<OrderRow>(
+            $@"SELECT {OrderCols} FROM ""Orders"" WHERE ""ParentOrderId"" = @parentOrderId",
+            new { parentOrderId });
+        return rows.Select(OrderMapper.ToDomain).ToList();
+    }
+
+    // §3.6 P4: every non-terminal bracket child across all users, for the BracketCoordinator's
+    // cold-load index rebuild (dormant Attached + already-armed/open legs).
+    public async Task<List<Order>> GetActiveBracketChildrenAsync(CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        var rows = await c.QueryAsync<OrderRow>($@"
+            SELECT {OrderCols} FROM ""Orders""
+            WHERE ""ParentOrderId"" IS NOT NULL
+              AND ""Status"" IN (@attached, @pending, @open)",
+            new { attached = Order.Statuses.Attached, pending = Order.Statuses.Pending, open = Order.Statuses.Open });
+        return rows.Select(OrderMapper.ToDomain).ToList();
+    }
+
     public async Task CreateOrder(Order order, CancellationToken ct = default)
     {
         if (!order.IsValid()) throw new ArgumentException("Order entity is not valid", nameof(order));
