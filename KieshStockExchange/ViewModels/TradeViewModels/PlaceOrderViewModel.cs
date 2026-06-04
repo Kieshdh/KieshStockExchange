@@ -23,6 +23,15 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     // §3.6 P2: Stop modifier. Stop ON + Market = StopMarket; Stop ON + Limit = StopLimit.
     [ObservableProperty] private bool _isStopOrder = false;
     [ObservableProperty] private string _stopPriceString = String.Empty;
+    // §3.6 P4: bracket (long) — a buy entry + a protective stop-loss + up to 3 take-profit legs.
+    [ObservableProperty] private bool _isBracketOrder = false;
+    [ObservableProperty] private string _bracketStopPriceString = String.Empty;
+    [ObservableProperty] private string _tp1PriceString = String.Empty;
+    [ObservableProperty] private string _tp1QtyString = String.Empty;
+    [ObservableProperty] private string _tp2PriceString = String.Empty;
+    [ObservableProperty] private string _tp2QtyString = String.Empty;
+    [ObservableProperty] private string _tp3PriceString = String.Empty;
+    [ObservableProperty] private string _tp3QtyString = String.Empty;
     [ObservableProperty] private bool _noSlippageGuard = false; // If true, market orders have no slippage protection
     [ObservableProperty] private decimal _slippagePrc = 0.005m; // 0.5% default
     private const decimal DefaultSlippagePrc = 0.005m;
@@ -49,6 +58,9 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     // Slippage guard applies to any plain market order, and to a SELL stop-market (a capped
     // stop-loss that won't dump below the guard). Hidden for stop-limit and for a buy-stop.
     public bool ShowSlippageGuard => IsMarketSelected && (!IsStopOrder || IsSellSelected);
+    // §3.6 P4: brackets are long-only (buy entry); offered for a plain buy (not a stop).
+    public bool ShowBracket => IsBuySelected && !IsStopOrder;
+    private decimal BracketStopPrice => ParsingHelper.TryToDecimal(BracketStopPriceString, out var v) ? v : 0m;
     private decimal PriceForOrder => IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
     private decimal LimitPrice => ParsingHelper.TryToDecimal(LimitPriceString, out var val) ? val : 0m;
     private decimal StopPrice => ParsingHelper.TryToDecimal(StopPriceString, out var val) ? val : 0m;
@@ -66,6 +78,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         OnPropertyChanged(nameof(IsBuySelected));
         OnPropertyChanged(nameof(IsSellSelected));
         OnPropertyChanged(nameof(ShowSlippageGuard));
+        OnPropertyChanged(nameof(ShowBracket));
+        if (!ShowBracket) IsBracketOrder = false; // brackets are buy-only
     }
     partial void OnSelectedTypeIndexChanged(int value)
     {
@@ -74,13 +88,20 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         OnPropertyChanged(nameof(IsLimitSelected));
         OnPropertyChanged(nameof(ShowSlippageGuard));
     }
+    partial void OnIsBracketOrderChanged(bool value)
+    {
+        if (value) IsStopOrder = false; // a bracket and a standalone stop are mutually exclusive
+        RecomputeUi();
+    }
     partial void OnQuantityStringChanged(string value) { RecomputeUi(); }
     partial void OnLimitPriceStringChanged(string value) { RecomputeUi(); }
     partial void OnStopPriceStringChanged(string value) { RecomputeUi(); }
     partial void OnIsStopOrderChanged(bool value)
     {
+        if (value) IsBracketOrder = false; // mutually exclusive with a bracket
         RecomputeUi();
         OnPropertyChanged(nameof(ShowSlippageGuard));
+        OnPropertyChanged(nameof(ShowBracket));
     }
     partial void OnNoSlippageGuardChanged(bool value)
     {
@@ -235,7 +256,32 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             var ct = CancellationToken.None;
 
             OrderResult result;
-            if (IsStopOrder)
+            if (IsBracketOrder && ShowBracket)
+            {
+                // §3.6 P4 (long) bracket: buy entry + protective SL + up to 3 take-profit legs.
+                var entry = IsMarketSelected ? EntryType.Market : EntryType.Limit;
+                decimal? budget = IsMarketSelected
+                    ? (_portfolio.GetFundByCurrency(cur)?.AvailableBalance ?? 0m) : (decimal?)null;
+                decimal? limit = IsLimitSelected ? LimitPrice : (decimal?)null;
+
+                var tps = new List<(decimal Price, int Quantity)>(3);
+                void AddTp(string ps, string qs)
+                {
+                    if (ParsingHelper.TryToDecimal(ps, out var p) && p > 0m
+                        && ParsingHelper.TryToInt(qs, out var q) && q > 0)
+                        tps.Add((p, q));
+                }
+                AddTp(Tp1PriceString, Tp1QtyString);
+                AddTp(Tp2PriceString, Tp2QtyString);
+                AddTp(Tp3PriceString, Tp3QtyString);
+
+                _logger.LogInformation("Placing BUY BRACKET for {Qty} of {Symbol}: SL {Stop}, {TpCount} TP(s).",
+                    Quantity, Selected.Symbol, BracketStopPrice, tps.Count);
+
+                result = await _orders.PlaceBracketAsync(userId, id, Quantity, entry, cur, limit, budget,
+                    BracketStopPrice, stopLimitPrice: null, stopSlippagePct: null, tps, ct);
+            }
+            else if (IsStopOrder)
             {
                 // Stop ON + Market = StopMarket (promotes to a true market order on trigger);
                 // Stop ON + Limit = StopLimit. Sell-stop reserves the held shares; buy-stop
@@ -491,6 +537,11 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         if (IsStopOrder && StopPrice <= 0m)
         {
             _logger.LogWarning("Stop price must be positive.");
+            return false;
+        }
+        if (IsBracketOrder && ShowBracket && BracketStopPrice <= 0m)
+        {
+            _logger.LogWarning("Bracket stop-loss price must be positive.");
             return false;
         }
         return true;

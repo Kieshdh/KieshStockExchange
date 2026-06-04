@@ -7,6 +7,9 @@
              x:DataType="vm:PlaceOrderViewModel">
 
     <Border Style="{StaticResource TradingPanelStyle}">
+        <!-- §3.6 P4: the ticket can grow tall (stop + bracket SL + up to 3 TP rows), so the body
+             scrolls within the panel. The TradePage parent bounds the panel height. -->
+        <ScrollView>
         <VerticalStackLayout Spacing="12">
 
             <!-- Card head: title + Buy/Sell pill -->
@@ -65,6 +68,55 @@
                        Style="{StaticResource FormEntryStyle}"
                        Keyboard="Numeric"
                        HorizontalTextAlignment="End" />
+            </VerticalStackLayout>
+
+            <!-- §3.6 P4 bracket toggle (long entry only: Buy, not a standalone stop) -->
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4"
+                  IsVisible="{Binding ShowBracket}">
+                <Label Grid.Column="0"
+                       Text="Bracket (stop-loss + take-profits)"
+                       Style="{StaticResource FormLabelStyle}"
+                       Margin="0"
+                       VerticalOptions="Center" />
+                <CheckBox Grid.Column="1"
+                          IsChecked="{Binding IsBracketOrder}"
+                          VerticalOptions="Center" />
+            </Grid>
+
+            <!-- Bracket legs (visible when bracket is on): a protective stop-loss + up to 3 TPs. -->
+            <VerticalStackLayout Spacing="6"
+                                 IsVisible="{Binding IsBracketOrder}">
+                <VerticalStackLayout Spacing="0">
+                    <Label Text="Stop-loss price" Style="{StaticResource FormLabelStyle}" />
+                    <Entry Text="{Binding BracketStopPriceString, Mode=TwoWay}"
+                           Placeholder="below entry"
+                           Style="{StaticResource FormEntryStyle}"
+                           Keyboard="Numeric" HorizontalTextAlignment="End" />
+                </VerticalStackLayout>
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <Entry Grid.Column="0" Text="{Binding Tp1PriceString, Mode=TwoWay}"
+                           Placeholder="TP1 price" Style="{StaticResource FormEntryStyle}"
+                           Keyboard="Numeric" HorizontalTextAlignment="End" />
+                    <Entry Grid.Column="1" Text="{Binding Tp1QtyString, Mode=TwoWay}"
+                           Placeholder="TP1 qty" Style="{StaticResource FormEntryStyle}"
+                           Keyboard="Numeric" HorizontalTextAlignment="End" />
+                </Grid>
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <Entry Grid.Column="0" Text="{Binding Tp2PriceString, Mode=TwoWay}"
+                           Placeholder="TP2 price" Style="{StaticResource FormEntryStyle}"
+                           Keyboard="Numeric" HorizontalTextAlignment="End" />
+                    <Entry Grid.Column="1" Text="{Binding Tp2QtyString, Mode=TwoWay}"
+                           Placeholder="TP2 qty" Style="{StaticResource FormEntryStyle}"
+                           Keyboard="Numeric" HorizontalTextAlignment="End" />
+                </Grid>
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <Entry Grid.Column="0" Text="{Binding Tp3PriceString, Mode=TwoWay}"
+                           Placeholder="TP3 price" Style="{StaticResource FormEntryStyle}"
+                           Keyboard="Numeric" HorizontalTextAlignment="End" />
+                    <Entry Grid.Column="1" Text="{Binding Tp3QtyString, Mode=TwoWay}"
+                           Placeholder="TP3 qty" Style="{StaticResource FormEntryStyle}"
+                           Keyboard="Numeric" HorizontalTextAlignment="End" />
+                </Grid>
             </VerticalStackLayout>
 
             <!-- Available assets row -->
@@ -169,5 +221,6 @@
             </Button>
 
         </VerticalStackLayout>
+        </ScrollView>
     </Border>
 </ContentView>
