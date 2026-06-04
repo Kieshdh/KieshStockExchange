@@ -396,14 +396,21 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         }
         else
         {
-            // §3.6 P1: a market sell beyond holdings opens a cash-collateralized short.
-            // A limit sell can't (resting short limits are a later patch) — guide the user.
+            // §3.6 P1: only a FULLY-FLAT seller can open a short, and only via a market
+            // order. A partial holder selling beyond their shares is a mixed close+short,
+            // which the MVP rejects — say so instead of promising a short that won't happen.
+            var held  = UserPosition.Quantity;
             var avail = UserPosition.AvailableQuantity;
-            HintText = (Selected.HasSelectedStock && Quantity > 0 && Quantity > avail)
-                ? (IsMarketSelected
-                    ? "Selling more than you hold opens a cash-collateralized short."
-                    : "Limit sells can't exceed your holdings yet — use a market order to short.")
-                : string.Empty;
+            if (!Selected.HasSelectedStock || Quantity <= 0)
+                HintText = string.Empty;
+            else if (held == 0)
+                HintText = IsMarketSelected
+                    ? "Opens a cash-collateralized short position."
+                    : "Limit sells can't short yet — use a market order.";
+            else if (Quantity > avail)
+                HintText = $"You hold {held} (available {avail}). To short, sell your full holding first.";
+            else
+                HintText = string.Empty;
         }
     }
 
