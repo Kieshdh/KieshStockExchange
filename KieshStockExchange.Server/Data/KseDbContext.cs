@@ -82,6 +82,7 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.Price).HasColumnType(Money);
             b.Property(x => x.SlippagePercent).HasColumnType(Money);
             b.Property(x => x.BuyBudget).HasColumnType(Money);
+            b.Property(x => x.StopPrice).HasColumnType(Money);
             b.Property(x => x.CreatedAt).HasColumnType(TimestampTz);
             b.Property(x => x.UpdatedAt).HasColumnType(TimestampTz);
             // Two overlapping composites both terminating on Status — both must survive.

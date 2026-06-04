@@ -329,6 +329,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<int>("StockId")
                         .HasColumnType("integer");
 
+                    b.Property<decimal?>("StopPrice")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 

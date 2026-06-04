@@ -9,7 +9,7 @@ namespace KieshStockExchange.Services.DataServices;
 public sealed partial class PgDBService
 {
     private const string OrderCols = @"
-        ""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",
+        ""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
         ""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt""";
 
     private const string TransactionCols = @"
@@ -159,14 +159,39 @@ public sealed partial class PgDBService
     {
         if (userIds is null || userIds.Count == 0) return new List<Order>();
         await using var c = await OpenAsync(ct);
+        // Open limit orders hold a reservation on the book; armed (Pending) stops hold a
+        // reservation off-book (shares for a sell-stop, cash for a buy-stop). Both must come
+        // back so AccountsCache re-seeds their reservations on cold-load. (The book itself
+        // still loads only Open limit orders via GetOpenLimitOrders — Pending never enters it.)
         var rows = await c.QueryAsync<OrderRow>($@"
             SELECT {OrderCols} FROM ""Orders""
-            WHERE ""UserId"" = ANY(@ids) AND ""Status"" = @open AND ""OrderType"" = ANY(@limitTypes)",
+            WHERE ""UserId"" = ANY(@ids)
+              AND ( (""Status"" = @open AND ""OrderType"" = ANY(@limitTypes))
+                 OR (""Status"" = @pending AND ""OrderType"" = ANY(@stopTypes)) )",
             new
             {
                 ids = userIds.Distinct().ToArray(),
                 open = Order.Statuses.Open,
+                pending = Order.Statuses.Pending,
                 limitTypes = new[] { Order.Types.LimitBuy, Order.Types.LimitSell },
+                stopTypes = new[] { Order.Types.StopMarketBuy, Order.Types.StopMarketSell,
+                                    Order.Types.StopLimitBuy, Order.Types.StopLimitSell },
+            });
+        return rows.Select(OrderMapper.ToDomain).ToList();
+    }
+
+    // §3.6 P2: all armed stops across every user, for the StopTriggerWatcher's cold-load
+    // index rebuild on server start.
+    public async Task<List<Order>> GetAllArmedStopsAsync(CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        var rows = await c.QueryAsync<OrderRow>($@"
+            SELECT {OrderCols} FROM ""Orders"" WHERE ""Status"" = @pending AND ""OrderType"" = ANY(@stopTypes)",
+            new
+            {
+                pending = Order.Statuses.Pending,
+                stopTypes = new[] { Order.Types.StopMarketBuy, Order.Types.StopMarketSell,
+                                    Order.Types.StopLimitBuy, Order.Types.StopLimitSell },
             });
         return rows.Select(OrderMapper.ToDomain).ToList();
     }
@@ -177,9 +202,9 @@ public sealed partial class PgDBService
         await using var c = await OpenAsync(ct);
         var row = OrderMapper.ToRow(order);
         row.OrderId = await c.ExecuteScalarAsync<int>(@"
-            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",
+            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
                                    ""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
-            VALUES (@UserId,@StockId,@Quantity,@Price,@SlippagePercent,@BuyBudget,
+            VALUES (@UserId,@StockId,@Quantity,@Price,@SlippagePercent,@BuyBudget,@StopPrice,
                     @Currency,@OrderType,@Status,@AmountFilled,@CreatedAt,@UpdatedAt)
             RETURNING ""OrderId""", row);
         order.OrderId = row.OrderId;
@@ -195,8 +220,8 @@ public sealed partial class PgDBService
         await c.ExecuteAsync(@"
             UPDATE ""Orders"" SET
               ""UserId"" = @UserId, ""StockId"" = @StockId, ""Quantity"" = @Quantity, ""Price"" = @Price,
-              ""SlippagePercent"" = @SlippagePercent, ""BuyBudget"" = @BuyBudget, ""Currency"" = @Currency,
-              ""OrderType"" = @OrderType, ""Status"" = @Status, ""AmountFilled"" = @AmountFilled,
+              ""SlippagePercent"" = @SlippagePercent, ""BuyBudget"" = @BuyBudget, ""StopPrice"" = @StopPrice,
+              ""Currency"" = @Currency, ""OrderType"" = @OrderType, ""Status"" = @Status, ""AmountFilled"" = @AmountFilled,
               ""CreatedAt"" = @CreatedAt, ""UpdatedAt"" = @UpdatedAt
             WHERE ""OrderId"" = @OrderId", OrderMapper.ToRow(order));
     }
@@ -396,7 +421,7 @@ public sealed partial class PgDBService
                 throw new ArgumentException("Order entity is not valid", nameof(orders));
 
         var sql = new StringBuilder(@"
-            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",
+            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
                                    ""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
             VALUES ", capacity: 256 + orders.Count * 96);
         var p = new DynamicParameters();
@@ -409,6 +434,7 @@ public sealed partial class PgDBService
                .Append(",@Price_").Append(i)
                .Append(",@SlippagePercent_").Append(i)
                .Append(",@BuyBudget_").Append(i)
+               .Append(",@StopPrice_").Append(i)
                .Append(",@Currency_").Append(i)
                .Append(",@OrderType_").Append(i)
                .Append(",@Status_").Append(i)
@@ -424,6 +450,7 @@ public sealed partial class PgDBService
             p.Add($"Price_{i}",           r.Price);
             p.Add($"SlippagePercent_{i}", r.SlippagePercent);
             p.Add($"BuyBudget_{i}",       r.BuyBudget);
+            p.Add($"StopPrice_{i}",       r.StopPrice);
             p.Add($"Currency_{i}",        r.Currency);
             p.Add($"OrderType_{i}",       r.OrderType);
             p.Add($"Status_{i}",          r.Status);
@@ -449,8 +476,9 @@ public sealed partial class PgDBService
             UPDATE ""Orders"" SET
               ""UserId"" = data.""UserId"", ""StockId"" = data.""StockId"", ""Quantity"" = data.""Quantity"",
               ""Price"" = data.""Price"", ""SlippagePercent"" = data.""SlippagePercent"", ""BuyBudget"" = data.""BuyBudget"",
-              ""Currency"" = data.""Currency"", ""OrderType"" = data.""OrderType"", ""Status"" = data.""Status"",
-              ""AmountFilled"" = data.""AmountFilled"", ""CreatedAt"" = data.""CreatedAt"", ""UpdatedAt"" = data.""UpdatedAt""
+              ""StopPrice"" = data.""StopPrice"", ""Currency"" = data.""Currency"", ""OrderType"" = data.""OrderType"",
+              ""Status"" = data.""Status"", ""AmountFilled"" = data.""AmountFilled"", ""CreatedAt"" = data.""CreatedAt"",
+              ""UpdatedAt"" = data.""UpdatedAt""
             FROM (VALUES ", capacity: 512 + orders.Count * 128);
         var p = new DynamicParameters();
         for (int i = 0; i < orders.Count; i++)
@@ -458,7 +486,7 @@ public sealed partial class PgDBService
             if (i > 0) sql.Append(',');
             // First row carries explicit casts; Postgres infers subsequent rows.
             if (i == 0)
-                sql.Append("(@OrderId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@Price_0::numeric,@SlippagePercent_0::numeric,@BuyBudget_0::numeric,@Currency_0::text,@OrderType_0::text,@Status_0::text,@AmountFilled_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
+                sql.Append("(@OrderId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@Price_0::numeric,@SlippagePercent_0::numeric,@BuyBudget_0::numeric,@StopPrice_0::numeric,@Currency_0::text,@OrderType_0::text,@Status_0::text,@AmountFilled_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
             else
                 sql.Append("(@OrderId_").Append(i)
                    .Append(",@UserId_").Append(i)
@@ -467,6 +495,7 @@ public sealed partial class PgDBService
                    .Append(",@Price_").Append(i)
                    .Append(",@SlippagePercent_").Append(i)
                    .Append(",@BuyBudget_").Append(i)
+                   .Append(",@StopPrice_").Append(i)
                    .Append(",@Currency_").Append(i)
                    .Append(",@OrderType_").Append(i)
                    .Append(",@Status_").Append(i)
@@ -483,6 +512,7 @@ public sealed partial class PgDBService
             p.Add($"Price_{i}",           r.Price);
             p.Add($"SlippagePercent_{i}", r.SlippagePercent);
             p.Add($"BuyBudget_{i}",       r.BuyBudget);
+            p.Add($"StopPrice_{i}",       r.StopPrice);
             p.Add($"Currency_{i}",        r.Currency);
             p.Add($"OrderType_{i}",       r.OrderType);
             p.Add($"Status_{i}",          r.Status);
@@ -490,7 +520,7 @@ public sealed partial class PgDBService
             p.Add($"CreatedAt_{i}",       r.CreatedAt);
             p.Add($"UpdatedAt_{i}",       r.UpdatedAt);
         }
-        sql.Append(@") AS data(""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"") WHERE ""Orders"".""OrderId"" = data.""OrderId""");
+        sql.Append(@") AS data(""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"") WHERE ""Orders"".""OrderId"" = data.""OrderId""");
 
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(sql.ToString(), p);

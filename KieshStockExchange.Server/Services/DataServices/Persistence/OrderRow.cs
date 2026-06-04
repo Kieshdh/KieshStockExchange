@@ -24,6 +24,9 @@ public class OrderRow
 
     [Column("BuyBudget")] public decimal? BuyBudget { get; set; }
 
+    // §3.6 P2: trigger level for stop orders (null for non-stops).
+    [Column("StopPrice")] public decimal? StopPrice { get; set; }
+
     [Column("Currency")] public string Currency { get; set; } = nameof(CurrencyType.USD);
 
     [Column("OrderType")] public string OrderType { get; set; } = string.Empty;
@@ -50,6 +53,7 @@ public static class OrderMapper
         Price = r.Price,
         SlippagePercent = r.SlippagePercent,
         BuyBudget = r.BuyBudget,
+        StopPrice = r.StopPrice,
         Currency = r.Currency,
         OrderType = r.OrderType,
         Status = r.Status,
@@ -67,6 +71,7 @@ public static class OrderMapper
         Price = o.Price,
         SlippagePercent = o.SlippagePercent,
         BuyBudget = o.BuyBudget,
+        StopPrice = o.StopPrice,
         Currency = o.Currency,
         OrderType = o.OrderType,
         Status = o.Status,

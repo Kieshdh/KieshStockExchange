@@ -267,6 +267,10 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default)
         => await PostListAsync<List<int>, Order>("api/orders/open-for-users", userIds, ct);
 
+    // Server-only: the stop trigger watcher lives on the server; the client never enumerates armed stops.
+    public Task<List<Order>> GetAllArmedStopsAsync(CancellationToken ct = default)
+        => throw new NotSupportedException("GetAllArmedStopsAsync is server-only (stop watcher runs server-side).");
+
     public Task CreateOrder(Order order, CancellationToken ct = default)
         => PostWriteBackAsync("api/orders", order, (d, r) => { if (d.OrderId == 0) d.OrderId = r.OrderId; }, ct);
 

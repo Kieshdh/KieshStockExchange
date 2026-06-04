@@ -68,6 +68,8 @@ public interface IDataBaseService
     Task<List<Order>> GetOrdersByStockId(int stockId, CancellationToken ct = default);
     Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken ct = default);
     Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default);
+    // §3.6 P2: armed (Pending) stop orders across all users, for the trigger watcher cold-load.
+    Task<List<Order>> GetAllArmedStopsAsync(CancellationToken ct = default);
     Task CreateOrder(Order order, CancellationToken ct = default);
     Task UpdateOrder(Order order, CancellationToken ct = default);
     Task DeleteOrder(Order order, CancellationToken ct = default);
