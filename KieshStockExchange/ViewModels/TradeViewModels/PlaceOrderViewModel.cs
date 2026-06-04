@@ -46,9 +46,9 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     public bool IsLimitSelected => SelectedTypeIndex == 1;
     public bool IsBuySelected => SelectedSideIndex == 0;
     public bool IsSellSelected => SelectedSideIndex == 1;
-    // Slippage guard only applies to a plain market order — a StopMarket promotes to a
-    // true market order on trigger, so hide the guard when the Stop modifier is on.
-    public bool ShowSlippageGuard => IsMarketSelected && !IsStopOrder;
+    // Slippage guard applies to any plain market order, and to a SELL stop-market (a capped
+    // stop-loss that won't dump below the guard). Hidden for stop-limit and for a buy-stop.
+    public bool ShowSlippageGuard => IsMarketSelected && (!IsStopOrder || IsSellSelected);
     private decimal PriceForOrder => IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
     private decimal LimitPrice => ParsingHelper.TryToDecimal(LimitPriceString, out var val) ? val : 0m;
     private decimal StopPrice => ParsingHelper.TryToDecimal(StopPriceString, out var val) ? val : 0m;
@@ -60,11 +60,12 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     #endregion
 
     #region PropertyChanged events
-    partial void OnSelectedSideIndexChanged(int value) 
-    { 
-        RecomputeUi(); 
+    partial void OnSelectedSideIndexChanged(int value)
+    {
+        RecomputeUi();
         OnPropertyChanged(nameof(IsBuySelected));
         OnPropertyChanged(nameof(IsSellSelected));
+        OnPropertyChanged(nameof(ShowSlippageGuard));
     }
     partial void OnSelectedTypeIndexChanged(int value)
     {
@@ -251,7 +252,10 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
                     }
                     else
                     {
-                        result = await _orders.PlaceStopMarketSellOrderAsync(userId, id, Quantity, StopPrice, cur, ct);
+                        // Capped sell-stop when the slippage guard is on: pass the cap (percentage
+                        // points, matching the engine) so the stop-loss fires as a capped market sell.
+                        decimal? cap = NoSlippageGuard ? (decimal?)null : SlippagePrc * 100m;
+                        result = await _orders.PlaceStopMarketSellOrderAsync(userId, id, Quantity, StopPrice, cur, cap, ct);
                     }
                 }
                 else

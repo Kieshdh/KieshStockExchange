@@ -103,29 +103,30 @@ public sealed class OrderEntryService : IOrderEntryService
     public Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
         => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice: null, buyBudget: buyBudget,
-            currency, buyOrder: true, limitStop: false, ct);
+            slippagePct: null, currency, buyOrder: true, limitStop: false, ct);
 
     public Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
-        decimal stopPrice, CurrencyType currency, CancellationToken ct = default)
+        decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default)
         => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice: null, buyBudget: null,
-            currency, buyOrder: false, limitStop: false, ct);
+            slippagePct: slippagePct, currency, buyOrder: false, limitStop: false, ct);
 
     public Task<OrderResult> PlaceStopLimitBuyOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
         => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice, buyBudget: null,
-            currency, buyOrder: true, limitStop: true, ct);
+            slippagePct: null, currency, buyOrder: true, limitStop: true, ct);
 
     public Task<OrderResult> PlaceStopLimitSellOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
         => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice, buyBudget: null,
-            currency, buyOrder: false, limitStop: true, ct);
+            slippagePct: null, currency, buyOrder: false, limitStop: true, ct);
 
     // Build a stop order, enforce direction sanity against the live price (the engine validator
     // stays structural), arm it via the engine (reserve + persist Pending), and register it with
-    // the trigger watcher on success.
+    // the trigger watcher on success. A sell-stop may carry a slippage cap (fires as a capped
+    // market sell); the cap anchor is re-set to the trigger price at promotion time.
     private async Task<OrderResult> ArmStopOrderAsync(int userId, int stockId, int quantity,
-        decimal stopPrice, decimal? limitPrice, decimal? buyBudget, CurrencyType currency,
-        bool buyOrder, bool limitStop, CancellationToken ct)
+        decimal stopPrice, decimal? limitPrice, decimal? buyBudget, decimal? slippagePct,
+        CurrencyType currency, bool buyOrder, bool limitStop, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (stopPrice <= 0m) return OrderResultFactory.InvalidParams("Stop price must be positive.");
@@ -145,14 +146,22 @@ public sealed class OrderEntryService : IOrderEntryService
                     $"Sell-stop must be at or below the market price ({CurrencyHelper.Format(market, currency)}).");
         }
 
+        // A capped market sell-stop carries a slippage cap + an anchor Price (the arm-time market,
+        // re-anchored to the trigger price at promotion). Limit stops carry the limit price; an
+        // uncapped market stop has Price 0 (and a budget for an uncapped buy).
+        bool capped = !limitStop && slippagePct.HasValue && market > 0m;
+        decimal price = limitStop ? CurrencyHelper.RoundMoney(limitPrice ?? 0m, currency)
+                       : capped   ? CurrencyHelper.RoundMoney(market, currency)
+                       : 0m;
         var order = new Order
         {
             UserId = userId,
             StockId = stockId,
             Quantity = quantity,
-            Price = limitStop ? CurrencyHelper.RoundMoney(limitPrice ?? 0m, currency) : 0m,
+            Price = price,
+            SlippagePercent = capped ? slippagePct : null,
             StopPrice = CurrencyHelper.RoundMoney(stopPrice, currency),
-            BuyBudget = (!limitStop && buyOrder) ? CurrencyHelper.RoundMoney(buyBudget ?? 0m, currency) : null,
+            BuyBudget = (!limitStop && buyOrder && !capped) ? CurrencyHelper.RoundMoney(buyBudget ?? 0m, currency) : null,
             CurrencyType = currency,
             Side = buyOrder ? OrderSide.Buy : OrderSide.Sell,
             Entry = limitStop ? EntryType.Limit : EntryType.Market,

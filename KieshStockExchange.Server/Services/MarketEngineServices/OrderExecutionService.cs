@@ -266,7 +266,20 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (!order.IsArmed || !order.IsStopOrder)
             return OrderResultFactory.InvalidParams("Order is not an armed stop.");
 
-        order.PromoteStop();                                   // Pending->Open, StopX->active type
+        order.PromoteStop();                                   // Pending->Open, clears the Stop dimension
+
+        // §3.6 slippage-capped stop: once promoted it's a slippage market order whose cap is
+        // relative to its anchor Price. Re-anchor that to the live trigger price so the guard
+        // brackets the trigger, not the (stale) arm-time price. Share-reserved sell side only —
+        // the reservation is in shares, so changing the anchor doesn't desync it.
+        if (order.IsSlippageOrder && order.IsSellOrder)
+        {
+            var trigger = _marketData.Quotes.TryGetValue((order.StockId, order.CurrencyType), out var q) && q.LastPrice > 0m
+                ? q.LastPrice
+                : await _marketData.GetLastPriceAsync(order.StockId, order.CurrencyType, ct).ConfigureAwait(false);
+            if (trigger > 0m) order.Price = CurrencyHelper.RoundMoney(trigger, order.CurrencyType);
+        }
+
         await _db.UpdateOrder(order, ct).ConfigureAwait(false); // persist the flip; reservation already held
         return await MatchAndSettleAsync(order, ct).ConfigureAwait(false);
     }

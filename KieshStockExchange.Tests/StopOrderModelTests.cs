@@ -118,6 +118,26 @@ public class StopOrderModelTests
     }
 
     [Fact]
+    public void Capped_sell_stop_is_valid_and_promotes_to_slippage_market()
+    {
+        // §3.6: a sell-stop with a slippage cap fires as a capped market sell.
+        var o = new Order
+        {
+            UserId = 1, StockId = 1, Quantity = 10,
+            Side = OrderSide.Sell, Entry = EntryType.Market, Stop = StopKind.Stop,
+            Price = 100m, SlippagePercent = 0.5m, StopPrice = 90m, Status = Order.Statuses.Pending,
+        };
+        Assert.True(o.IsValid());
+        Assert.True(o.IsStopOrder);
+        Assert.True(o.IsStopMarketOrder);
+
+        o.PromoteStop();
+        Assert.False(o.IsStopOrder);
+        Assert.True(o.IsSlippageOrder); // capped market sell after the trigger
+        Assert.True(o.IsValid());
+    }
+
+    [Fact]
     public void Clone_preserves_stop_price()
     {
         var o = ArmedSellStop();

@@ -55,8 +55,8 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Market, StopKind.Stop, currency, buyBudget: buyBudget, stopPrice: stopPrice), ct);
 
     public Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
-        decimal stopPrice, CurrencyType currency, CancellationToken ct = default)
-        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.Stop, currency, stopPrice: stopPrice), ct);
+        decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.Stop, currency, slippagePct: slippagePct, stopPrice: stopPrice), ct);
 
     public Task<OrderResult> PlaceStopLimitBuyOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)

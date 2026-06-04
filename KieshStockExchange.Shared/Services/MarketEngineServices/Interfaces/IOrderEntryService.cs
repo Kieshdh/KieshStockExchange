@@ -30,8 +30,10 @@ public interface IOrderEntryService
     Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal buyBudget, CurrencyType currency, CancellationToken ct = default);
 
+    // §3.6: a sell-stop may fire as a slippage-capped market order (a guard so a stop-loss
+    // doesn't dump at any price). slippagePct null = fires as a true market sell.
     Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
-        decimal stopPrice, CurrencyType currency, CancellationToken ct = default);
+        decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default);
 
     Task<OrderResult> PlaceStopLimitBuyOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default);

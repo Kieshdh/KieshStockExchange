@@ -138,7 +138,7 @@ public sealed class OrderController : ControllerBase
             (StopKind.Stop, EntryType.Market, OrderSide.Buy)
                 => await _entry.PlaceStopMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.BuyBudget ?? 0m, req.Currency, ct),
             (StopKind.Stop, EntryType.Market, OrderSide.Sell)
-                => await _entry.PlaceStopMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Currency, ct),
+                => await _entry.PlaceStopMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Currency, req.SlippagePct, ct),
             (StopKind.Stop, EntryType.Limit, OrderSide.Buy)
                 => await _entry.PlaceStopLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
             (StopKind.Stop, EntryType.Limit, OrderSide.Sell)
