@@ -10,11 +10,12 @@ public sealed record PlaceOrderRequest(
     int UserId,
     int StockId,
     int Quantity,
-    string Type,            // OrderType: "LimitBuy" | "LimitSell" | "SlippageMarketBuy" | "SlippageMarketSell" | "TrueMarketBuy" | "TrueMarketSell"
+    string Type,            // OrderType: Limit/SlippageMarket/TrueMarket{Buy,Sell} | §3.6 P2 Stop{Market,Limit}{Buy,Sell}
     CurrencyType Currency,
-    decimal? Price,         // populated for Limit orders only
+    decimal? Price,         // populated for Limit + StopLimit orders
     decimal? SlippagePct,   // populated for SlippageMarket* only
-    decimal? BuyBudget);    // populated for TrueMarketBuy only
+    decimal? BuyBudget,     // populated for TrueMarketBuy + StopMarketBuy
+    decimal? StopPrice = null); // §3.6 P2: populated for Stop* orders
 
 public sealed record ModifyOrderRequest(
     int UserId,

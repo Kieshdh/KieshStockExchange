@@ -44,6 +44,22 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         CurrencyType currency, CancellationToken ct = default)
         => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "TrueMarketSell", currency, null, null, null), ct);
 
+    public Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "StopMarketBuy", currency, null, null, buyBudget, stopPrice), ct);
+
+    public Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "StopMarketSell", currency, null, null, null, stopPrice), ct);
+
+    public Task<OrderResult> PlaceStopLimitBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "StopLimitBuy", currency, limitPrice, null, null, stopPrice), ct);
+
+    public Task<OrderResult> PlaceStopLimitSellOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "StopLimitSell", currency, limitPrice, null, null, stopPrice), ct);
+
     public async Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default)
     {

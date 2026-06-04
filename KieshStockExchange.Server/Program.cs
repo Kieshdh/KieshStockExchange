@@ -204,6 +204,12 @@ builder.Services.AddSingleton<IUserPortfolioService, UserPortfolioService>();
 // Engine orchestration — fully wired now that IMarketDataService is available.
 builder.Services.AddSingleton<IOrderExecutionService, OrderExecutionService>();
 builder.Services.AddSingleton<IOrderEntryService, OrderEntryService>();
+
+// §3.6 P2 stop trigger watcher — one instance serving both the IStopWatcher arm/disarm
+// surface (used by OrderEntryService) and the IHostedService quote loop.
+builder.Services.AddSingleton<StopTriggerWatcher>();
+builder.Services.AddSingleton<IStopWatcher>(sp => sp.GetRequiredService<StopTriggerWatcher>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StopTriggerWatcher>());
 // EngineAdminService is registered now that NoopAuthService satisfies its dep.
 builder.Services.AddSingleton<IEngineAdminService, EngineAdminService>();
 

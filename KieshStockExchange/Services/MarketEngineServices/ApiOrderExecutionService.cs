@@ -49,6 +49,15 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
         }
     }
 
+    // §3.6 P2: arm/promote are server-internal (the arm goes through /api/orders/place with a
+    // Stop* type; promotion is driven by the server-side StopTriggerWatcher). The client never
+    // calls these directly on the execution surface.
+    public Task<OrderResult> ArmStopAsync(Order incoming, CancellationToken ct = default)
+        => throw new NotSupportedException("ArmStopAsync is server-side; place a Stop* order via /api/orders/place.");
+
+    public Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default)
+        => throw new NotSupportedException("PromoteStopAsync is server-side (driven by StopTriggerWatcher).");
+
     public async Task<OrderResult> CancelOrderAsync(int orderId, CancellationToken ct = default)
     {
         // The HTTP endpoint takes userId; admin-path callers don't have it readily

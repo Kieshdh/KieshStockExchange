@@ -25,4 +25,17 @@ public interface IOrderEntryService
 
     Task<OrderResult> PlaceTrueMarketSellOrderAsync(int userId, int stockId,
         int quantity, CurrencyType currency, CancellationToken ct = default);
+
+    // §3.6 P2 stop orders — armed off-book, promoted when the price crosses stopPrice.
+    Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal buyBudget, CurrencyType currency, CancellationToken ct = default);
+
+    Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, CurrencyType currency, CancellationToken ct = default);
+
+    Task<OrderResult> PlaceStopLimitBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default);
+
+    Task<OrderResult> PlaceStopLimitSellOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default);
 }

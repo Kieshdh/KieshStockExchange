@@ -257,6 +257,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
         ct.ThrowIfCancellationRequested();
         Order? order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
         if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+        // Ensure the owner's accounts are loaded first: after a restart this both registers
+        // the armed stop in the registry and re-seeds its arm reservation (GetOpenOrdersForUsers
+        // returns armed stops). Without it, a cold promote would use the zero-reservation DB copy.
+        await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
         // Canonical instance carries the live arm reservation; a fresh DB copy has zeros.
         if (_registry.TryGet(order.OrderId, out var canon)) order = canon;
         if (!order.IsArmed || !order.IsStopOrder)

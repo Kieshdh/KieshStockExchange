@@ -8,6 +8,7 @@ using KieshStockExchange.Services.PortfolioServices;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Server.Services.HostedServices;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
@@ -21,15 +22,17 @@ public sealed class OrderEntryService : IOrderEntryService
     private readonly ILogger<OrderEntryService> _logger;
     private readonly IOrderValidator _validator;
     private readonly IDataBaseService _db;
+    private readonly IStopWatcher _stopWatcher;
 
     public OrderEntryService(IOrderExecutionService engine, ILogger<OrderEntryService> logger,
-        IOrderValidator validator, IMarketDataService data, IDataBaseService db)
+        IOrderValidator validator, IMarketDataService data, IDataBaseService db, IStopWatcher stopWatcher)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _data = data ?? throw new ArgumentNullException(nameof(data));
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _stopWatcher = stopWatcher ?? throw new ArgumentNullException(nameof(stopWatcher));
     }
     #endregion
 
@@ -37,7 +40,11 @@ public sealed class OrderEntryService : IOrderEntryService
     public async Task<OrderResult> CancelOrderAsync(int userId, int orderId, CancellationToken ct = default)
     {
         var denied = await VerifyOwnershipAsync(userId, orderId, ct).ConfigureAwait(false);
-        return denied ?? await _engine.CancelOrderAsync(orderId, ct).ConfigureAwait(false);
+        if (denied != null) return denied;
+        var result = await _engine.CancelOrderAsync(orderId, ct).ConfigureAwait(false);
+        // Drop it from the armed index too (no-op when it isn't an armed stop).
+        _stopWatcher.Disarm(orderId);
+        return result;
     }
 
     public async Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
@@ -87,9 +94,77 @@ public sealed class OrderEntryService : IOrderEntryService
             buyOrder: true, limitOrder: false, slippagePercent: null, ct);
 
     public Task<OrderResult> PlaceTrueMarketSellOrderAsync(int userId, int stockId, int quantity,
-        CurrencyType currency, CancellationToken ct = default) 
+        CurrencyType currency, CancellationToken ct = default)
         => PlaceOrderAsync(userId, stockId, quantity, 0m, currency, buyBudget: null,
             buyOrder: false, limitOrder: false, slippagePercent: null, ct);
+    #endregion
+
+    #region Place Stop Orders (§3.6 P2)
+    public Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
+        => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice: null, buyBudget: buyBudget,
+            currency, buyOrder: true, limitStop: false, ct);
+
+    public Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, CurrencyType currency, CancellationToken ct = default)
+        => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice: null, buyBudget: null,
+            currency, buyOrder: false, limitStop: false, ct);
+
+    public Task<OrderResult> PlaceStopLimitBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
+        => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice, buyBudget: null,
+            currency, buyOrder: true, limitStop: true, ct);
+
+    public Task<OrderResult> PlaceStopLimitSellOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
+        => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice, buyBudget: null,
+            currency, buyOrder: false, limitStop: true, ct);
+
+    // Build a stop order, enforce direction sanity against the live price (the engine validator
+    // stays structural), arm it via the engine (reserve + persist Pending), and register it with
+    // the trigger watcher on success.
+    private async Task<OrderResult> ArmStopOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal? limitPrice, decimal? buyBudget, CurrencyType currency,
+        bool buyOrder, bool limitStop, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (stopPrice <= 0m) return OrderResultFactory.InvalidParams("Stop price must be positive.");
+
+        // Direction sanity: a sell-stop sits at/below market, a buy-stop at/above. Skipped only
+        // when no live price is available yet (the watcher would still fire on the next cross).
+        decimal market = _data.Quotes.TryGetValue((stockId, currency), out var q) && q.LastPrice > 0m
+            ? q.LastPrice
+            : await _data.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
+        if (market > 0m)
+        {
+            if (buyOrder && stopPrice < market)
+                return OrderResultFactory.InvalidParams(
+                    $"Buy-stop must be at or above the market price ({CurrencyHelper.Format(market, currency)}).");
+            if (!buyOrder && stopPrice > market)
+                return OrderResultFactory.InvalidParams(
+                    $"Sell-stop must be at or below the market price ({CurrencyHelper.Format(market, currency)}).");
+        }
+
+        string orderType = limitStop
+            ? (buyOrder ? Order.Types.StopLimitBuy : Order.Types.StopLimitSell)
+            : (buyOrder ? Order.Types.StopMarketBuy : Order.Types.StopMarketSell);
+
+        var order = new Order
+        {
+            UserId = userId,
+            StockId = stockId,
+            Quantity = quantity,
+            Price = limitStop ? CurrencyHelper.RoundMoney(limitPrice ?? 0m, currency) : 0m,
+            StopPrice = CurrencyHelper.RoundMoney(stopPrice, currency),
+            BuyBudget = (!limitStop && buyOrder) ? CurrencyHelper.RoundMoney(buyBudget ?? 0m, currency) : null,
+            CurrencyType = currency,
+            OrderType = orderType,
+        };
+
+        var result = await _engine.ArmStopAsync(order, ct).ConfigureAwait(false);
+        if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
+        return result;
+    }
     #endregion
 
     #region Private methods
