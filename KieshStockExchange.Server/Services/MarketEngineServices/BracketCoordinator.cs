@@ -46,6 +46,11 @@ public interface IBracketCoordinator
 
     /// <summary>The SL is about to promote: cancel all open TP siblings and size the SL to held.</summary>
     Task OnStopFiringAsync(Order sl, CancellationToken ct = default);
+
+    /// <summary>A bracket member was just cancelled (by the user). Apply group cancel-semantics:
+    /// cancelling an unfilled parent or the SL tears down the whole group; cancelling a single TP or
+    /// a partially-filled parent leaves the rest intact.</summary>
+    Task OnMemberCancelledAsync(Order cancelled, CancellationToken ct = default);
 }
 
 public sealed class BracketCoordinator : IBracketCoordinator
@@ -328,6 +333,81 @@ public sealed class BracketCoordinator : IBracketCoordinator
                     await ReleaseParentBuyReservationAsync(parent, ct).ConfigureAwait(false);
                 }
 
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+        }).ConfigureAwait(false);
+
+        _bracketParents.TryRemove(parentId, out _);
+        _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
+    }
+
+    public async Task OnMemberCancelledAsync(Order cancelled, CancellationToken ct = default)
+    {
+        if (cancelled is null) return;
+        int? pidNullable = cancelled.IsBracketChild ? cancelled.ParentOrderId
+                          : (IsBracketParent(cancelled.OrderId) ? cancelled.OrderId : (int?)null);
+        if (pidNullable is not int parentId) return;
+
+        Order? parent = _registry.TryGet(parentId, out var pc) ? pc
+                       : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
+        if (parent is null) { _bracketParents.TryRemove(parentId, out _); return; }
+
+        // Group teardown only when the user cancels an UNFILLED parent (discard dormant legs) or the
+        // SL (the TPs can't rest unprotected). A single-TP cancel, or a partially-filled parent
+        // cancel, leaves the surviving legs protecting the held shares. The cancelled order itself +
+        // its reservation were already handled by the normal cancel path.
+        bool teardown = (cancelled.OrderId == parentId && parent.AmountFilled == 0)
+                     || (cancelled.IsBracketChild && cancelled.IsStopOrder);
+        if (!teardown)
+        {
+            if (cancelled.OrderId == parentId) _bracketParents.TryRemove(parentId, out _);
+            return;
+        }
+
+        var (sl, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
+        await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
+        {
+            await using var gate = await _accounts
+                .AcquirePositionGateAsync(parent.UserId, parent.StockId, ct).ConfigureAwait(false);
+            await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                // Cancel the SL sibling unless it's the order the user already cancelled. A dormant
+                // (Attached) SL reserves nothing; an armed SL would have been the cancel target
+                // (released by the normal path), so here it's always reservation-free.
+                if (sl is not null && sl.OrderId != cancelled.OrderId && !sl.IsClosed)
+                {
+                    _stopWatcher.Value.Disarm(sl.OrderId);
+                    book.RemoveById(sl.OrderId);
+                    sl.Status = Order.Statuses.Cancelled;
+                    sl.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
+                }
+                // Cancel every TP sibling (book-remove; they reserve nothing).
+                for (int i = 0; i < tps.Count; i++)
+                {
+                    var tp = tps[i];
+                    if (tp.OrderId == cancelled.OrderId || tp.IsClosed) continue;
+                    if (tp.IsOpen) book.RemoveById(tp.OrderId);
+                    tp.Status = Order.Statuses.Cancelled;
+                    tp.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(tp, ct).ConfigureAwait(false);
+                }
+                // If the SL was cancelled while a limit parent still rests, pull the parent too.
+                if (parent.OrderId != cancelled.OrderId && parent.IsOpen
+                    && parent.IsLimitOrder && parent.RemainingQuantity > 0)
+                {
+                    book.RemoveById(parent.OrderId);
+                    parent.Cancel();
+                    parent.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(parent, ct).ConfigureAwait(false);
+                    await ReleaseParentBuyReservationAsync(parent, ct).ConfigureAwait(false);
+                }
                 await tx.CommitAsync(ct).ConfigureAwait(false);
             }
             catch

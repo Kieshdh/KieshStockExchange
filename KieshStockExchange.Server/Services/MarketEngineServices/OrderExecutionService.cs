@@ -269,6 +269,45 @@ public sealed class OrderExecutionService : IOrderExecutionService
         return OrderResultFactory.Success(incoming, trades);
     }
 
+    // §3.6 P4: place a (long) bracket. Reserve + insert the parent first so it has an OrderId, then
+    // insert the SL + TP legs as dormant Attached children pointing at it (they reserve nothing yet),
+    // register the bracket, and match the parent. A market parent fills immediately → the post-commit
+    // bracket hook arms the SL (full pooled reservation) + the covered TP legs; a limit parent rests
+    // and its legs arm when it later fills.
+    public async Task<OrderResult> PlaceBracketAsync(Order parent, Order stopLoss,
+        IReadOnlyList<Order> takeProfits, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var validationError = _validator.ValidateNew(parent);
+        if (validationError != null) return validationError;
+
+        var reserveError = await _settlement.SettleOrderAsync(parent, ct).ConfigureAwait(false);
+        if (reserveError != null) return reserveError;
+
+        // Insert the child legs as dormant (Attached) — ParentOrderId links them; they reserve
+        // nothing until the parent fills and the coordinator arms them.
+        var children = new List<Order>(takeProfits.Count + 1);
+        stopLoss.ParentOrderId = parent.OrderId;
+        stopLoss.Status = Order.Statuses.Attached;
+        children.Add(stopLoss);
+        for (int i = 0; i < takeProfits.Count; i++)
+        {
+            takeProfits[i].ParentOrderId = parent.OrderId;
+            takeProfits[i].Status = Order.Statuses.Attached;
+            children.Add(takeProfits[i]);
+        }
+        foreach (var ch in children)
+        {
+            await _db.CreateOrder(ch, ct).ConfigureAwait(false);
+            _registry.Register(ch);
+        }
+
+        _bracket.RegisterBracket(parent.OrderId);
+
+        return await MatchAndSettleAsync(parent, ct).ConfigureAwait(false);
+    }
+
     // §3.6 P2: arm a stop — reserve (shares for a sell-stop, cash/budget for a buy-stop) and
     // persist it Pending WITHOUT matching. SettleOrderAsync does the reserve + insert + registry
     // register; the order never touches the book. The caller (OrderEntryService) registers it
@@ -351,6 +390,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
             book.RemoveById(order.OrderId);
             await _settlement.CancelRemainderAsync(order, ct);
         });
+
+        // §3.6 P4 cancel-semantics: cancelling an unfilled parent or the SL tears down the bracket
+        // group; a single-TP / partial-parent cancel leaves the rest. No-op for non-bracket orders.
+        if (order.IsBracketChild || _bracket.IsBracketParent(order.OrderId))
+        {
+            try { await _bracket.OnMemberCancelledAsync(order, ct).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogError(ex, "Bracket cancel-semantics failed for order #{Id}", order.OrderId); }
+        }
 
         _orderCache.NotifyOrdersMutated(new[] { order.UserId });
         return OrderResultFactory.Cancelled(order);

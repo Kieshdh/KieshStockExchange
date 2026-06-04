@@ -157,6 +157,23 @@ public sealed class OrderController : ControllerBase
         return Ok(result);
     }
 
+    // §3.6 P4: place a (long) bracket — entry + protective stop-loss + up to 3 take-profit legs.
+    [HttpPost("place-bracket")]
+    [EnableRateLimiting("orders")]
+    public async Task<ActionResult<OrderResult>> PlaceBracket([FromBody] PlaceBracketRequest req, CancellationToken ct)
+    {
+        if (req is null) return BadRequest();
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.UserId != caller) return Forbid();
+        var tps = (req.TakeProfits ?? Array.Empty<BracketLeg>())
+            .Select(l => (l.Price, l.Quantity)).ToList();
+        var result = await _entry.PlaceBracketAsync(req.UserId, req.StockId, req.Quantity, req.Entry,
+            req.Currency, req.Price, req.BuyBudget, req.StopPrice, req.StopLimitPrice, req.StopSlippagePct,
+            tps, ct);
+        await _notifications.OnOrderResultAsync(result, caller, ct);
+        return Ok(result);
+    }
+
     [HttpPost("{id:int}/modify")]
     [EnableRateLimiting("orders")]
     public async Task<ActionResult<OrderResult>> Modify(int id, [FromBody] ModifyOrderRequest req, CancellationToken ct)

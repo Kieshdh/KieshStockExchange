@@ -76,6 +76,23 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
             ?? throw new InvalidOperationException("modify-order returned no body.");
     }
 
+    public async Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
+        CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal stopPrice,
+        decimal? stopLimitPrice, decimal? stopSlippagePct,
+        IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default)
+    {
+        var legs = new List<BracketLeg>(takeProfits?.Count ?? 0);
+        if (takeProfits is not null)
+            for (int i = 0; i < takeProfits.Count; i++)
+                legs.Add(new BracketLeg(takeProfits[i].Price, takeProfits[i].Quantity));
+        var req = new PlaceBracketRequest(userId, stockId, quantity, entry, currency,
+            limitPrice, buyBudget, stopPrice, stopLimitPrice, stopSlippagePct, legs);
+        var resp = await _http.PostAsJsonAsync("api/orders/place-bracket", req, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<OrderResult>(ApiJsonOptions.Default, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("place-bracket returned no body.");
+    }
+
     public async Task<OrderResult> ModifyStopAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
     {

@@ -35,3 +35,23 @@ public sealed record ModifyStopRequest(
 
 public sealed record CancelBatchRequest(
     IReadOnlyList<int> OrderIds);
+
+// §3.6 P4: one take-profit leg of a bracket — a limit exit at Price for Quantity shares.
+public sealed record BracketLeg(decimal Price, int Quantity);
+
+// §3.6 P4: place a (long) bracket — a buy entry plus a protective stop-loss and up to three
+// scale-out take-profit legs, OCO-grouped, armed as the parent fills. Entry = Market (BuyBudget) or
+// Limit (Price). StopLimitPrice set ⇒ the SL is a stop-limit; null ⇒ a stop-market (StopSlippagePct
+// optionally caps it). Short brackets are not yet supported (rejected server-side).
+public sealed record PlaceBracketRequest(
+    int UserId,
+    int StockId,
+    int Quantity,
+    EntryType Entry,
+    CurrencyType Currency,
+    decimal? Price,
+    decimal? BuyBudget,
+    decimal StopPrice,
+    decimal? StopLimitPrice,
+    decimal? StopSlippagePct,
+    IReadOnlyList<BracketLeg> TakeProfits);

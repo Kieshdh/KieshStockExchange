@@ -58,6 +58,12 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
     public Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default)
         => throw new NotSupportedException("PromoteStopAsync is server-side (driven by StopTriggerWatcher).");
 
+    // §3.6 P4: bracket placement is server-internal (via IOrderEntryService.PlaceBracketAsync →
+    // /api/orders/place-bracket); never called on the client execution surface.
+    public Task<OrderResult> PlaceBracketAsync(Order parent, Order stopLoss,
+        IReadOnlyList<Order> takeProfits, CancellationToken ct = default)
+        => throw new NotSupportedException("PlaceBracketAsync is server-side; use IOrderEntryService.PlaceBracketAsync.");
+
     // §3.6 P3: a stop modify goes through the user-facing IOrderEntryService.ModifyStopAsync →
     // /api/orders/{id}/modify-stop, not this execution surface. Mirrors ArmStop/PromoteStop.
     public Task<OrderResult> ModifyStopAsync(int orderId, int? newQuantity = null,

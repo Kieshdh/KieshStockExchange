@@ -6,6 +6,13 @@ public interface IOrderExecutionService
 {
     Task<OrderResult> PlaceAndMatchAsync(Order incoming, CancellationToken ct = default);
 
+    /// <summary>§3.6 P4: place a bracket — reserve+insert the parent, insert the SL + TP legs as
+    /// dormant (Attached) children, register the bracket, then match the parent (legs arm as it
+    /// fills). The child orders must already have Side/Entry/Stop/Price set; this assigns their
+    /// ParentOrderId + Attached status.</summary>
+    Task<OrderResult> PlaceBracketAsync(Order parent, Order stopLoss,
+        IReadOnlyList<Order> takeProfits, CancellationToken ct = default);
+
     /// <summary>§3.6 P2: reserve + persist a stop order in the armed (Pending) state without
     /// matching. The caller registers it with the trigger watcher on success.</summary>
     Task<OrderResult> ArmStopAsync(Order incoming, CancellationToken ct = default);
