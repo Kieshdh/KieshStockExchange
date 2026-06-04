@@ -20,6 +20,9 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
 
     [ObservableProperty] private string _quantityString = "0";
     [ObservableProperty] private string _limitPriceString = String.Empty;
+    // §3.6 P2: Stop modifier. Stop ON + Market = StopMarket; Stop ON + Limit = StopLimit.
+    [ObservableProperty] private bool _isStopOrder = false;
+    [ObservableProperty] private string _stopPriceString = String.Empty;
     [ObservableProperty] private bool _noSlippageGuard = false; // If true, market orders have no slippage protection
     [ObservableProperty] private decimal _slippagePrc = 0.005m; // 0.5% default
     private const decimal DefaultSlippagePrc = 0.005m;
@@ -43,8 +46,12 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     public bool IsLimitSelected => SelectedTypeIndex == 1;
     public bool IsBuySelected => SelectedSideIndex == 0;
     public bool IsSellSelected => SelectedSideIndex == 1;
+    // Slippage guard only applies to a plain market order — a StopMarket promotes to a
+    // true market order on trigger, so hide the guard when the Stop modifier is on.
+    public bool ShowSlippageGuard => IsMarketSelected && !IsStopOrder;
     private decimal PriceForOrder => IsMarketSelected ? Selected.CurrentPrice : LimitPrice;
     private decimal LimitPrice => ParsingHelper.TryToDecimal(LimitPriceString, out var val) ? val : 0m;
+    private decimal StopPrice => ParsingHelper.TryToDecimal(StopPriceString, out var val) ? val : 0m;
     private int Quantity
     {
         get => ParsingHelper.TryToInt(QuantityString, out var v) && v > 0 ? v : 0;
@@ -64,9 +71,16 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         RecomputeUi();
         OnPropertyChanged(nameof(IsMarketSelected));
         OnPropertyChanged(nameof(IsLimitSelected));
+        OnPropertyChanged(nameof(ShowSlippageGuard));
     }
     partial void OnQuantityStringChanged(string value) { RecomputeUi(); }
     partial void OnLimitPriceStringChanged(string value) { RecomputeUi(); }
+    partial void OnStopPriceStringChanged(string value) { RecomputeUi(); }
+    partial void OnIsStopOrderChanged(bool value)
+    {
+        RecomputeUi();
+        OnPropertyChanged(nameof(ShowSlippageGuard));
+    }
     partial void OnNoSlippageGuardChanged(bool value)
     {
         RecomputeUi();
@@ -220,7 +234,34 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             var ct = CancellationToken.None;
 
             OrderResult result;
-            if (IsMarketSelected)
+            if (IsStopOrder)
+            {
+                // Stop ON + Market = StopMarket (promotes to a true market order on trigger);
+                // Stop ON + Limit = StopLimit. Sell-stop reserves the held shares; buy-stop
+                // reserves cash (StopMarketBuy uses available balance as its budget).
+                _logger.LogInformation("Placing {Side} STOP{Lim} order for {Qty} of {Symbol} @ stop {Stop}.",
+                    IsBuySelected ? "BUY" : "SELL", IsLimitSelected ? "-LIMIT" : "", Quantity, Selected.Symbol, StopPrice);
+
+                if (IsMarketSelected)
+                {
+                    if (IsBuySelected)
+                    {
+                        var budget = _portfolio.GetFundByCurrency(cur)?.AvailableBalance ?? 0m;
+                        result = await _orders.PlaceStopMarketBuyOrderAsync(userId, id, Quantity, StopPrice, budget, cur, ct);
+                    }
+                    else
+                    {
+                        result = await _orders.PlaceStopMarketSellOrderAsync(userId, id, Quantity, StopPrice, cur, ct);
+                    }
+                }
+                else
+                {
+                    result = IsBuySelected
+                        ? await _orders.PlaceStopLimitBuyOrderAsync(userId, id, Quantity, StopPrice, LimitPrice, cur, ct)
+                        : await _orders.PlaceStopLimitSellOrderAsync(userId, id, Quantity, StopPrice, LimitPrice, cur, ct);
+                }
+            }
+            else if (IsMarketSelected)
             {
                 if (NoSlippageGuard)
                 {
@@ -373,7 +414,8 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
     private void RecomputeUi()
     {
         // Submit button text and color
-        SubmitButtonText = IsBuySelected ? $"Buy {Selected.Symbol}" : $"Sell {Selected.Symbol}";
+        var verb = IsBuySelected ? "Buy" : "Sell";
+        SubmitButtonText = IsStopOrder ? $"{verb} {Selected.Symbol} Stop" : $"{verb} {Selected.Symbol}";
         SubmitButtonColor = IsBuySelected ? Colors.ForestGreen : Colors.OrangeRed;
 
         // User Asset Display
@@ -393,6 +435,11 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             HintText = (Selected.HasSelectedStock && !hasFund)
                 ? $"Convert cash to {Selected.Currency} first."
                 : string.Empty;
+        }
+        else if (IsStopOrder)
+        {
+            // A sell-stop reserves shares the user already holds (no shorting via stops in P2).
+            HintText = string.Empty;
         }
         else
         {
@@ -435,6 +482,11 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
         if (PriceForOrder <= 0)
         {
             _logger.LogWarning("Invalid price.");
+            return false;
+        }
+        if (IsStopOrder && StopPrice <= 0m)
+        {
+            _logger.LogWarning("Stop price must be positive.");
             return false;
         }
         return true;

@@ -43,6 +43,30 @@
                 </views:SegmentedTabView.Tabs>
             </views:SegmentedTabView>
 
+            <!-- Stop modifier: Stop + Market = StopMarket, Stop + Limit = StopLimit (§3.6 P2) -->
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                <Label Grid.Column="0"
+                       Text="Stop order"
+                       Style="{StaticResource FormLabelStyle}"
+                       Margin="0"
+                       VerticalOptions="Center" />
+                <CheckBox Grid.Column="1"
+                          IsChecked="{Binding IsStopOrder}"
+                          VerticalOptions="Center" />
+            </Grid>
+
+            <!-- Stop trigger price (Stop mode only) -->
+            <VerticalStackLayout Spacing="0"
+                                 IsVisible="{Binding IsStopOrder}">
+                <Label Text="Stop price"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding StopPriceString, Mode=TwoWay}"
+                       Placeholder="{Binding Selected.CurrentPriceDisplay}"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric"
+                       HorizontalTextAlignment="End" />
+            </VerticalStackLayout>
+
             <!-- Available assets row -->
             <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
                 <Label Grid.Column="0"
@@ -84,9 +108,9 @@
                        HorizontalTextAlignment="End" />
             </VerticalStackLayout>
 
-            <!-- Slippage guard (Market mode only) -->
+            <!-- Slippage guard (plain Market mode only — hidden when Stop is on) -->
             <VerticalStackLayout Spacing="0"
-                                 IsVisible="{Binding IsMarketSelected}">
+                                 IsVisible="{Binding ShowSlippageGuard}">
                 <Grid ColumnDefinitions="*,Auto,Auto"
                       ColumnSpacing="4">
                     <Label Grid.Column="0"

@@ -220,7 +220,9 @@ public partial class ChartViewModel : StockAwareViewModel
         foreach (var o in _orderCache.OpenOrders)
         {
             if (o.StockId != stockId || o.CurrencyType != currency) continue;
-            if (o.IsMarketOrder) continue;
+            // Market orders have no resting price line; armed stops aren't on the book yet
+            // (rendering a stop at Price 0 would draw a bogus line) — skip both. §3.6 P2.
+            if (o.IsMarketOrder || o.IsStopOrder) continue;
             if (o.UserId != _auth.CurrentUserId) continue;
             OpenOrderLines.Add(new OpenOrderLine(o.OrderId, o.Price, o.IsBuyOrder, o.Quantity));
         }
