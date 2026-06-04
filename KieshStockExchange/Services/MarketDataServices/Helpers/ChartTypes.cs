@@ -50,7 +50,16 @@ public readonly record struct MovingAverageSeries(
 
 public readonly record struct PriceMarker(Guid Id, decimal Price);
 
-// Snapshot of one of the user's open limit orders rendered on the chart as a
-// horizontal price line. IsBuy drives the line colour (green vs red); Quantity
-// shows in the right-gutter tag so the user can see the size at a glance.
-public readonly record struct OpenOrderLine(int OrderId, decimal Price, bool IsBuy, int Quantity);
+// Snapshot of one of the user's open orders rendered on the chart as a horizontal
+// price line. IsBuy drives the line colour (green vs red); Quantity shows in the
+// right-gutter tag so the user can see the size at a glance. §3.6 P3: an armed stop
+// is drawn at its StopPrice with a distinct dash + STOP/STOP-LIM pill — IsStop marks
+// it, IsStopLimit distinguishes the pill label (a stop-limit also carries a limit price).
+public readonly record struct OpenOrderLine(
+    int OrderId, decimal Price, bool IsBuy, int Quantity, bool IsStop = false, bool IsStopLimit = false);
+
+// One of the user's executed fills, rendered on the chart as a small triangle at
+// (AtTime, Price). IsBuy drives the shape + colour: a buy is an up-pointing green
+// triangle sitting just below the fill price; a sell is a down-pointing red triangle
+// just above it — the active-trader "filled here" convention.
+public readonly record struct FillMarker(DateTime AtTime, decimal Price, bool IsBuy);

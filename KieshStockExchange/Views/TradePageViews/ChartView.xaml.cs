@@ -217,6 +217,7 @@ public partial class ChartView : ContentView
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
         _drawable.OpenOrderSellColor = ResolveColor(_vm.SellOrderColorOption.Key);
+        _drawable.FillMarkers = _vm.FillMarkers.ToArray();
     }
 
     // Theme-aware colour lookup used for MA series so the VM stays free of

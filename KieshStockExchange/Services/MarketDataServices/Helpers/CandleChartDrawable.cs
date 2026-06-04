@@ -70,6 +70,16 @@ public sealed class CandleChartDrawable : IDrawable
     // slot from a user-facing color picker.
     public Color OpenOrderBuyColor = Colors.Green;
     public Color OpenOrderSellColor = Colors.Red;
+    // §3.6 P3: armed-stop trigger lines paint in a muted amber so they read distinctly
+    // from the green/red resting-limit lines, regardless of buy/sell direction.
+    public Color OpenOrderStopColor = Color.FromArgb("#E0A030");
+
+    // The user's executed fills, drawn as small triangles (buy up/below, sell down/above).
+    public IReadOnlyList<FillMarker> FillMarkers { get; set; } = Array.Empty<FillMarker>();
+    // Deliberately a similar-but-distinct shade from the Bull/Bear candle colours so a fill
+    // marker reads as "my trade" rather than blending into the candle it sits against.
+    public Color FillBuyColor = Color.FromArgb("#26C281");   // teal-green vs the candle bull green
+    public Color FillSellColor = Color.FromArgb("#E74C3C");  // softer red vs the candle bear red
 
     // Volume bar controls. ShowVolume gates rendering. OverlayVolume picks the
     // TradingView-style overlay where bars sit at low alpha in the bottom strip
@@ -235,6 +245,7 @@ public sealed class CandleChartDrawable : IDrawable
         DrawCandles(canvas, plot, X, Y);
         DrawMovingAverages(canvas, plot, tMin, tMax, yMin, yMax, X, Y);
         DrawOpenOrderLines(canvas, plot, Y, currency);
+        DrawFillMarkers(canvas, plot, X, Y);
         DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
         DrawMarkers(canvas, plot, Y, currency);
 
@@ -273,10 +284,12 @@ public sealed class CandleChartDrawable : IDrawable
             float y = Y((double)price);
             if (y < plot.Top || y > plot.Bottom) continue;
 
-            var color = line.IsBuy ? OpenOrderBuyColor : OpenOrderSellColor;
+            // §3.6 P3: a stop trigger line is amber with a tighter dash so it stands apart
+            // from the green/red resting-limit lines; limits keep the {4,4} dash + side colour.
+            var color = line.IsStop ? OpenOrderStopColor : (line.IsBuy ? OpenOrderBuyColor : OpenOrderSellColor);
             canvas.StrokeColor = color;
             canvas.StrokeSize = dragging ? 2f : 1f;
-            canvas.StrokeDashPattern = new float[] { 4f, 4f };
+            canvas.StrokeDashPattern = line.IsStop ? new float[] { 2f, 3f } : new float[] { 4f, 4f };
             canvas.DrawLine(plot.Left, y, plot.Right, y);
             canvas.StrokeDashPattern = null;
 
@@ -290,9 +303,12 @@ public sealed class CandleChartDrawable : IDrawable
                 new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
                 HorizontalAlignment.Left, VerticalAlignment.Center);
 
-            // Inline side+qty label hugged to the right edge of the plot, on top
-            // of the dashed line. Small pill so it stays readable against candles.
-            var labelText = $"{(line.IsBuy ? "B" : "S")} {line.Quantity}";
+            // Inline label hugged to the right edge of the plot, on top of the dashed
+            // line. Small pill so it stays readable against candles. §3.6 P3: a stop reads
+            // STOP/STOP-LIM + qty; a resting limit reads B/S + qty.
+            var labelText = line.IsStop
+                ? $"{(line.IsStopLimit ? "STOP-LIM" : "STOP")} {line.Quantity}"
+                : $"{(line.IsBuy ? "B" : "S")} {line.Quantity}";
             float labelW = Math.Max(28f, labelText.Length * 7f);
             var labelRect = new RectF(plot.Right - labelW - 4f, y - 8, labelW, 16);
             canvas.FillColor = color;
@@ -300,6 +316,55 @@ public sealed class CandleChartDrawable : IDrawable
             canvas.FontColor = Colors.White;
             canvas.DrawString(labelText, labelRect,
                 HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+        canvas.RestoreState();
+    }
+
+    /// <summary>
+    /// Draw the user's executed fills as small, tall triangles at (fill time, fill price).
+    /// A buy is an up-pointing triangle sitting just BELOW the price (apex pointing up at it);
+    /// a sell is a down-pointing triangle just ABOVE the price (apex pointing down at it). The
+    /// base is short and the sides long so the markers read as crisp arrows, not blobs.
+    /// </summary>
+    private void DrawFillMarkers(ICanvas canvas, RectF plot, Func<DateTime, float> X, Func<double, float> Y)
+    {
+        if (FillMarkers.Count == 0) return;
+        const float baseHalf = 4f;  // half the (short) base → 8px wide
+        const float height = 16f;   // long sides → tall arrow
+        const float gap = 5f;       // offset between the apex and the fill price
+        canvas.SaveState();
+        for (int i = 0; i < FillMarkers.Count; i++)
+        {
+            var m = FillMarkers[i];
+            float x = X(m.AtTime);
+            if (x < plot.Left || x > plot.Right) continue;
+            float yPrice = Y((double)m.Price);
+            if (yPrice < plot.Top || yPrice > plot.Bottom) continue;
+
+            var path = new PathF();
+            if (m.IsBuy)
+            {
+                // Up triangle below the price: apex (top) points up toward the fill.
+                float apexY = yPrice + gap;
+                float baseY = apexY + height;
+                path.MoveTo(x, apexY);
+                path.LineTo(x - baseHalf, baseY);
+                path.LineTo(x + baseHalf, baseY);
+                path.Close();
+                canvas.FillColor = FillBuyColor;
+            }
+            else
+            {
+                // Down triangle above the price: apex (bottom) points down toward the fill.
+                float apexY = yPrice - gap;
+                float baseY = apexY - height;
+                path.MoveTo(x, apexY);
+                path.LineTo(x - baseHalf, baseY);
+                path.LineTo(x + baseHalf, baseY);
+                path.Close();
+                canvas.FillColor = FillSellColor;
+            }
+            canvas.FillPath(path);
         }
         canvas.RestoreState();
     }

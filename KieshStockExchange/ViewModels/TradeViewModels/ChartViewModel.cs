@@ -9,6 +9,7 @@ using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
@@ -129,6 +130,11 @@ public partial class ChartViewModel : StockAwareViewModel
     // buy, red for sell). Synced from IOrderCacheService.OrdersChanged.
     public ObservableCollection<OpenOrderLine> OpenOrderLines { get; } = new();
 
+    // The current user's executed fills for the selected stock+currency, rendered as
+    // green (buy) / red (sell) triangles. Sourced from ITransactionService and re-synced
+    // on stock change + whenever the transaction list refreshes.
+    public ObservableCollection<FillMarker> FillMarkers { get; } = new();
+
     // User-configurable line colour per side. Defaults to ChartBull / ChartBear
     // (the Binance + TradingView convention) but selectable from the same palette
     // the MA color picker uses, surfaced in the chart settings overlay.
@@ -163,6 +169,7 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly IOrderCacheService _orderCache;
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
+    private readonly ITransactionService _transactions;
 
     // Atomic CTS swap. RestartStreamAsync cancels + disposes the previous CTS
     // before starting a new one. No SemaphoreSlim — aggressive switching
@@ -172,7 +179,7 @@ public partial class ChartViewModel : StockAwareViewModel
 
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
         IOrderCacheService orderCache, IAuthService auth, IOrderEditService editService,
-        ISelectedStockService selected, INotificationService notification)
+        ISelectedStockService selected, INotificationService notification, ITransactionService transactions)
         : base(selected, notification, logger)
     {
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
@@ -180,6 +187,7 @@ public partial class ChartViewModel : StockAwareViewModel
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
+        _transactions = transactions ?? throw new ArgumentNullException(nameof(transactions));
 
         // Repaint on any MA edit; stamp RemoveCommand on each default row.
         MaSeries.CollectionChanged += OnMaSeriesCollectionChanged;
@@ -191,10 +199,13 @@ public partial class ChartViewModel : StockAwareViewModel
 
         Markers.CollectionChanged += (_, __) => RequestRedraw();
         OpenOrderLines.CollectionChanged += (_, __) => RequestRedraw();
+        FillMarkers.CollectionChanged += (_, __) => RequestRedraw();
 
         // Keep open-order overlays in sync with the cache. Rebuild on selection
         // change too so switching stocks shows the right user lines.
         _orderCache.OrdersChanged += OnOrdersChanged;
+        // Fill markers track the user's transaction history (refreshed elsewhere too).
+        _transactions.TransactionsChanged += OnTransactionsChanged;
 
         InitializeSelection();
     }
@@ -220,11 +231,46 @@ public partial class ChartViewModel : StockAwareViewModel
         foreach (var o in _orderCache.OpenOrders)
         {
             if (o.StockId != stockId || o.CurrencyType != currency) continue;
-            // Market orders have no resting price line; armed stops aren't on the book yet
-            // (rendering a stop at Price 0 would draw a bogus line) — skip both. §3.6 P2.
-            if (o.IsMarketOrder || o.IsStopOrder) continue;
             if (o.UserId != _auth.CurrentUserId) continue;
+            // §3.6 P3: an armed stop draws at its StopPrice as a distinct dashed line so the
+            // user sees (and can drag) the trigger. A plain market order has no resting price.
+            if (o.IsStopOrder)
+            {
+                if (o.StopPrice is decimal sp && sp > 0m)
+                    OpenOrderLines.Add(new OpenOrderLine(
+                        o.OrderId, sp, o.IsBuyOrder, o.Quantity, IsStop: true, IsStopLimit: o.IsStopLimitOrder));
+                continue;
+            }
+            if (o.IsMarketOrder) continue;
             OpenOrderLines.Add(new OpenOrderLine(o.OrderId, o.Price, o.IsBuyOrder, o.Quantity));
+        }
+    }
+
+    private void OnTransactionsChanged(object? sender, EventArgs e)
+    {
+        try { MainThread.BeginInvokeOnMainThread(SyncFillMarkers); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to sync chart fill markers."); }
+    }
+
+    /// <summary>
+    /// Mirror the current user's fills for the selected stock+currency into
+    /// <see cref="FillMarkers"/> (buy = up triangle, sell = down triangle). The drawable
+    /// clips markers outside the visible viewport, so no time filtering is needed here.
+    /// </summary>
+    private void SyncFillMarkers()
+    {
+        FillMarkers.Clear();
+        if (!Selected.HasSelectedStock || _auth.CurrentUserId <= 0) return;
+
+        var stockId = Selected.StockId!.Value;
+        var currency = Selected.Currency;
+        var userId = _auth.CurrentUserId;
+        foreach (var t in _transactions.AllTransactions)
+        {
+            if (t.StockId != stockId || t.CurrencyType != currency) continue;
+            if (!t.InvolvesUser(userId)) continue;
+            // A buy fill is one where the user is the buyer; otherwise it's a sell.
+            FillMarkers.Add(new FillMarker(t.Timestamp, t.Price, IsBuy: t.BuyerId == userId));
         }
     }
 
@@ -246,6 +292,10 @@ public partial class ChartViewModel : StockAwareViewModel
         await RestartStreamAsync(stockId, currency, SelectedResolution, ct).ConfigureAwait(false);
         // After switching stock the open-order line set changes too.
         SyncOpenOrderLines();
+        // Render fills already cached for the new stock, then pull the latest in the background
+        // (RefreshAsync raises TransactionsChanged → SyncFillMarkers when it completes).
+        SyncFillMarkers();
+        _ = _transactions.RefreshAsync(null, ct);
     }
 
     protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency,
@@ -268,6 +318,7 @@ public partial class ChartViewModel : StockAwareViewModel
             }
             StopCandleStream();
             _orderCache.OrdersChanged -= OnOrdersChanged;
+            _transactions.TransactionsChanged -= OnTransactionsChanged;
         }
         base.Dispose(disposing);
     }
