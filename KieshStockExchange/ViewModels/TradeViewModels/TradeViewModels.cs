@@ -175,8 +175,12 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
             _logger.LogInformation("TradeViewModel initializing for stock #{StockId}", stockId);
             await LoadTradingPairsAsync();
 
-            var stock = await _market.GetStockAsync(stockId)
-                ?? throw new ArgumentException($"Stock with ID {stockId} not found.");
+            // Restore the last-watched stock from the session if there is one; fall back to the
+            // caller's default when there isn't, or if the remembered stock no longer resolves.
+            var targetId = _session.CurrentStockId ?? stockId;
+            var stock = await _market.GetStockAsync(targetId)
+                        ?? await _market.GetStockAsync(stockId)
+                        ?? throw new ArgumentException($"Stock with ID {stockId} not found.");
             await _selected.Set(stock);
 
             _pickerSelection = TradingPairs.FirstOrDefault(p =>
@@ -240,6 +244,11 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
                 OnPropertyChanged(nameof(PickerSelection));
                 return;
             }
+
+            // Remember the last-watched stock in the session so returning to the Trade page
+            // restores it (Cleanup resets the live selection on leave, but never to the session —
+            // we only persist a real, non-null selection here, so the reset can't erase it).
+            _session.SetCurrentStockId(stockId);
 
             var match = TradingPairs.FirstOrDefault(p =>
                 p.StockId == stockId.Value && p.Currency == _selected.Currency);
