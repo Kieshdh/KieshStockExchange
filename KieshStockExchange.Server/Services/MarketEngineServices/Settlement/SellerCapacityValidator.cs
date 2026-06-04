@@ -75,11 +75,17 @@ internal sealed class SellerCapacityValidator
 
             var available = availableBySeller[sellerKey];
 
-            // Lazy-init order reservation pool. Missing from ordersById = brand-new mid-batch sell with no reservation.
+            // Lazy-init order reservation pool from the order's ACTUAL share reservation
+            // (CurrentSellReservedQty), not RemainingQuantity: MatchingEngine already called
+            // taker.Fill() during Match, so RemainingQuantity reads 0 for a fully-filling sell of
+            // an entire (fully-reserved) holding — which, with AvailableQuantity also 0, would
+            // wrongly reject it. CurrentSellReservedQty is set at place time and untouched by Match.
+            // Missing from ordersById = brand-new mid-batch sell with no reservation → 0 (covered
+            // by the available pool / the apply-pass top-up).
             if (!reservedRemainingByOrder.TryGetValue(t.SellOrderId, out var reservedThis))
             {
                 reservedThis = ordersById.TryGetValue(t.SellOrderId, out var sellOrder)
-                    ? sellOrder.RemainingQuantity
+                    ? sellOrder.CurrentSellReservedQty
                     : 0;
                 reservedRemainingByOrder[t.SellOrderId] = reservedThis;
             }
