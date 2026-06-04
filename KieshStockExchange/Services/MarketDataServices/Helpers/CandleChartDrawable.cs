@@ -332,11 +332,14 @@ public sealed class CandleChartDrawable : IDrawable
         const float baseHalf = 4f;  // half the (short) base → 8px wide
         const float height = 16f;   // long sides → tall arrow
         const float gap = 5f;       // offset between the apex and the fill price
+        var outline = OutlineForBackground();
         canvas.SaveState();
         for (int i = 0; i < FillMarkers.Count; i++)
         {
             var m = FillMarkers[i];
-            float x = X(m.AtTime);
+            // Snap to the center of the candle that contains the fill time so the arrow lines up
+            // with its bar (esp. on higher timeframes) instead of landing between two candles.
+            float x = SnapToCandleCenterX(m.AtTime, X);
             if (x < plot.Left || x > plot.Right) continue;
             float yPrice = Y((double)m.Price);
             if (yPrice < plot.Top || yPrice > plot.Bottom) continue;
@@ -365,8 +368,35 @@ public sealed class CandleChartDrawable : IDrawable
                 canvas.FillColor = FillSellColor;
             }
             canvas.FillPath(path);
+            // Theme-aware outline: keeps the arrow legible against both candles and the background.
+            canvas.StrokeColor = outline;
+            canvas.StrokeSize = 1f;
+            canvas.DrawPath(path);
         }
         canvas.RestoreState();
+    }
+
+    // Center x of the candle bucket that contains t; falls back to the raw time x when no candle
+    // covers it (a fill in a gap / outside the loaded slice).
+    private float SnapToCandleCenterX(DateTime t, Func<DateTime, float> X)
+    {
+        int lo = 0, hi = Candles.Count - 1;
+        while (lo <= hi)
+        {
+            int mid = lo + ((hi - lo) >> 1);
+            var c = Candles[mid];
+            if (t < c.OpenTime) hi = mid - 1;
+            else if (t >= c.CloseTime) lo = mid + 1;
+            else return (X(c.OpenTime) + X(c.CloseTime)) * 0.5f;
+        }
+        return X(t);
+    }
+
+    // Dark background → light outline, light background → dark outline (relative luminance).
+    private Color OutlineForBackground()
+    {
+        double lum = 0.299 * Bg.Red + 0.587 * Bg.Green + 0.114 * Bg.Blue;
+        return lum < 0.5 ? Color.FromRgba(1f, 1f, 1f, 0.85f) : Color.FromRgba(0f, 0f, 0f, 0.85f);
     }
 
     private void DrawMarkers(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)

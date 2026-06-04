@@ -265,12 +265,34 @@ public partial class ChartViewModel : StockAwareViewModel
         var stockId = Selected.StockId!.Value;
         var currency = Selected.Currency;
         var userId = _auth.CurrentUserId;
+
+        // Aggregate one order's fills that fall in the SAME candle bucket into a single VWAP arrow,
+        // so a many-fill order doesn't spray the chart with arrows. Fills of the same order in
+        // different buckets (≥1 bar apart in time) stay separate. Bucket size = the resolution's
+        // seconds (CandleResolution is seconds-valued).
+        long bucketTicks = Math.Max(1, (int)SelectedResolution) * TimeSpan.TicksPerSecond;
+        var groups = new Dictionary<(int OrderId, long Bucket), (decimal Notional, int Qty, bool IsBuy)>();
         foreach (var t in _transactions.AllTransactions)
         {
             if (t.StockId != stockId || t.CurrencyType != currency) continue;
             if (!t.InvolvesUser(userId)) continue;
-            // A buy fill is one where the user is the buyer; otherwise it's a sell.
-            FillMarkers.Add(new FillMarker(t.Timestamp, t.Price, IsBuy: t.BuyerId == userId));
+            bool isBuy = t.BuyerId == userId;                       // user is the buyer ⇒ a buy fill
+            int orderId = isBuy ? t.BuyOrderId : t.SellOrderId;     // the user's own order id
+            var key = (orderId, t.Timestamp.Ticks / bucketTicks);
+            groups.TryGetValue(key, out var agg);
+            agg.Notional += t.Price * t.Quantity;
+            agg.Qty += t.Quantity;
+            agg.IsBuy = isBuy;
+            groups[key] = agg;
+        }
+        foreach (var kv in groups)
+        {
+            var (notional, qty, isBuy) = kv.Value;
+            if (qty <= 0) continue;
+            var vwap = notional / qty;
+            // Bucket-start time → the drawable snaps it to that candle's center.
+            var atTime = new DateTime(kv.Key.Bucket * bucketTicks, DateTimeKind.Utc);
+            FillMarkers.Add(new FillMarker(atTime, vwap, isBuy));
         }
     }
 
@@ -801,6 +823,8 @@ public partial class ChartViewModel : StockAwareViewModel
         // Use the most recent stock-token so a stock change cancels this restart too
         var ct = CtsStock?.Token ?? CancellationToken.None;
         _ = RestartStreamAsync(Selected.StockId, Selected.Currency, value, ct);
+        // Re-bucket the fill-marker VWAP aggregation against the new resolution.
+        SyncFillMarkers();
     }
 
     partial void OnVisibleCountChanged(int value)
