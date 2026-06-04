@@ -14,7 +14,7 @@ public class StopOrderModelTests
     {
         UserId = 1, StockId = 1, Quantity = 10,
         Price = 0m, StopPrice = 90m,
-        OrderType = Order.Types.StopMarketSell, Status = Order.Statuses.Pending,
+        Side = OrderSide.Sell, Entry = EntryType.Market, Stop = StopKind.Stop, Status = Order.Statuses.Pending,
     };
 
     [Fact]
@@ -46,7 +46,7 @@ public class StopOrderModelTests
         {
             UserId = 1, StockId = 1, Quantity = 5,
             Price = 105m, StopPrice = 104m,
-            OrderType = Order.Types.StopLimitBuy, Status = Order.Statuses.Pending,
+            Side = OrderSide.Buy, Entry = EntryType.Limit, Stop = StopKind.Stop, Status = Order.Statuses.Pending,
         };
         Assert.True(o.IsValid());
         o.PromoteStop();
@@ -63,7 +63,7 @@ public class StopOrderModelTests
         {
             UserId = 1, StockId = 1, Quantity = 5,
             Price = 0m, StopPrice = 110m, BuyBudget = 550m,
-            OrderType = Order.Types.StopMarketBuy, Status = Order.Statuses.Pending,
+            Side = OrderSide.Buy, Entry = EntryType.Market, Stop = StopKind.Stop, Status = Order.Statuses.Pending,
         };
         Assert.True(withBudget.IsValid());
 
@@ -71,7 +71,7 @@ public class StopOrderModelTests
         {
             UserId = 1, StockId = 1, Quantity = 5,
             Price = 0m, StopPrice = 110m,
-            OrderType = Order.Types.StopMarketBuy, Status = Order.Statuses.Pending,
+            Side = OrderSide.Buy, Entry = EntryType.Market, Stop = StopKind.Stop, Status = Order.Statuses.Pending,
         };
         Assert.False(noBudget.IsValid());
     }
@@ -83,7 +83,7 @@ public class StopOrderModelTests
         {
             UserId = 1, StockId = 1, Quantity = 5,
             Price = 10m, StopPrice = 90m, // StopMarket must have Price == 0
-            OrderType = Order.Types.StopMarketSell, Status = Order.Statuses.Pending,
+            Side = OrderSide.Sell, Entry = EntryType.Market, Stop = StopKind.Stop, Status = Order.Statuses.Pending,
         };
         Assert.False(o.IsValid());
     }
@@ -95,7 +95,7 @@ public class StopOrderModelTests
         {
             UserId = 1, StockId = 1, Quantity = 5,
             Price = 0m, // no StopPrice
-            OrderType = Order.Types.StopMarketSell, Status = Order.Statuses.Pending,
+            Side = OrderSide.Sell, Entry = EntryType.Market, Stop = StopKind.Stop, Status = Order.Statuses.Pending,
         };
         Assert.False(o.IsValid());
     }

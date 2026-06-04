@@ -2,6 +2,11 @@ using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
+// §3.6 decomposition: an order type is three orthogonal dimensions, not one flat string.
+public enum OrderSide { Buy, Sell }
+public enum EntryType { Limit, Market }       // slippage is a CAP on a Market entry, not a type
+public enum StopKind  { None, Stop, Trailing } // Trailing schema lands now; behavior is P3
+
 public class Order : IValidatable
 {
     public static class Types
@@ -127,20 +132,45 @@ public class Order : IValidatable
         set => CurrencyType = CurrencyHelper.FromIsoCodeOrDefault(value);
     }
 
-    private string _orderType = String.Empty;
-    public string OrderType
+    // §3.6 decomposition — the three orthogonal dimensions are the source of truth.
+    public OrderSide Side { get; set; } = OrderSide.Buy;
+    public EntryType Entry { get; set; } = EntryType.Limit;
+    public StopKind Stop { get; set; } = StopKind.None;
+
+    // §3.6 P3 trailing-stop schema (behavior deferred to P3): offset from the watermark, whether
+    // it's a percentage, and the running high/low-water reference. Null unless Stop == Trailing.
+    private decimal? _trailOffset = null;
+    public decimal? TrailOffset
     {
-        get => _orderType;
+        get => _trailOffset;
         set
         {
-            if (value is Types.TrueMarketBuy or Types.SlippageMarketBuy or Types.LimitBuy or
-                Types.TrueMarketSell or Types.SlippageMarketSell or Types.LimitSell or
-                Types.StopMarketBuy or Types.StopMarketSell or
-                Types.StopLimitBuy or Types.StopLimitSell)
-                _orderType = value;
-            else throw new ArgumentException("Invalid OrderType.");
+            if (value.HasValue && value.Value < 0m)
+                throw new ArgumentException("Trail offset cannot be negative.");
+            _trailOffset = value;
         }
     }
+    public bool? TrailIsPercent { get; set; }
+    public decimal? TrailWatermark { get; set; }
+
+    // Backward-compatible read-only projection of the three dimensions to the legacy 10-value
+    // string vocabulary, for logs/telemetry/notifications that still read a single type string.
+    // The enums are authoritative; this is derived, never set.
+    public string OrderType => (Stop, Entry, Side, SlippagePercent.HasValue) switch
+    {
+        (StopKind.None, EntryType.Limit,  OrderSide.Buy,  _)     => Types.LimitBuy,
+        (StopKind.None, EntryType.Limit,  OrderSide.Sell, _)     => Types.LimitSell,
+        (StopKind.None, EntryType.Market, OrderSide.Buy,  false) => Types.TrueMarketBuy,
+        (StopKind.None, EntryType.Market, OrderSide.Sell, false) => Types.TrueMarketSell,
+        (StopKind.None, EntryType.Market, OrderSide.Buy,  true)  => Types.SlippageMarketBuy,
+        (StopKind.None, EntryType.Market, OrderSide.Sell, true)  => Types.SlippageMarketSell,
+        (StopKind.Stop, EntryType.Market, OrderSide.Buy,  _)     => Types.StopMarketBuy,
+        (StopKind.Stop, EntryType.Market, OrderSide.Sell, _)     => Types.StopMarketSell,
+        (StopKind.Stop, EntryType.Limit,  OrderSide.Buy,  _)     => Types.StopLimitBuy,
+        (StopKind.Stop, EntryType.Limit,  OrderSide.Sell, _)     => Types.StopLimitSell,
+        // Trailing (P3): no legacy string — compose a stable label for logs/telemetry.
+        _ => $"Trailing{Entry}{Side}",
+    };
 
     // "Open", "Filled", "Cancelled"
     private string _status = Statuses.Open;
@@ -188,7 +218,9 @@ public class Order : IValidatable
 
     public bool IsInvalid => !IsValid();
 
-    private bool IsValidOrderType() => IsLimitOrder || IsMarketOrder || IsStopOrder;
+    // Every (Side, Entry, Stop) combination is a defined type; per-combo rules live in the
+    // price/budget checks below.
+    private bool IsValidOrderType() => true;
     private bool IsValidStatus() =>
         Status == Statuses.Open || Status == Statuses.Filled ||
         Status == Statuses.Cancelled || Status == Statuses.Pending;
@@ -199,17 +231,22 @@ public class Order : IValidatable
         (IsOpen && RemainingQuantity > 0) || (IsArmed && AmountFilled == 0 && Quantity > 0) ||
         (IsCancelled && AmountFilled >= 0 && AmountFilled < Quantity);
 
-    private bool IsValidPrice() => (IsLimitOrder && SlippagePercent is null && Price > 0m) ||
-        (IsTrueMarketOrder && SlippagePercent is null && Price == 0m) ||
-        (IsSlippageOrder && SlippagePercent.HasValue && Price > 0m) ||
-        // StopMarket fires as a market order (Price 0); StopLimit carries a limit Price. Both need a StopPrice.
-        (IsStopMarketOrder && SlippagePercent is null && Price == 0m && StopPrice > 0m) ||
-        (IsStopLimitOrder && SlippagePercent is null && Price > 0m && StopPrice > 0m);
+    // Price rules per dimension: a stop/trailing needs a positive StopPrice (a promoted stop may
+    // keep a stale StopPrice — only checked while Stop != None); a Limit has a positive Price and
+    // no slippage; a Market is either slippage-capped (anchor Price > 0 + cap) or true (Price 0).
+    private bool IsValidPrice()
+    {
+        if (Stop != StopKind.None && !(StopPrice > 0m)) return false;
+        if (Entry == EntryType.Limit)
+            return SlippagePercent is null && Price > 0m;
+        return SlippagePercent.HasValue ? Price > 0m : Price == 0m;
+    }
 
     private bool IsValidBuyBudget()
     {
-        // StopMarketBuy promotes to TrueMarketBuy, so it carries a budget like one.
-        if ((IsTrueMarketOrder || IsStopMarketOrder) && IsBuyOrder)
+        // A market BUY with no slippage cap funds itself from a flat budget (true market, or a
+        // stop-market that promotes to one). Limits and slippage-capped markets carry no budget.
+        if (Side == OrderSide.Buy && Entry == EntryType.Market && SlippagePercent is null)
             return BuyBudget.HasValue && BuyBudget.Value > 0m;
         return BuyBudget is null;
     }
@@ -270,23 +307,20 @@ public class Order : IValidatable
     public string UpdatedAtDisplay => UpdatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm:ss");
     public string UpdatedDateShort => UpdatedAt.ToLocalTime().ToString("dd-MM HH:mm");
 
-    public bool IsBuyOrder => OrderType is Types.TrueMarketBuy or Types.SlippageMarketBuy or Types.LimitBuy
-        or Types.StopMarketBuy or Types.StopLimitBuy;
-    public bool IsSellOrder => OrderType is Types.TrueMarketSell or Types.SlippageMarketSell or Types.LimitSell
-        or Types.StopMarketSell or Types.StopLimitSell;
-    public bool IsLimitOrder =>
-        OrderType == Types.LimitBuy || OrderType == Types.LimitSell;
-    public bool IsMarketOrder => IsSlippageOrder || IsTrueMarketOrder;
-    public bool IsSlippageOrder =>
-        OrderType == Types.SlippageMarketBuy || OrderType == Types.SlippageMarketSell;
-    public bool IsTrueMarketOrder => IsTrueMarketBuyOrder || OrderType == Types.TrueMarketSell;
-    public bool IsTrueMarketBuyOrder => OrderType == Types.TrueMarketBuy;
-    // §3.6 P2 stop helpers. A stop is neither a limit nor a market order while armed —
-    // it carries no book presence until promoted to its StopPromotionTarget.
-    public bool IsStopOrder => OrderType is Types.StopMarketBuy or Types.StopMarketSell
-        or Types.StopLimitBuy or Types.StopLimitSell;
-    public bool IsStopMarketOrder => OrderType is Types.StopMarketBuy or Types.StopMarketSell;
-    public bool IsStopLimitOrder => OrderType is Types.StopLimitBuy or Types.StopLimitSell;
+    // §3.6 decomposition — the IsX surface is reimplemented on the three dimensions so every
+    // existing call site (settlement, matching, watcher, UI, bots, telemetry) is unchanged.
+    // A stop/trailing is neither a limit nor a market order while armed: those helpers require
+    // Stop == None, so an armed stop has no book presence until promotion sets Stop = None.
+    public bool IsBuyOrder => Side == OrderSide.Buy;
+    public bool IsSellOrder => Side == OrderSide.Sell;
+    public bool IsLimitOrder => Entry == EntryType.Limit && Stop == StopKind.None;
+    public bool IsMarketOrder => Entry == EntryType.Market && Stop == StopKind.None;
+    public bool IsSlippageOrder => Entry == EntryType.Market && Stop == StopKind.None && SlippagePercent.HasValue;
+    public bool IsTrueMarketOrder => Entry == EntryType.Market && Stop == StopKind.None && SlippagePercent is null;
+    public bool IsTrueMarketBuyOrder => IsTrueMarketOrder && Side == OrderSide.Buy;
+    public bool IsStopOrder => Stop != StopKind.None;
+    public bool IsStopMarketOrder => Stop != StopKind.None && Entry == EntryType.Market;
+    public bool IsStopLimitOrder => Stop != StopKind.None && Entry == EntryType.Limit;
     public bool IsOpen => Status == Statuses.Open;
     public bool IsArmed => Status == Statuses.Pending;
     public bool IsFilled => Status == Statuses.Filled;
@@ -295,15 +329,6 @@ public class Order : IValidatable
     public bool IsClosed => IsFilled || IsCancelled;
     public bool IsOpenLimitOrder => IsOpen && IsLimitOrder;
 
-    // §3.6 P2: the active type an armed stop becomes when the watcher promotes it.
-    public string StopPromotionTarget => OrderType switch
-    {
-        Types.StopMarketBuy  => Types.TrueMarketBuy,
-        Types.StopMarketSell => Types.TrueMarketSell,
-        Types.StopLimitBuy   => Types.LimitBuy,
-        Types.StopLimitSell  => Types.LimitSell,
-        _ => OrderType
-    };
     public decimal TotalAmount => IsLimitOrder
         ? CurrencyHelper.Notional(Price, Quantity, CurrencyType)
         : (IsSlippageOrder && SlippagePercent.HasValue)
@@ -352,12 +377,14 @@ public class Order : IValidatable
         UpdatedAt = TimeHelper.NowUtc();
     }
 
-    // §3.6 P2: the trigger watcher promotes an armed stop to its active type and opens it for
-    // matching. StopPrice is kept for history; OrderType flips so the engine treats it normally.
+    // §3.6 P2: the trigger watcher promotes an armed stop by clearing the Stop dimension — a
+    // stop-limit becomes a plain limit, a stop-market a plain market (Side/Entry unchanged) — and
+    // opening it for matching. StopPrice/Trail* are left as-is for history (only consulted while
+    // Stop != None).
     public void PromoteStop()
     {
         if (!IsArmed) throw new InvalidOperationException("Only an armed (Pending) stop can be promoted.");
-        OrderType = StopPromotionTarget;
+        Stop = StopKind.None;
         Status = Statuses.Open;
         UpdatedAt = TimeHelper.NowUtc();
     }
@@ -395,7 +422,12 @@ public class Order : IValidatable
             StopPrice = this.StopPrice,
             BuyBudget = this.BuyBudget,
             CurrencyType = this.CurrencyType,
-            OrderType = this.OrderType,
+            Side = this.Side,
+            Entry = this.Entry,
+            Stop = this.Stop,
+            TrailOffset = this.TrailOffset,
+            TrailIsPercent = this.TrailIsPercent,
+            TrailWatermark = this.TrailWatermark,
             Status = this.Status,
             AmountFilled = this.AmountFilled,
             CreatedAt = this.CreatedAt,

@@ -104,13 +104,16 @@ internal sealed class AiBotDecisionService
             if (buyBudget is null or <= 0m) return null;
         }
 
+        // §3.6 decomposition: bots place plain (non-stop) orders — set the dimensions directly.
         return new Order
         {
             UserId = user.UserId, StockId = stockId, CurrencyType = currency,
             Quantity = quantity, Price = price,
             SlippagePercent = IsSlippageOrder(type) ? user.SlippageTolerancePrc * 100m : null,
             BuyBudget = buyBudget,
-            OrderType = ToOrderTypeString(type)
+            Side = IsBuyOrder(type) ? OrderSide.Buy : OrderSide.Sell,
+            Entry = (type is OrderType.LimitBuy or OrderType.LimitSell) ? EntryType.Limit : EntryType.Market,
+            Stop = StopKind.None,
         };
     }
     #endregion

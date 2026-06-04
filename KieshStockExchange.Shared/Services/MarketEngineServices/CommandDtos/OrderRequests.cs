@@ -1,21 +1,24 @@
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 
 namespace KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 
-// Phase 3 Step 3: HTTP body shapes for the four /api/orders/* endpoints. One
-// generic place endpoint dispatches on Type into the six IOrderEntryService
-// Place*Async methods.
+// Phase 3 Step 3: HTTP body for /api/orders/place. §3.6 decomposition — the type is the three
+// orthogonal dimensions (Side/Entry/Stop) plus the optional value fields; the controller maps the
+// combination to the matching named IOrderEntryService.Place*Async method.
 
 public sealed record PlaceOrderRequest(
     int UserId,
     int StockId,
     int Quantity,
-    string Type,            // OrderType: Limit/SlippageMarket/TrueMarket{Buy,Sell} | §3.6 P2 Stop{Market,Limit}{Buy,Sell}
+    OrderSide Side,         // Buy | Sell
+    EntryType Entry,        // Limit | Market
+    StopKind Stop,          // None | Stop | (Trailing — P3)
     CurrencyType Currency,
-    decimal? Price,         // populated for Limit + StopLimit orders
-    decimal? SlippagePct,   // populated for SlippageMarket* only
-    decimal? BuyBudget,     // populated for TrueMarketBuy + StopMarketBuy
-    decimal? StopPrice = null); // §3.6 P2: populated for Stop* orders
+    decimal? Price,         // limit price (Limit / StopLimit) or slippage anchor (capped Market)
+    decimal? SlippagePct,   // set = slippage cap on a Market entry (incl. a stop firing as capped market)
+    decimal? BuyBudget,     // budget for an uncapped Market buy (true market / stop-market→true)
+    decimal? StopPrice = null); // trigger level when Stop != None
 
 public sealed record ModifyOrderRequest(
     int UserId,

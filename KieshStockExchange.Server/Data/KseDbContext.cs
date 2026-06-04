@@ -83,6 +83,9 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.SlippagePercent).HasColumnType(Money);
             b.Property(x => x.BuyBudget).HasColumnType(Money);
             b.Property(x => x.StopPrice).HasColumnType(Money);
+            // §3.6 P3 trailing schema (decimals as Money; Side/Entry/Stop are text by convention).
+            b.Property(x => x.TrailOffset).HasColumnType(Money);
+            b.Property(x => x.TrailWatermark).HasColumnType(Money);
             b.Property(x => x.CreatedAt).HasColumnType(TimestampTz);
             b.Property(x => x.UpdatedAt).HasColumnType(TimestampTz);
             // Two overlapping composites both terminating on Status — both must survive.

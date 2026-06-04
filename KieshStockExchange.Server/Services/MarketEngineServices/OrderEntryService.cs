@@ -145,10 +145,6 @@ public sealed class OrderEntryService : IOrderEntryService
                     $"Sell-stop must be at or below the market price ({CurrencyHelper.Format(market, currency)}).");
         }
 
-        string orderType = limitStop
-            ? (buyOrder ? Order.Types.StopLimitBuy : Order.Types.StopLimitSell)
-            : (buyOrder ? Order.Types.StopMarketBuy : Order.Types.StopMarketSell);
-
         var order = new Order
         {
             UserId = userId,
@@ -158,7 +154,9 @@ public sealed class OrderEntryService : IOrderEntryService
             StopPrice = CurrencyHelper.RoundMoney(stopPrice, currency),
             BuyBudget = (!limitStop && buyOrder) ? CurrencyHelper.RoundMoney(buyBudget ?? 0m, currency) : null,
             CurrencyType = currency,
-            OrderType = orderType,
+            Side = buyOrder ? OrderSide.Buy : OrderSide.Sell,
+            Entry = limitStop ? EntryType.Limit : EntryType.Market,
+            Stop = StopKind.Stop,
         };
 
         var result = await _engine.ArmStopAsync(order, ct).ConfigureAwait(false);
@@ -202,22 +200,15 @@ public sealed class OrderEntryService : IOrderEntryService
         return await _engine.PlaceAndMatchAsync(order, ct).ConfigureAwait(false);
     }
 
-    private Order CreateOrder(int userId, int stockId, int quantity, decimal price, decimal? buyBudget, 
+    private Order CreateOrder(int userId, int stockId, int quantity, decimal price, decimal? buyBudget,
         CurrencyType currency, bool buyOrder, bool limitOrder, decimal? slippagePercent)
     {
-        // Order type determination
-        string orderType;
-        if (limitOrder)
-            orderType = buyOrder ? Order.Types.LimitBuy : Order.Types.LimitSell;
-        else if (slippagePercent.HasValue)
-            orderType = buyOrder ? Order.Types.SlippageMarketBuy : Order.Types.SlippageMarketSell;
-        else
-            orderType = buyOrder ? Order.Types.TrueMarketBuy : Order.Types.TrueMarketSell;
-
-        // Round buy budget for TrueMarketBuy orders
-        if (orderType == Order.Types.TrueMarketBuy)
-            buyBudget = CurrencyHelper.RoundMoney(buyBudget!.Value, currency);
-        else buyBudget = null; // For safety
+        // §3.6 decomposition: set the three dimensions. Budget applies only to an uncapped market
+        // buy (true market); a limit or slippage-capped market carries none.
+        var entry = limitOrder ? EntryType.Limit : EntryType.Market;
+        decimal? budget = (entry == EntryType.Market && buyOrder && !slippagePercent.HasValue)
+            ? CurrencyHelper.RoundMoney(buyBudget!.Value, currency)
+            : null;
 
         return new Order
         {
@@ -226,9 +217,11 @@ public sealed class OrderEntryService : IOrderEntryService
             Quantity = quantity,
             Price = CurrencyHelper.RoundMoney(price, currency),
             SlippagePercent = slippagePercent,
-            BuyBudget = buyBudget,
+            BuyBudget = budget,
             CurrencyType = currency,
-            OrderType = orderType,
+            Side = buyOrder ? OrderSide.Buy : OrderSide.Sell,
+            Entry = entry,
+            Stop = StopKind.None,
         };
     }
     #endregion

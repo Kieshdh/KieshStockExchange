@@ -89,16 +89,17 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
     }
 
     private static PlaceOrderRequest OrderToPlaceRequest(Order o)
-    {
-        var type = o.OrderType;
-        return new PlaceOrderRequest(
+        => new(
             UserId: o.UserId,
             StockId: o.StockId,
             Quantity: o.Quantity,
-            Type: type,
+            Side: o.Side,
+            Entry: o.Entry,
+            Stop: o.Stop,
             Currency: o.CurrencyType,
-            Price: o.IsLimitOrder ? o.Price : null,
+            // Limit (incl. stop-limit) and a capped market carry a Price/anchor; true market does not.
+            Price: o.Entry == EntryType.Limit ? o.Price : (o.SlippagePercent.HasValue ? o.Price : (decimal?)null),
             SlippagePct: o.SlippagePercent,
-            BuyBudget: o.BuyBudget);
-    }
+            BuyBudget: o.BuyBudget,
+            StopPrice: o.StopPrice);
 }

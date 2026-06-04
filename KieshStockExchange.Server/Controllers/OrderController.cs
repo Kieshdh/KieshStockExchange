@@ -119,24 +119,36 @@ public sealed class OrderController : ControllerBase
         if (req is null) return BadRequest();
         if (User.GetUserId() is not int caller) return Forbid();
         if (req.UserId != caller) return Forbid();
-        var result = req.Type switch
+        // §3.6 decomposition: map the (Stop, Entry, Side) combination — plus a slippage cap on a
+        // market entry — to the matching named entry method. Trailing (Stop == Trailing) is P3.
+        var result = (req.Stop, req.Entry, req.Side) switch
         {
-            "LimitBuy"            => await _entry.PlaceLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
-            "LimitSell"           => await _entry.PlaceLimitSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
-            "SlippageMarketBuy"   => await _entry.PlaceSlippageMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.SlippagePct ?? 0m, req.Currency, ct),
-            "SlippageMarketSell"  => await _entry.PlaceSlippageMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.SlippagePct ?? 0m, req.Currency, ct),
-            "TrueMarketBuy"       => await _entry.PlaceTrueMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.BuyBudget ?? 0m, req.Currency, ct),
-            "TrueMarketSell"      => await _entry.PlaceTrueMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.Currency, ct),
-            "StopMarketBuy"       => await _entry.PlaceStopMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.BuyBudget ?? 0m, req.Currency, ct),
-            "StopMarketSell"      => await _entry.PlaceStopMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Currency, ct),
-            "StopLimitBuy"        => await _entry.PlaceStopLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
-            "StopLimitSell"       => await _entry.PlaceStopLimitSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
+            (StopKind.None, EntryType.Limit, OrderSide.Buy)
+                => await _entry.PlaceLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
+            (StopKind.None, EntryType.Limit, OrderSide.Sell)
+                => await _entry.PlaceLimitSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
+            (StopKind.None, EntryType.Market, OrderSide.Buy)
+                => req.SlippagePct.HasValue
+                    ? await _entry.PlaceSlippageMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.SlippagePct.Value, req.Currency, ct)
+                    : await _entry.PlaceTrueMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.BuyBudget ?? 0m, req.Currency, ct),
+            (StopKind.None, EntryType.Market, OrderSide.Sell)
+                => req.SlippagePct.HasValue
+                    ? await _entry.PlaceSlippageMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.SlippagePct.Value, req.Currency, ct)
+                    : await _entry.PlaceTrueMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.Currency, ct),
+            (StopKind.Stop, EntryType.Market, OrderSide.Buy)
+                => await _entry.PlaceStopMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.BuyBudget ?? 0m, req.Currency, ct),
+            (StopKind.Stop, EntryType.Market, OrderSide.Sell)
+                => await _entry.PlaceStopMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Currency, ct),
+            (StopKind.Stop, EntryType.Limit, OrderSide.Buy)
+                => await _entry.PlaceStopLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
+            (StopKind.Stop, EntryType.Limit, OrderSide.Sell)
+                => await _entry.PlaceStopLimitSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
             _ => null!
         };
         if (result is null)
         {
-            _logger.LogWarning("Place: unknown order type {Type}", req.Type);
-            return BadRequest($"Unknown order type: {req.Type}");
+            _logger.LogWarning("Place: unsupported order ({Side},{Entry},{Stop})", req.Side, req.Entry, req.Stop);
+            return BadRequest($"Unsupported order combination: {req.Side}/{req.Entry}/{req.Stop}");
         }
 
         // Resting/failed placement notification (fills are notified by the engine's

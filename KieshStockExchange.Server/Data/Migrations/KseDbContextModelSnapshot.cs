@@ -309,7 +309,7 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("OrderType")
+                    b.Property<string>("Entry")
                         .IsRequired()
                         .HasColumnType("text");
 
@@ -318,6 +318,10 @@ namespace KieshStockExchange.Server.Data.Migrations
 
                     b.Property<int>("Quantity")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Side")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<decimal?>("SlippagePercent")
                         .HasColumnType("numeric(20,10)");
@@ -329,7 +333,20 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<int>("StockId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Stop")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<decimal?>("StopPrice")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<bool?>("TrailIsPercent")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal?>("TrailOffset")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal?>("TrailWatermark")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<DateTime>("UpdatedAt")
