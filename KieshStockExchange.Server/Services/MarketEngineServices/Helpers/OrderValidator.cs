@@ -152,14 +152,13 @@ public sealed class OrderValidator : IOrderValidator
                 return OrderResultFactory.InvalidParams("Slippage market order cannot have BuyBudget.");
         }
 
-        // §3.6 P2 stop orders. StopMarket fires as a market order (Price 0 + BuyBudget for
-        // buys); StopLimit fires as a limit order (positive Price). Both need a positive
-        // StopPrice and no slippage. Direction sanity (sell-stop below / buy-stop above the
-        // live price) is enforced at the arm entry point, which has the quote.
+        // §3.6 stop orders, validated like their promotion target. StopLimit → limit
+        // (positive Price, no slippage). StopMarket → market: either a slippage-capped market
+        // (SlippagePercent set + a positive anchor Price) or a true market (Price 0). Buys
+        // fund an uncapped market from BuyBudget; sells/limits/capped markets carry none. All
+        // need a positive StopPrice. Direction sanity is enforced at the arm entry point.
         if (order.IsStopOrder)
         {
-            if (order.SlippagePercent.HasValue)
-                return OrderResultFactory.InvalidParams("Stop order cannot have slippage.");
             if (!order.StopPrice.HasValue || order.StopPrice.Value <= 0m)
                 return OrderResultFactory.InvalidParams("Stop order requires a positive stop price.");
             if (NotionalOverflows(order.StopPrice.Value, order.Quantity))
@@ -167,6 +166,8 @@ public sealed class OrderValidator : IOrderValidator
 
             if (order.IsStopLimitOrder)
             {
+                if (order.SlippagePercent.HasValue)
+                    return OrderResultFactory.InvalidParams("Stop-limit order cannot have slippage.");
                 if (order.Price <= 0m)
                     return OrderResultFactory.InvalidParams("Stop-limit requires a positive limit price.");
                 if (order.BuyBudget.HasValue)
@@ -174,12 +175,25 @@ public sealed class OrderValidator : IOrderValidator
             }
             else // StopMarket
             {
-                if (order.Price != 0m)
-                    return OrderResultFactory.InvalidParams("StopMarket must have Price = 0.");
-                if (order.IsBuyOrder && (!order.BuyBudget.HasValue || order.BuyBudget.Value <= 0m))
-                    return OrderResultFactory.InvalidParams("BuyBudget is required for StopMarket BUY orders and must be > 0.");
-                if (order.IsSellOrder && order.BuyBudget.HasValue)
-                    return OrderResultFactory.InvalidParams("StopMarket SELL orders cannot have BuyBudget.");
+                if (order.SlippagePercent.HasValue)
+                {
+                    // Slippage-capped stop-market: needs a positive anchor Price and a 0–100% cap.
+                    if (order.Price <= 0m)
+                        return OrderResultFactory.InvalidParams("Capped StopMarket requires a positive anchor price.");
+                    if (order.SlippagePercent.Value < 0m || order.SlippagePercent.Value > 100m)
+                        return OrderResultFactory.InvalidParams("Slippage percent must be between 0 and 100%.");
+                    if (order.BuyBudget.HasValue)
+                        return OrderResultFactory.InvalidParams("Capped StopMarket order cannot have BuyBudget.");
+                }
+                else // true (uncapped) market stop
+                {
+                    if (order.Price != 0m)
+                        return OrderResultFactory.InvalidParams("StopMarket must have Price = 0.");
+                    if (order.IsBuyOrder && (!order.BuyBudget.HasValue || order.BuyBudget.Value <= 0m))
+                        return OrderResultFactory.InvalidParams("BuyBudget is required for StopMarket BUY orders and must be > 0.");
+                    if (order.IsSellOrder && order.BuyBudget.HasValue)
+                        return OrderResultFactory.InvalidParams("StopMarket SELL orders cannot have BuyBudget.");
+                }
             }
         }
 
