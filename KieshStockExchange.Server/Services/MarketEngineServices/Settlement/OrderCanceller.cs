@@ -53,7 +53,9 @@ internal sealed class OrderCanceller
         var dbOrder = await _db.GetOrderById(order.OrderId, ct).ConfigureAwait(false)
                      ?? throw new InvalidOperationException($"Order #{order.OrderId} not found.");
 
-        if (!dbOrder.IsOpen)
+        // §3.6 P2: an armed (Pending) stop is live — route it through the main cancel path
+        // below (mark Cancelled + release its arm reservation), not the "closed elsewhere" branch.
+        if (!dbOrder.IsOpen && !dbOrder.IsArmed)
         {
             if (order.IsOpen) order.Cancel(); // sync in-memory
             // DB row was closed by another path (fill, peer cancel) but this in-memory
@@ -72,7 +74,7 @@ internal sealed class OrderCanceller
         dbOrder.Cancel();
         await _db.UpdateOrder(dbOrder, ct).ConfigureAwait(false);
 
-        if (order.IsOpen) order.Cancel();
+        if (order.IsOpen || order.IsArmed) order.Cancel();
 
         // Release + persist so DB-backed Available* drops without waiting for full refresh
         await ReleaseSellReservationAndPersist(order, ct).ConfigureAwait(false);

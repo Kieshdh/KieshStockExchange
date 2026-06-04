@@ -8,20 +8,26 @@ public static class ReservationMath
 {
     internal static bool IsTrueMarketBuy(Order o) => o.OrderType == Order.Types.TrueMarketBuy;
 
-    /// <summary> Per-unit reservation. 0 for non-buys and TrueMarketBuy (flat budget). </summary>
+    // §3.6 P2: budget-funded buys reserve a flat BuyBudget rather than price×qty. A
+    // StopMarketBuy promotes to TrueMarketBuy, so while armed it reserves the same way.
+    internal static bool IsBudgetBuy(Order o) =>
+        o.OrderType is Order.Types.TrueMarketBuy or Order.Types.StopMarketBuy;
+
+    /// <summary> Per-unit reservation. 0 for non-buys and budget buys (flat budget). </summary>
     internal static decimal ReservationPerUnit(Order o)
     {
         if (!o.IsBuyOrder) return 0m;
-        if (o.IsLimitOrder) return o.Price;
+        // StopLimitBuy reserves at its limit Price, like a LimitBuy (it promotes to one).
+        if (o.IsLimitOrder || o.OrderType == Order.Types.StopLimitBuy) return o.Price;
         if (o.IsSlippageOrder && o.PriceWithSlippage.HasValue) return o.PriceWithSlippage.Value;
-        return 0m; // TrueMarketBuy: per-fill reserves directly from BuyBudget
+        return 0m; // budget buys: per-fill reserves directly from BuyBudget
     }
 
-    /// <summary> Place-time reservation: per-unit × Quantity, or full BuyBudget for TrueMarketBuy. </summary>
+    /// <summary> Place-time reservation: per-unit × Quantity, or full BuyBudget for budget buys. </summary>
     internal static decimal InitialBuyReservation(Order o)
     {
         if (!o.IsBuyOrder) return 0m;
-        if (IsTrueMarketBuy(o)) return o.BuyBudget ?? 0m;
+        if (IsBudgetBuy(o)) return o.BuyBudget ?? 0m;
         return CurrencyHelper.Notional(ReservationPerUnit(o), o.Quantity, o.CurrencyType);
     }
 
@@ -29,7 +35,7 @@ public static class ReservationMath
     internal static decimal RemainingBuyReservation(Order o)
     {
         if (!o.IsBuyOrder) return 0m;
-        if (IsTrueMarketBuy(o)) return o.BuyBudget ?? 0m;
+        if (IsBudgetBuy(o)) return o.BuyBudget ?? 0m;
         return CurrencyHelper.Notional(ReservationPerUnit(o), o.RemainingQuantity, o.CurrencyType);
     }
 

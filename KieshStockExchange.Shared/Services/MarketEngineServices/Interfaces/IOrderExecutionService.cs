@@ -5,6 +5,15 @@ namespace KieshStockExchange.Services.MarketEngineServices.Interfaces;
 public interface IOrderExecutionService
 {
     Task<OrderResult> PlaceAndMatchAsync(Order incoming, CancellationToken ct = default);
+
+    /// <summary>§3.6 P2: reserve + persist a stop order in the armed (Pending) state without
+    /// matching. The caller registers it with the trigger watcher on success.</summary>
+    Task<OrderResult> ArmStopAsync(Order incoming, CancellationToken ct = default);
+
+    /// <summary>§3.6 P2: promote an armed stop (by id) to its active type and match it. The
+    /// arm-time reservation is reused — no re-reserve, no re-insert.</summary>
+    Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default);
+
     Task<OrderResult> CancelOrderAsync(int orderId, CancellationToken ct = default);
     Task<OrderResult> ModifyOrderAsync(int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default);

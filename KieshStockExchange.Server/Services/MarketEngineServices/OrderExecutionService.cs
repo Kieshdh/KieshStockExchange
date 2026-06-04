@@ -82,6 +82,17 @@ public sealed class OrderExecutionService : IOrderExecutionService
         var reserveError = await _settlement.SettleOrderAsync(incoming, ct).ConfigureAwait(false);
         if (reserveError != null) return reserveError;
 
+        return await MatchAndSettleAsync(incoming, ct).ConfigureAwait(false);
+    }
+
+    // §3.6 P2: the post-reserve match + settle body, shared by normal placement and stop
+    // promotion. The caller MUST have already reserved + persisted `incoming` — SettleOrderAsync
+    // inserts+reserves for a new order; stop promotion flips the armed order's type + UpdateOrder
+    // while its arm-time reservation is still held. This method neither reserves nor inserts; it
+    // only matches, settles, and publishes. (Risk #4: re-calling PlaceAndMatchAsync to promote
+    // would double-reserve and double-insert.)
+    public async Task<OrderResult> MatchAndSettleAsync(Order incoming, CancellationToken ct = default)
+    {
         // Matching & settlement under book lock
         List<Transaction> trades = new();
         HashSet<int>? affectedUsers = null;
@@ -213,6 +224,47 @@ public sealed class OrderExecutionService : IOrderExecutionService
             _orderCache.NotifyOrdersMutated(affectedUsers);
 
         return OrderResultFactory.Success(incoming, trades);
+    }
+
+    // §3.6 P2: arm a stop — reserve (shares for a sell-stop, cash/budget for a buy-stop) and
+    // persist it Pending WITHOUT matching. SettleOrderAsync does the reserve + insert + registry
+    // register; the order never touches the book. The caller (OrderEntryService) registers it
+    // with the trigger watcher on success.
+    public async Task<OrderResult> ArmStopAsync(Order incoming, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var validationError = _validator.ValidateNew(incoming);
+        if (validationError != null) return validationError;
+        if (!incoming.IsStopOrder)
+            return OrderResultFactory.InvalidParams("ArmStopAsync requires a stop order.");
+
+        incoming.Arm(); // Status = Pending before SettleOrderAsync inserts it
+
+        // Reserves shares (sell-stop) or cash/budget (buy-stop) and persists the Pending row.
+        var reserveError = await _settlement.SettleOrderAsync(incoming, ct).ConfigureAwait(false);
+        if (reserveError != null) return reserveError;
+
+        _orderCache.NotifyOrdersMutated(new[] { incoming.UserId });
+        return OrderResultFactory.Success(incoming, new List<Transaction>());
+    }
+
+    // §3.6 P2: promote an armed stop to its active type and run it through the shared
+    // match/settle body. The arm-time reservation is already held by the canonical registry
+    // instance, so this does NOT reserve — it flips the type, persists the flip, and matches.
+    public async Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        Order? order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
+        if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+        // Canonical instance carries the live arm reservation; a fresh DB copy has zeros.
+        if (_registry.TryGet(order.OrderId, out var canon)) order = canon;
+        if (!order.IsArmed || !order.IsStopOrder)
+            return OrderResultFactory.InvalidParams("Order is not an armed stop.");
+
+        order.PromoteStop();                                   // Pending->Open, StopX->active type
+        await _db.UpdateOrder(order, ct).ConfigureAwait(false); // persist the flip; reservation already held
+        return await MatchAndSettleAsync(order, ct).ConfigureAwait(false);
     }
 
     public async Task<OrderResult> CancelOrderAsync(int orderId, CancellationToken ct = default)

@@ -152,6 +152,37 @@ public sealed class OrderValidator : IOrderValidator
                 return OrderResultFactory.InvalidParams("Slippage market order cannot have BuyBudget.");
         }
 
+        // §3.6 P2 stop orders. StopMarket fires as a market order (Price 0 + BuyBudget for
+        // buys); StopLimit fires as a limit order (positive Price). Both need a positive
+        // StopPrice and no slippage. Direction sanity (sell-stop below / buy-stop above the
+        // live price) is enforced at the arm entry point, which has the quote.
+        if (order.IsStopOrder)
+        {
+            if (order.SlippagePercent.HasValue)
+                return OrderResultFactory.InvalidParams("Stop order cannot have slippage.");
+            if (!order.StopPrice.HasValue || order.StopPrice.Value <= 0m)
+                return OrderResultFactory.InvalidParams("Stop order requires a positive stop price.");
+            if (NotionalOverflows(order.StopPrice.Value, order.Quantity))
+                return OrderResultFactory.InvalidParams("Stop price is too large.");
+
+            if (order.IsStopLimitOrder)
+            {
+                if (order.Price <= 0m)
+                    return OrderResultFactory.InvalidParams("Stop-limit requires a positive limit price.");
+                if (order.BuyBudget.HasValue)
+                    return OrderResultFactory.InvalidParams("Stop-limit order cannot have BuyBudget.");
+            }
+            else // StopMarket
+            {
+                if (order.Price != 0m)
+                    return OrderResultFactory.InvalidParams("StopMarket must have Price = 0.");
+                if (order.IsBuyOrder && (!order.BuyBudget.HasValue || order.BuyBudget.Value <= 0m))
+                    return OrderResultFactory.InvalidParams("BuyBudget is required for StopMarket BUY orders and must be > 0.");
+                if (order.IsSellOrder && order.BuyBudget.HasValue)
+                    return OrderResultFactory.InvalidParams("StopMarket SELL orders cannot have BuyBudget.");
+            }
+        }
+
         if (order.IsInvalid) return OrderResultFactory.InvalidParams("Order is invalid.");
         return null;
     }
@@ -196,7 +227,8 @@ public sealed class OrderValidator : IOrderValidator
     public OrderResult? ValidateCancel(Order order)
     {
         if (order is null) return OrderResultFactory.InvalidParams("Order not found.");
-        if (!order.IsOpen) return OrderResultFactory.AlreadyClosed();
+        // An armed (Pending) stop is cancellable too — the user can pull it before it triggers.
+        if (!order.IsOpen && !order.IsArmed) return OrderResultFactory.AlreadyClosed();
 
         if (!_stock.TryGetById(order.StockId, out _))
             return OrderResultFactory.InvalidParams("Invalid stock ID.");
