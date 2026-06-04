@@ -58,6 +58,12 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
     public Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default)
         => throw new NotSupportedException("PromoteStopAsync is server-side (driven by StopTriggerWatcher).");
 
+    // §3.6 P3: a stop modify goes through the user-facing IOrderEntryService.ModifyStopAsync →
+    // /api/orders/{id}/modify-stop, not this execution surface. Mirrors ArmStop/PromoteStop.
+    public Task<OrderResult> ModifyStopAsync(int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
+        => throw new NotSupportedException("ModifyStopAsync is server-side; use IOrderEntryService.ModifyStopAsync.");
+
     public async Task<OrderResult> CancelOrderAsync(int orderId, CancellationToken ct = default)
     {
         // The HTTP endpoint takes userId; admin-path callers don't have it readily

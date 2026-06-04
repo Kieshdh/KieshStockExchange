@@ -54,6 +54,47 @@ public sealed class OrderEntryService : IOrderEntryService
         return denied ?? await _engine.ModifyOrderAsync(orderId, newQuantity, newPrice, ct).ConfigureAwait(false);
     }
 
+    // §3.6 P3: modify an armed stop's trigger / stop-limit price / quantity. Gate on ownership,
+    // enforce the same direction sanity as arm-time for a new StopPrice (the engine validator stays
+    // structural), then re-index the trigger watcher so it fires at the new level.
+    public async Task<OrderResult> ModifyStopAsync(int userId, int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
+    {
+        var order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
+        if (order is null || order.UserId != userId)
+            return OrderResultFactory.InvalidParams("Order not found.");
+
+        // Direction sanity for a new trigger (mirrors ArmStopOrderAsync): a sell-stop sits
+        // at/below market, a buy-stop at/above. Skipped when no live price is available.
+        if (newStopPrice.HasValue)
+        {
+            decimal market = _data.Quotes.TryGetValue((order.StockId, order.CurrencyType), out var q) && q.LastPrice > 0m
+                ? q.LastPrice
+                : await _data.GetLastPriceAsync(order.StockId, order.CurrencyType, ct).ConfigureAwait(false);
+            if (market > 0m)
+            {
+                if (order.IsBuyOrder && newStopPrice.Value < market)
+                    return OrderResultFactory.InvalidParams(
+                        $"Buy-stop must be at or above the market price ({CurrencyHelper.Format(market, order.CurrencyType)}).");
+                if (order.IsSellOrder && newStopPrice.Value > market)
+                    return OrderResultFactory.InvalidParams(
+                        $"Sell-stop must be at or below the market price ({CurrencyHelper.Format(market, order.CurrencyType)}).");
+            }
+        }
+
+        var result = await _engine.ModifyStopAsync(orderId, newQuantity, newStopPrice, newLimitPrice, ct).ConfigureAwait(false);
+
+        // Re-index the watcher (disarm old snapshot + arm the updated trigger) so it fires at the
+        // new StopPrice. Re-read the persisted order so Arm caches the fresh StopPrice/IsBuy.
+        if (result.PlacedSuccessfully)
+        {
+            var updated = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
+            _stopWatcher.Disarm(orderId);
+            if (updated is { IsArmed: true }) _stopWatcher.Arm(updated);
+        }
+        return result;
+    }
+
     // The engine cancels/modifies purely by orderId and is shared with system callers,
     // so it can't tell whose order it is. This is the user-facing entry, so gate here:
     // reject anything the caller doesn't own as a uniform "not found" — never reveal

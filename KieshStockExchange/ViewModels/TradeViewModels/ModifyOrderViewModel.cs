@@ -56,6 +56,13 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
     [ObservableProperty] private string _priceString = string.Empty;
     [ObservableProperty] private string _quantityString = string.Empty;
 
+    // §3.6 P3: a stop's primary price field is its trigger (StopPrice); a stop-limit also exposes
+    // a separate limit-price field. PriceFieldLabel relabels the first field accordingly.
+    [ObservableProperty] private bool _isStopOrder;
+    [ObservableProperty] private bool _isStopLimit;
+    [ObservableProperty] private string _priceFieldLabel = "Limit price";
+    [ObservableProperty] private string _limitPriceString = string.Empty;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasError))]
     private string _errorMessage = string.Empty;
@@ -111,7 +118,11 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         Summary = string.Empty;
         SideTypeChip = string.Empty;
         IsBuyOrder = false;
+        IsStopOrder = false;
+        IsStopLimit = false;
+        PriceFieldLabel = "Limit price";
         PriceString = string.Empty;
+        LimitPriceString = string.Empty;
         QuantityString = string.Empty;
         ErrorMessage = string.Empty;
     }
@@ -123,9 +134,20 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         Summary = $"#{order.OrderId}  {order.SideDisplay} {order.Quantity} @ {order.PriceDisplay}";
         SideTypeChip = $"{order.SideDisplay} · {order.TypeDisplay}";
         IsBuyOrder = order.IsBuyOrder;
+        IsStopOrder = order.IsStopOrder;
+        IsStopLimit = order.IsStopLimitOrder;
+        PriceFieldLabel = order.IsStopOrder ? "Stop price" : "Limit price";
 
-        var seedPrice = prefillPrice is decimal p && p > 0m ? p : order.Price;
+        // The primary (draggable) field is the trigger for a stop, the limit price otherwise.
+        // The chart line for a stop is drawn at StopPrice, so a drag-derived prefill is the
+        // new trigger; both paths therefore seed PriceString consistently.
+        var basePrice = order.IsStopOrder ? (order.StopPrice ?? order.Price) : order.Price;
+        var seedPrice = prefillPrice is decimal p && p > 0m ? p : basePrice;
         PriceString    = CurrencyHelper.FormatForEdit(seedPrice, order.CurrencyType);
+        // A stop-limit's separate limit price (not draggable); blank for everything else.
+        LimitPriceString = order.IsStopLimitOrder
+            ? CurrencyHelper.FormatForEdit(order.Price, order.CurrencyType)
+            : string.Empty;
         QuantityString = order.Quantity.ToString();
         ErrorMessage   = string.Empty;
     }
@@ -136,9 +158,9 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         if (IsBusy || TargetOrder is null) return;
         ErrorMessage = string.Empty;
 
-        var (newPrice, newQty, validationError) = ValidateInputs(TargetOrder);
+        var (newPrice, newLimitPrice, newQty, validationError) = ValidateInputs(TargetOrder);
         if (validationError is not null) { ErrorMessage = validationError; return; }
-        if (newPrice is null && newQty is null)
+        if (newPrice is null && newLimitPrice is null && newQty is null)
         {
             // No change — leave edit mode silently rather than confirming a no-op.
             _editService.EndEdit();
@@ -148,8 +170,13 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         IsBusy = true;
         try
         {
-            var result = await _orders.ModifyOrderAsync(_auth.CurrentUserId,
-                TargetOrder.OrderId, newQty, newPrice).ConfigureAwait(false);
+            // §3.6 P3: for an armed stop the primary field is the trigger and there may be a
+            // separate limit price; route to ModifyStopAsync. Plain orders go to ModifyOrderAsync.
+            var result = TargetOrder.IsStopOrder
+                ? await _orders.ModifyStopAsync(_auth.CurrentUserId,
+                    TargetOrder.OrderId, newQty, newStopPrice: newPrice, newLimitPrice: newLimitPrice).ConfigureAwait(false)
+                : await _orders.ModifyOrderAsync(_auth.CurrentUserId,
+                    TargetOrder.OrderId, newQty, newPrice).ConfigureAwait(false);
 
             _logger.LogInformation("Modify order #{OrderId}: {Status}",
                 TargetOrder.OrderId, result.Status);
@@ -181,31 +208,51 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
     [RelayCommand]
     private void Cancel() => _editService.EndEdit();
 
-    private (decimal? NewPrice, int? NewQty, string? Error) ValidateInputs(Order order)
+    // Returns the changed values (null = unchanged). For a stop, NewPrice is the new trigger and
+    // NewLimitPrice the new stop-limit price; for a plain order, NewPrice is the new limit price
+    // and NewLimitPrice is always null.
+    private (decimal? NewPrice, decimal? NewLimitPrice, int? NewQty, string? Error) ValidateInputs(Order order)
     {
         decimal? newPrice = null;
+        decimal? newLimitPrice = null;
         int? newQty = null;
 
+        // The primary field compares against the trigger for a stop, the limit price otherwise.
+        var primaryBase = order.IsStopOrder ? (order.StopPrice ?? 0m) : order.Price;
         var trimmed = (PriceString ?? string.Empty).Trim();
         if (!string.IsNullOrEmpty(trimmed))
         {
             var parsed = CurrencyHelper.Parse(trimmed, order.CurrencyType);
             if (!parsed.HasValue || parsed.Value <= 0m)
-                return (null, null, "Enter a valid positive price.");
+                return (null, null, null, order.IsStopOrder ? "Enter a valid positive stop price." : "Enter a valid positive price.");
 
-            if (parsed.Value != order.Price)
+            if (parsed.Value != primaryBase)
                 newPrice = parsed.Value;
         }
 
+        // Stop-limit's separate limit-price field.
+        if (order.IsStopLimitOrder)
+        {
+            var limTrimmed = (LimitPriceString ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(limTrimmed))
+            {
+                var parsedLim = CurrencyHelper.Parse(limTrimmed, order.CurrencyType);
+                if (!parsedLim.HasValue || parsedLim.Value <= 0m)
+                    return (null, null, null, "Enter a valid positive limit price.");
+                if (parsedLim.Value != order.Price)
+                    newLimitPrice = parsedLim.Value;
+            }
+        }
+
         if (!int.TryParse(QuantityString, out var q) || q <= 0)
-            return (null, null, "Enter a valid positive quantity.");
+            return (null, null, null, "Enter a valid positive quantity.");
 
         if (q < order.AmountFilled)
-            return (null, null, $"Quantity must be ≥ filled amount ({order.AmountFilled}).");
+            return (null, null, null, $"Quantity must be ≥ filled amount ({order.AmountFilled}).");
 
         if (q != order.Quantity) newQty = q;
 
-        return (newPrice, newQty, null);
+        return (newPrice, newLimitPrice, newQty, null);
     }
 
     public void Dispose() => _editService.PropertyChanged -= OnEditServiceChanged;

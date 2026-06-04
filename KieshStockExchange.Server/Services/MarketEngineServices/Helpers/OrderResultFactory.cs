@@ -126,5 +126,17 @@ public static class OrderResultFactory
                                                : "Order fully filled after modification."
         };
     }
+
+    /// <summary>
+    /// §3.6 P3: an armed stop was modified in place (off-book, nothing matched). Its status
+    /// stays Pending, so the fill-based <see cref="Modified"/> status logic doesn't apply —
+    /// report a plain Success.
+    /// </summary>
+    public static OrderResult ModifiedStop(Order order) => new()
+    {
+        PlacedOrder = order,
+        Status = OrderStatus.Success,
+        SuccessMessage = "Stop order modified."
+    };
     #endregion
 }

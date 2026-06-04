@@ -25,5 +25,13 @@ public sealed record ModifyOrderRequest(
     int? Quantity,
     decimal? Price);
 
+// §3.6 P3: HTTP body for /api/orders/{id}/modify-stop. Modifies an armed stop's trigger
+// (StopPrice), its stop-limit price (LimitPrice, stop-limit only), and/or its quantity.
+public sealed record ModifyStopRequest(
+    int UserId,
+    int? Quantity,
+    decimal? StopPrice,
+    decimal? LimitPrice);
+
 public sealed record CancelBatchRequest(
     IReadOnlyList<int> OrderIds);

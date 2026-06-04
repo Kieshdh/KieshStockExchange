@@ -27,4 +27,8 @@ public interface ISettlementEngine
 
     /// <summary> Update price/quantity on an existing open order </summary>
     Task ApplyOrderChangeAsync(Order order, int? newQuantity, decimal? newPrice, CancellationToken ct = default);
+
+    /// <summary> §3.6 P3: update an armed stop's StopPrice / stop-limit price / quantity (off-book). </summary>
+    Task ApplyStopChangeAsync(Order order, int? newQuantity, decimal? newStopPrice,
+        decimal? newLimitPrice, CancellationToken ct = default);
 }

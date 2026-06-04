@@ -56,11 +56,24 @@
                        HorizontalTextAlignment="End" />
             </VerticalStackLayout>
 
-            <!-- Limit price -->
+            <!-- Primary price field: limit price for a normal order, trigger price for a stop.
+                 The label flips via PriceFieldLabel (§3.6 P3). This is the field the chart drag
+                 tracks. -->
             <VerticalStackLayout Spacing="0">
-                <Label Text="Limit price"
+                <Label Text="{Binding PriceFieldLabel}"
                        Style="{StaticResource FormLabelStyle}" />
                 <Entry Text="{Binding PriceString, Mode=TwoWay}"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric"
+                       HorizontalTextAlignment="End" />
+            </VerticalStackLayout>
+
+            <!-- Stop-limit only: the separate limit price the stop promotes to (§3.6 P3). -->
+            <VerticalStackLayout Spacing="0"
+                                 IsVisible="{Binding IsStopLimit}">
+                <Label Text="Limit price"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding LimitPriceString, Mode=TwoWay}"
                        Style="{StaticResource FormEntryStyle}"
                        Keyboard="Numeric"
                        HorizontalTextAlignment="End" />

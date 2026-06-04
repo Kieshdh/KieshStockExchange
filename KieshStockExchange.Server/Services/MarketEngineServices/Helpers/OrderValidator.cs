@@ -18,6 +18,10 @@ public interface IOrderValidator
     /// <summary> Returns null when valid; otherwise an OrderResult explaining the failure. </summary>
     OrderResult? ValidateModify(Order order, int? newQty, decimal? newPrice);
 
+    /// <summary> §3.6 P3: validate a modify on an armed stop (StopPrice / stop-limit price / qty).
+    /// Returns null when valid; otherwise an OrderResult explaining the failure. </summary>
+    OrderResult? ValidateModifyStop(Order order, int? newQty, decimal? newStopPrice, decimal? newLimitPrice);
+
     /// <summary> Returns null when valid; otherwise an OrderResult explaining the failure. </summary>
     OrderResult? ValidateCancel(Order order);
 }
@@ -235,6 +239,54 @@ public sealed class OrderValidator : IOrderValidator
 
         if (order.IsInvalid) return OrderResultFactory.InvalidParams("Order is invalid.");
 
+        return null;
+    }
+
+    public OrderResult? ValidateModifyStop(Order order, int? newQty, decimal? newStopPrice, decimal? newLimitPrice)
+    {
+        if (order is null) return OrderResultFactory.InvalidParams("Order not found.");
+        // Only an armed (Pending) stop is modifiable here — once promoted it's a normal open
+        // order and goes through ValidateModify instead.
+        if (!order.IsArmed || !order.IsStopOrder)
+            return OrderResultFactory.InvalidParams("Only an armed stop can be modified.");
+        if (!_stock.TryGetById(order.StockId, out _))
+            return OrderResultFactory.InvalidParams("Invalid stock ID.");
+
+        if (newStopPrice.HasValue && newStopPrice.Value <= 0m)
+            return OrderResultFactory.InvalidParams("New stop price must be positive.");
+
+        // A limit price only applies to a stop-limit; reject it for a stop-market so a bad
+        // request can't silently set a meaningless field.
+        if (newLimitPrice.HasValue)
+        {
+            if (!order.IsStopLimitOrder)
+                return OrderResultFactory.InvalidParams("Only a stop-limit order has a limit price.");
+            if (newLimitPrice.Value <= 0m)
+                return OrderResultFactory.InvalidParams("New limit price must be positive.");
+        }
+
+        if (newQty.HasValue)
+        {
+            if (newQty.Value <= 0)
+                return OrderResultFactory.InvalidParams("New quantity must be positive.");
+            if (newQty.Value > MaxOrderQuantity)
+                return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
+        }
+
+        // Guard the reservation multiply for a buy-stop-limit (qty × limit price). The stop-price
+        // anchor is also bounded so a promoted/triggered notional can't overflow decimal.
+        var effQty = newQty ?? order.Quantity;
+        if (order.IsStopLimitOrder && order.IsBuyOrder)
+        {
+            var effLimit = newLimitPrice ?? order.Price;
+            if (NotionalOverflows(effLimit, effQty))
+                return OrderResultFactory.InvalidParams("Limit price is too large.");
+        }
+        var effStop = newStopPrice ?? order.StopPrice ?? 0m;
+        if (NotionalOverflows(effStop, effQty))
+            return OrderResultFactory.InvalidParams("Stop price is too large.");
+
+        if (order.IsInvalid) return OrderResultFactory.InvalidParams("Order is invalid.");
         return null;
     }
 

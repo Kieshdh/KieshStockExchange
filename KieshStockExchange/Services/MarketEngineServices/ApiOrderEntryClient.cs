@@ -76,6 +76,16 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
             ?? throw new InvalidOperationException("modify-order returned no body.");
     }
 
+    public async Task<OrderResult> ModifyStopAsync(int userId, int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"api/orders/{orderId}/modify-stop",
+            new ModifyStopRequest(userId, newQuantity, newStopPrice, newLimitPrice), ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<OrderResult>(ApiJsonOptions.Default, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("modify-stop returned no body.");
+    }
+
     public async Task<OrderResult> CancelOrderAsync(int userId, int orderId, CancellationToken ct = default)
     {
         var resp = await _http.PostAsync($"api/orders/{orderId}/cancel?userId={userId}", content: null, ct).ConfigureAwait(false);

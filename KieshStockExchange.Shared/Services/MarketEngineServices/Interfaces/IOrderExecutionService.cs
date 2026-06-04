@@ -18,6 +18,11 @@ public interface IOrderExecutionService
     Task<OrderResult> ModifyOrderAsync(int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default);
 
+    /// <summary>§3.6 P3: modify an armed (Pending) stop's StopPrice / stop-limit price / quantity
+    /// without touching the book. The reservation delta is applied under the user's gate.</summary>
+    Task<OrderResult> ModifyStopAsync(int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default);
+
     /// <summary>
     /// Places and matches multiple orders in one engine pass:
     /// one DB transaction for all order inserts, one per-book settlement transaction per stock.

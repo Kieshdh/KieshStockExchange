@@ -56,7 +56,12 @@ public static class ReservationMath
         if (IsTrueMarketBuy(o)) return o.BuyBudget ?? 0m; // budget is not modifiable
 
         decimal perUnit;
-        if (o.IsLimitOrder)
+        // §3.6 P3: an armed buy-stop-limit reserves at its limit Price (it promotes to a
+        // LimitBuy), but IsLimitOrder is false while Stop != None — so include it explicitly,
+        // matching how ReservationPerUnit/InitialBuyReservation already special-case StopLimitBuy.
+        // Without this, modifying an armed buy-stop-limit's qty/limit would compute a 0 reservation
+        // and release the whole hold.
+        if (o.IsLimitOrder || o.OrderType == Order.Types.StopLimitBuy)
             perUnit = newPrice ?? o.Price;
         else if (o.IsSlippageOrder && o.PriceWithSlippage.HasValue)
             perUnit = o.PriceWithSlippage.Value; // slippage upper bound isn't modified

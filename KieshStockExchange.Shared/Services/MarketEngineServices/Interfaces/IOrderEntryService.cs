@@ -8,6 +8,10 @@ public interface IOrderEntryService
     Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default);
 
+    // §3.6 P3: modify an armed stop's trigger / stop-limit price / quantity (off-book).
+    Task<OrderResult> ModifyStopAsync(int userId, int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default);
+
     Task<OrderResult> PlaceLimitBuyOrderAsync(int userId, int stockId, int quantity,
         decimal limitPrice, CurrencyType currency, CancellationToken ct = default);
 

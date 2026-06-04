@@ -433,6 +433,31 @@ public sealed class OrderExecutionService : IOrderExecutionService
         return OrderResultFactory.Modified(order, txs);
     }
 
+    // §3.6 P3: modify an armed stop off-book. No book lock, no match — an armed stop isn't on
+    // the book; StopModifier mutates StopPrice/limit/qty + the reservation delta under the user's
+    // gate. The caller (OrderEntryService) re-indexes the trigger watcher on success.
+    public async Task<OrderResult> ModifyStopAsync(int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        Order? order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
+        if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+
+        // Resolve to canonical so StopModifier sees the live arm-time reservation, not the zero
+        // on a freshly DB-loaded instance (mirrors CancelOrderAsync/ModifyOrderAsync).
+        await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
+        if (_registry.TryGet(order.OrderId, out var canon)) order = canon;
+
+        var validation = _validator.ValidateModifyStop(order, newQuantity, newStopPrice, newLimitPrice);
+        if (validation != null) return validation;
+
+        await _settlement.ApplyStopChangeAsync(order, newQuantity, newStopPrice, newLimitPrice, ct).ConfigureAwait(false);
+
+        _orderCache.NotifyOrdersMutated(new[] { order.UserId });
+        return OrderResultFactory.ModifiedStop(order);
+    }
+
     #endregion
 
     #region Batch Operations

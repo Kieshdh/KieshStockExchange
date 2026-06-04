@@ -166,6 +166,17 @@ public sealed class OrderController : ControllerBase
         return Ok(await _entry.ModifyOrderAsync(caller, id, req.Quantity, req.Price, ct));
     }
 
+    // §3.6 P3: modify an armed stop's trigger / stop-limit price / quantity (off-book).
+    [HttpPost("{id:int}/modify-stop")]
+    [EnableRateLimiting("orders")]
+    public async Task<ActionResult<OrderResult>> ModifyStop(int id, [FromBody] ModifyStopRequest req, CancellationToken ct)
+    {
+        if (req is null) return BadRequest();
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.UserId != caller) return Forbid();
+        return Ok(await _entry.ModifyStopAsync(caller, id, req.Quantity, req.StopPrice, req.LimitPrice, ct));
+    }
+
     [HttpPost("{id:int}/cancel")]
     [EnableRateLimiting("orders")]
     public async Task<ActionResult<OrderResult>> Cancel(int id, [FromQuery] int userId, CancellationToken ct)
