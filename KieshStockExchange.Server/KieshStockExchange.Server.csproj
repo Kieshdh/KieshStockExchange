@@ -37,4 +37,10 @@
     <ProjectReference Include="..\KieshStockExchange.Shared\KieshStockExchange.Shared.csproj" />
   </ItemGroup>
 
+  <!-- §3.6 P4: expose internal settlement helpers (SellerCapacityValidator, RejectedFill) to the
+       test project so the conservation-critical bracket-TP acceptance branch can be unit-tested. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="KieshStockExchange.Tests" />
+  </ItemGroup>
+
 </Project>
