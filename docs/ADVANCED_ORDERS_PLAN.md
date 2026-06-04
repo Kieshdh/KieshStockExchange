@@ -547,6 +547,15 @@ Render the user's own executed fills on the candle chart as small green (buy) / 
 
 Slot it whenever convenient after P3 — it has no dependency on P4/P5/P6 and no engine/DB change.
 
+## Backlog — from P1 manual testing (future, owner-requested 2026-06-04)
+
+- **Confirm/cancel popup dialogs.** The short-open / long→short-flip / marketable-limit warnings ship
+  first as inline text, but should become proper modal popups (clear text + Confirm / Cancel buttons)
+  so a risky order (opening a short, a limit that fills like a market) requires a deliberate confirm.
+- **Per-stock P/L in the portfolio.** Today there's no way to see a closed trade's P/L (e.g. a
+  buy-to-close). List every traded stock in the portfolio holdings with realized + unrealized P/L, as a
+  single P/L column that can switch timeframe (daily / all-time). Mirrors how brokers show position P/L.
+
 ## Invariants every patch holds
 - Lock order **book → per-user gates → DB tx** is sacrosanct; new dual-gate (short) acquisition uses
   one fixed global order; the watcher only promotes via the shared match path, never touches the book.
