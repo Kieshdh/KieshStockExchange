@@ -56,13 +56,15 @@ public sealed class BracketCoordinator : IBracketCoordinator
     private readonly IAccountsCache _accounts;
     private readonly IOrderRegistry _registry;
     private readonly IOrderBookEngine _books;
-    private readonly IStopWatcher _stopWatcher;
+    // Lazy to break the DI cycle StopTriggerWatcher → OrderExecutionService → BracketCoordinator →
+    // IStopWatcher(=StopTriggerWatcher). Only used at runtime (Arm/Disarm), never at construction.
+    private readonly Lazy<IStopWatcher> _stopWatcher;
     private readonly IReservationLedger _ledger;
     private readonly IOrderCacheService _orderCache;
     private readonly ILogger<BracketCoordinator> _logger;
 
     public BracketCoordinator(IDataBaseService db, IAccountsCache accounts, IOrderRegistry registry,
-        IOrderBookEngine books, IStopWatcher stopWatcher, IReservationLedger ledger,
+        IOrderBookEngine books, Lazy<IStopWatcher> stopWatcher, IReservationLedger ledger,
         IOrderCacheService orderCache, ILogger<BracketCoordinator> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -204,7 +206,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
                 slBefore, sl.CurrentSellReservedQty);
         }).ConfigureAwait(false);
 
-        if (sl.IsArmed) _stopWatcher.Arm(sl);
+        if (sl.IsArmed) _stopWatcher.Value.Arm(sl);
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
@@ -237,7 +239,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
                 if (held <= 0)
                 {
                     // Whole position exited via TPs — retire the SL.
-                    _stopWatcher.Disarm(sl.OrderId);
+                    _stopWatcher.Value.Disarm(sl.OrderId);
                     book.RemoveById(sl.OrderId);
                     sl.Status = Order.Statuses.Cancelled;
                     sl.UpdatedAt = TimeHelper.NowUtc();
@@ -283,6 +285,11 @@ public sealed class BracketCoordinator : IBracketCoordinator
         if (parent is null) return;
         var (_, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
 
+        // Held = what the parent acquired minus what the TPs already sold (the SL hasn't fired yet).
+        int held = parent.AmountFilled;
+        for (int i = 0; i < tps.Count; i++) held -= tps[i].AmountFilled;
+        if (held < 0) held = 0;
+
         await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
         {
             await using var gate = await _accounts
@@ -290,6 +297,15 @@ public sealed class BracketCoordinator : IBracketCoordinator
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
+                // Size the SL to the live held pool before it promotes (risk #4: a TP fill in the
+                // transient window may have dropped Position.ReservedQuantity below the SL's stale
+                // CSR — reconcile both so the promote sells exactly `held`, never more).
+                int slOver = sl.CurrentSellReservedQty - held;
+                if (slOver > 0) sl.ConsumeSellReservation(slOver);
+                sl.Quantity = sl.CurrentSellReservedQty + sl.AmountFilled;
+                sl.UpdatedAt = TimeHelper.NowUtc();
+                await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
+
                 // Cancel all open TP legs first (book-remove; they reserve nothing). The SL is still
                 // off-book (Pending) during this, so there's no double-sell window before it promotes.
                 for (int i = 0; i < tps.Count; i++)

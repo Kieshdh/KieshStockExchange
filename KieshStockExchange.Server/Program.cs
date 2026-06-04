@@ -205,6 +205,11 @@ builder.Services.AddSingleton<IUserPortfolioService, UserPortfolioService>();
 builder.Services.AddSingleton<IOrderExecutionService, OrderExecutionService>();
 builder.Services.AddSingleton<IOrderEntryService, OrderEntryService>();
 
+// §3.6 P4 bracket coordinator. Lazy<IStopWatcher> breaks the DI cycle
+// StopTriggerWatcher → OrderExecutionService → BracketCoordinator → IStopWatcher.
+builder.Services.AddSingleton<IBracketCoordinator, BracketCoordinator>();
+builder.Services.AddSingleton(sp => new Lazy<IStopWatcher>(sp.GetRequiredService<IStopWatcher>));
+
 // §3.6 P2 stop trigger watcher — one instance serving both the IStopWatcher arm/disarm
 // surface (used by OrderEntryService) and the IHostedService quote loop.
 builder.Services.AddSingleton<StopTriggerWatcher>();
@@ -350,6 +355,10 @@ if (builder.Configuration.GetValue("Seed:AutoOnEmptyDb", false))
 // this implicitly via MauiProgram lifecycle hooks; on the server we trigger it
 // here once at boot.
 await app.Services.GetRequiredService<IStockService>().EnsureLoadedAsync().ConfigureAwait(false);
+
+// §3.6 P4: rebuild the bracket-parent index from DB so brackets self-manage after a restart
+// (armed SL legs rehydrate via the stop-watcher cold-load; Attached children stay dormant).
+await app.Services.GetRequiredService<IBracketCoordinator>().RehydrateAsync().ConfigureAwait(false);
 
 // Boot-warm the chart's 7 candle resolutions across every (stock, supported
 // currency). The CandleService then aggregates every bot tick for these keys,

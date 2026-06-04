@@ -32,6 +32,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly IReservationLedger _ledger;
     private readonly IOrderRegistry _registry;
     private readonly IServerNotificationService _notifications;
+    private readonly IBracketCoordinator _bracket;
     private readonly ILogger<OrderExecutionService> _logger;
     // Caps concurrent per-group settlement txs so the fan-out can't exhaust the Npgsql pool.
     private readonly SemaphoreSlim _groupGate;
@@ -42,6 +43,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         IOrderCacheService orderCache, IReservationLedger ledger,
         IOrderRegistry registry,
         IServerNotificationService notifications,
+        IBracketCoordinator bracket,
         IConfiguration config,
         ILogger<OrderExecutionService> logger)
     {
@@ -56,6 +58,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _bracket = bracket ?? throw new ArgumentNullException(nameof(bracket));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _groupGate = new SemaphoreSlim(Math.Max(1, config.GetValue("Db:MaxConcurrentGroups", 24)));
     }
@@ -66,6 +69,44 @@ public sealed class OrderExecutionService : IOrderExecutionService
         var set = new HashSet<int>(ordersById.Count + 1) { taker.UserId };
         foreach (var o in ordersById.Values) set.Add(o.UserId);
         return set;
+    }
+
+    // §3.6 P4: after fills commit, drive the bracket coordinator (post-commit, outside the book
+    // lock). A long bracket's parent is a BUY (BuyOrderId in the fills) → grow the SL + arm covered
+    // TP legs; a bracket TP is a SELL (SellOrderId) → shrink the SL (OCO) + cancel-remainder. Hooks
+    // are best-effort + idempotent (recompute from state); a failure is logged loudly rather than
+    // unwinding an already-committed trade, and the reconciler/clamp (Step 0) is the safety net.
+    private async Task FireBracketHooksAsync(IReadOnlyList<Transaction> trades, CancellationToken ct)
+    {
+        if (trades is null || trades.Count == 0) return;
+
+        HashSet<int>? parentIds = null;
+        HashSet<int>? sellIds = null;
+        for (int i = 0; i < trades.Count; i++)
+        {
+            if (_bracket.IsBracketParent(trades[i].BuyOrderId)) (parentIds ??= new()).Add(trades[i].BuyOrderId);
+            (sellIds ??= new()).Add(trades[i].SellOrderId);
+        }
+
+        if (parentIds is not null)
+            foreach (var pid in parentIds)
+            {
+                var parent = _registry.TryGet(pid, out var pc) ? pc
+                            : await _db.GetOrderById(pid, ct).ConfigureAwait(false);
+                if (parent is null) continue;
+                try { await _bracket.OnParentFillAsync(parent, ct).ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogError(ex, "Bracket parent-fill hook failed for order #{Id}", pid); }
+            }
+
+        if (sellIds is not null)
+            foreach (var sid in sellIds)
+            {
+                var o = _registry.TryGet(sid, out var sc) ? sc
+                       : await _db.GetOrderById(sid, ct).ConfigureAwait(false);
+                if (o is null || !o.IsBracketChild || !o.IsLimitOrder) continue;
+                try { await _bracket.OnChildFillAsync(o, ct).ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogError(ex, "Bracket child-fill hook failed for order #{Id}", sid); }
+            }
     }
     #endregion
 
@@ -223,6 +264,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (affectedUsers is not null)
             _orderCache.NotifyOrdersMutated(affectedUsers);
 
+        await FireBracketHooksAsync(trades, ct).ConfigureAwait(false);
+
         return OrderResultFactory.Success(incoming, trades);
     }
 
@@ -265,6 +308,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (_registry.TryGet(order.OrderId, out var canon)) order = canon;
         if (!order.IsArmed || !order.IsStopOrder)
             return OrderResultFactory.InvalidParams("Order is not an armed stop.");
+
+        // §3.6 P4: a firing bracket SL must cancel its TP siblings (and size to the held pool)
+        // BEFORE it promotes, so there's no double-sell. The SL is still off-book here.
+        if (order.IsBracketChild)
+            await _bracket.OnStopFiringAsync(order, ct).ConfigureAwait(false);
 
         order.PromoteStop();                                   // Pending->Open, clears the Stop dimension
 
@@ -424,6 +472,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         if (affectedUsers is not null)
             _orderCache.NotifyOrdersMutated(affectedUsers);
+
+        await FireBracketHooksAsync(txs, ct).ConfigureAwait(false);
 
         if (trace)
             _logger.LogInformation(
@@ -776,6 +826,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
             await _marketData.OnTicksAsync(allFills, ct).ConfigureAwait(false);
             await _notifications.OnFillsAsync(allFills, ct).ConfigureAwait(false);
         }
+
+        await FireBracketHooksAsync(allFills, ct).ConfigureAwait(false);
 
         return results;
     }

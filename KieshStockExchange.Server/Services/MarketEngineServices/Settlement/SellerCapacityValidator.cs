@@ -30,6 +30,11 @@ internal sealed class SellerCapacityValidator
         var posExistsBySeller = new Dictionary<(int, int), bool>(trades.Count);
         // §3.6 P1: per sell order, is this a short-opening market sell (flat/short seller)?
         var shortByOrder = new Dictionary<int, bool>(trades.Count);
+        // §3.6 P4: per sell order, is this a bracket TP (limit sell whose shares are reserved on the
+        // Position by its sibling SL, not by itself)? And the per-position reserved pool those TP
+        // fills draw from, decremented per accepted fill so two TP fills in one batch can't over-draw.
+        var bracketTpByOrder = new Dictionary<int, bool>(trades.Count);
+        var bracketPoolBySeller = new Dictionary<(int, int), int>(trades.Count);
         var rejected = new List<RejectedFill>();
         var accepted = new List<Transaction>(trades.Count);
 
@@ -62,6 +67,40 @@ internal sealed class SellerCapacityValidator
             }
             if (isShort)
             {
+                accepted.Add(t);
+                continue;
+            }
+
+            // §3.6 P4 bracket TP: a resting limit sell whose ParentOrderId is set holds NO
+            // reservation of its own — its shares are reserved on the Position by the sibling SL
+            // (the shared pool). Accept it by drawing from a per-position pool seeded to
+            // Position.ReservedQuantity, decremented per accepted fill (risk #2: two TP fills in one
+            // batch can't over-draw the held position). TradeSettler's long-sell ConsumeReservedStock
+            // then drops Position.ReservedQuantity; the coordinator shrinks the SL post-commit.
+            if (!bracketTpByOrder.TryGetValue(t.SellOrderId, out var isBracketTp))
+            {
+                ordersById.TryGetValue(t.SellOrderId, out var tpo);
+                isBracketTp = tpo is not null && tpo.IsBracketChild && tpo.IsSellOrder && tpo.IsLimitOrder;
+                bracketTpByOrder[t.SellOrderId] = isBracketTp;
+            }
+            if (isBracketTp)
+            {
+                if (!bracketPoolBySeller.TryGetValue(sellerKey, out var pool))
+                {
+                    var bp = accounts.GetPosition(t.SellerId, t.StockId);
+                    if (bp is null) pendingNewPositions.TryGetValue(sellerKey, out bp);
+                    pool = bp?.ReservedQuantity ?? 0;
+                    bracketPoolBySeller[sellerKey] = pool;
+                }
+                if (pool < t.Quantity)
+                {
+                    rejected.Add(new RejectedFill(
+                        t, t.SellOrderId,
+                        $"Bracket TP for seller {t.SellerId} on stock {t.StockId}: " +
+                        $"reserved pool {pool} < needs {t.Quantity}."));
+                    continue;
+                }
+                bracketPoolBySeller[sellerKey] = pool - t.Quantity;
                 accepted.Add(t);
                 continue;
             }
