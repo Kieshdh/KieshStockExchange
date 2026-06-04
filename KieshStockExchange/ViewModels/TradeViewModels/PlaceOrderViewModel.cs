@@ -519,12 +519,18 @@ public partial class PlaceOrderViewModel : StockAwareViewModel
             var avail = UserPosition.AvailableQuantity;
             if (!Selected.HasSelectedStock || Quantity <= 0)
                 HintText = string.Empty;
+            else if (held < 0)
+                HintText = IsMarketSelected
+                    ? "Adds to your short position."
+                    : "Limit sells can't short yet — use a market order.";
             else if (held == 0)
                 HintText = IsMarketSelected
                     ? "Opens a cash-collateralized short position."
                     : "Limit sells can't short yet — use a market order.";
             else if (Quantity > avail)
-                HintText = $"You hold {held} (available {avail}). To short, sell your full holding first.";
+                // §3.6: the one-order long→short flip (mixed close+open) isn't supported yet (risk #7);
+                // sell to flat first, then short.
+                HintText = $"You hold {held} (available {avail}). To short, sell to flat first.";
             else
                 HintText = string.Empty;
         }

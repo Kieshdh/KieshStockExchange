@@ -96,7 +96,12 @@ internal sealed class OrderSettler
             // still persisted so the matcher can fill it. A partial holder (Quantity > 0
             // but < order qty) is NOT a short — it falls through to the rejection below
             // (P1 MVP disallows mixed close-long-and-open-short).
-            bool shortOpen = incoming.IsMarketOrder && (existing is null || existing.Quantity == 0);
+            // §3.6: a market sell by a flat OR already-short seller opens/extends a short (no share
+            // reservation — collateral is posted at fill). <=0 (not ==0) so adding to an existing short
+            // works; the SellerCapacityValidator + TradeSettler already gate on startQty <= 0 to match.
+            // (A partial long holder selling beyond their shares — the long→short flip — is still
+            // rejected here; that mixed close+open is risk #7, a separate change.)
+            bool shortOpen = incoming.IsMarketOrder && (existing is null || existing.Quantity <= 0);
             if (!shortOpen)
             {
             sellPos = existing;

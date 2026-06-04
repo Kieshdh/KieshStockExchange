@@ -22,16 +22,20 @@ public sealed class OrderController : ControllerBase
     private readonly IOrderExecutionService _execution;
     private readonly IServerNotificationService _notifications;
     private readonly ILogger<OrderController> _logger;
+    // §3.6: a dedicated "MarketEngine" category so the website log shows every HUMAN order operation
+    // (place / bracket / modify / cancel) distinctly from the bot flood and the framework noise.
+    private readonly ILogger _marketEngine;
 
     public OrderController(IDataBaseService db, IOrderEntryService entry,
         IOrderExecutionService execution, IServerNotificationService notifications,
-        ILogger<OrderController> logger)
+        ILogger<OrderController> logger, ILoggerFactory loggerFactory)
     {
         _db = db;
         _entry = entry;
         _execution = execution;
         _notifications = notifications;
         _logger = logger;
+        _marketEngine = loggerFactory.CreateLogger("MarketEngine");
     }
 
     // Read endpoints below expose orders across all users (admin tables) or write raw
@@ -151,6 +155,10 @@ public sealed class OrderController : ControllerBase
             return BadRequest($"Unsupported order combination: {req.Side}/{req.Entry}/{req.Stop}");
         }
 
+        _marketEngine.LogInformation(
+            "User {User} place {Side}/{Entry}/{Stop} qty {Qty} stock {Stock} {Ccy} → {Status}",
+            caller, req.Side, req.Entry, req.Stop, req.Quantity, req.StockId, req.Currency, result.Status);
+
         // Resting/failed placement notification (fills are notified by the engine's
         // OnFillsAsync). Human-gated inside the service; bots produce nothing.
         await _notifications.OnOrderResultAsync(result, caller, ct);
@@ -170,6 +178,9 @@ public sealed class OrderController : ControllerBase
         var result = await _entry.PlaceBracketAsync(req.UserId, req.StockId, req.Quantity, req.Entry,
             req.Currency, req.Price, req.BuyBudget, req.StopPrice, req.StopLimitPrice, req.StopSlippagePct,
             tps, ct);
+        _marketEngine.LogInformation(
+            "User {User} place BRACKET {Entry} qty {Qty} stock {Stock} {Ccy} SL {Stop} TPs {TpCount} → {Status}",
+            caller, req.Entry, req.Quantity, req.StockId, req.Currency, req.StopPrice, tps.Count, result.Status);
         await _notifications.OnOrderResultAsync(result, caller, ct);
         return Ok(result);
     }
@@ -180,7 +191,10 @@ public sealed class OrderController : ControllerBase
     {
         if (User.GetUserId() is not int caller) return Forbid();
         if (req.UserId != caller) return Forbid();
-        return Ok(await _entry.ModifyOrderAsync(caller, id, req.Quantity, req.Price, ct));
+        var result = await _entry.ModifyOrderAsync(caller, id, req.Quantity, req.Price, ct);
+        _marketEngine.LogInformation("User {User} modify order #{Id} qty {Qty} px {Px} → {Status}",
+            caller, id, req.Quantity, req.Price, result.Status);
+        return Ok(result);
     }
 
     // §3.6 P3: modify an armed stop's trigger / stop-limit price / quantity (off-book).
@@ -191,7 +205,10 @@ public sealed class OrderController : ControllerBase
         if (req is null) return BadRequest();
         if (User.GetUserId() is not int caller) return Forbid();
         if (req.UserId != caller) return Forbid();
-        return Ok(await _entry.ModifyStopAsync(caller, id, req.Quantity, req.StopPrice, req.LimitPrice, ct));
+        var result = await _entry.ModifyStopAsync(caller, id, req.Quantity, req.StopPrice, req.LimitPrice, ct);
+        _marketEngine.LogInformation("User {User} modify TRIGGER #{Id} trigger {Trigger} limit {Limit} qty {Qty} → {Status}",
+            caller, id, req.StopPrice, req.LimitPrice, req.Quantity, result.Status);
+        return Ok(result);
     }
 
     [HttpPost("{id:int}/cancel")]
@@ -200,7 +217,9 @@ public sealed class OrderController : ControllerBase
     {
         if (User.GetUserId() is not int caller) return Forbid();
         if (userId != caller) return Forbid();
-        return Ok(await _entry.CancelOrderAsync(caller, id, ct));
+        var result = await _entry.CancelOrderAsync(caller, id, ct);
+        _marketEngine.LogInformation("User {User} cancel order #{Id} → {Status}", caller, id, result.Status);
+        return Ok(result);
     }
 
     // Upper bound on a single user-initiated cancel batch — a person clearing their
