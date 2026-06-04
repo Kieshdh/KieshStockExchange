@@ -75,6 +75,38 @@ public sealed class OrderRegistry : IOrderRegistry
         return matches ?? (IReadOnlyList<Order>)Array.Empty<Order>();
     }
 
+    public IReadOnlyList<Order> GetArmedSellStopsForUser(int userId, int stockId)
+    {
+        List<Order>? matches = null;
+        foreach (var kv in _byId)
+        {
+            var o = kv.Value;
+            if (o.UserId != userId) continue;
+            if (!o.IsSellOrder) continue;
+            if (o.StockId != stockId) continue;
+            if (!o.IsArmed || !o.IsStopOrder) continue;
+            matches ??= new List<Order>();
+            matches.Add(o);
+        }
+        return matches ?? (IReadOnlyList<Order>)Array.Empty<Order>();
+    }
+
+    public IReadOnlyList<Order> GetArmedBuyStopsForUser(int userId, CurrencyType ccy)
+    {
+        List<Order>? matches = null;
+        foreach (var kv in _byId)
+        {
+            var o = kv.Value;
+            if (o.UserId != userId) continue;
+            if (!o.IsBuyOrder) continue;
+            if (o.CurrencyType != ccy) continue;
+            if (!o.IsArmed || !o.IsStopOrder) continue;
+            matches ??= new List<Order>();
+            matches.Add(o);
+        }
+        return matches ?? (IReadOnlyList<Order>)Array.Empty<Order>();
+    }
+
     public IEnumerable<Order> AllOrders()
     {
         // ConcurrentDictionary's enumerator is safe but doesn't observe a consistent

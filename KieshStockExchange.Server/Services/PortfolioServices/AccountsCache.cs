@@ -410,7 +410,9 @@ public sealed class AccountsCache : IAccountsCache
             if (o.IsBuyOrder && o.CurrentBuyReservation > 0m)
             {
                 var key = (o.UserId, o.CurrencyType);
-                if (o.IsOpen)
+                // §3.6 P4: an armed buy-stop reserves cash/budget at arm time but isn't IsOpen;
+                // count it (and the short-bracket SL) so its pooled reservation isn't read as phantom.
+                if (o.IsOpen || (o.IsArmed && o.IsStopOrder))
                 {
                     expectedBalByFund.TryGetValue(key, out var sum);
                     expectedBalByFund[key] = sum + o.CurrentBuyReservation;
@@ -439,7 +441,9 @@ public sealed class AccountsCache : IAccountsCache
             else if (o.IsSellOrder && o.CurrentSellReservedQty > 0)
             {
                 var key = (o.UserId, o.StockId);
-                if (o.IsOpen && o.IsLimitOrder)
+                // §3.6 P4: an armed sell-stop reserves shares on the Position at arm time but isn't
+                // IsOpen; count it (and a long-bracket SL's pooled reservation) so it isn't clamped away.
+                if ((o.IsOpen && o.IsLimitOrder) || (o.IsArmed && o.IsStopOrder))
                 {
                     expectedQtyByPos.TryGetValue(key, out var sum);
                     expectedQtyByPos[key] = sum + o.CurrentSellReservedQty;
@@ -589,6 +593,11 @@ public sealed class AccountsCache : IAccountsCache
         foreach (var o in _registry.GetOpenBuysForUser(userId, ccy))
             if (o.IsOpen && o.CurrentBuyReservation > 0m) expected += o.CurrentBuyReservation;
 
+        // §3.6 P4: include armed buy-stops (their cash/budget pool isn't IsOpen) so the clamp
+        // re-derives the SAME expectation the reconcile pass used and never erases the SL pool.
+        foreach (var o in _registry.GetArmedBuyStopsForUser(userId, ccy))
+            if (o.CurrentBuyReservation > 0m) expected += o.CurrentBuyReservation;
+
         // §3.6 P1 (risk #8): include short collateral held in this currency so the clamp
         // re-derives the SAME expectation the reconcile pass used and never erases collateral.
         foreach (var kv in _positions)
@@ -611,6 +620,11 @@ public sealed class AccountsCache : IAccountsCache
         int expected = 0;
         foreach (var o in _registry.GetOpenSellsForUser(userId, stockId))
             if (o.IsOpen && o.IsLimitOrder && o.CurrentSellReservedQty > 0) expected += o.CurrentSellReservedQty;
+
+        // §3.6 P4: include armed sell-stops (their share pool isn't IsOpen) so the clamp matches the
+        // reconcile pass and never zeros a standalone armed stop or a long-bracket SL's pooled hold.
+        foreach (var o in _registry.GetArmedSellStopsForUser(userId, stockId))
+            if (o.CurrentSellReservedQty > 0) expected += o.CurrentSellReservedQty;
 
         if (pos.ReservedQuantity <= expected) return;
         pos.ReservedQuantity = expected;

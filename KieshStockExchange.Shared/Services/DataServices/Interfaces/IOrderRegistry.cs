@@ -36,6 +36,16 @@ public interface IOrderRegistry
     IReadOnlyList<Order> GetOpenSellsForUser(int userId, int stockId);
 
     /// <summary>
+    /// §3.6 P4: armed (Pending) sell-stops for a user/stock, canonical refs. They reserve shares on
+    /// the Position at arm time but aren't <c>IsOpen</c>, so the reconciler/clamp must count them
+    /// explicitly or their pooled reservation reads as a phantom and gets clamped to zero.
+    /// </summary>
+    IReadOnlyList<Order> GetArmedSellStopsForUser(int userId, int stockId);
+
+    /// <summary>§3.6 P4: armed (Pending) buy-stops for a user/currency, canonical refs (fund side).</summary>
+    IReadOnlyList<Order> GetArmedBuyStopsForUser(int userId, CurrencyType ccy);
+
+    /// <summary>
     /// Snapshot enumeration over all registered orders. Used by the reconciler to name
     /// offending closed orders that still hold a CurrentReservation.
     /// </summary>
