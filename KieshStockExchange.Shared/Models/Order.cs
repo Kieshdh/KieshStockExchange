@@ -342,6 +342,9 @@ public class Order : IValidatable
     public bool IsCancelled => Status == Statuses.Cancelled;
     // Terminal only — Pending (armed) is NOT closed, so retention/registry cleanup leave it be.
     public bool IsClosed => IsFilled || IsCancelled;
+    // User-actionable (modify / cancel): a resting order OR an armed trigger. Excludes dormant
+    // (Attached) bracket children, which the coordinator manages.
+    public bool IsActive => IsOpen || IsArmed;
     public bool IsOpenLimitOrder => IsOpen && IsLimitOrder;
 
     public decimal TotalAmount => IsLimitOrder

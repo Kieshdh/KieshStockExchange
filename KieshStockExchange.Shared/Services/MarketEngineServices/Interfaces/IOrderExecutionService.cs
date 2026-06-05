@@ -8,9 +8,10 @@ public interface IOrderExecutionService
 
     /// <summary>§3.6 P4: place a bracket — reserve+insert the parent, insert the SL + TP legs as
     /// dormant (Attached) children, register the bracket, then match the parent (legs arm as it
-    /// fills). The child orders must already have Side/Entry/Stop/Price set; this assigns their
+    /// fills). <paramref name="stopLoss"/> null ⇒ a take-profit-only bracket (no protective stop).
+    /// The child orders must already have Side/Entry/Stop/Price set; this assigns their
     /// ParentOrderId + Attached status.</summary>
-    Task<OrderResult> PlaceBracketAsync(Order parent, Order stopLoss,
+    Task<OrderResult> PlaceBracketAsync(Order parent, Order? stopLoss,
         IReadOnlyList<Order> takeProfits, CancellationToken ct = default);
 
     /// <summary>§3.6 P2: reserve + persist a stop order in the armed (Pending) state without

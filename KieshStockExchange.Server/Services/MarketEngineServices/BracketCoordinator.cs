@@ -136,12 +136,12 @@ public sealed class BracketCoordinator : IBracketCoordinator
         await _accounts.EnsureLoadedAsync(parent.UserId, ct).ConfigureAwait(false);
 
         var (sl, tps) = await LoadLegsAsync(parent.OrderId, ct).ConfigureAwait(false);
-        if (sl is null) return; // a bracket must have an SL
         int held = ComputeHeld(parent, sl, tps);
         if (held <= 0) return;
 
-        // book → gate → tx. The book lock covers TP upserts; the position gate + tx cover the SL
-        // reservation resize and the persist.
+        // book → gate → tx. The book lock covers TP upserts; the position gate + tx cover the
+        // reservation resize and the persist. With an SL the SL owns the whole pool (Model B); a
+        // take-profit-only bracket has no pool, so each armed TP reserves its own shares.
         await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
         {
             await using var gate = await _accounts
@@ -149,69 +149,124 @@ public sealed class BracketCoordinator : IBracketCoordinator
             var pos = _accounts.GetPosition(parent.UserId, parent.StockId);
             if (pos is null) return;
 
-            // SL holds the full pool: grow its reservation to `held` from the freshly-acquired
-            // (available) shares. delta>0 on parent fills; never <0 here (TP fills shrink it).
-            int delta = held - sl.CurrentSellReservedQty;
-            int posResBefore = pos.ReservedQuantity;
-            int slBefore = sl.CurrentSellReservedQty;
-            if (delta > 0)
+            if (sl is not null)
             {
-                if (pos.AvailableQuantity < delta)
-                {
-                    _logger.LogWarning(
-                        "Bracket #{Parent}: SL can't reserve {Delta} more (avail {Avail}); capping to available.",
-                        parent.OrderId, delta, pos.AvailableQuantity);
-                    delta = pos.AvailableQuantity;
-                }
+                // SL holds the full pool: grow its reservation to `held` from the freshly-acquired
+                // (available) shares. delta>0 on parent fills; never <0 here (TP fills shrink it).
+                int delta = held - sl.CurrentSellReservedQty;
+                int posResBefore = pos.ReservedQuantity;
+                int slBefore = sl.CurrentSellReservedQty;
                 if (delta > 0)
                 {
-                    pos.ReserveStock(delta);
-                    sl.TakeSellReservation(delta);
-                }
-            }
-
-            await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-            try
-            {
-                sl.Quantity = sl.CurrentSellReservedQty + sl.AmountFilled; // RemainingQuantity == held pool
-                if (sl.IsAttached) sl.Arm();                              // Attached → Pending
-                else { sl.Status = Order.Statuses.Pending; }
-                sl.UpdatedAt = TimeHelper.NowUtc();
-                await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
-
-                // Fill-up: arm whole TP legs whose cumulative allocation is covered by held.
-                int cum = 0;
-                for (int i = 0; i < tps.Count; i++)
-                {
-                    var tp = tps[i];
-                    cum += tp.Quantity;
-                    if (tp.IsAttached && cum <= held)
+                    if (pos.AvailableQuantity < delta)
                     {
-                        tp.Status = Order.Statuses.Open; // TP rests on the book reserving nothing
-                        tp.UpdatedAt = TimeHelper.NowUtc();
-                        await _db.UpdateOrder(tp, ct).ConfigureAwait(false);
-                        book.UpsertOrder(tp);
+                        _logger.LogWarning(
+                            "Bracket #{Parent}: SL can't reserve {Delta} more (avail {Avail}); capping to available.",
+                            parent.OrderId, delta, pos.AvailableQuantity);
+                        delta = pos.AvailableQuantity;
+                    }
+                    if (delta > 0)
+                    {
+                        pos.ReserveStock(delta);
+                        sl.TakeSellReservation(delta);
                     }
                 }
 
-                if (pos.PositionId != 0) await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
-                await tx.CommitAsync(ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-                // Restore the cache reservation taken above; DB rolled back.
-                if (pos.ReservedQuantity != posResBefore) pos.ReservedQuantity = posResBefore;
-                sl.RestoreReservationFromSnapshot(sl.CurrentBuyReservation, slBefore);
-                throw;
-            }
+                await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    sl.Quantity = sl.CurrentSellReservedQty + sl.AmountFilled; // RemainingQuantity == held pool
+                    if (sl.IsAttached) sl.Arm();                              // Attached → Pending
+                    else { sl.Status = Order.Statuses.Pending; }
+                    sl.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
 
-            _ledger.LogOrder(sl.UserId, sl.OrderId, "Bracket:ArmSL",
-                Math.Max(0, delta), sl.CurrentBuyReservation, sl.CurrentBuyReservation,
-                slBefore, sl.CurrentSellReservedQty);
+                    // Fill-up: arm whole TP legs whose cumulative allocation is covered by held.
+                    int cum = 0;
+                    for (int i = 0; i < tps.Count; i++)
+                    {
+                        var tp = tps[i];
+                        cum += tp.Quantity;
+                        if (tp.IsAttached && cum <= held)
+                        {
+                            tp.Status = Order.Statuses.Open; // TP rests on the book reserving nothing
+                            tp.UpdatedAt = TimeHelper.NowUtc();
+                            await _db.UpdateOrder(tp, ct).ConfigureAwait(false);
+                            book.UpsertOrder(tp);
+                        }
+                    }
+
+                    if (pos.PositionId != 0) await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
+                    await tx.CommitAsync(ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    // Restore the cache reservation taken above; DB rolled back.
+                    if (pos.ReservedQuantity != posResBefore) pos.ReservedQuantity = posResBefore;
+                    sl.RestoreReservationFromSnapshot(sl.CurrentBuyReservation, slBefore);
+                    throw;
+                }
+
+                _ledger.LogOrder(sl.UserId, sl.OrderId, "Bracket:ArmSL",
+                    Math.Max(0, delta), sl.CurrentBuyReservation, sl.CurrentBuyReservation,
+                    slBefore, sl.CurrentSellReservedQty);
+            }
+            else
+            {
+                // Take-profit-only bracket: no shared pool. Fill-up-whole-legs, each armed TP
+                // reserving its own quantity from the freshly-acquired (available) shares — the
+                // standard sell-limit reservation, so the normal fill/cancel paths release it.
+                int posResBefore = pos.ReservedQuantity;
+                var armed = new List<(Order Tp, int Before)>(tps.Count);
+                await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    int cum = 0;
+                    for (int i = 0; i < tps.Count; i++)
+                    {
+                        var tp = tps[i];
+                        cum += tp.Quantity;
+                        if (!tp.IsAttached || cum > held) continue;
+
+                        int need = tp.Quantity;
+                        if (pos.AvailableQuantity < need)
+                        {
+                            _logger.LogWarning(
+                                "Bracket #{Parent}: TP #{Tp} can't reserve {Need} (avail {Avail}); capping.",
+                                parent.OrderId, tp.OrderId, need, pos.AvailableQuantity);
+                            need = pos.AvailableQuantity;
+                        }
+                        if (need <= 0) continue;
+
+                        int posBeforeThis = pos.ReservedQuantity;
+                        int tpBefore = tp.CurrentSellReservedQty;
+                        pos.ReserveStock(need);
+                        tp.TakeSellReservation(need);
+                        armed.Add((tp, tpBefore));
+                        tp.Status = Order.Statuses.Open;
+                        tp.UpdatedAt = TimeHelper.NowUtc();
+                        await _db.UpdateOrder(tp, ct).ConfigureAwait(false);
+                        book.UpsertOrder(tp);
+                        _ledger.LogPosition(parent.UserId, parent.StockId, tp.OrderId, "Bracket:ArmTP",
+                            need, posBeforeThis, pos.ReservedQuantity, pos.Quantity, pos.Quantity);
+                    }
+
+                    if (pos.PositionId != 0) await _db.UpdateAllAsync(new[] { pos }, ct).ConfigureAwait(false);
+                    await tx.CommitAsync(ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    if (pos.ReservedQuantity != posResBefore) pos.ReservedQuantity = posResBefore;
+                    foreach (var (tp, before) in armed)
+                        tp.RestoreReservationFromSnapshot(tp.CurrentBuyReservation, before);
+                    throw;
+                }
+            }
         }).ConfigureAwait(false);
 
-        if (sl.IsArmed) _stopWatcher.Value.Arm(sl);
+        if (sl is not null && sl.IsArmed) _stopWatcher.Value.Arm(sl);
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
@@ -224,7 +279,6 @@ public sealed class BracketCoordinator : IBracketCoordinator
                        : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
         if (parent is null) return;
         var (sl, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
-        if (sl is null) return;
         int held = ComputeHeld(parent, sl, tps);
 
         await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
@@ -235,27 +289,37 @@ public sealed class BracketCoordinator : IBracketCoordinator
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
-                // The TP fill already dropped Position.ReservedQuantity (ConsumeReservedStock in
-                // TradeSettler). Only the SL's per-order field lags — bring it down to `held` so
-                // SL.CSR == Position.ReservedQuantity again (closes the post-commit transient).
-                int slDrop = sl.CurrentSellReservedQty - held;
-                if (slDrop > 0) sl.ConsumeSellReservation(slDrop);
-
-                if (held <= 0)
+                if (sl is not null)
                 {
-                    // Whole position exited via TPs — retire the SL.
-                    _stopWatcher.Value.Disarm(sl.OrderId);
-                    book.RemoveById(sl.OrderId);
-                    sl.Status = Order.Statuses.Cancelled;
-                    sl.UpdatedAt = TimeHelper.NowUtc();
+                    // The TP fill already dropped Position.ReservedQuantity (ConsumeReservedStock in
+                    // TradeSettler). Only the SL's per-order field lags — bring it down to `held` so
+                    // SL.CSR == Position.ReservedQuantity again (closes the post-commit transient).
+                    int slDrop = sl.CurrentSellReservedQty - held;
+                    if (slDrop > 0) sl.ConsumeSellReservation(slDrop);
+
+                    if (held <= 0)
+                    {
+                        // Whole position exited via TPs — retire the SL.
+                        _stopWatcher.Value.Disarm(sl.OrderId);
+                        book.RemoveById(sl.OrderId);
+                        sl.Status = Order.Statuses.Cancelled;
+                        sl.UpdatedAt = TimeHelper.NowUtc();
+                        _bracketParents.TryRemove(parentId, out _);
+                    }
+                    else
+                    {
+                        sl.Quantity = sl.CurrentSellReservedQty + sl.AmountFilled;
+                        sl.UpdatedAt = TimeHelper.NowUtc();
+                    }
+                    await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
+                }
+                else if (held <= 0)
+                {
+                    // Take-profit-only bracket: the TP fill already released its own reservation via
+                    // the normal sell-limit path; nothing to resize. Retire the bracket once the
+                    // covered shares are fully exited.
                     _bracketParents.TryRemove(parentId, out _);
                 }
-                else
-                {
-                    sl.Quantity = sl.CurrentSellReservedQty + sl.AmountFilled;
-                    sl.UpdatedAt = TimeHelper.NowUtc();
-                }
-                await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
 
                 // Cancel-the-remainder: a protective leg fired while a LIMIT parent still rests →
                 // stop acquiring more of a position we're now exiting.

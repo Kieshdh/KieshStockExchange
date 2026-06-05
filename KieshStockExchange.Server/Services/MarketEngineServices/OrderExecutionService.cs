@@ -274,7 +274,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
     // register the bracket, and match the parent. A market parent fills immediately → the post-commit
     // bracket hook arms the SL (full pooled reservation) + the covered TP legs; a limit parent rests
     // and its legs arm when it later fills.
-    public async Task<OrderResult> PlaceBracketAsync(Order parent, Order stopLoss,
+    public async Task<OrderResult> PlaceBracketAsync(Order parent, Order? stopLoss,
         IReadOnlyList<Order> takeProfits, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -286,11 +286,15 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (reserveError != null) return reserveError;
 
         // Insert the child legs as dormant (Attached) — ParentOrderId links them; they reserve
-        // nothing until the parent fills and the coordinator arms them.
+        // nothing until the parent fills and the coordinator arms them. stopLoss null ⇒ a
+        // take-profit-only bracket (no protective stop leg).
         var children = new List<Order>(takeProfits.Count + 1);
-        stopLoss.ParentOrderId = parent.OrderId;
-        stopLoss.Status = Order.Statuses.Attached;
-        children.Add(stopLoss);
+        if (stopLoss is not null)
+        {
+            stopLoss.ParentOrderId = parent.OrderId;
+            stopLoss.Status = Order.Statuses.Attached;
+            children.Add(stopLoss);
+        }
         for (int i = 0; i < takeProfits.Count; i++)
         {
             takeProfits[i].ParentOrderId = parent.OrderId;

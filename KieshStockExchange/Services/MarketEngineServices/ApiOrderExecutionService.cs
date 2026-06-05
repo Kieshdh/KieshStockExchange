@@ -60,7 +60,7 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
 
     // §3.6 P4: bracket placement is server-internal (via IOrderEntryService.PlaceBracketAsync →
     // /api/orders/place-bracket); never called on the client execution surface.
-    public Task<OrderResult> PlaceBracketAsync(Order parent, Order stopLoss,
+    public Task<OrderResult> PlaceBracketAsync(Order parent, Order? stopLoss,
         IReadOnlyList<Order> takeProfits, CancellationToken ct = default)
         => throw new NotSupportedException("PlaceBracketAsync is server-side; use IOrderEntryService.PlaceBracketAsync.");
 

@@ -31,12 +31,14 @@ public interface IOrderEntryService
     Task<OrderResult> PlaceTrueMarketSellOrderAsync(int userId, int stockId,
         int quantity, CurrencyType currency, CancellationToken ct = default);
 
-    // §3.6 P4: place a (long) bracket — a buy entry + a protective stop-loss + up to three scale-out
-    // take-profit limits. entry = Limit (limitPrice) or Market (buyBudget). stopLimitPrice set ⇒ the
-    // SL is a stop-limit; null ⇒ a stop-market (stopSlippagePct optionally caps it). Each take-profit
-    // is (price, quantity); Σ TP qty ≤ quantity, TP prices strictly ascending above entry, SL below.
+    // §3.6 P4: place a (long) bracket — a buy entry + an optional protective stop-loss and/or up to
+    // three scale-out take-profit limits. entry = Limit (limitPrice) or Market (buyBudget). stopPrice
+    // null ⇒ a take-profit-only bracket (no protective stop); then ≥1 take-profit is required.
+    // stopLimitPrice set ⇒ the SL is a stop-limit; null ⇒ a stop-market (stopSlippagePct optionally
+    // caps it). Each take-profit is (price, quantity); Σ TP qty ≤ quantity, TP prices strictly
+    // ascending above entry, SL below.
     Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
-        CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal stopPrice,
+        CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
         IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default);
 

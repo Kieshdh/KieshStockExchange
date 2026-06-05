@@ -64,24 +64,9 @@ public sealed class OrderEntryService : IOrderEntryService
         if (order is null || order.UserId != userId)
             return OrderResultFactory.InvalidParams("Order not found.");
 
-        // Direction sanity for a new trigger (mirrors ArmStopOrderAsync): a sell-stop sits
-        // at/below market, a buy-stop at/above. Skipped when no live price is available.
-        if (newStopPrice.HasValue)
-        {
-            decimal market = _data.Quotes.TryGetValue((order.StockId, order.CurrencyType), out var q) && q.LastPrice > 0m
-                ? q.LastPrice
-                : await _data.GetLastPriceAsync(order.StockId, order.CurrencyType, ct).ConfigureAwait(false);
-            if (market > 0m)
-            {
-                if (order.IsBuyOrder && newStopPrice.Value < market)
-                    return OrderResultFactory.InvalidParams(
-                        $"Buy-stop must be at or above the market price ({CurrencyHelper.Format(market, order.CurrencyType)}).");
-                if (order.IsSellOrder && newStopPrice.Value > market)
-                    return OrderResultFactory.InvalidParams(
-                        $"Sell-stop must be at or below the market price ({CurrencyHelper.Format(market, order.CurrencyType)}).");
-            }
-        }
-
+        // A trigger modified onto/across the market is intentionally allowed: it's already met, so the
+        // watcher promotes it on the next tick and it fills like a market order. The client shows a
+        // non-blocking warning before Confirm (mirrors the marketable-limit hint) — no rejection here.
         var result = await _engine.ModifyStopAsync(orderId, newQuantity, newStopPrice, newLimitPrice, ct).ConfigureAwait(false);
 
         // Re-index the watcher (disarm old snapshot + arm the updated trigger) so it fires at the
@@ -217,7 +202,7 @@ public sealed class OrderEntryService : IOrderEntryService
 
     #region Place Bracket (§3.6 P4)
     public async Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
-        CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal stopPrice,
+        CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
         IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default)
     {
@@ -225,7 +210,12 @@ public sealed class OrderEntryService : IOrderEntryService
         if (quantity <= 0) return OrderResultFactory.InvalidParams("Quantity must be positive.");
         takeProfits ??= Array.Empty<(decimal, int)>();
         if (takeProfits.Count > 3) return OrderResultFactory.InvalidParams("A bracket supports at most 3 take-profits.");
-        if (stopPrice <= 0m) return OrderResultFactory.InvalidParams("Stop price must be positive.");
+        // stopPrice null ⇒ a take-profit-only bracket (no protective stop); then ≥1 TP is required.
+        bool hasStop = stopPrice.HasValue;
+        if (hasStop && stopPrice!.Value <= 0m)
+            return OrderResultFactory.InvalidParams("Stop price must be positive.");
+        if (!hasStop && takeProfits.Count == 0)
+            return OrderResultFactory.InvalidParams("A bracket needs a stop-loss or at least one take-profit.");
 
         // Entry reference: the limit price for a limit parent, the live market price for a market
         // parent. SL must sit below it, TPs above it (long bracket).
@@ -244,7 +234,7 @@ public sealed class OrderEntryService : IOrderEntryService
             if (entryRef <= 0m) return OrderResultFactory.InvalidParams("No live market price to anchor the bracket.");
         }
 
-        if (stopPrice >= entryRef)
+        if (hasStop && stopPrice!.Value >= entryRef)
             return OrderResultFactory.InvalidParams(
                 $"Stop-loss must be below the entry price ({CurrencyHelper.Format(entryRef, currency)}).");
 
@@ -276,19 +266,24 @@ public sealed class OrderEntryService : IOrderEntryService
             BuyBudget = entry == EntryType.Market ? CurrencyHelper.RoundMoney(buyBudget!.Value, currency) : null,
         };
 
-        // Build the protective stop-loss (sell). Stop-limit when a limit price is given; otherwise a
-        // stop-market, optionally slippage-capped (anchor = entry reference).
-        bool slCapped = stopLimitPrice is null && stopSlippagePct.HasValue;
-        var sl = new Order
+        // Build the protective stop-loss (sell), if any. Stop-limit when a limit price is given;
+        // otherwise a stop-market, optionally slippage-capped (anchor = entry reference). Null ⇒
+        // take-profit-only bracket (the TPs reserve their own shares once the parent fills).
+        Order? sl = null;
+        if (hasStop)
         {
-            UserId = userId, StockId = stockId, Quantity = quantity, CurrencyType = currency,
-            Side = OrderSide.Sell, Stop = StopKind.Stop,
-            Entry = stopLimitPrice is not null ? EntryType.Limit : EntryType.Market,
-            StopPrice = CurrencyHelper.RoundMoney(stopPrice, currency),
-            Price = stopLimitPrice is not null ? CurrencyHelper.RoundMoney(stopLimitPrice.Value, currency)
-                  : slCapped ? CurrencyHelper.RoundMoney(entryRef, currency) : 0m,
-            SlippagePercent = slCapped ? stopSlippagePct : null,
-        };
+            bool slCapped = stopLimitPrice is null && stopSlippagePct.HasValue;
+            sl = new Order
+            {
+                UserId = userId, StockId = stockId, Quantity = quantity, CurrencyType = currency,
+                Side = OrderSide.Sell, Stop = StopKind.Stop,
+                Entry = stopLimitPrice is not null ? EntryType.Limit : EntryType.Market,
+                StopPrice = CurrencyHelper.RoundMoney(stopPrice!.Value, currency),
+                Price = stopLimitPrice is not null ? CurrencyHelper.RoundMoney(stopLimitPrice.Value, currency)
+                      : slCapped ? CurrencyHelper.RoundMoney(entryRef, currency) : 0m,
+                SlippagePercent = slCapped ? stopSlippagePct : null,
+            };
+        }
 
         // Build the take-profit legs (sell limits).
         var tps = new List<Order>(takeProfits.Count);
@@ -305,8 +300,11 @@ public sealed class OrderEntryService : IOrderEntryService
         // Structural validation of every leg before the engine reserves/inserts anything.
         var parentErr = _validator.ValidateNew(parent);
         if (parentErr != null) return parentErr;
-        var slErr = _validator.ValidateNew(sl);
-        if (slErr != null) return slErr;
+        if (sl is not null)
+        {
+            var slErr = _validator.ValidateNew(sl);
+            if (slErr != null) return slErr;
+        }
         for (int i = 0; i < tps.Count; i++)
         {
             var tpErr = _validator.ValidateNew(tps[i]);

@@ -113,6 +113,12 @@ public sealed class ServerNotificationService : IServerNotificationService
         if (o is null)
             return ($"{symbol}: Order update", "Order details unavailable.", Message.MessageType.Info);
 
+        // An armed trigger/trailing rests off-book until the market reaches its trigger.
+        if (o.IsArmed)
+            return ($"{symbol}: Trigger armed",
+                    $"{o.OrderType} {o.Quantity} {symbol} @ trigger {o.StopPriceDisplay} — we'll place it when the market reaches your trigger.",
+                    Message.MessageType.Info);
+
         // Only PlacedOnBook reaches here (Filled/PartialFill filtered upstream).
         return ($"{symbol}: Order #{o.OrderId} placed on book",
                 $"{o.OrderType} {o.Quantity} {symbol} @ {o.PriceDisplay} — resting. We'll notify you on fills.",

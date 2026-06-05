@@ -77,7 +77,7 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
     }
 
     public async Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
-        CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal stopPrice,
+        CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
         IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default)
     {
