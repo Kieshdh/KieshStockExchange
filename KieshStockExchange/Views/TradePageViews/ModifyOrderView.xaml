@@ -85,16 +85,29 @@
                    TextColor="{DynamicResource SellRed}"
                    FontSize="12" />
 
-            <!-- Cancel + Confirm CTA pair -->
-            <Grid ColumnDefinitions="*,*"
-                  ColumnSpacing="8"
-                  Margin="0,4,0,0">
-                <Button Grid.Column="0"
-                        Text="Cancel"
-                        Command="{Binding CancelCommand}"
-                        Style="{StaticResource UnselectedSegmentButtonStyle}" />
-                <Button Grid.Column="1"
-                        Text="Confirm"
+            <!-- Non-blocking warning: the edited price crosses the market (fills like a market order). -->
+            <Label Text="{Binding WarningMessage}"
+                   IsVisible="{Binding HasWarning}"
+                   Style="{StaticResource MutedLabelStyle}"
+                   FontSize="12" />
+
+            <!-- Row 1: Cancel (back out) · Remove (cancel the order). Row 2: full-width Confirm. -->
+            <VerticalStackLayout Spacing="8" Margin="0,4,0,0">
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <Button Grid.Column="0"
+                            Text="Cancel"
+                            FontSize="13"
+                            Command="{Binding CancelCommand}"
+                            Style="{StaticResource UnselectedSegmentButtonStyle}" />
+                    <Button Grid.Column="1"
+                            Text="Remove"
+                            FontSize="13"
+                            Command="{Binding RemoveCommand}"
+                            Style="{StaticResource BuyButtonStyle}"
+                            BackgroundColor="{DynamicResource SellRed}" />
+                </Grid>
+                <Button Text="Confirm modification"
+                        FontSize="13"
                         Command="{Binding ConfirmCommand}"
                         Style="{StaticResource BuyButtonStyle}">
                     <Button.Triggers>
@@ -105,7 +118,7 @@
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-            </Grid>
+            </VerticalStackLayout>
 
         </VerticalStackLayout>
     </Border>

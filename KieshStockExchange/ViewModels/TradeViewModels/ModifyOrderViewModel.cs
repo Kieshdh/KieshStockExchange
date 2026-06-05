@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
@@ -27,12 +28,13 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
     private readonly INotificationService _notify;
+    private readonly ISelectedStockService _selected;
     private readonly ILogger<ModifyOrderViewModel> _logger;
 
     public ModifyOrderViewModel(IOrderEntryService orders, IOrderCacheService cache,
         IUserPortfolioService portfolio,
         IAuthService auth, IOrderEditService editService,
-        INotificationService notify,
+        INotificationService notify, ISelectedStockService selected,
         ILogger<ModifyOrderViewModel> logger)
     {
         Title = "Modify order";
@@ -42,6 +44,7 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         _auth        = auth        ?? throw new ArgumentNullException(nameof(auth));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
         _notify      = notify      ?? throw new ArgumentNullException(nameof(notify));
+        _selected    = selected    ?? throw new ArgumentNullException(nameof(selected));
         _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
 
         _editService.PropertyChanged += OnEditServiceChanged;
@@ -69,6 +72,14 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
+    // Non-blocking heads-up (not an error): the edited price crosses the market, so the order will fill
+    // immediately like a market order. Confirm still works.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasWarning))]
+    private string _warningMessage = string.Empty;
+
+    public bool HasWarning => !string.IsNullOrEmpty(WarningMessage);
+
     // When the user types a new price into the modify panel, push it back into
     // IOrderEditService.PrefillPrice. The chart view subscribes to that service
     // and moves the dragged line to track the panel's value live. Round-trips
@@ -82,6 +93,34 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         var parsed = CurrencyHelper.Parse((value ?? string.Empty).Trim(), order.CurrencyType);
         if (parsed.HasValue && parsed.Value > 0m)
             _editService.UpdatePrefillPrice(parsed.Value);
+        UpdateWarning();
+    }
+
+    // Warn (don't block) when the edited price crosses the market: a trigger past the market is already
+    // met and fires immediately; a limit through the market is marketable. Best-effort — only for the
+    // on-screen stock, where we have a live price.
+    private void UpdateWarning()
+    {
+        WarningMessage = string.Empty;
+        var order = TargetOrder;
+        if (order is null || _selected.StockId != order.StockId) return;
+        var market = _selected.CurrentPrice;
+        if (market <= 0m) return;
+        if (CurrencyHelper.Parse((PriceString ?? string.Empty).Trim(), order.CurrencyType) is not decimal p || p <= 0m)
+            return;
+
+        if (order.IsStopOrder)
+        {
+            bool crosses = order.IsBuyOrder ? p <= market : p >= market;
+            if (crosses)
+                WarningMessage = "This trigger is past the market — it will fill immediately, like a market order.";
+        }
+        else
+        {
+            bool marketable = order.IsBuyOrder ? p >= market : p <= market;
+            if (marketable)
+                WarningMessage = "This price crosses the market — it fills immediately, like a market order.";
+        }
     }
 
     private void OnEditServiceChanged(object? sender, PropertyChangedEventArgs e)
@@ -125,6 +164,7 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         LimitPriceString = string.Empty;
         QuantityString = string.Empty;
         ErrorMessage = string.Empty;
+        WarningMessage = string.Empty;
     }
 
     private void Initialize(Order order, decimal? prefillPrice)
@@ -150,6 +190,7 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
             : string.Empty;
         QuantityString = order.Quantity.ToString();
         ErrorMessage   = string.Empty;
+        UpdateWarning();
     }
 
     [RelayCommand]
@@ -207,6 +248,30 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
 
     [RelayCommand]
     private void Cancel() => _editService.EndEdit();
+
+    // Remove = cancel the order being edited (release its reservation), then leave edit mode. Distinct
+    // from Cancel, which just backs out of editing without touching the order.
+    [RelayCommand]
+    private async Task RemoveAsync()
+    {
+        if (IsBusy || TargetOrder is null) return;
+        IsBusy = true;
+        try
+        {
+            var result = await _orders.CancelOrderAsync(_auth.CurrentUserId, TargetOrder.OrderId).ConfigureAwait(false);
+            _logger.LogInformation("Remove (cancel) order #{OrderId}: {Status}", TargetOrder.OrderId, result.Status);
+            await _notify.NotifyOrderResultAsync(result).ConfigureAwait(false);
+            await _cache.RefreshAsync(_auth.CurrentUserId).ConfigureAwait(false);
+            await _portfolio.RefreshAsync(null).ConfigureAwait(false);
+            MainThread.BeginInvokeOnMainThread(() => _editService.EndEdit());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Remove order failed for #{OrderId}", TargetOrder.OrderId);
+            ErrorMessage = ex.Message;
+        }
+        finally { IsBusy = false; }
+    }
 
     // Returns the changed values (null = unchanged). For a stop, NewPrice is the new trigger and
     // NewLimitPrice the new stop-limit price; for a plain order, NewPrice is the new limit price
