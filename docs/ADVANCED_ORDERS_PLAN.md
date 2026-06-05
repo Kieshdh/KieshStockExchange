@@ -517,7 +517,23 @@ work is the **shared/joint** pool across the leg group rather than one reservati
   (`:124-147`, which currently has no Trailing case → returns `BadRequest`). `PlaceOrderRequest` already
   carries `Stop`; add `TrailOffset`/`TrailIsPercent` fields.
 - UI: ticket Trailing option with an abs/% toggle. Chart line reuses the P3 stop-line path at the moving
-  trigger level.
+  trigger level. **UI prep already shipped:** a `HasTrailing` toggle row exists in `PlaceOrderView`
+  (mutually exclusive with the static stop-loss); wire it to the entry points above when P5 lands.
+
+### P5 also covers: short brackets (SL + TP on Sell/Short)   *(added 2026-06-05)*
+Folded in here (was P4 long-only). Web-confirmed shape: for a short the SL is a **buy-stop** (above
+entry) and the TPs are **buy-limits** (below entry), OCO-grouped. The conservation-critical part is the
+inverted reservation model — the protective legs reserve **cash** (to buy back), not shares, and it
+interacts with P1 short collateral (release as TPs/SL buy back):
+- `OrderEntryService.PlaceBracketAsync` currently builds a `Side=Buy` parent with sell SL/TPs and is
+  long-only; add the mirror (short parent, buy SL/TPs).
+- `BracketCoordinator` is documented "long brackets only … short brackets rejected (risk #7)" and
+  reserves shares via `ReserveStock` — needs a cash-reserving mirror (mirror of the §3.6 P4 Model B /
+  TP-only `Σ CSR == reserved` invariant, but on `Fund.ReservedBalance`).
+- UI: flip `ShowBracket` to also allow Sell; SL/trailing/TP rows already exist — add side-aware captions
+  + price-side validation (SL above / TPs below for a short).
+- **Worth an Ultraplan pass** on the reservation/collateral design before implementing (same class as the
+  original long-bracket hardening). Sequenced **after the P3/P4 + TP-only manual test pass.**
 
 ## Patch 6 — Bots + chart realism   *(documented; later PR)*
 `AiBotDecisionService` gains a short-opening branch (sentiment-gated, sized to postable collateral
