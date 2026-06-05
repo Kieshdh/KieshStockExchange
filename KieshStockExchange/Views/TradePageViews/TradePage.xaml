@@ -119,6 +119,18 @@
                         UnselectedButtonStyle="{StaticResource RailSegmentUnselectedCompact}"
                         ShowUnderline="True" >
 
+                    <!-- §F11: "current stock only" filter — one toggle for Open Orders / Order History /
+                         Transactions (Positions stay unfiltered). Label tracks the selected symbol. -->
+                    <other:SegmentedTabView.HeaderRightContent>
+                        <HorizontalStackLayout Spacing="6" VerticalOptions="Center">
+                            <Label Text="{Binding TablesFilterLabel}"
+                                   Style="{StaticResource MutedLabelStyle}"
+                                   VerticalOptions="Center" />
+                            <CheckBox IsChecked="{Binding CurrentStockOnly}"
+                                      VerticalOptions="Center" />
+                        </HorizontalStackLayout>
+                    </other:SegmentedTabView.HeaderRightContent>
+
                     <!-- Tab BindingContexts wired in code-behind. -->
                     <other:SegmentedTabView.Tabs>
                         <!-- Open Orders Table-->

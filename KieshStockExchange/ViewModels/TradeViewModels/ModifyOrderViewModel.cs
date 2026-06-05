@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
@@ -48,7 +49,20 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
 
         _editService.PropertyChanged += OnEditServiceChanged;
+        // §F6: a filled order can't be modified — if the edited order leaves the active set while the
+        // panel is open, leave edit mode automatically.
+        _cache.OrdersChanged += OnCacheOrdersChanged;
     }
+
+    private void OnCacheOrdersChanged(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            var t = TargetOrder;
+            if (t is null) return;
+            var current = _cache.AllOrders.FirstOrDefault(o => o.OrderId == t.OrderId);
+            if (current is not null && !current.IsActive)   // Filled / Cancelled ⇒ end the edit
+                _editService.EndEdit();
+        });
 
     [ObservableProperty] private Order? _targetOrder;
 
@@ -320,5 +334,9 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         return (newPrice, newLimitPrice, newQty, null);
     }
 
-    public void Dispose() => _editService.PropertyChanged -= OnEditServiceChanged;
+    public void Dispose()
+    {
+        _editService.PropertyChanged -= OnEditServiceChanged;
+        _cache.OrdersChanged -= OnCacheOrdersChanged;
+    }
 }

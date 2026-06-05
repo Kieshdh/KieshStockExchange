@@ -101,4 +101,11 @@
         <Setter Property="Color"         Value="{DynamicResource TextMuted}" />
     </Style>
 
+    <!-- §F4 thin region divider for the order ticket (matches the order-value footer rule). -->
+    <Style x:Key="TicketDivider" TargetType="BoxView">
+        <Setter Property="HeightRequest"    Value="1" />
+        <Setter Property="BackgroundColor"  Value="{DynamicResource Divider}" />
+        <Setter Property="Margin"           Value="0,2" />
+    </Style>
+
 </ResourceDictionary>

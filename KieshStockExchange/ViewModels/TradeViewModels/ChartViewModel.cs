@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
@@ -170,6 +171,11 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
     private readonly ITransactionService _transactions;
+    private readonly IUserSessionService _session;
+
+    // §F7: one-shot viewport restore. Seeded from the session at construction and consumed once on the
+    // first candle load so a later stock switch still snaps to live instead of re-applying a stale view.
+    private (int Vis, int Off, bool YAuto, decimal? YMin, decimal? YMax)? _pendingRestore;
 
     // Atomic CTS swap. RestartStreamAsync cancels + disposes the previous CTS
     // before starting a new one. No SemaphoreSlim — aggressive switching
@@ -179,7 +185,8 @@ public partial class ChartViewModel : StockAwareViewModel
 
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
         IOrderCacheService orderCache, IAuthService auth, IOrderEditService editService,
-        ISelectedStockService selected, INotificationService notification, ITransactionService transactions)
+        ISelectedStockService selected, INotificationService notification, ITransactionService transactions,
+        IUserSessionService session)
         : base(selected, notification, logger)
     {
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
@@ -188,6 +195,15 @@ public partial class ChartViewModel : StockAwareViewModel
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
         _transactions = transactions ?? throw new ArgumentNullException(nameof(transactions));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+
+        // §F7: restore the saved resolution + viewport. Seed the resolution before InitializeSelection
+        // kicks off the first stream so it loads at the remembered resolution; the viewport (count /
+        // offset / manual Y) is applied once on that first load via _pendingRestore.
+        if (ResolutionOptions.Contains(_session.DefaultCandleResolution))
+            SelectedResolution = _session.DefaultCandleResolution;
+        _pendingRestore = (_session.ChartVisibleCount, _session.ChartOffset,
+            _session.ChartYAutoFit, _session.ChartManualYMin, _session.ChartManualYMax);
 
         // Repaint on any MA edit; stamp RemoveCommand on each default row.
         MaSeries.CollectionChanged += OnMaSeriesCollectionChanged;
@@ -332,6 +348,9 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         if (disposing)
         {
+            // §F7: snapshot the current viewport so the next Trade-page visit restores it.
+            _session.SetChartViewState(VisibleCount, OffsetFromLatest, IsYAutoFit, ManualYMin, ManualYMax);
+
             var prev = Interlocked.Exchange(ref _streamCts, null);
             if (prev is not null)
             {
@@ -573,18 +592,39 @@ public partial class ChartViewModel : StockAwareViewModel
             // History from CandleService is already sorted; preserve order on insert.
             _candleBuffer.AddRange(history);
 
-            // Auto-zoom: if the requested viewport is much wider than the data
-            // actually returned (e.g. a young server's 1h ring has 5 buckets but
-            // VisibleCount expects ~120), shrink VisibleCount to fit. Otherwise
-            // the chart renders 5 candle-dots spread across 600 bucket-widths of
-            // horizontal space — looks empty even though data is present.
-            if (history.Count > 0 && history.Count < VisibleCount)
+            if (_pendingRestore is { } vs)
             {
-                var fit = Math.Clamp(history.Count, MinVisible, MaxVisible);
-                if (fit != VisibleCount) VisibleCount = fit;
+                // §F7: first load after (re)entering the page — restore the saved viewport instead of
+                // the auto-zoom/snap-to-live defaults. Consume once so a later stock switch snaps live.
+                _pendingRestore = null;
+                if (vs.Vis >= MinVisible && vs.Vis <= MaxVisible) VisibleCount = vs.Vis;
+                OffsetFromLatest = Math.Clamp(vs.Off, MinOffset, MaxOffset);
+                if (!vs.YAuto && vs.YMin is decimal mn && vs.YMax is decimal mx && mx > mn)
+                {
+                    // Suppress autofit so the saved Y-window sticks. This runs inside the awaited
+                    // history-load block, after TradeViewModel's on-stock-change IsYAutoFit=true, so
+                    // it wins on restore.
+                    ManualYMin = mn;
+                    ManualYMax = mx;
+                    IsYAutoFit = false;
+                }
+            }
+            else
+            {
+                // Auto-zoom: if the requested viewport is much wider than the data
+                // actually returned (e.g. a young server's 1h ring has 5 buckets but
+                // VisibleCount expects ~120), shrink VisibleCount to fit. Otherwise
+                // the chart renders 5 candle-dots spread across 600 bucket-widths of
+                // horizontal space — looks empty even though data is present.
+                if (history.Count > 0 && history.Count < VisibleCount)
+                {
+                    var fit = Math.Clamp(history.Count, MinVisible, MaxVisible);
+                    if (fit != VisibleCount) VisibleCount = fit;
+                }
+
+                OffsetFromLatest = 0; // snap to live on (re)load
             }
 
-            OffsetFromLatest = 0; // snap to live on (re)load
             SyncLatestCandle();
             RequestRedraw();
         }).ConfigureAwait(false);
@@ -819,6 +859,8 @@ public partial class ChartViewModel : StockAwareViewModel
     #region Property change handlers
     partial void OnSelectedResolutionChanged(CandleResolution value)
     {
+        // §F7: remember the chosen resolution for the next visit to the Trade page.
+        _session.SetDefaultCandleResolution(value);
         if (Selected.StockId is null) return;
         // Use the most recent stock-token so a stock change cancels this restart too
         var ct = CtsStock?.Token ?? CancellationToken.None;

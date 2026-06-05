@@ -16,7 +16,15 @@ public sealed record SessionSnapshot(
     bool KeepLoggedIn,
     CurrencyType BaseCurrency,
     CandleResolution DefaultCandleResolution,
-    int? CurrentStockId)
+    int? CurrentStockId,
+    // Chart viewport restore (F7): persisted so returning to the Trade page restores the same view.
+    int ChartVisibleCount = 80,
+    int ChartOffset = 0,
+    bool ChartYAutoFit = true,
+    decimal? ChartManualYMin = null,
+    decimal? ChartManualYMax = null,
+    // Trade-page tables "current stock only" filter (F11): true = show all stocks (default).
+    bool TablesShowAll = true)
 {
     public static SessionSnapshot CreateDefault() => new(
         UserId: 0,

@@ -85,6 +85,9 @@
                    TextColor="{DynamicResource SellRed}"
                    Margin="0,2,0,0" />
 
+            <!-- §F4 region divider: available funds/shares above, order fields below. -->
+            <BoxView Style="{StaticResource TicketDivider}" />
+
             <!-- Trigger price (Trigger tab only) -->
             <VerticalStackLayout Spacing="0"
                                  IsVisible="{Binding IsStopOrder}">
@@ -173,6 +176,44 @@
                            MinimumWidthRequest="60" />
                 </Grid>
             </VerticalStackLayout>
+
+            <!-- Quantity + snap slider (dots at 0/25/50/75/100% of the affordable/held max). Sits above
+                 the bracket section now (§F3) so SL/Trailing/TP read below the quantity. -->
+            <VerticalStackLayout Spacing="2">
+                <Label Text="Quantity"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding QuantityString, Mode=TwoWay}"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric"
+                       HorizontalTextAlignment="End" />
+                <Grid HeightRequest="30">
+                    <!-- 0..1 fraction; Maximum is constant so changing the affordable max never
+                         re-coerces the thumb (that coercion caused a feedback-loop freeze). -->
+                    <!-- Negative side margin extends the track past the thumb's glow inset so the thumb
+                         reaches the visual ends of the bar (lines up with the end dots). -->
+                    <Slider Minimum="0" Maximum="1"
+                            Value="{Binding QuantitySliderValue, Mode=TwoWay}"
+                            VerticalOptions="Center"
+                            WidthRequest="230"
+                            Margin="0,0" />
+                    <!-- Dot guides ON TOP of the track (InputTransparent so drags still reach the
+                         slider). Margin nudges them onto the track centre; widen balls / narrow side
+                         margins to line the end dots up with the track ends. Fine-align as needed. -->
+                    <Grid ColumnDefinitions="*,*,*,*" InputTransparent="True"
+                          VerticalOptions="Center" Margin="2,2,2,0">
+                        <BoxView Grid.Column="0" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
+                        <BoxView Grid.Column="1" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
+                        <BoxView Grid.Column="2" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
+                        <BoxView Grid.Column="3" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
+                        <BoxView Grid.Column="3" Style="{StaticResource SliderDot}" HorizontalOptions="End" />
+                    </Grid>
+                </Grid>
+            </VerticalStackLayout>
+
+            <!-- §F4 region divider before the bracket section; hidden on the Trigger tab / Sell side
+                 (no bracket section there) so the ticket never shows a trailing rule. -->
+            <BoxView Style="{StaticResource TicketDivider}"
+                     IsVisible="{Binding ShowBracket}" />
 
             <!-- §3.6 P4 bracket (buy entry only). Stop-loss / trailing / take-profits toggle here. -->
             <VerticalStackLayout Spacing="8"
@@ -279,38 +320,6 @@
                                Keyboard="Numeric" HorizontalTextAlignment="End" />
                     </Grid>
                 </VerticalStackLayout>
-            </VerticalStackLayout>
-
-            <!-- Quantity + snap slider (dots at 0/25/50/75/100% of the affordable/held max). -->
-            <VerticalStackLayout Spacing="2">
-                <Label Text="Quantity"
-                       Style="{StaticResource FormLabelStyle}" />
-                <Entry Text="{Binding QuantityString, Mode=TwoWay}"
-                       Style="{StaticResource FormEntryStyle}"
-                       Keyboard="Numeric"
-                       HorizontalTextAlignment="End" />
-                <Grid HeightRequest="30">
-                    <!-- 0..1 fraction; Maximum is constant so changing the affordable max never
-                         re-coerces the thumb (that coercion caused a feedback-loop freeze). -->
-                    <!-- Negative side margin extends the track past the thumb's glow inset so the thumb
-                         reaches the visual ends of the bar (lines up with the end dots). -->
-                    <Slider Minimum="0" Maximum="1"
-                            Value="{Binding QuantitySliderValue, Mode=TwoWay}"
-                            VerticalOptions="Center"
-                            WidthRequest="230"
-                            Margin="0,0" />
-                    <!-- Dot guides ON TOP of the track (InputTransparent so drags still reach the
-                         slider). Margin nudges them onto the track centre; widen balls / narrow side
-                         margins to line the end dots up with the track ends. Fine-align as needed. -->
-                    <Grid ColumnDefinitions="*,*,*,*" InputTransparent="True"
-                          VerticalOptions="Center" Margin="2,2,2,0">
-                        <BoxView Grid.Column="0" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
-                        <BoxView Grid.Column="1" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
-                        <BoxView Grid.Column="2" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
-                        <BoxView Grid.Column="3" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
-                        <BoxView Grid.Column="3" Style="{StaticResource SliderDot}" HorizontalOptions="End" />
-                    </Grid>
-                </Grid>
             </VerticalStackLayout>
 
         </VerticalStackLayout>

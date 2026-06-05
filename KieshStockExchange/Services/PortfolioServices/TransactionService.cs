@@ -82,6 +82,13 @@ public sealed class TransactionService : ITransactionService
 
             NotifyChanged();
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // §F9: an in-flight GET cancelled by the app's lifetime token on shutdown is benign —
+            // log-debug instead of surfacing a noisy error. A real HttpClient timeout (token not
+            // cancelled) still falls through to the error path below.
+            _logger.LogDebug("Transaction refresh cancelled (shutdown).");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to refresh transactions for user #{UserId}", activeUserId);

@@ -71,7 +71,13 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         }
     }
 
-    [ObservableProperty] private bool _showAll = true;
+    // §F11: the tables "current stock only" filter. false = show all stocks (default). Bound to the
+    // checkbox in the tables-card header; persisted in the session so it survives leaving the page.
+    [ObservableProperty] private bool _currentStockOnly;
+
+    /// <summary>Header label for the filter checkbox, e.g. "GOOG only"; tracks the selected symbol.</summary>
+    public string TablesFilterLabel =>
+        Selected.Symbol is string s && s.Length > 0 ? $"{s} only" : "Current stock only";
 
     /// <summary>Whether the currently selected stock is on the user's watchlist.</summary>
     [ObservableProperty] private bool _isSelectedWatched;
@@ -175,6 +181,9 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
             _logger.LogInformation("TradeViewModel initializing for stock #{StockId}", stockId);
             await LoadTradingPairsAsync();
 
+            // §F11: restore the persisted tables filter (fires OnCurrentStockOnlyChanged to apply it).
+            CurrentStockOnly = !_session.TablesShowAll;
+
             // Restore the last-watched stock from the session if there is one; fall back to the
             // caller's default when there isn't, or if the remembered stock no longer resolves.
             var targetId = _session.CurrentStockId ?? stockId;
@@ -270,6 +279,7 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
             {
                 ChartVm.IsYAutoFit = true;
                 RefreshIsSelectedWatched();
+                OnPropertyChanged(nameof(TablesFilterLabel)); // §F11: label tracks the symbol
             }
         });
     }
@@ -294,12 +304,14 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
         finally { IsBusy = false; }
     }
 
-    partial void OnShowAllChanged(bool value)
+    partial void OnCurrentStockOnlyChanged(bool value)
     {
-        OpenOrdersVm.SetShowAll(value);
-        TransactionVm.SetShowAll(value);
-        OrderHistoryVm.SetShowAll(value);
-        PositionsVm.SetShowAll(value);
+        // Checked ⇒ show the current stock only ⇒ ShowAll=false on the three order/transaction tables.
+        // Positions are intentionally left unfiltered (F11).
+        OpenOrdersVm.SetShowAll(!value);
+        TransactionVm.SetShowAll(!value);
+        OrderHistoryVm.SetShowAll(!value);
+        _session.SetTablesShowAll(!value);
     }
     #endregion
 }
