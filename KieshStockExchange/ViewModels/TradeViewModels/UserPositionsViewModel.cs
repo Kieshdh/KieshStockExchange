@@ -79,11 +79,6 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
         finally { IsBusy = false; }
     }
 
-    [RelayCommand] public async Task TradeAsync(PositionRow? row)
-    {
-        if (row is null) return;
-        await Selected.Set(row.StockId, row.Currency);
-    }
     #endregion
 
     #region Row Building
@@ -157,7 +152,7 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
             Currency = currency,
             Live = live,
             Pos = pos,
-            TradeCommand = TradeCommand,
+            GoToStockCommand = GoToStockCommand,
         };
     }
 
@@ -169,14 +164,18 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
     #endregion
 }
 
-public sealed partial class PositionRow : ObservableObject, IDisposable
+public sealed partial class PositionRow : ObservableObject, IDisposable, IStockNav
 {
     #region Initialization Properties
     public required Position Pos { get; init; }
     public required string Symbol { get; init; }
     public required CurrencyType Currency { get; init; }
-    // Injected by owner VM so Trade button binds directly.
-    public required ICommand TradeCommand { get; init; }
+    // Trade page: the ↗ (go-to-stock) glyph. Optional because the Portfolio page reuses this row
+    // with TradeCommand instead.
+    public ICommand? GoToStockCommand { get; init; }
+    // Portfolio page: select the stock AND navigate to the Trade page (Shell). Distinct from the
+    // trade page's in-page GoToStock.
+    public ICommand? TradeCommand { get; init; }
     #endregion
 
     #region Live Data Property

@@ -135,6 +135,7 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
             Symbol = symbol,
             ModifyCommand = ModifyCommand,
             CancelCommand = CancelCommand,
+            GoToStockCommand = GoToStockCommand,
         };
     }
 
@@ -146,13 +147,18 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
     #endregion
 }
 
-public sealed class OpenOrderRow : ISideRow
+public sealed class OpenOrderRow : ISideRow, IStockNav
 {
     public required Order Order { get; init; }
     public required string Symbol { get; init; }
-    // Injected by owner VM so ✎/✕ bind directly.
+    // Injected by owner VM so ✎/✕/↗ bind directly.
     public required ICommand ModifyCommand { get; init; }
     public required ICommand CancelCommand { get; init; }
+    // Optional: the trade-page tables inject the ↗ nav command; the Portfolio page reuses this row
+    // without it (no symbol nav there).
+    public ICommand? GoToStockCommand { get; init; }
+    public int StockId => Order.StockId;
+    public CurrencyType Currency => Order.CurrencyType;
     public string When => Order.CreatedDateShort;
     public string Side => Order.SideDisplay;
     public string Type => Order.TypeDisplay;

@@ -6,12 +6,14 @@
              xmlns:local="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:views="clr-namespace:KieshStockExchange.Views.TradePageViews"
-             xmlns:models="clr-namespace:KieshStockExchange.Models"
              x:DataType="local:TradeViewModel"
              Title="TradePage" >
-    <ScrollView>
-        <Grid Style="{StaticResource MainGrid}"
-              RowDefinitions="Auto, Auto, *, Auto"
+        <!-- No page-level ScrollView: the grid fills the page so the chart row is a real height
+             constraint (the panel's inner ScrollView only works when its cell is bounded). Below the
+             nav + picker, the chart area gets 70% and the tables 30% of the remaining height. -->
+        <Grid x:Name="RootGrid"
+              Style="{StaticResource MainGrid}"
+              RowDefinitions="Auto, Auto, 7*, 3*"
               ColumnDefinitions="*, Auto, Auto"
               RowSpacing="8"
               ColumnSpacing="8"
@@ -19,6 +21,7 @@
 
             <!-- Navigation bar at the Top -->
             <other:TopNavBarView Grid.Row="0"
+                                 x:Name="TopNav"
                                  Grid.ColumnSpan="3"
                                  BindingContext="{Binding TopNavBarVm}" />
 
@@ -32,9 +35,10 @@
                                  Margin="0,8,8,0"
                                  ZIndex="200" />
 
-            <!-- Stock picker and price display -->
+            <!-- Stock picker and price display — full-width symbol bar above the chart/book/panel. -->
             <Border Style="{StaticResource TradeContentOutline}"
-                   Grid.Row="1" Grid.Column="0"
+                   x:Name="SymbolBar"
+                   Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
                    Margin="0">
                 <Grid ColumnDefinitions="Auto, Auto, Auto, Auto" ColumnSpacing="10">
                     <Picker ItemsSource="{Binding TradingPairs}" Grid.Column="0"
@@ -66,35 +70,53 @@
                 </Grid>
             </Border>
 
-            <!-- The chart that displays the price - ChartView is its own card -->
+            <!-- The chart that displays the price - ChartView is its own card. Height is pinned in
+                 code-behind (UpdateTradeLayout) to the chart row's 70% share so the bottom table's
+                 content can't perturb the star-row split and inflate the chart. -->
             <views:ChartView Grid.Row="2" Grid.Column="0"
+                             x:Name="ChartCard"
+                             VerticalOptions="Fill" HorizontalOptions="Fill"
                              BindingContext="{Binding ChartVm}"/>
 
-            <!-- The Orderbook that displays current orders - OrderBookView is its own card -->
-            <views:OrderBookView Grid.Row="1" Grid.Column="1" Grid.RowSpan="2"
+            <!-- Orderbook + order panel live in the star row (row 2). The panel's inner ScrollView
+                 reports its full content as desired height, which would inflate this star row past
+                 its share (pushing the pinned footer/button below the window). Their heights are set
+                 imperatively in code-behind (UpdatePanelHeights) to the row's true height — a
+                 loop-free calc from the page height, so it stays correct across window resizes. -->
+            <views:OrderBookView Grid.Row="2" Grid.Column="1"
+                                 x:Name="OrderBookHost" 
+                                 WidthRequest="230" VerticalOptions="Fill"
                                  BindingContext="{Binding OrderBookVm}"/>
 
-            <!-- PlaceOrderView and ModifyOrderView share the cell. -->
-            <ContentView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
-                         WidthRequest="260"
+            <!-- PlaceOrderView -->
+            <ContentView Grid.Column="2" Grid.Row="2"
+                         x:Name="PlaceHost"
+                         WidthRequest="260" VerticalOptions="Fill" 
                          IsVisible="{Binding IsPlacing}">
                 <views:PlaceOrderView BindingContext="{Binding PlacingVm}" />
             </ContentView>
-            <ContentView Grid.Column="2" Grid.Row="1" Grid.RowSpan="2"
-                         WidthRequest="260"
+            <!-- ModifyOrderView -->
+            <ContentView Grid.Column="2" Grid.Row="2"
+                         x:Name="ModifyHost"
+                         WidthRequest="260" VerticalOptions="Fill" 
                          IsVisible="{Binding IsModifying}">
                 <views:ModifyOrderView BindingContext="{Binding ModifyingVm}" />
             </ContentView>
 
             <!-- Shows the current orders, order history and current positions.
-                 Spans all 3 columns so the table is as wide as the page. -->
+                 Spans all 3 columns so the table is as wide as the page. Width is pinned in
+                 code-behind (UpdateTradeLayout) to the page width: a `*`-column table measured
+                 unbounded balloons its desired width and, via this colspan, inflates the Auto
+                 columns (orderbook/panel) — which pushed the page wider than the window and clipped
+                 the right side (incl. the Open Orders cancel button) when a table had data. -->
             <Border Style="{StaticResource TradeContentOutline}"
+                    x:Name="TablesCard" HorizontalOptions="Start" VerticalOptions="Fill"
                     Grid.Row="3" Grid.ColumnSpan="3"
-                    Margin="0">
+                    Margin="0" Padding="8,3,8,6">
                 <other:SegmentedTabView HeaderContainerHorizontalOptions="Start"
                         ContainerStyle="{StaticResource SegmentedRailContainer}"
-                        SelectedButtonStyle="{StaticResource RailSegmentSelected}"
-                        UnselectedButtonStyle="{StaticResource RailSegmentUnselected}"
+                        SelectedButtonStyle="{StaticResource RailSegmentSelectedCompact}"
+                        UnselectedButtonStyle="{StaticResource RailSegmentUnselectedCompact}"
                         ShowUnderline="True" >
 
                     <!-- Tab BindingContexts wired in code-behind. -->
@@ -130,5 +152,4 @@
                 </other:SegmentedTabView>
             </Border>
         </Grid>
-    </ScrollView>
 </ContentPage>

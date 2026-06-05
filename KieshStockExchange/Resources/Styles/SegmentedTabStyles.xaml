@@ -113,4 +113,16 @@
         <Setter Property="TextColor" Value="{DynamicResource TextPrimary}" />
     </Style>
 
+    <!-- Compact rail variants: shorter buttons (less vertical padding) so the tab strip
+         sits higher and frees height for table rows. Used by the TradePage bottom tables;
+         the regular rail (Admin/Portfolio) is unchanged. -->
+    <Style x:Key="RailSegmentUnselectedCompact" TargetType="Button"
+           BasedOn="{StaticResource RailSegmentUnselected}">
+        <Setter Property="Padding" Value="12,5" />
+    </Style>
+    <Style x:Key="RailSegmentSelectedCompact" TargetType="Button"
+           BasedOn="{StaticResource RailSegmentSelected}">
+        <Setter Property="Padding" Value="12,5" />
+    </Style>
+
 </ResourceDictionary>

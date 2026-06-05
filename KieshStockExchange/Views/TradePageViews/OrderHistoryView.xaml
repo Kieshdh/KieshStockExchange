@@ -6,10 +6,11 @@
              x:Name="OrderHistoryRoot"
              x:DataType="vm:OrderHistoryViewModel">
 
-    <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
+    <Grid RowDefinitions="Auto,*" Style="{StaticResource TradeTableContainerGrid}">
 
         <!-- Table headers -->
-        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
+        <Grid Grid.Row="0"
+              ColumnDefinitions="*,*,*,*,*,*,*,*"
               Style="{StaticResource TradeTableHeaderGrid}">
             <Label Grid.Column="0" Text="Symbol"  Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="1" Text="Created" Style="{StaticResource TradeTableHeaderLabel}" />
@@ -22,9 +23,9 @@
         </Grid>
 
         <!-- Rows -->
-        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
+        <RefreshView Grid.Row="1" Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
             <CollectionView ItemsSource="{Binding CurrentView}"
-                            SelectionMode="None" Margin="0,4,0,0">
+                            SelectionMode="None">
                 <CollectionView.EmptyView>
                     <StackLayout Padding="12" Spacing="4">
                         <Label Text="No order history" Opacity="0.7" />
@@ -35,7 +36,14 @@
                     <DataTemplate x:DataType="vm:ClosedOrderRow">
                         <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
                               Style="{StaticResource TradeTableRowGrid}">
-                            <Label Grid.Column="0" Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" />
+                            <HorizontalStackLayout Grid.Column="0" Spacing="3" VerticalOptions="Center">
+                                <Label Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" VerticalOptions="Center" />
+                                <Label Style="{StaticResource TableSymbolNavGlyph}">
+                                    <Label.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding GoToStockCommand}" CommandParameter="{Binding .}" />
+                                    </Label.GestureRecognizers>
+                                </Label>
+                            </HorizontalStackLayout>
                             <Label Grid.Column="1" Text="{Binding Opened}" Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="2" Text="{Binding Closed}" Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="3" Text="{Binding Side}"   Style="{StaticResource TradeTableSideLabel}" />
@@ -48,5 +56,5 @@
                 </CollectionView.ItemTemplate>
             </CollectionView>
         </RefreshView>
-    </VerticalStackLayout>
+    </Grid>
 </ContentView>

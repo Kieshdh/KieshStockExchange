@@ -7,6 +7,7 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using Microsoft.Extensions.Logging;
+using System.Windows.Input;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -85,7 +86,7 @@ public partial class OrderHistoryViewModel : TradeTableViewModelBase<ClosedOrder
     {
         if (!_stocks.TryGetSymbol(order.StockId, out string symbol))
             symbol = "-";
-        return new ClosedOrderRow { Order = order, Symbol = symbol };
+        return new ClosedOrderRow { Order = order, Symbol = symbol, GoToStockCommand = GoToStockCommand };
     }
 
     private void OnOrdersChanged(object? s, EventArgs e)
@@ -96,10 +97,14 @@ public partial class OrderHistoryViewModel : TradeTableViewModelBase<ClosedOrder
     #endregion
 }
 
-public sealed class ClosedOrderRow : ISideRow
+public sealed class ClosedOrderRow : ISideRow, IStockNav
 {
     public required Order Order { get; init; }
     public required string Symbol { get; init; }
+    // Optional: trade-page tables inject the ↗ nav command; Portfolio reuses this row without it.
+    public ICommand? GoToStockCommand { get; init; }
+    public int StockId => Order.StockId;
+    public CurrencyType Currency => Order.CurrencyType;
     public string Opened => Order.CreatedDateShort;
     public string Closed => Order.UpdatedDateShort;
     public string Side => Order.SideDisplay;
