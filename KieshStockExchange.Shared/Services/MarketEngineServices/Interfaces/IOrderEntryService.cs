@@ -13,6 +13,13 @@ public interface IOrderEntryService
     Task<OrderResult> ModifyStopAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default);
 
+    // §F5: modify a bracket leg (the SL or a TP), dormant or live. Dispatches by leg status —
+    // a dormant (Attached) leg is edited in place + re-validated against the bracket geometry; a
+    // live leg delegates to ModifyStopAsync (armed SL) / ModifyOrderAsync (resting TP). newPrice is
+    // the leg's stop price (SL) or limit price (TP).
+    Task<OrderResult> ModifyBracketLegAsync(int userId, int legId, decimal newPrice, int newQuantity,
+        CancellationToken ct = default);
+
     Task<OrderResult> PlaceLimitBuyOrderAsync(int userId, int stockId, int quantity,
         decimal limitPrice, CurrencyType currency, CancellationToken ct = default);
 

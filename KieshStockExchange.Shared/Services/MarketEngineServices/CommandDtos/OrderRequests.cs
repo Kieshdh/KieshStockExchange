@@ -36,6 +36,13 @@ public sealed record ModifyStopRequest(
 public sealed record CancelBatchRequest(
     IReadOnlyList<int> OrderIds);
 
+// §F5: HTTP body for /api/orders/{id}/modify-leg. Edit one bracket leg (the SL or a TP), dormant or
+// live. Price = the leg's stop price (SL) or limit price (TP); Quantity = the leg quantity.
+public sealed record ModifyBracketLegRequest(
+    int UserId,
+    decimal Price,
+    int Quantity);
+
 // §3.6 P4: one take-profit leg of a bracket — a limit exit at Price for Quantity shares.
 public sealed record BracketLeg(decimal Price, int Quantity);
 

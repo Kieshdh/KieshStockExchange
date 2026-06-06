@@ -145,5 +145,16 @@ public static class OrderResultFactory
         Status = OrderStatus.Success,
         SuccessMessage = "Stop order modified."
     };
+
+    /// <summary>
+    /// §F5: a dormant (Attached) bracket leg was edited in place (off-book, reserves nothing) — its
+    /// status is unchanged, so report a plain Success rather than the fill-derived statuses above.
+    /// </summary>
+    public static OrderResult BracketLegModified(Order leg) => new()
+    {
+        PlacedOrder = leg,
+        Status = OrderStatus.Success,
+        SuccessMessage = "Bracket leg modified."
+    };
     #endregion
 }

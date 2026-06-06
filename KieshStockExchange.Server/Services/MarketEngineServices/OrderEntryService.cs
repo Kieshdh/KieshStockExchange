@@ -23,9 +23,11 @@ public sealed class OrderEntryService : IOrderEntryService
     private readonly IOrderValidator _validator;
     private readonly IDataBaseService _db;
     private readonly IStopWatcher _stopWatcher;
+    private readonly IOrderCacheService _orderCache;
 
     public OrderEntryService(IOrderExecutionService engine, ILogger<OrderEntryService> logger,
-        IOrderValidator validator, IMarketDataService data, IDataBaseService db, IStopWatcher stopWatcher)
+        IOrderValidator validator, IMarketDataService data, IDataBaseService db, IStopWatcher stopWatcher,
+        IOrderCacheService orderCache)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -33,6 +35,7 @@ public sealed class OrderEntryService : IOrderEntryService
         _data = data ?? throw new ArgumentNullException(nameof(data));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _stopWatcher = stopWatcher ?? throw new ArgumentNullException(nameof(stopWatcher));
+        _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
     }
     #endregion
 
@@ -78,6 +81,61 @@ public sealed class OrderEntryService : IOrderEntryService
             if (updated is { IsArmed: true }) _stopWatcher.Arm(updated);
         }
         return result;
+    }
+
+    // §F5: modify one bracket leg (the SL or a TP), dormant or live. Ownership-gated. Dispatches by
+    // the leg's status: a live armed SL / resting TP delegates to the proven modify paths (which handle
+    // book + reservation + notify); a dormant (Attached) leg — which reserves nothing and isn't on the
+    // book — is edited in place, re-validated against the shared bracket geometry, and only its row is
+    // written. newPrice is the leg's stop price (SL) or limit price (TP).
+    public async Task<OrderResult> ModifyBracketLegAsync(int userId, int legId, decimal newPrice,
+        int newQuantity, CancellationToken ct = default)
+    {
+        var leg = await _db.GetOrderById(legId, ct).ConfigureAwait(false);
+        if (leg is null || leg.UserId != userId || leg.ParentOrderId is not int parentId)
+            return OrderResultFactory.InvalidParams("Order not found.");
+
+        // Live legs: reuse the proven paths (book + reservation + notify already handled).
+        if (leg.IsArmed && leg.IsStopOrder)   // parent filled, SL armed
+            return await ModifyStopAsync(userId, legId, newQuantity, newStopPrice: newPrice, ct: ct).ConfigureAwait(false);
+        if (leg.IsOpen && leg.IsLimitOrder)   // parent filled, TP resting on the book
+            return await ModifyOrderAsync(userId, legId, newQuantity, newPrice, ct).ConfigureAwait(false);
+        if (!leg.IsAttached)
+            return OrderResultFactory.InvalidParams("This order can't be modified.");
+        if (newQuantity <= 0) return OrderResultFactory.InvalidParams("Quantity must be positive.");
+
+        // Dormant (Attached) leg: a dormant bracket is a resting LIMIT parent, so the entry reference is
+        // the parent's limit price. Build the post-edit leg set and re-check the shared geometry before
+        // persisting only this leg (siblings untouched — F12).
+        var parent = await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
+        if (parent is null) return OrderResultFactory.InvalidParams("Bracket parent not found.");
+
+        var siblings = await _db.GetBracketChildrenAsync(parentId, ct).ConfigureAwait(false);
+        decimal entryRef = parent.Price;
+        decimal? slStop = null;
+        var tps = new List<(decimal Price, int Quantity)>();
+        foreach (var s in siblings)
+        {
+            if (s.IsCancelled) continue;
+            bool isThis = s.OrderId == legId;
+            if (s.IsStopOrder)
+                slStop = isThis ? newPrice : s.StopPrice;
+            else if (s.IsLimitOrder)
+                tps.Add(isThis ? (newPrice, newQuantity) : (s.Price, s.Quantity));
+        }
+        tps.Sort((a, b) => a.Price.CompareTo(b.Price));
+
+        var geometryErr = BracketGeometryValidator.Validate(entryRef, slStop, tps, parent.Quantity, leg.CurrencyType);
+        if (geometryErr != null) return geometryErr;
+
+        if (leg.IsStopOrder) leg.StopPrice = CurrencyHelper.RoundMoney(newPrice, leg.CurrencyType);
+        else                 leg.Price     = CurrencyHelper.RoundMoney(newPrice, leg.CurrencyType);
+        leg.Quantity = newQuantity;
+        leg.UpdatedAt = TimeHelper.NowUtc();
+        await _db.UpdateOrder(leg, ct).ConfigureAwait(false);
+
+        _orderCache.NotifyOrdersMutated(new[] { userId });
+        return OrderResultFactory.BracketLegModified(leg);
     }
 
     // The engine cancels/modifies purely by orderId and is shared with system callers,

@@ -211,6 +211,20 @@ public sealed class OrderController : ControllerBase
         return Ok(result);
     }
 
+    // §F5: modify one bracket leg (the SL or a TP), dormant or live.
+    [HttpPost("{id:int}/modify-leg")]
+    [EnableRateLimiting("orders")]
+    public async Task<ActionResult<OrderResult>> ModifyLeg(int id, [FromBody] ModifyBracketLegRequest req, CancellationToken ct)
+    {
+        if (req is null) return BadRequest();
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.UserId != caller) return Forbid();
+        var result = await _entry.ModifyBracketLegAsync(caller, id, req.Price, req.Quantity, ct);
+        _marketEngine.LogInformation("User {User} modify LEG #{Id} price {Price} qty {Qty} → {Status}",
+            caller, id, req.Price, req.Quantity, result.Status);
+        return Ok(result);
+    }
+
     [HttpPost("{id:int}/cancel")]
     [EnableRateLimiting("orders")]
     public async Task<ActionResult<OrderResult>> Cancel(int id, [FromQuery] int userId, CancellationToken ct)
