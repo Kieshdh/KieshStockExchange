@@ -23,8 +23,9 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
 
     private PlaceOrderRequest Req(int userId, int stockId, int quantity, OrderSide side, EntryType entry,
         StopKind stop, CurrencyType currency, decimal? price = null, decimal? slippagePct = null,
-        decimal? buyBudget = null, decimal? stopPrice = null)
-        => new(userId, stockId, quantity, side, entry, stop, currency, price, slippagePct, buyBudget, stopPrice);
+        decimal? buyBudget = null, decimal? stopPrice = null, decimal? trailOffset = null, bool? trailIsPercent = null)
+        => new(userId, stockId, quantity, side, entry, stop, currency, price, slippagePct, buyBudget, stopPrice,
+            trailOffset, trailIsPercent);
 
     public Task<OrderResult> PlaceLimitBuyOrderAsync(int userId, int stockId, int quantity,
         decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
@@ -65,6 +66,16 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
     public Task<OrderResult> PlaceStopLimitSellOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
         => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Limit, StopKind.Stop, currency, price: limitPrice, stopPrice: stopPrice), ct);
+
+    public Task<OrderResult> PlaceTrailingStopBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Market, StopKind.Trailing, currency,
+            buyBudget: buyBudget, trailOffset: trailOffset, trailIsPercent: isPercent), ct);
+
+    public Task<OrderResult> PlaceTrailingStopSellOrderAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.Trailing, currency,
+            trailOffset: trailOffset, trailIsPercent: isPercent), ct);
 
     public async Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default)

@@ -147,6 +147,11 @@ public sealed class OrderController : ControllerBase
                 => await _entry.PlaceStopLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
             (StopKind.Stop, EntryType.Limit, OrderSide.Sell)
                 => await _entry.PlaceStopLimitSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
+            // §P5 trailing stops — market-only (trailing-stop-limit is gated out → falls through to BadRequest).
+            (StopKind.Trailing, EntryType.Market, OrderSide.Buy)
+                => await _entry.PlaceTrailingStopBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.TrailOffset ?? 0m, req.TrailIsPercent ?? false, req.BuyBudget ?? 0m, req.Currency, ct),
+            (StopKind.Trailing, EntryType.Market, OrderSide.Sell)
+                => await _entry.PlaceTrailingStopSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.TrailOffset ?? 0m, req.TrailIsPercent ?? false, req.Currency, ct),
             _ => null!
         };
         if (result is null)

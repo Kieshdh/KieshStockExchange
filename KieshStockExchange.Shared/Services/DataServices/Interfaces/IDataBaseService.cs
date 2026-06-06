@@ -77,6 +77,9 @@ public interface IDataBaseService
     Task<List<Order>> GetActiveBracketChildrenAsync(CancellationToken ct = default);
     Task CreateOrder(Order order, CancellationToken ct = default);
     Task UpdateOrder(Order order, CancellationToken ct = default);
+    // §3.6 P5: batched watermark/trigger-only update for trailing stops (the throttled flusher's only
+    // DB cost — never per-tick). Narrow by design: touches only TrailWatermark + StopPrice + UpdatedAt.
+    Task UpdateTrailStateAsync(IReadOnlyList<(int OrderId, decimal Watermark, decimal StopPrice)> updates, CancellationToken ct = default);
     Task DeleteOrder(Order order, CancellationToken ct = default);
     #endregion
 

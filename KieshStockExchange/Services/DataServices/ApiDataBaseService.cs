@@ -271,6 +271,10 @@ public sealed class ApiDataBaseService : IDataBaseService
     public Task<List<Order>> GetAllArmedStopsAsync(CancellationToken ct = default)
         => throw new NotSupportedException("GetAllArmedStopsAsync is server-only (stop watcher runs server-side).");
 
+    // Server-only: the trailing-stop watermark flusher runs server-side.
+    public Task UpdateTrailStateAsync(IReadOnlyList<(int OrderId, decimal Watermark, decimal StopPrice)> updates, CancellationToken ct = default)
+        => throw new NotSupportedException("UpdateTrailStateAsync is server-only (stop watcher runs server-side).");
+
     public Task<List<Order>> GetBracketChildrenAsync(int parentOrderId, CancellationToken ct = default)
         => throw new NotSupportedException("GetBracketChildrenAsync is server-only (bracket coordinator runs server-side).");
 

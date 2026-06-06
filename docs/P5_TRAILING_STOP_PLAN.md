@@ -1,7 +1,15 @@
-# P5 — Trailing stops (runtime). Plan for Ultraplan to refine.
+# P5 — Trailing stops (runtime). Plan + Ultraplan design → IMPLEMENTED.
 
-**Status:** plan only — not implemented. Schema already shipped (decomposition `737a3e4`); P5 is
-**runtime-only**: no new `Order.Types` constant, no migration. Branch `feature/advanced-orders-p4-brackets`.
+**Status:** trailing-stop-MARKET (both sides) IMPLEMENTED + self-tested (engine). Runtime-only — no new
+`Order.Types` constant, no migration (schema shipped in decomposition `737a3e4`; `Trail*` columns already
+round-trip). Per Ultraplan's design, the cadence is a throttled off-thread batched flush; the watermark is
+single-writer on the one quote-drain thread (lock-free); firing reuses `PromoteStopAsync` verbatim.
+Trailing-stop-**limit** is gated out by validation (its own follow-up). Short brackets (§8) remain a
+separate P5b pass. Tests: `TrailMathTests` (pure math) + the `scripts/kse-order-smoke.ps1`-style P5 harness
+(arm / ratchet+flush+persist / cancel / restart-resume / fire). UI wiring (the `HasTrailing` toggle) is
+the client owner's.
+
+_Original plan below (kept for reference)._
 
 **Scope of THIS plan:** trailing stops (the "start P5" ask). **Short brackets** (SL+TP on a Sell, the
 inverted cash-reservation mirror) are folded into "P5" in `ADVANCED_ORDERS_PLAN.md` but are a separate

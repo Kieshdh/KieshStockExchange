@@ -240,6 +240,23 @@ public sealed partial class PgDBService
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(@"DELETE FROM ""Orders"" WHERE ""OrderId"" = @OrderId", new { order.OrderId });
     }
+
+    // §3.6 P5: narrow batched update of trailing-stop watermark + effective trigger. Called only by the
+    // watcher's throttled flusher (every few seconds), never per tick. Dapper runs the parameterized
+    // statement once per row over one connection.
+    public async Task UpdateTrailStateAsync(
+        IReadOnlyList<(int OrderId, decimal Watermark, decimal StopPrice)> updates, CancellationToken ct = default)
+    {
+        if (updates is null || updates.Count == 0) return;
+        var now = TimeHelper.NowUtc();
+        var rows = new List<object>(updates.Count);
+        for (int i = 0; i < updates.Count; i++)
+            rows.Add(new { OrderId = updates[i].OrderId, Watermark = updates[i].Watermark, StopPrice = updates[i].StopPrice, UpdatedAt = now });
+        await using var c = await OpenAsync(ct);
+        await c.ExecuteAsync(@"
+            UPDATE ""Orders"" SET ""TrailWatermark"" = @Watermark, ""StopPrice"" = @StopPrice, ""UpdatedAt"" = @UpdatedAt
+            WHERE ""OrderId"" = @OrderId", rows);
+    }
     #endregion
 
     #region Transaction operations

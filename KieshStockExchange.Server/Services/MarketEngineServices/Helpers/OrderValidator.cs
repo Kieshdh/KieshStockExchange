@@ -168,6 +168,20 @@ public sealed class OrderValidator : IOrderValidator
             if (NotionalOverflows(order.StopPrice.Value, order.Quantity))
                 return OrderResultFactory.InvalidParams("Stop price is too large.");
 
+            // §3.6 P5 trailing stop: market-only this patch (a moving limit price is a second moving
+            // part — its own design); requires a positive offset; a percent offset is 0–100%. The
+            // StopPrice carried here is the arm-time effective trigger, validated above. After this it
+            // falls through to the StopMarket checks (Price 0, BuyBudget rules) which it satisfies.
+            if (order.Stop == StopKind.Trailing)
+            {
+                if (order.Entry != EntryType.Market)
+                    return OrderResultFactory.InvalidParams("Trailing stops are market-only.");
+                if (!order.TrailOffset.HasValue || order.TrailOffset.Value <= 0m)
+                    return OrderResultFactory.InvalidParams("Trailing stop requires a positive trail offset.");
+                if ((order.TrailIsPercent ?? false) && order.TrailOffset.Value > 100m)
+                    return OrderResultFactory.InvalidParams("Trailing percent offset must be between 0 and 100%.");
+            }
+
             if (order.IsStopLimitOrder)
             {
                 if (order.SlippagePercent.HasValue)

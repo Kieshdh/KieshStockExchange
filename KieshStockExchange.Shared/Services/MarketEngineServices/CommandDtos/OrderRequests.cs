@@ -18,7 +18,9 @@ public sealed record PlaceOrderRequest(
     decimal? Price,         // limit price (Limit / StopLimit) or slippage anchor (capped Market)
     decimal? SlippagePct,   // set = slippage cap on a Market entry (incl. a stop firing as capped market)
     decimal? BuyBudget,     // budget for an uncapped Market buy (true market / stop-market→true)
-    decimal? StopPrice = null); // trigger level when Stop != None
+    decimal? StopPrice = null,    // trigger level when Stop != None
+    decimal? TrailOffset = null,  // §P5 trailing offset (absolute, or 0–100% when TrailIsPercent)
+    bool? TrailIsPercent = null); // §P5 true = TrailOffset is a percent of the watermark
 
 public sealed record ModifyOrderRequest(
     int UserId,

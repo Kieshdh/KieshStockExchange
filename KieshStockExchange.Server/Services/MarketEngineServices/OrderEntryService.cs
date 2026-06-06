@@ -256,6 +256,61 @@ public sealed class OrderEntryService : IOrderEntryService
         if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
         return result;
     }
+
+    // §3.6 P5 trailing stops (market-only). A trailing stop arms exactly like a static stop — same
+    // reserve (shares for a sell, budget for a buy) and the same watcher — but its trigger trails a
+    // monotonic watermark seeded at the arm-time market. The watcher recomputes the effective stop each
+    // tick; here we just seed watermark + initial StopPrice and reuse the static arm path.
+    public Task<OrderResult> PlaceTrailingStopBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
+        => ArmTrailingStopAsync(userId, stockId, quantity, trailOffset, isPercent, buyBudget, buyOrder: true, currency, ct);
+
+    public Task<OrderResult> PlaceTrailingStopSellOrderAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, CurrencyType currency, CancellationToken ct = default)
+        => ArmTrailingStopAsync(userId, stockId, quantity, trailOffset, isPercent, buyBudget: null, buyOrder: false, currency, ct);
+
+    private async Task<OrderResult> ArmTrailingStopAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, decimal? buyBudget, bool buyOrder, CurrencyType currency, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (trailOffset <= 0m) return OrderResultFactory.InvalidParams("Trail offset must be positive.");
+        if (isPercent && trailOffset > 100m)
+            return OrderResultFactory.InvalidParams("Trailing percent offset must be between 0 and 100%.");
+
+        // A trailing stop needs a live reference price to seed the watermark + initial trigger.
+        decimal market = _data.Quotes.TryGetValue((stockId, currency), out var q) && q.LastPrice > 0m
+            ? q.LastPrice
+            : await _data.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
+        if (market <= 0m)
+            return OrderResultFactory.InvalidParams("No reference price available to arm a trailing stop.");
+
+        decimal watermark = market;
+        decimal effStop = CurrencyHelper.RoundMoney(
+            TrailMath.EffectiveStop(watermark, trailOffset, isPercent, buyOrder), currency);
+        if (effStop <= 0m)
+            return OrderResultFactory.InvalidParams("Trail offset is too large for the current price.");
+
+        var order = new Order
+        {
+            UserId = userId,
+            StockId = stockId,
+            Quantity = quantity,
+            Price = 0m,                                   // fires as a market order
+            StopPrice = effStop,                          // arm-time effective trigger (watcher updates it)
+            TrailOffset = trailOffset,
+            TrailIsPercent = isPercent,
+            TrailWatermark = watermark,
+            BuyBudget = buyOrder ? CurrencyHelper.RoundMoney(buyBudget ?? 0m, currency) : null,
+            CurrencyType = currency,
+            Side = buyOrder ? OrderSide.Buy : OrderSide.Sell,
+            Entry = EntryType.Market,
+            Stop = StopKind.Trailing,
+        };
+
+        var result = await _engine.ArmStopAsync(order, ct).ConfigureAwait(false);
+        if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
+        return result;
+    }
     #endregion
 
     #region Place Bracket (§3.6 P4)

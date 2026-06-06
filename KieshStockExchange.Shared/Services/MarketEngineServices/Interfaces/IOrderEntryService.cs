@@ -63,4 +63,13 @@ public interface IOrderEntryService
 
     Task<OrderResult> PlaceStopLimitSellOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default);
+
+    // §3.6 P5 trailing stops (market-only). The trigger trails a monotonic watermark by trailOffset
+    // (absolute, or a 0–100 percent of the watermark when isPercent). A buy-trail funds its market
+    // fill from buyBudget; a sell-trail reserves shares like a static sell-stop.
+    Task<OrderResult> PlaceTrailingStopBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, decimal buyBudget, CurrencyType currency, CancellationToken ct = default);
+
+    Task<OrderResult> PlaceTrailingStopSellOrderAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, CurrencyType currency, CancellationToken ct = default);
 }
