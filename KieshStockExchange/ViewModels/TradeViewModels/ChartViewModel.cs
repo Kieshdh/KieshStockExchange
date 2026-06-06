@@ -136,6 +136,11 @@ public partial class ChartViewModel : StockAwareViewModel
     // on stock change + whenever the transaction list refreshes.
     public ObservableCollection<FillMarker> FillMarkers { get; } = new();
 
+    // §F2: fired triggers for the selected stock+currency+user, drawn as blue arrows at the trigger
+    // price/firing time. Sourced from the order cache (AllOrders) — a fired trigger is Filled, so it
+    // lives in ClosedOrders; ActivatedAt carries the firing moment.
+    public ObservableCollection<TriggerMarker> TriggerMarkers { get; } = new();
+
     // User-configurable line colour per side. Defaults to ChartBull / ChartBear
     // (the Binance + TradingView convention) but selectable from the same palette
     // the MA color picker uses, surfaced in the chart settings overlay.
@@ -216,6 +221,7 @@ public partial class ChartViewModel : StockAwareViewModel
         Markers.CollectionChanged += (_, __) => RequestRedraw();
         OpenOrderLines.CollectionChanged += (_, __) => RequestRedraw();
         FillMarkers.CollectionChanged += (_, __) => RequestRedraw();
+        TriggerMarkers.CollectionChanged += (_, __) => RequestRedraw();
 
         // Keep open-order overlays in sync with the cache. Rebuild on selection
         // change too so switching stocks shows the right user lines.
@@ -228,7 +234,14 @@ public partial class ChartViewModel : StockAwareViewModel
 
     private void OnOrdersChanged(object? sender, EventArgs e)
     {
-        try { MainThread.BeginInvokeOnMainThread(SyncOpenOrderLines); }
+        try
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                SyncOpenOrderLines();
+                SyncTriggerMarkers();   // §F2: a fired trigger leaves OpenOrders and gains an arrow
+            });
+        }
         catch (Exception ex) { _logger.LogError(ex, "Failed to sync chart open-order lines."); }
     }
 
@@ -259,6 +272,29 @@ public partial class ChartViewModel : StockAwareViewModel
             }
             if (o.IsMarketOrder) continue;
             OpenOrderLines.Add(new OpenOrderLine(o.OrderId, o.Price, o.IsBuyOrder, o.Quantity));
+        }
+    }
+
+    /// <summary>
+    /// §F2: snapshot the user's fired triggers for the selected stock+currency and mirror them into
+    /// <see cref="TriggerMarkers"/> — a blue arrow at the trigger price/firing time. A fired trigger
+    /// is Filled (so it's in AllOrders, not OpenOrders) and carries ActivatedAt + StopPrice.
+    /// </summary>
+    private void SyncTriggerMarkers()
+    {
+        TriggerMarkers.Clear();
+        if (!Selected.HasSelectedStock || _auth.CurrentUserId <= 0) return;
+
+        var stockId = Selected.StockId!.Value;
+        var currency = Selected.Currency;
+        foreach (var o in _orderCache.AllOrders)
+        {
+            if (o.StockId != stockId || o.CurrencyType != currency) continue;
+            if (o.UserId != _auth.CurrentUserId) continue;
+            if (o.ActivatedAt is not DateTime firedAt) continue;
+            var price = o.StopPrice ?? 0m;
+            if (price <= 0m) continue;
+            TriggerMarkers.Add(new TriggerMarker(firedAt, price, o.IsBuyOrder));
         }
     }
 
@@ -330,6 +366,7 @@ public partial class ChartViewModel : StockAwareViewModel
         await RestartStreamAsync(stockId, currency, SelectedResolution, ct).ConfigureAwait(false);
         // After switching stock the open-order line set changes too.
         SyncOpenOrderLines();
+        SyncTriggerMarkers();   // §F2: fired-trigger arrows for the new stock
         // Render fills already cached for the new stock, then pull the latest in the background
         // (RefreshAsync raises TransactionsChanged → SyncFillMarkers when it completes).
         SyncFillMarkers();

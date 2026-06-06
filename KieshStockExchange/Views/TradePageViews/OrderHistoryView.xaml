@@ -10,7 +10,7 @@
 
         <!-- Table headers -->
         <Grid Grid.Row="0"
-              ColumnDefinitions="*,*,*,*,*,*,*,*"
+              ColumnDefinitions="*,*,*,*,*,*,*,*,*"
               Style="{StaticResource TradeTableHeaderGrid}">
             <Label Grid.Column="0" Text="Symbol"  Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="1" Text="Created" Style="{StaticResource TradeTableHeaderLabel}" />
@@ -20,6 +20,7 @@
             <Label Grid.Column="5" Text="Qty"     Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="6" Text="Price"   Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="7" Text="Total"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="8" Text="Status"  Style="{StaticResource TradeTableHeaderLabel}" />
         </Grid>
 
         <!-- Rows -->
@@ -34,7 +35,7 @@
 
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="vm:ClosedOrderRow">
-                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
+                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*,*"
                               Style="{StaticResource TradeTableRowGrid}">
                             <HorizontalStackLayout Grid.Column="0" Spacing="3" VerticalOptions="Center">
                                 <Label Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" VerticalOptions="Center" />
@@ -51,6 +52,41 @@
                             <Label Grid.Column="5" Text="{Binding Qty}"    Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="6" Text="{Binding Price}"  Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="7" Text="{Binding Total}"  Style="{StaticResource TradeTableRowLabel}" />
+
+                            <!-- Status pill (§G Part 1): mirrors Open Orders. A fired trigger reads FILLED
+                                 (green), a cancelled armed trigger reads CANCELLED (red). Same Order bindings. -->
+                            <Border Grid.Column="8"
+                                    HorizontalOptions="Center"
+                                    VerticalOptions="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource StatusPillOpen}">
+                                        <Style.Triggers>
+                                            <DataTrigger TargetType="Border" Binding="{Binding Order.IsFilled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource BuyGreen}" />
+                                                <Setter Property="Stroke"     Value="Transparent" />
+                                            </DataTrigger>
+                                            <DataTrigger TargetType="Border" Binding="{Binding Order.IsCancelled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource SellRed}" />
+                                                <Setter Property="Stroke"     Value="Transparent" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Label Text="{Binding Order.StatusDisplay}">
+                                    <Label.Style>
+                                        <Style TargetType="Label" BasedOn="{StaticResource StatusPillLabelMuted}">
+                                            <Style.Triggers>
+                                                <DataTrigger TargetType="Label" Binding="{Binding Order.IsFilled}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource White}" />
+                                                </DataTrigger>
+                                                <DataTrigger TargetType="Label" Binding="{Binding Order.IsCancelled}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource White}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Label.Style>
+                                </Label>
+                            </Border>
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>

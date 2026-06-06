@@ -52,6 +52,9 @@ public class OrderRow
 
     [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
     [Column("UpdatedAt")] public DateTime UpdatedAt { get; set; }
+
+    // §F2: when an armed trigger fired (null otherwise). Drives the chart firing-point marker.
+    [Column("ActivatedAt")] public DateTime? ActivatedAt { get; set; }
 }
 
 public static class OrderMapper
@@ -84,6 +87,7 @@ public static class OrderMapper
         AmountFilled = r.AmountFilled,
         CreatedAt = r.CreatedAt,
         UpdatedAt = r.UpdatedAt,
+        ActivatedAt = r.ActivatedAt,
     };
 
     public static OrderRow ToRow(Order o) => new()
@@ -108,5 +112,6 @@ public static class OrderMapper
         AmountFilled = o.AmountFilled,
         CreatedAt = o.CreatedAt,
         UpdatedAt = o.UpdatedAt,
+        ActivatedAt = o.ActivatedAt,
     };
 }

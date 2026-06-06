@@ -88,6 +88,8 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.TrailWatermark).HasColumnType(Money);
             b.Property(x => x.CreatedAt).HasColumnType(TimestampTz);
             b.Property(x => x.UpdatedAt).HasColumnType(TimestampTz);
+            // §F2: nullable firing-point timestamp (null for non-triggers / still-armed).
+            b.Property(x => x.ActivatedAt).HasColumnType(TimestampTz);
             // Two overlapping composites both terminating on Status — both must survive.
             b.HasIndex(x => new { x.UserId, x.Status })
              .HasDatabaseName("IX_Orders_User_Status");

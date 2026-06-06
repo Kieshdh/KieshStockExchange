@@ -81,6 +81,11 @@ public sealed class CandleChartDrawable : IDrawable
     public Color FillBuyColor = Color.FromArgb("#26C281");   // teal-green vs the candle bull green
     public Color FillSellColor = Color.FromArgb("#E74C3C");  // softer red vs the candle bear red
 
+    // §F2: fired-trigger activation points, drawn as larger hollow blue arrows at the trigger price
+    // (where the trigger crossed) — distinct from the solid green/red fill triangles.
+    public IReadOnlyList<TriggerMarker> TriggerMarkers { get; set; } = Array.Empty<TriggerMarker>();
+    public Color TriggerColor = Color.FromArgb("#3B82F6");   // theme overrides via ChartTrigger
+
     // Volume bar controls. ShowVolume gates rendering. OverlayVolume picks the
     // TradingView-style overlay where bars sit at low alpha in the bottom strip
     // of the price plot; setting it to false falls back to a separate sub-pane
@@ -246,6 +251,7 @@ public sealed class CandleChartDrawable : IDrawable
         DrawMovingAverages(canvas, plot, tMin, tMax, yMin, yMax, X, Y);
         DrawOpenOrderLines(canvas, plot, Y, currency);
         DrawFillMarkers(canvas, plot, X, Y);
+        DrawTriggerMarkers(canvas, plot, X, Y);
         DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
         DrawMarkers(canvas, plot, Y, currency);
 
@@ -371,6 +377,58 @@ public sealed class CandleChartDrawable : IDrawable
             // Theme-aware outline: keeps the arrow legible against both candles and the background.
             canvas.StrokeColor = outline;
             canvas.StrokeSize = 1f;
+            canvas.DrawPath(path);
+        }
+        canvas.RestoreState();
+    }
+
+    /// <summary>
+    /// §F2: draw each fired trigger as a hollow blue arrow at (activation time, trigger price).
+    /// Larger than a fill triangle and outlined-not-filled, so a coincident fill + trigger reads as
+    /// two distinct things: "filled here" (solid green/red) vs "trigger crossed here" (blue arrow).
+    /// Up for a buy trigger, down for a sell.
+    /// </summary>
+    private void DrawTriggerMarkers(ICanvas canvas, RectF plot, Func<DateTime, float> X, Func<double, float> Y)
+    {
+        if (TriggerMarkers.Count == 0) return;
+        const float baseHalf = 6f;  // wider than the fill triangle (4f)
+        const float height = 18f;   // taller too
+        const float gap = 6f;
+        canvas.SaveState();
+        for (int i = 0; i < TriggerMarkers.Count; i++)
+        {
+            var m = TriggerMarkers[i];
+            float x = SnapToCandleCenterX(m.AtTime, X);
+            if (x < plot.Left || x > plot.Right) continue;
+            float yPrice = Y((double)m.Price);
+            if (yPrice < plot.Top || yPrice > plot.Bottom) continue;
+
+            var path = new PathF();
+            if (m.IsBuy)
+            {
+                // Up arrow below the trigger price: apex points up toward the level.
+                float apexY = yPrice + gap;
+                float baseY = apexY + height;
+                path.MoveTo(x, apexY);
+                path.LineTo(x - baseHalf, baseY);
+                path.LineTo(x + baseHalf, baseY);
+                path.Close();
+            }
+            else
+            {
+                // Down arrow above the trigger price: apex points down toward the level.
+                float apexY = yPrice - gap;
+                float baseY = apexY - height;
+                path.MoveTo(x, apexY);
+                path.LineTo(x - baseHalf, baseY);
+                path.LineTo(x + baseHalf, baseY);
+                path.Close();
+            }
+            // Hollow: low-alpha blue wash + a bold blue outline, vs the fill triangle's solid fill.
+            canvas.FillColor = TriggerColor.WithAlpha(0.22f);
+            canvas.FillPath(path);
+            canvas.StrokeColor = TriggerColor;
+            canvas.StrokeSize = 2f;
             canvas.DrawPath(path);
         }
         canvas.RestoreState();

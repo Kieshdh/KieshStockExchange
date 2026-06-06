@@ -11,7 +11,7 @@ public sealed partial class PgDBService
     private const string OrderCols = @"
         ""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
         ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
-        ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt""";
+        ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"",""ActivatedAt""";
 
     private const string TransactionCols = @"
         ""TransactionId"",""StockId"",""BuyOrderId"",""SellOrderId"",""BuyerId"",""SellerId"",
@@ -229,7 +229,7 @@ public sealed partial class PgDBService
               ""ParentOrderId"" = @ParentOrderId,
               ""Currency"" = @Currency, ""Side"" = @Side, ""Entry"" = @Entry, ""Stop"" = @Stop,
               ""Status"" = @Status, ""AmountFilled"" = @AmountFilled,
-              ""CreatedAt"" = @CreatedAt, ""UpdatedAt"" = @UpdatedAt
+              ""CreatedAt"" = @CreatedAt, ""UpdatedAt"" = @UpdatedAt, ""ActivatedAt"" = @ActivatedAt
             WHERE ""OrderId"" = @OrderId", OrderMapper.ToRow(order));
     }
 

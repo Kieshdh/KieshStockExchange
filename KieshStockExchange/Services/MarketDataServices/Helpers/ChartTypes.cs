@@ -63,3 +63,9 @@ public readonly record struct OpenOrderLine(
 // triangle sitting just below the fill price; a sell is a down-pointing red triangle
 // just above it — the active-trader "filled here" convention.
 public readonly record struct FillMarker(DateTime AtTime, decimal Price, bool IsBuy);
+
+// §F2: a fired trigger's activation point, drawn as a blue directional arrow at (AtTime, Price).
+// Price is the trigger level (Order.StopPrice). Distinct from FillMarker, which sits at the *fill*
+// price — for a stop-market the two differ, conveying "crossed here" vs "filled here". IsBuy → up
+// arrow, sell → down.
+public readonly record struct TriggerMarker(DateTime AtTime, decimal Price, bool IsBuy);

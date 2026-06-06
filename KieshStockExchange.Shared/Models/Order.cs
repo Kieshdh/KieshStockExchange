@@ -216,6 +216,15 @@ public class Order : IValidatable
         set => _updatedAt = TimeHelper.EnsureUtc(value);
     }
 
+    // §F2: the moment an armed trigger fired (set in PromoteStop). Null = never a trigger, or still
+    // armed. Drives the blue firing-point marker on the chart; serialized over the API automatically.
+    private DateTime? _activatedAt = null;
+    public DateTime? ActivatedAt
+    {
+        get => _activatedAt;
+        set => _activatedAt = value.HasValue ? TimeHelper.EnsureUtc(value.Value) : null;
+    }
+
     // Runtime-only reservation tracking, mirrored against Fund.ReservedBalance /
     // Position.ReservedQuantity. Hydrated at cold-load from ReservationMath and
     // maintained in lock-step by every reservation site under the per-user gate.
@@ -404,6 +413,7 @@ public class Order : IValidatable
         if (!IsArmed) throw new InvalidOperationException("Only an armed (Pending) stop can be promoted.");
         Stop = StopKind.None;
         Status = Statuses.Open;
+        ActivatedAt = TimeHelper.NowUtc();   // §F2: firing-point timestamp for the chart marker
         UpdatedAt = TimeHelper.NowUtc();
     }
 
@@ -450,7 +460,8 @@ public class Order : IValidatable
             Status = this.Status,
             AmountFilled = this.AmountFilled,
             CreatedAt = this.CreatedAt,
-            UpdatedAt = this.UpdatedAt
+            UpdatedAt = this.UpdatedAt,
+            ActivatedAt = this.ActivatedAt
         };
         clone.CurrentBuyReservation = this.CurrentBuyReservation;
         clone.CurrentSellReservedQty = this.CurrentSellReservedQty;

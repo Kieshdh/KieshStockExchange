@@ -161,6 +161,7 @@ public partial class ChartView : ContentView
         if (TryGetColor("ChartPriceLineDown", out var lineDown)) _drawable.PriceLineDown = lineDown;
         if (TryGetColor("ChartCrosshair",     out var ch))       _drawable.CrosshairColor = ch;
         if (TryGetColor("ChartMarker",        out var marker))   _drawable.MarkerColor   = marker;
+        if (TryGetColor("ChartTrigger",       out var trig))     _drawable.TriggerColor  = trig;   // §F2
     }
 
     private static bool TryGetColor(string key, out Color color)
@@ -218,6 +219,7 @@ public partial class ChartView : ContentView
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
         _drawable.OpenOrderSellColor = ResolveColor(_vm.SellOrderColorOption.Key);
         _drawable.FillMarkers = _vm.FillMarkers.ToArray();
+        _drawable.TriggerMarkers = _vm.TriggerMarkers.ToArray();   // §F2
     }
 
     // Theme-aware colour lookup used for MA series so the VM stays free of
