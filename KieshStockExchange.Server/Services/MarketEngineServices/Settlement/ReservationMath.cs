@@ -49,6 +49,16 @@ public static class ReservationMath
     internal static decimal ShortCollateralForFill(int qty, decimal fillPrice, CurrencyType ccy)
         => CurrencyHelper.Notional(fillPrice, qty, ccy);
 
+    /// <summary>
+    /// §F14: place-time cash collateral for a RESTING short — the uncovered remainder
+    /// (<paramref name="shortQty"/> shares) of a limit sell, held at the order's own limit Price. A
+    /// limit maker fills at its limit, so this place-time hold equals the proceeds credited at fill ⇒
+    /// buying power is neutral once filled (and locked while resting). Counterpart of
+    /// <see cref="ShortCollateralForFill"/> for the resting (not market) short.
+    /// </summary>
+    internal static decimal ShortCollateralForResting(Order o, int shortQty)
+        => CurrencyHelper.Notional(o.Price, shortQty, o.CurrencyType);
+
     /// <summary> RemainingBuyReservation with hypothetical new price/qty. Pass null to keep current. </summary>
     internal static decimal ProjectedBuyReservation(Order o, int? newQty, decimal? newPrice)
     {

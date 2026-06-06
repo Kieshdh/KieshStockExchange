@@ -230,6 +230,9 @@ public class Order : IValidatable
     // maintained in lock-step by every reservation site under the per-user gate.
     public decimal CurrentBuyReservation { get; private set; } = 0m;
     public int CurrentSellReservedQty { get; private set; } = 0;
+    // §F14: cash held to back a RESTING short (a limit sell beyond holdings). In-memory only, like the
+    // two above — reconstructed on cold-load; converts to Position.ShortCollateral as the short fills.
+    public decimal CurrentShortCollateral { get; private set; } = 0m;
 
     public bool IsValid() => UserId > 0 && StockId > 0 && Quantity > 0 && IsValidPrice() &&
         IsValidOrderType() && IsValidStatus() && IsValidCurrency() && IsValidAmount() && IsValidBuyBudget();
@@ -467,6 +470,7 @@ public class Order : IValidatable
         };
         clone.CurrentBuyReservation = this.CurrentBuyReservation;
         clone.CurrentSellReservedQty = this.CurrentSellReservedQty;
+        clone.CurrentShortCollateral = this.CurrentShortCollateral;
         return clone;
     }
 
@@ -525,15 +529,43 @@ public class Order : IValidatable
         return released;
     }
 
+    // §F14: cash collateral held for a resting short (limit sell beyond holdings). Mirrors the
+    // buy-reservation API; the fund side is Fund.ReservedBalance, kept in lock-step at every site.
+    public void TakeShortCollateral(decimal amount)
+    {
+        if (amount < 0m)
+            throw new ArgumentException("TakeShortCollateral amount cannot be negative.", nameof(amount));
+        CurrentShortCollateral += amount;
+    }
+
+    public void ConsumeShortCollateral(decimal amount)
+    {
+        if (amount < 0m)
+            throw new ArgumentException("ConsumeShortCollateral amount cannot be negative.", nameof(amount));
+        if (amount > CurrentShortCollateral)
+            throw new InvalidOperationException(
+                $"ConsumeShortCollateral #{OrderId}: amount {amount} exceeds current {CurrentShortCollateral}.");
+        CurrentShortCollateral -= amount;
+    }
+
+    public decimal ReleaseShortCollateral()
+    {
+        var released = CurrentShortCollateral;
+        CurrentShortCollateral = 0m;
+        return released;
+    }
+
     /// <summary>
     /// Rollback hook: restore the per-order reservation fields to a pre-mutation snapshot
     /// captured by the settlement scope.
     /// </summary>
-    public void RestoreReservationFromSnapshot(decimal buy, int sell)
+    public void RestoreReservationFromSnapshot(decimal buy, int sell, decimal shortCollateral = 0m)
     {
         if (buy < 0m) throw new ArgumentException(nameof(buy));
         if (sell < 0) throw new ArgumentException(nameof(sell));
+        if (shortCollateral < 0m) throw new ArgumentException(nameof(shortCollateral));
         CurrentBuyReservation = buy;
         CurrentSellReservedQty = sell;
+        CurrentShortCollateral = shortCollateral;   // §F14: only a resting short carries this (else 0)
     }
 }
