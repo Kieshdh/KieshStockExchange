@@ -71,13 +71,17 @@ public partial class TradePage : ContentPage
         {
             SetSize(TablesCard, width - 18, isWidth: true); // 16 = Padding 8*2; -2 safety
 
-            // §F10: pin the chart (column 0, `*`) width so the orderbook (230) + order panel (260)
-            // always fit inside the window with the 8px page-padding gutter. Otherwise the chart
-            // toolbar's intrinsic minimum width is the floor the `*` column can't shrink below, which
-            // pushed the panel's right edge (incl. its border) off-screen on narrower windows.
-            // Padding 8*2 + ColumnSpacing 8*2 + orderbook 230 + panel 260 (+2 safety).
+            // §F10: size the chart COLUMN (col 0) explicitly rather than pinning the chart child's
+            // WidthRequest. The chart toolbar's intrinsic min width can keep a `*` column from
+            // shrinking, pushing the orderbook (230) + panel (260) past the window so the panel's right
+            // edge clips; and pinning the child while it's HorizontalOptions=Fill makes MAUI centre it
+            // (uneven gaps between the cards). Setting the column is the right lever — the toolbar clips
+            // within it. Loop-free (derived from the window width). Padding 8*2 + ColumnSpacing 8*2 +
+            // orderbook 230 + panel 260 (+2 safety). Fall back to `*` on very narrow windows.
             var chartWidth = width - 16 - 16 - 230 - 260 - 2;
-            SetSize(ChartCard, chartWidth, isWidth: true);
+            RootGrid.ColumnDefinitions[0].Width = chartWidth >= 100
+                ? new GridLength(chartWidth, GridUnitType.Absolute)
+                : GridLength.Star;
         }
     }
 

@@ -122,7 +122,11 @@
                     <!-- §F11: "current stock only" filter — one toggle for Open Orders / Order History /
                          Transactions (Positions stay unfiltered). Label tracks the selected symbol. -->
                     <other:SegmentedTabView.HeaderRightContent>
-                        <HorizontalStackLayout Spacing="6" VerticalOptions="Center">
+                        <!-- §F11: bind context explicitly to the page VM — this content is reparented into
+                             the SegmentedTabView's RightSlot, which drops the inherited TradeViewModel
+                             context (label + checkbox would otherwise bind to nothing). -->
+                        <HorizontalStackLayout Spacing="6" VerticalOptions="Center"
+                                               BindingContext="{Binding Source={x:Reference TradePageRoot}, Path=BindingContext}">
                             <Label Text="{Binding TablesFilterLabel}"
                                    Style="{StaticResource MutedLabelStyle}"
                                    VerticalOptions="Center" />
