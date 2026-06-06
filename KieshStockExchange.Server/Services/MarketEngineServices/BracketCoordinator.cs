@@ -652,34 +652,36 @@ public sealed class BracketCoordinator : IBracketCoordinator
                 new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
             var fund = _accounts.GetFund(parent.UserId, parent.CurrencyType);
             if (fund is null) return;
-            var pos = _accounts.GetPosition(parent.UserId, parent.StockId);
-            decimal collateral = pos?.ShortCollateral ?? 0m;
 
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
             try
             {
                 if (sl is not null)
                 {
-                    // The TP buy already consumed its buyback from the shared Fund.ReservedBalance (settler,
-                    // reuse #1) and the collateral release ran pro-rata. The SL's per-order pool field lags;
-                    // bring it down to the new worst-case pool AND release the worst-case-vs-actual cushion so
-                    // ReservedBalance == Σ buy-reservation + Σ collateral again. The cushion is derived from
-                    // the post-settler fund vs target (== (SL_worst − fillPrice)·coverQty) — no need for the
-                    // per-fill price/qty here.
+                    // §P6: shrink the SL's cash pool to the new worst-case for the remaining held shares and
+                    // release ONLY that pool shrinkage from the fund. The previous formula derived the release
+                    // from whole-fund ReservedBalance (fund.ReservedBalance − desiredPool − collateral), which
+                    // under bot load wrongly swept up this user's OTHER shorts' collateral + other orders'
+                    // reservations (all share one Fund.ReservedBalance) as "cushion" and released them — a large
+                    // reservation-locking leak (single-bracket admin tests never hit it, the bot soak did). The
+                    // bracket-local poolDrop touches only this SL's pool, mirroring OnStopFiringShortAsync. The
+                    // TP's buyback + its pro-rata collateral release were already handled by the settler.
                     decimal desiredPool = ShortBracketMath.Pool(SlWorst(sl), held);
-                    decimal target = desiredPool + collateral;
-                    decimal cushion = fund.ReservedBalance - target;
-                    if (cushion > 0m)
-                    {
-                        cushion = Math.Min(cushion, fund.ReservedBalance);
-                        var rb = fund.ReservedBalance; var tb = fund.TotalBalance;
-                        fund.UnreserveFunds(cushion);
-                        fund.UpdatedAt = TimeHelper.NowUtc();
-                        _ledger.LogFund(parent.UserId, parent.CurrencyType, sl.OrderId,
-                            "Bracket:Short:TPCushionRelease", cushion, rb, fund.ReservedBalance, tb, fund.TotalBalance);
-                    }
                     decimal poolDrop = sl.CurrentBuyReservation - desiredPool;
-                    if (poolDrop > 0m) sl.ConsumeBuyReservation(Math.Min(poolDrop, sl.CurrentBuyReservation));
+                    if (poolDrop > 0m)
+                    {
+                        poolDrop = Math.Min(poolDrop, sl.CurrentBuyReservation);
+                        var rel = Math.Min(poolDrop, fund.ReservedBalance);
+                        if (rel > 0m)
+                        {
+                            var rb = fund.ReservedBalance; var tb = fund.TotalBalance;
+                            fund.UnreserveFunds(rel);
+                            fund.UpdatedAt = TimeHelper.NowUtc();
+                            _ledger.LogFund(parent.UserId, parent.CurrencyType, sl.OrderId,
+                                "Bracket:Short:TPCushionRelease", rel, rb, fund.ReservedBalance, tb, fund.TotalBalance);
+                        }
+                        sl.ConsumeBuyReservation(poolDrop);
+                    }
 
                     if (held <= 0)
                     {

@@ -158,10 +158,40 @@ short-bracket coordinator's pool/cushion accounting in `OnParentFillShortAsync` 
 only reproducible under concurrent bot load (single-order admin tests never hit it; cf. the money-probe
 parallel-group race that the batch path already had to fix).
 
-**Status / recommendation.** Validated & solid this session: Bug B fix, Fix A cover-clamp, and the CK-violation
-hardening (DB integrity proven on a clean soak). The short-collateral under-reservation is a separate,
-larger finding that needs a focused design pass on where/when advanced short opens reserve collateral on the
-fund vs the position under load — recommend an Ultraplan pass (it's their short-collateral model and is
-conservation-critical). Repro harness: fresh `kse_soak` (create + `dotnet ef database update` + auto-seed),
-run with `Bots__Advanced__Enabled=true` and the probs above, then compare Σ position collateral vs Σ fund
-reserved.
+### ROOT CAUSE + FIX (2026-06-07) — coordinator cushion used whole-fund ReservedBalance
+
+The under-reservation was a single bug in `BracketCoordinator.OnChildFillShortAsync` (short-bracket TP fill).
+It resized the SL cash pool by computing the release as:
+
+```
+cushion = fund.ReservedBalance − (desiredPool + thisPosition.ShortCollateral)
+fund.UnreserveFunds(cushion)
+```
+
+`fund.ReservedBalance` is the user's **whole** reserved balance across **every** short position and order in
+that currency (they all share one Fund). So when a bot held multiple concurrent shorts/orders in the same
+currency — exactly the soak's load — this swept up all the OTHER positions' collateral and other orders'
+reservations as "cushion" and released them. Single-bracket admin tests never hit it (there, ReservedBalance
+== this bracket's footprint, so the formula happened to be right). `OnStopFiringShortAsync` already used the
+correct **bracket-local** form; `OnChildFillShortAsync` was the outlier.
+
+**Fix:** make it bracket-local, mirroring `OnStopFiringShortAsync` — release only this SL's pool shrinkage:
+
+```
+poolDrop = sl.CurrentBuyReservation − desiredPool
+release  = min(poolDrop, fund.ReservedBalance)
+fund.UnreserveFunds(release); sl.ConsumeBuyReservation(poolDrop)
+```
+
+**Validated on a fresh clean `kse_soak`** (all 5 advanced kinds, t+2…t+12m, shorts→1697): the collateral gap
+(Σ pos collateral − Σ fund reserved) flipped from **+$0.5M (under-reserved leak)** to **negative** (fund
+correctly reserves collateral + SL pools + live buy reservations); `CK=0`, `badPos=0`, `badFund=0` (DB
+integrity perfect); `insufAvail=0` (the TP-pays-from-available path never starved); settlement drift hundreds
+→ **5**; the large structural shortfalls (194 of 235, avg ~$1259) → **0** — only 20 sub-cent SL-fire rounding
+shortfalls remain (max $0.09, total **$0.56** across the whole sim), absorbed by the hardening + reconciler;
+reconcile bounded ~38 mismatches with phantomTotal $0.81 (was growing 5→263 before the fix).
+
+**Status:** Bug B, Fix A, CK hardening, and this cushion fix are all validated on clean soaks. Remaining dust
+is sub-cent SL-fire rounding (negligible, reconciler-tracked). Repro harness: fresh `kse_soak` (create +
+`dotnet ef database update` + auto-seed), `Bots__Advanced__Enabled=true` with the probs above, then compare
+Σ position collateral vs Σ fund reserved (should be ≤ 0) and watch CK/shortfall/reconcile.
