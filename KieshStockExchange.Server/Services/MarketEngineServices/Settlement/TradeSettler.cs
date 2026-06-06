@@ -367,8 +367,14 @@ internal sealed class TradeSettler
             // Pre-batch Quantity decides short vs long (stable across this order's fills and
             // matching SellerCapacityValidator's decision). New rows were flat ⇒ 0.
             int sellerStartQty = posSnapshots.TryGetValue(sellerPosKey, out var sps) ? sps.Quantity : 0;
-            bool isShortFill = sellOrder is not null && sellOrder.IsMarketOrder && sellerStartQty <= 0;
-            bool isFlipFill = sellOrder is not null && sellOrder.IsMarketOrder && sellerStartQty > 0;
+            // §F14: a resting LIMIT short (carrying a place-time collateral hold) opens/extends a short
+            // at fill just like a market short — pure short when flat (startQty<=0), straddle/flip when a
+            // long holder's covered shares are exhausted (startQty>0). The short blocks below source the
+            // collateral from the order's hold (already reserved) instead of ReserveFunds.
+            bool sellHasShortPart = sellOrder is not null
+                && (sellOrder.IsMarketOrder || (sellOrder.IsLimitOrder && sellOrder.CurrentShortCollateral > 0m));
+            bool isShortFill = sellHasShortPart && sellerStartQty <= 0;
+            bool isFlipFill = sellHasShortPart && sellerStartQty > 0;
 
             if (isShortFill)
             {
@@ -377,13 +383,25 @@ internal sealed class TradeSettler
                 // at open. Push Quantity negative; collateral lives on the position. No
                 // ReservedQuantity (shares) involved.
                 var collateral = ReservationMath.ShortCollateralForFill(t.Quantity, t.Price, ccy);
-                var cResB = sellerFund.ReservedBalance;
-                var cTotB = sellerFund.TotalBalance;
-                sellerFund.ReserveFunds(collateral);
-                sellerFund.UpdatedAt = TimeHelper.NowUtc();
-                _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
-                    "ApplyPass:ShortOpen:ReserveCollateral", collateral,
-                    cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
+                // §F14: a resting short's collateral is already in ReservedBalance from placement —
+                // consume the order's hold (snapshot for rollback), don't re-reserve. A market short
+                // reserves it now (P1). Either way it's posted to Position.ShortCollateral below, so
+                // Σ holds == Fund.ReservedBalance is preserved.
+                if (sellOrder!.CurrentShortCollateral >= collateral)
+                {
+                    SnapshotOrderIfNew(sellOrder);
+                    sellOrder.ConsumeShortCollateral(collateral);
+                }
+                else
+                {
+                    var cResB = sellerFund.ReservedBalance;
+                    var cTotB = sellerFund.TotalBalance;
+                    sellerFund.ReserveFunds(collateral);
+                    sellerFund.UpdatedAt = TimeHelper.NowUtc();
+                    _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
+                        "ApplyPass:ShortOpen:ReserveCollateral", collateral,
+                        cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
+                }
 
                 var sQtyBefore = sellerPos.Quantity;
                 sellerPos.ApplyDelta(-t.Quantity);
@@ -423,13 +441,24 @@ internal sealed class TradeSettler
                 if (shortPart > 0)
                 {
                     var collateral = ReservationMath.ShortCollateralForFill(shortPart, t.Price, ccy);
-                    var cResB = sellerFund.ReservedBalance;
-                    var cTotB = sellerFund.TotalBalance;
-                    sellerFund.ReserveFunds(collateral);
-                    sellerFund.UpdatedAt = TimeHelper.NowUtc();
-                    _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
-                        "ApplyPass:Flip:ShortOpen:ReserveCollateral", collateral,
-                        cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
+                    // §F14: resting-short straddle — consume the order's place-time hold (already in
+                    // ReservedBalance); a market flip reserves now. SnapshotOrderIfNew already ran for the
+                    // long part above, but call again (idempotent — snapshots once per OrderId).
+                    if (sellOrder!.CurrentShortCollateral >= collateral)
+                    {
+                        SnapshotOrderIfNew(sellOrder);
+                        sellOrder.ConsumeShortCollateral(collateral);
+                    }
+                    else
+                    {
+                        var cResB = sellerFund.ReservedBalance;
+                        var cTotB = sellerFund.TotalBalance;
+                        sellerFund.ReserveFunds(collateral);
+                        sellerFund.UpdatedAt = TimeHelper.NowUtc();
+                        _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
+                            "ApplyPass:Flip:ShortOpen:ReserveCollateral", collateral,
+                            cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
+                    }
 
                     var sQtyBefore = sellerPos.Quantity;
                     sellerPos.ApplyDelta(-shortPart);

@@ -64,7 +64,11 @@ internal sealed class SellerCapacityValidator
             if (!shortByOrder.TryGetValue(t.SellOrderId, out var isShort))
             {
                 ordersById.TryGetValue(t.SellOrderId, out var so);
-                isShort = so is not null && so.IsMarketOrder && startQty <= 0;
+                // §F14: a PURE resting short (flat/short seller, no covered shares) is a LIMIT sell
+                // carrying a place-time collateral hold — accept it like a market short (no share draw)
+                // so it doesn't hit the no-position hard-fail below. Cash was checked at placement.
+                isShort = so is not null && startQty <= 0
+                    && (so.IsMarketOrder || (so.IsLimitOrder && so.CurrentShortCollateral > 0m));
                 shortByOrder[t.SellOrderId] = isShort;
             }
             if (isShort)
@@ -138,7 +142,11 @@ internal sealed class SellerCapacityValidator
             if (!flipByOrder.TryGetValue(t.SellOrderId, out var isFlip))
             {
                 ordersById.TryGetValue(t.SellOrderId, out var fo);
-                isFlip = fo is not null && fo.IsMarketOrder && startQty > 0;
+                // §F14: a straddle resting short — a LIMIT sell by a long holder whose covered shares
+                // run out, the uncovered remainder collateral-backed at placement — flips to short
+                // exactly like a market sell beyond holdings, so the same accept-the-remainder applies.
+                isFlip = fo is not null && startQty > 0
+                    && (fo.IsMarketOrder || (fo.IsLimitOrder && fo.CurrentShortCollateral > 0m));
                 flipByOrder[t.SellOrderId] = isFlip;
             }
 

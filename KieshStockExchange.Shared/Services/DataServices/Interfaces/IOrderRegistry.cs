@@ -35,6 +35,10 @@ public interface IOrderRegistry
     /// <summary>All open sell orders for a user/stock, canonical refs.</summary>
     IReadOnlyList<Order> GetOpenSellsForUser(int userId, int stockId);
 
+    /// <summary>§F14: a user's open resting shorts in one currency (any stock) — open limit sells with a
+    /// place-time short-collateral hold, so the fund reconcile/clamp can count that hold.</summary>
+    IReadOnlyList<Order> GetOpenShortSellsForUser(int userId, CurrencyType ccy);
+
     /// <summary>
     /// §3.6 P4: armed (Pending) sell-stops for a user/stock, canonical refs. They reserve shares on
     /// the Position at arm time but aren't <c>IsOpen</c>, so the reconciler/clamp must count them

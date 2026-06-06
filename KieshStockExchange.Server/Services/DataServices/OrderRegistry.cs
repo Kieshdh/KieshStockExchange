@@ -75,6 +75,26 @@ public sealed class OrderRegistry : IOrderRegistry
         return matches ?? (IReadOnlyList<Order>)Array.Empty<Order>();
     }
 
+    // §F14: a user's open resting shorts in one currency (any stock) — limit sells carrying a
+    // place-time short-collateral hold. Used by the fund reconcile/clamp to count that hold so it
+    // isn't read as a phantom or clamped away.
+    public IReadOnlyList<Order> GetOpenShortSellsForUser(int userId, CurrencyType ccy)
+    {
+        List<Order>? matches = null;
+        foreach (var kv in _byId)
+        {
+            var o = kv.Value;
+            if (o.UserId != userId) continue;
+            if (!o.IsSellOrder) continue;
+            if (o.CurrencyType != ccy) continue;
+            if (!o.IsOpen) continue;
+            if (o.CurrentShortCollateral <= 0m) continue;
+            matches ??= new List<Order>();
+            matches.Add(o);
+        }
+        return matches ?? (IReadOnlyList<Order>)Array.Empty<Order>();
+    }
+
     public IReadOnlyList<Order> GetArmedSellStopsForUser(int userId, int stockId)
     {
         List<Order>? matches = null;

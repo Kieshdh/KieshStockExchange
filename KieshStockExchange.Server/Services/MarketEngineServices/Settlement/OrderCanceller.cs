@@ -42,10 +42,17 @@ internal sealed class OrderCanceller
         // Load outside the gate to avoid nesting _loadGate inside a gate scope
         await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
 
-        // Per-user gate: hold across release + persist (unless the caller already holds it)
+        // Per-user gate: hold across release + persist (unless the caller already holds it).
+        // §F14: a resting short (sell carrying a collateral hold) touches BOTH fund and position on
+        // cancel — acquire both in settlement's fund→position order to avoid an AB/BA deadlock. A plain
+        // long sell still takes the position gate only; a buy takes the fund gate only.
         IAsyncDisposable? gate = callerHoldsGate ? null
             : order.IsSellOrder
-                ? await _accounts.AcquirePositionGateAsync(order.UserId, order.StockId, ct).ConfigureAwait(false)
+                ? (order.CurrentShortCollateral > 0m
+                    ? await _accounts.AcquireUserGatesAsync(
+                        new[] { (order.UserId, order.CurrencyType) },
+                        new[] { (order.UserId, order.StockId) }, ct).ConfigureAwait(false)
+                    : await _accounts.AcquirePositionGateAsync(order.UserId, order.StockId, ct).ConfigureAwait(false))
                 : await _accounts.AcquireFundGateAsync(order.UserId, order.CurrencyType, ct).ConfigureAwait(false);
         try
         {
@@ -69,6 +76,7 @@ internal sealed class OrderCanceller
                 order.CurrentBuyReservation, order.CurrentBuyReservation,
                 order.CurrentSellReservedQty, order.CurrentSellReservedQty);
             await ReleaseSellReservationAndPersist(order, ct).ConfigureAwait(false);
+            await ReleaseShortCollateralAndPersist(order, ct).ConfigureAwait(false);
             await ReleaseBuyReservationAndPersist(order, ct).ConfigureAwait(false);
             _registry.Remove(order.OrderId);
             return;
@@ -81,6 +89,7 @@ internal sealed class OrderCanceller
 
         // Release + persist so DB-backed Available* drops without waiting for full refresh
         await ReleaseSellReservationAndPersist(order, ct).ConfigureAwait(false);
+        await ReleaseShortCollateralAndPersist(order, ct).ConfigureAwait(false);
         await ReleaseBuyReservationAndPersist(order, ct).ConfigureAwait(false);
 
         // Terminal state + zero reservation: drop from registry. Reconciler doesn't
@@ -130,6 +139,36 @@ internal sealed class OrderCanceller
             _logger.LogInformation(
                 "Cancel: released {Qty} share(s) for order #{OrderId} (user {UserId}, stock {StockId}); available now {Avail}",
                 toRelease, order.OrderId, order.UserId, order.StockId, pos.AvailableQuantity);
+    }
+
+    // §F14: release a resting short's place-time cash collateral on cancel. CurrentShortCollateral is
+    // the source of truth, kept in lock-step with fund.ReservedBalance at the reservation site. A long
+    // sell or an already-filled short carries 0 here, so this is a no-op for them.
+    private async Task ReleaseShortCollateralAndPersist(Order order, CancellationToken ct)
+    {
+        if (!order.IsSellOrder) return;
+        var amount = order.CurrentShortCollateral;
+        if (amount <= 0m) return;
+        var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
+        if (fund is null) return;
+        var toRelease = Math.Min(amount, fund.ReservedBalance);
+        if (toRelease > 0m)
+        {
+            var resB = fund.ReservedBalance;
+            var totB = fund.TotalBalance;
+            fund.UnreserveFunds(toRelease);
+            fund.UpdatedAt = TimeHelper.NowUtc();
+            var released = order.ReleaseShortCollateral();
+            _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
+                "CancelRemainder:ReleaseShortCollateral", toRelease, resB, fund.ReservedBalance,
+                totB, fund.TotalBalance);
+            await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+        }
+
+        if (SettlementDebug.Mode && (!SettlementDebug.UserId.HasValue || order.UserId == SettlementDebug.UserId.Value))
+            _logger.LogInformation(
+                "Cancel: released {Amount} short collateral for order #{OrderId} (user {UserId}, {Ccy}); available now {Avail}",
+                toRelease, order.OrderId, order.UserId, order.CurrencyType, fund.AvailableBalance);
     }
 
     private async Task ReleaseBuyReservationAndPersist(Order order, CancellationToken ct)
