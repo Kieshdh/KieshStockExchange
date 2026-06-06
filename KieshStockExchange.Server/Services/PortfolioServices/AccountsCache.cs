@@ -85,20 +85,27 @@ public sealed class AccountsCache : IAccountsCache
                 openOrders.Add(_registry.GetOrAdd(openOrdersRaw[i]));
             var (sellsByPos, buysByFund) = GroupOpenOrdersBySide(openOrders);
 
+            // Cold-load reservation rebuild — ORDER MATTERS (see each method):
+            //   1. ReseedBracketReservations — bracket pools onto the Position first, so ClampSells
+            //      sees them as an existing baseline rather than rival sells it would cancel (Q1).
+            //   2. ClampSells — non-bracket sells reserve from the REMAINING position pool; seeds
+            //      covered shares for resting shorts (their collateral is seeded in step 4).
+            //   3/4. Backfill*ShortCollateral — filled + resting short collateral onto the Fund.
+            //   5. ClampBuys — LAST, so it caps buys against TotalBalance − collateral already held
+            //      and adds (not overwrites) ReservedBalance (Q2).
             var ordersToCancel = new List<Order>();
+            ReseedBracketReservations(sellsByPos, ordersToCancel);
             ClampSellsToPositionQuantity(sellsByPos, ordersToCancel);
-            ClampBuysToFundBalance(buysByFund, ordersToCancel);
 
-            // §F14: re-seed resting-short collateral AFTER ClampBuys (which assigns fund.ReservedBalance);
-            // doing it inside ClampSells would be clobbered by that assignment.
+            // §3.6 P1 (risk #5): short collateral is intrinsic to the position (loaded from DB, not
+            // rebuilt from open orders). Mirror each just-loaded short's ShortCollateral back into its
+            // currency Fund so hydration reproduces the lock the live session held.
+            BackfillShortCollateral(missing);
+            // §F14: re-seed resting-short collateral. Both collateral passes run BEFORE ClampBuys so its
+            // budget accounts for them (Q2) and its += doesn't clobber them.
             BackfillRestingShortCollateral(openOrders, ordersToCancel);
 
-            // §3.6 P1 (risk #5): short collateral is intrinsic to the position (loaded from
-            // DB, not rebuilt from open orders), so the order-driven fund rebuild above misses
-            // it. Mirror each just-loaded short's ShortCollateral back into its currency Fund's
-            // ReservedBalance so hydration reproduces the lock the live session held — without
-            // it, a restart would drop the collateral and ClampSells could cancel the short.
-            BackfillShortCollateral(missing);
+            ClampBuysToFundBalance(buysByFund, ordersToCancel);
 
             if (ordersToCancel.Count > 0)
                 await _db.UpdateAllAsync(ordersToCancel, ct).ConfigureAwait(false);
@@ -182,6 +189,106 @@ public sealed class AccountsCache : IAccountsCache
         return (sellsByPos, buysByFund);
     }
 
+    // §P4 Q1: rebuild an ACTIVE bracket's share reservation on cold-load BEFORE the generic ClampSells.
+    // An active bracket's legs load as ordinary sells (Open limit TPs + a Pending stop SL) and the generic
+    // clamp — which treats each sell as an independent competitor for the position — would seed the SL's
+    // whole pool and then cancel every TP as an over-reserver, silently destroying the user's take-profits
+    // (conservation still holds, so the reconciler can't catch it). This pass reproduces the live arming
+    // model from BracketCoordinator.OnParentFillAsync: SL present ⇒ Model B (the SL owns the whole held
+    // pool = its RemainingQuantity, kept in lock-step by the coordinator; each TP reserves 0); no SL ⇒
+    // take-profit-only fork (each TP reserves its own remaining shares). Runs single-threaded under
+    // _loadGate; mirrors the BackfillShortCollateral "structured reservation reseeded separately" pattern.
+    private void ReseedBracketReservations(
+        Dictionary<(int, int), List<Order>> sellsByPos,
+        List<Order> ordersToCancel)
+    {
+        // Group loaded bracket children by parent (a position may host several brackets + plain sells).
+        Dictionary<int, List<Order>>? byParent = null;
+        foreach (var kv in sellsByPos)
+            for (int i = 0; i < kv.Value.Count; i++)
+            {
+                var o = kv.Value[i];
+                if (!o.IsBracketChild || o.ParentOrderId is not int pid) continue;
+                byParent ??= new Dictionary<int, List<Order>>();
+                if (!byParent.TryGetValue(pid, out var g)) byParent[pid] = g = new List<Order>();
+                g.Add(o);
+            }
+        if (byParent is null) return;
+
+        foreach (var kv in byParent)
+        {
+            var group = kv.Value;
+            Order? sl = null;
+            var tps = new List<Order>(group.Count);
+            for (int i = 0; i < group.Count; i++)
+            {
+                var o = group[i];
+                if (o.IsStopOrder) sl = o;
+                else if (o.IsLimitOrder) tps.Add(o);
+            }
+            // All children of one parent share a single position (the parent's stock).
+            if (!_positions.TryGetValue((group[0].UserId, group[0].StockId), out var pos)) continue;
+
+            if (sl is not null)
+            {
+                // Model B: SL owns the whole pool; TPs reserve nothing.
+                int pool = sl.RemainingQuantity;
+                if (pool <= 0) continue;
+                if (pos.AvailableQuantity < pool)
+                {
+                    // Malformed (pool exceeds free shares) — fall back to cancelling the whole bracket's
+                    // legs rather than over-reserve the position.
+                    CancelBracketGroupOverReserve(kv.Key, sl, tps, ordersToCancel);
+                    continue;
+                }
+                int before = pos.ReservedQuantity;
+                pos.ReserveStock(pool);
+                sl.TakeSellReservation(pool);
+                _ledger.LogPosition(pos.UserId, pos.StockId, sl.OrderId, "Hydrate:BracketSLPool",
+                    pool, before, pos.ReservedQuantity, pos.Quantity, pos.Quantity);
+            }
+            else
+            {
+                // Take-profit-only fork: each TP reserves its own remaining shares, nearest-market-first
+                // (lowest price), exactly as OnParentFillAsync arms them.
+                tps.Sort(static (a, b) => a.Price.CompareTo(b.Price));
+                for (int i = 0; i < tps.Count; i++)
+                {
+                    var tp = tps[i];
+                    int need = tp.RemainingQuantity;
+                    if (need <= 0) continue;
+                    if (pos.AvailableQuantity < need) need = pos.AvailableQuantity; // defensive cap
+                    if (need <= 0) continue;
+                    int before = pos.ReservedQuantity;
+                    pos.ReserveStock(need);
+                    tp.TakeSellReservation(need);
+                    _ledger.LogPosition(pos.UserId, pos.StockId, tp.OrderId, "Hydrate:BracketTP",
+                        need, before, pos.ReservedQuantity, pos.Quantity, pos.Quantity);
+                }
+            }
+        }
+    }
+
+    // Defensive: a bracket whose pool exceeds its position's free shares (only reachable from an
+    // inconsistent DB seed) — cancel its legs instead of over-reserving.
+    private void CancelBracketGroupOverReserve(int parentId, Order? sl, List<Order> tps, List<Order> ordersToCancel)
+    {
+        void Cancel(Order o)
+        {
+            if (o.IsOpen || o.IsArmed || o.IsAttached) o.Cancel();
+            ordersToCancel.Add(o);
+            _ledger.LogOrder(o.UserId, o.OrderId, "Remove:Hydrate:BracketOverReserve",
+                o.CurrentBuyReservation, o.CurrentBuyReservation, o.CurrentBuyReservation,
+                o.CurrentSellReservedQty, o.CurrentSellReservedQty);
+            _registry.Remove(o.OrderId);
+        }
+        if (sl is not null) Cancel(sl);
+        for (int i = 0; i < tps.Count; i++) Cancel(tps[i]);
+        _logger.LogWarning(
+            "Cancelled malformed bracket #{Parent} legs on cache load: pooled reservation exceeds position.",
+            parentId);
+    }
+
     private void ClampSellsToPositionQuantity(
         Dictionary<(int, int), List<Order>> sellsByPos,
         List<Order> ordersToCancel)
@@ -194,11 +301,17 @@ public sealed class AccountsCache : IAccountsCache
             // pos may be null (a flat seller with only resting shorts) — posQty 0 covers nothing.
             _positions.TryGetValue(kv.Key, out var pos);
             int posQty = pos?.Quantity ?? 0;
-            int reserved = 0;
+            // §P4 Q1: start from the bracket pool ReseedBracketReservations already put on the position,
+            // so non-bracket sells compete only for the REMAINING shares (and the final assignment below
+            // keeps that pool instead of overwriting it). 0 for any position without an active bracket.
+            int reserved = pos?.ReservedQuantity ?? 0;
 
             for (int i = 0; i < list.Count; i++)
             {
                 var o = list[i];
+                // §P4 Q1: bracket legs are reserved by ReseedBracketReservations (SL owns the pool / TPs
+                // reserve their own), never by the generic per-sell clamp — it would cancel pooled TPs.
+                if (o.IsBracketChild) continue;
                 var remaining = o.RemainingQuantity;
 
                 // §F14: a LIMIT sell rests partly/fully as a short. Seed ONLY the covered shares here
@@ -360,6 +473,13 @@ public sealed class AccountsCache : IAccountsCache
                 continue;
             }
 
+            // §P4 Q2: ClampBuys runs LAST, so fund.ReservedBalance already holds any short collateral
+            // (filled + resting) seeded by the Backfill passes. Cap buys against the REMAINING headroom
+            // (Total − collateral), not gross Total, or buys + collateral could push ReservedBalance >
+            // TotalBalance — an invalid Fund (Available < 0; violates CK_Funds_Balance_Invariants on the
+            // next persist). Add (not overwrite) so the collateral survives.
+            decimal collateralHeld = fund.ReservedBalance;
+            decimal budget = fund.TotalBalance - collateralHeld;
             decimal reserved = 0m;
             for (int i = 0; i < list.Count; i++)
             {
@@ -367,10 +487,10 @@ public sealed class AccountsCache : IAccountsCache
                 var orderReservation = ReservationMath.RemainingBuyReservation(o);
                 if (orderReservation <= 0m) continue;
 
-                if (reserved + orderReservation <= fund.TotalBalance)
+                if (reserved + orderReservation <= budget)
                 {
                     reserved += orderReservation;
-                    // Seed per-order field so Σ CurrentBuyReservation == fund.ReservedBalance
+                    // Seed per-order field so Σ CurrentBuyReservation (+ collateral) == fund.ReservedBalance
                     // holds from t=0.
                     o.TakeBuyReservation(orderReservation);
                 }
@@ -385,14 +505,14 @@ public sealed class AccountsCache : IAccountsCache
                     _registry.Remove(o.OrderId);
                     _logger.LogWarning(
                         "Cancelled stale order #{OrderId} on cache load (buyer {UserId}, currency {Currency}): " +
-                        "would over-reserve funds (TotalBalance={Bal}, alreadyReserved={Res}, orderRemaining={Rem}).",
-                        o.OrderId, o.UserId, o.CurrencyType, fund.TotalBalance, reserved, orderReservation);
+                        "would over-reserve funds (budget={Bud}=Total−collateral, alreadyReserved={Res}, orderRemaining={Rem}).",
+                        o.OrderId, o.UserId, o.CurrencyType, budget, reserved, orderReservation);
                 }
             }
             var resBefore = fund.ReservedBalance;
-            fund.ReservedBalance = reserved;
+            fund.ReservedBalance += reserved;
             _ledger.LogFund(fund.UserId, fund.CurrencyType, null, "Hydrate:SeedFund",
-                reserved - resBefore, resBefore, fund.ReservedBalance,
+                reserved, resBefore, fund.ReservedBalance,
                 fund.TotalBalance, fund.TotalBalance);
         }
     }

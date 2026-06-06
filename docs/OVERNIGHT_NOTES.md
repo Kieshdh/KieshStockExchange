@@ -24,18 +24,23 @@ build, and verify with `kse-order-smoke.ps1` (extended with resting-short scenar
 ## Needs your input (decide tomorrow)
 - _(none)_
 
-## For Ultraplan to review (do NOT act tonight)
-- **Cold-load vs active bracket legs (defensive guard added, but please confirm).** My new
-  `BackfillRestingShortCollateral` skips `o.IsBracketChild` so an active bracket TP (an Open limit sell
-  whose shares are pooled on its sibling SL, CSR may be 0) is never mis-read as a resting short. I could
-  NOT live-test a bracket whose entry filled and then survived a restart (BracketCoordinator rehydrated 0
-  parents in all my runs). Worth an Ultraplan pass on: does an *active* (post-entry-fill) bracket leg flow
-  through AccountsCache cold-load (ClampSells covered-seed) correctly, independent of the resting-short path?
-- **ClampBuys TotalBalance cap ignores reserved short collateral.** `ClampBuysToFundBalance` caps buys at
-  `reserved(buys) <= fund.TotalBalance`, not counting a resting short's (or filled short's) collateral
-  already held. Pre-existing for filled-short collateral too (BackfillShortCollateral also runs after
-  ClampBuys). Not a conservation bug (seeds match order fields), but on a tight account buys+collateral
-  could exceed Total → negative Available after restart. Low priority; flagging for completeness.
+## Ultraplan review — RESOLVED (both implemented + tested 2026-06-06)
+Ultraplan confirmed both as real defects, both conservation-clean (so the reconciler is blind to them —
+order-status / fund-validity are the oracles). Landed as one coordinated cold-load ordering change:
+`ReseedBracketReservations → ClampSells(skip brackets, accumulate from baseline) → BackfillShortCollateral
+→ BackfillRestingShortCollateral → ClampBuys(last, collateral-aware)`.
+- **Q1 — active bracket legs vs ClampSells (was destructive).** Generic ClampSells treated an active
+  bracket's SL+TPs as rival sells: SL seeded the whole pool, every TP cancelled as StaleSeller:OverReserve
+  (silent TP loss; Σ CSR still balanced so the probe was green). Fix: new `ReseedBracketReservations`
+  rebuilds the live model (Model B: SL owns `RemainingQuantity` pool, TPs reserve 0; TP-only: each TP
+  reserves its own) BEFORE ClampSells, which now skips `IsBracketChild` and accumulates from the seeded
+  baseline. **Live-verified:** forced an active bracket (market-entry fill) through a restart — rehydrated
+  1 parent, SL stayed Pending, both TPs stayed Open, reconcile clean. Unit tests added.
+- **Q2 — ClampBuys cap ignored short collateral (escalated to invalid Fund).** Buys capped at gross Total
+  then collateral `+=` after ⇒ Reserved > Total ⇒ Available < 0 (violates CK_Funds_Balance_Invariants).
+  Fix: ClampBuys runs LAST, caps against `Total − collateralHeld`, and `+=` (not `=`). Unit-tested with an
+  inconsistent seed (buys 119.44 + collateral 200 vs Total 250 → buy cancelled, fund valid).
+- Tests: `KieshStockExchange.Tests/ColdLoadReseedTests.cs` (4 cases). Suite 33/33. Smoke 38/38.
 
 ## Results / verification
 **Batch H Parts 3–7 (resting shorts) IMPLEMENTED + SELF-TESTED. All green.**
