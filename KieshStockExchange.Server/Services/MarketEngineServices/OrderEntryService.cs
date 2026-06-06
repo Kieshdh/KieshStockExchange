@@ -322,12 +322,7 @@ public sealed class OrderEntryService : IOrderEntryService
     {
         ct.ThrowIfCancellationRequested();
         if (quantity <= 0) return OrderResultFactory.InvalidParams("Quantity must be positive.");
-        // §P5b stage 1: the side-aware geometry validator + DTO/plumbing are in; the short BUILD + the
-        // BracketCoordinator cash-pool arming land together in stage 2 (coupled — a placed short bracket
-        // whose legs never arm would strand the legs and leave the short unprotected). Gate it off here so
-        // no half-formed short bracket can be created until that arming exists.
-        if (side == OrderSide.Sell)
-            return OrderResultFactory.InvalidParams("Short brackets are not yet supported (P5b stage 2).");
+        bool isShort = side == OrderSide.Sell;
         takeProfits ??= Array.Empty<(decimal, int)>();
         if (takeProfits.Count > 3) return OrderResultFactory.InvalidParams("A bracket supports at most 3 take-profits.");
         // stopPrice null ⇒ a take-profit-only bracket (no protective stop); then ≥1 TP is required.
@@ -337,8 +332,16 @@ public sealed class OrderEntryService : IOrderEntryService
         if (!hasStop && takeProfits.Count == 0)
             return OrderResultFactory.InvalidParams("A bracket needs a stop-loss or at least one take-profit.");
 
-        // Entry reference: the limit price for a limit parent, the live market price for a market
-        // parent. SL must sit below it, TPs above it (long bracket).
+        // §P5b: a short bracket SL is a BUY-to-close whose cash pool must be sizeable, so it must be a
+        // stop-limit or a slippage-capped market buy-stop — an uncapped market buy-stop has unbounded
+        // buyback cost. (Long sell-stop SLs reserve shares and are unaffected.)
+        if (isShort && hasStop && stopLimitPrice is null && !stopSlippagePct.HasValue)
+            return OrderResultFactory.InvalidParams(
+                "A short bracket's stop-loss must be a stop-limit or slippage-capped (uncapped is unsizable).");
+
+        // Entry reference: the limit price for a limit parent, else the live market price. Long: SL below /
+        // TPs above. Short: SL above / TPs below. A long market entry funds from buyBudget; a short market
+        // entry just sells `quantity` short (collateral handled by the H/P1 settle path), no budget.
         decimal entryRef;
         if (entry == EntryType.Limit)
         {
@@ -347,31 +350,34 @@ public sealed class OrderEntryService : IOrderEntryService
         }
         else
         {
-            if (!(buyBudget > 0m)) return OrderResultFactory.InvalidParams("Buy budget must be positive for a market entry.");
+            if (!isShort && !(buyBudget > 0m))
+                return OrderResultFactory.InvalidParams("Buy budget must be positive for a market entry.");
             entryRef = _data.Quotes.TryGetValue((stockId, currency), out var q) && q.LastPrice > 0m
                 ? q.LastPrice
                 : await _data.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
             if (entryRef <= 0m) return OrderResultFactory.InvalidParams("No live market price to anchor the bracket.");
         }
 
-        // §F5: shared long-bracket geometry rules (SL below entry; TPs above entry, strictly ascending,
-        // qty>0, Σ ≤ parent qty), extracted so ModifyBracketLegAsync checks an edited leg identically.
+        // Shared geometry rules (side-aware), also used by ModifyBracketLegAsync so an edit checks identically.
         var geometryErr = BracketGeometryValidator.Validate(
-            entryRef, hasStop ? stopPrice : null, takeProfits, quantity, currency);
+            entryRef, hasStop ? stopPrice : null, takeProfits, quantity, currency, isShort);
         if (geometryErr != null) return geometryErr;
 
-        // Build the parent buy entry.
+        var legSide = isShort ? OrderSide.Buy : OrderSide.Sell;   // protective legs close the position
+
+        // Build the parent entry (long buy / short sell).
         var parent = new Order
         {
             UserId = userId, StockId = stockId, Quantity = quantity, CurrencyType = currency,
-            Side = OrderSide.Buy, Entry = entry, Stop = StopKind.None,
+            Side = side, Entry = entry, Stop = StopKind.None,
             Price = entry == EntryType.Limit ? CurrencyHelper.RoundMoney(limitPrice!.Value, currency) : 0m,
-            BuyBudget = entry == EntryType.Market ? CurrencyHelper.RoundMoney(buyBudget!.Value, currency) : null,
+            BuyBudget = (!isShort && entry == EntryType.Market) ? CurrencyHelper.RoundMoney(buyBudget!.Value, currency) : null,
         };
 
-        // Build the protective stop-loss (sell), if any. Stop-limit when a limit price is given;
-        // otherwise a stop-market, optionally slippage-capped (anchor = entry reference). Null ⇒
-        // take-profit-only bracket (the TPs reserve their own shares once the parent fills).
+        // Build the protective stop-loss (opposite side), if any. Stop-limit when a limit price is given;
+        // otherwise a slippage-capped stop-market. For a short SL (buy-stop) the slippage anchor is the
+        // trigger (StopPrice) — buy slippage isn't re-anchored at promotion; for a long SL (sell-stop) it's
+        // the entry ref (re-anchored to the trigger at promotion, as today). Null ⇒ take-profit-only bracket.
         Order? sl = null;
         if (hasStop)
         {
@@ -379,23 +385,23 @@ public sealed class OrderEntryService : IOrderEntryService
             sl = new Order
             {
                 UserId = userId, StockId = stockId, Quantity = quantity, CurrencyType = currency,
-                Side = OrderSide.Sell, Stop = StopKind.Stop,
+                Side = legSide, Stop = StopKind.Stop,
                 Entry = stopLimitPrice is not null ? EntryType.Limit : EntryType.Market,
                 StopPrice = CurrencyHelper.RoundMoney(stopPrice!.Value, currency),
                 Price = stopLimitPrice is not null ? CurrencyHelper.RoundMoney(stopLimitPrice.Value, currency)
-                      : slCapped ? CurrencyHelper.RoundMoney(entryRef, currency) : 0m,
+                      : slCapped ? CurrencyHelper.RoundMoney(isShort ? stopPrice!.Value : entryRef, currency) : 0m,
                 SlippagePercent = slCapped ? stopSlippagePct : null,
             };
         }
 
-        // Build the take-profit legs (sell limits).
+        // Build the take-profit legs (long sell-limits / short buy-limits).
         var tps = new List<Order>(takeProfits.Count);
         for (int i = 0; i < takeProfits.Count; i++)
         {
             tps.Add(new Order
             {
                 UserId = userId, StockId = stockId, Quantity = takeProfits[i].Quantity, CurrencyType = currency,
-                Side = OrderSide.Sell, Entry = EntryType.Limit, Stop = StopKind.None,
+                Side = legSide, Entry = EntryType.Limit, Stop = StopKind.None,
                 Price = CurrencyHelper.RoundMoney(takeProfits[i].Price, currency),
             });
         }

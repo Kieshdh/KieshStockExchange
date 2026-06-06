@@ -71,21 +71,25 @@ public sealed class OrderExecutionService : IOrderExecutionService
         return set;
     }
 
-    // §3.6 P4: after fills commit, drive the bracket coordinator (post-commit, outside the book
-    // lock). A long bracket's parent is a BUY (BuyOrderId in the fills) → grow the SL + arm covered
-    // TP legs; a bracket TP is a SELL (SellOrderId) → shrink the SL (OCO) + cancel-remainder. Hooks
-    // are best-effort + idempotent (recompute from state); a failure is logged loudly rather than
-    // unwinding an already-committed trade, and the reconciler/clamp (Step 0) is the safety net.
+    // §3.6 P4/P5b: after fills commit, drive the bracket coordinator (post-commit, outside the book
+    // lock). Side-aware: a LONG bracket's parent is a BUY (BuyOrderId) with SELL-limit TP legs; a SHORT
+    // bracket's parent is a SELL (SellOrderId) with BUY-limit TP legs. So a fill's parent may be on either
+    // side, and a TP-child fill may be on either side — collect both and let the coordinator (and the
+    // IsBracketChild/IsLimitOrder filter) sort it out. Hooks are best-effort + idempotent (recompute from
+    // state); a failure is logged loudly rather than unwinding a committed trade, and the
+    // reconciler/clamp is the safety net.
     private async Task FireBracketHooksAsync(IReadOnlyList<Transaction> trades, CancellationToken ct)
     {
         if (trades is null || trades.Count == 0) return;
 
         HashSet<int>? parentIds = null;
-        HashSet<int>? sellIds = null;
+        HashSet<int>? childIds = null;
         for (int i = 0; i < trades.Count; i++)
         {
             if (_bracket.IsBracketParent(trades[i].BuyOrderId)) (parentIds ??= new()).Add(trades[i].BuyOrderId);
-            (sellIds ??= new()).Add(trades[i].SellOrderId);
+            if (_bracket.IsBracketParent(trades[i].SellOrderId)) (parentIds ??= new()).Add(trades[i].SellOrderId);
+            (childIds ??= new()).Add(trades[i].BuyOrderId);
+            (childIds ??= new()).Add(trades[i].SellOrderId);
         }
 
         if (parentIds is not null)
@@ -98,14 +102,15 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 catch (Exception ex) { _logger.LogError(ex, "Bracket parent-fill hook failed for order #{Id}", pid); }
             }
 
-        if (sellIds is not null)
-            foreach (var sid in sellIds)
+        if (childIds is not null)
+            foreach (var cid in childIds)
             {
-                var o = _registry.TryGet(sid, out var sc) ? sc
-                       : await _db.GetOrderById(sid, ct).ConfigureAwait(false);
+                var o = _registry.TryGet(cid, out var sc) ? sc
+                       : await _db.GetOrderById(cid, ct).ConfigureAwait(false);
+                // TP legs are limits (long = sell, short = buy); the SL (a stop) fires via PromoteStopAsync.
                 if (o is null || !o.IsBracketChild || !o.IsLimitOrder) continue;
                 try { await _bracket.OnChildFillAsync(o, ct).ConfigureAwait(false); }
-                catch (Exception ex) { _logger.LogError(ex, "Bracket child-fill hook failed for order #{Id}", sid); }
+                catch (Exception ex) { _logger.LogError(ex, "Bracket child-fill hook failed for order #{Id}", cid); }
             }
     }
     #endregion

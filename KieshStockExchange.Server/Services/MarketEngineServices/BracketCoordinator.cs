@@ -138,8 +138,10 @@ public sealed class BracketCoordinator : IBracketCoordinator
 
     public async Task OnParentFillAsync(Order parent, CancellationToken ct = default)
     {
-        if (parent is null || !parent.IsBuyOrder) return; // long brackets only
+        if (parent is null) return;
         await _accounts.EnsureLoadedAsync(parent.UserId, ct).ConfigureAwait(false);
+        if (parent.IsSellOrder) { await OnParentFillShortAsync(parent, ct).ConfigureAwait(false); return; } // §P5b
+        if (!parent.IsBuyOrder) return; // long brackets beyond here
 
         var (sl, tps) = await LoadLegsAsync(parent.OrderId, ct).ConfigureAwait(false);
         int held = ComputeHeld(parent, sl, tps);
@@ -284,6 +286,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
         Order? parent = _registry.TryGet(parentId, out var pc) ? pc
                        : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
         if (parent is null) return;
+        if (parent.IsSellOrder) { await OnChildFillShortAsync(tp, parent, parentId, ct).ConfigureAwait(false); return; } // §P5b
         var (sl, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
         int held = ComputeHeld(parent, sl, tps);
 
@@ -358,6 +361,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
         Order? parent = _registry.TryGet(parentId, out var pc) ? pc
                        : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
         if (parent is null) return;
+        if (parent.IsSellOrder) { await OnStopFiringShortAsync(sl, parent, parentId, ct).ConfigureAwait(false); return; } // §P5b
         var (_, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
 
         // Held = what the parent acquired minus what the TPs already sold (the SL hasn't fired yet).
@@ -426,6 +430,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
         Order? parent = _registry.TryGet(parentId, out var pc) ? pc
                        : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
         if (parent is null) { _bracketParents.TryRemove(parentId, out _); return; }
+        if (parent.IsSellOrder) { await OnMemberCancelledShortAsync(cancelled, parent, parentId, ct).ConfigureAwait(false); return; } // §P5b
 
         // Group teardown only when the user cancels an UNFILLED parent (discard dormant legs) or the
         // SL (the TPs can't rest unprotected). A single-TP cancel, or a partially-filled parent
@@ -493,6 +498,394 @@ public sealed class BracketCoordinator : IBracketCoordinator
 
         _bracketParents.TryRemove(parentId, out _);
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
+    }
+
+    // ───────────────────────── §P5b short brackets (sell entry → buy-to-close legs) ─────────────────────────
+    // Inverted Model B: the SL owns a CASH pool (its CurrentBuyReservation = SL_worst × held); TPs reserve 0
+    // and draw the pool at fill via the settler's shared-fund consume (reuse win #1). The short entry's
+    // collateral is a separate ReservedBalance lock. Invariant: Σ leg-buy-reservation + Σ short-collateral
+    // == Fund.ReservedBalance. Gate is fund→position (AcquireUserGatesAsync), never the legacy nesting.
+
+    private static decimal SlWorst(Order sl)
+        => ShortBracketMath.SlWorst(sl.IsStopLimitOrder, sl.Price, sl.StopPrice ?? 0m, sl.SlippagePercent ?? 0m);
+
+    public async Task OnParentFillShortAsync(Order parent, CancellationToken ct)
+    {
+        var (sl, tps) = await LoadLegsAsync(parent.OrderId, ct).ConfigureAwait(false);
+        int held = ComputeHeld(parent, sl, tps);
+        if (held <= 0) return;
+        // Short TPs are buy-limits BELOW entry; nearest-market-first (fill-up order) is highest-price-first.
+        tps.Sort((a, b) => b.Price.CompareTo(a.Price));
+
+        bool degraded = false;
+        await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
+        {
+            await using var gate = await _accounts.AcquireUserGatesAsync(
+                new[] { (parent.UserId, parent.CurrencyType) },
+                new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
+            var fund = _accounts.GetFund(parent.UserId, parent.CurrencyType);
+            if (fund is null) return;
+
+            if (sl is not null)
+            {
+                decimal pool = ShortBracketMath.Pool(SlWorst(sl), held);
+                decimal delta = pool - sl.CurrentBuyReservation;   // grow toward the worst-case pool
+                if (delta > 0m && CurrencyHelper.LessThan(fund.AvailableBalance, delta, parent.CurrencyType))
+                {
+                    // Degrade-to-TP-only (verified policy): not enough cash to fund the SL pool → drop the
+                    // SL, keep the take-profits (each reserves its own buyback), flag the short unprotected.
+                    degraded = true;
+                    await using var dtx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+                    try
+                    {
+                        _stopWatcher.Value.Disarm(sl.OrderId);
+                        sl.Status = Order.Statuses.Cancelled;
+                        sl.UpdatedAt = TimeHelper.NowUtc();
+                        await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
+                        await ArmShortTpsOwnCashAsync(book, fund, parent, tps, held, ct).ConfigureAwait(false);
+                        if (fund.UserId != 0) await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+                        await dtx.CommitAsync(ct).ConfigureAwait(false);
+                    }
+                    catch { await dtx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); throw; }
+                    return;
+                }
+
+                decimal resBefore = fund.ReservedBalance;
+                decimal slBefore = sl.CurrentBuyReservation;
+                if (delta > 0m) { fund.ReserveFunds(delta); sl.TakeBuyReservation(delta); }
+
+                await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    sl.Quantity = held + sl.AmountFilled;          // RemainingQuantity == held shares to buy back
+                    if (sl.IsAttached) sl.Arm(); else sl.Status = Order.Statuses.Pending;
+                    sl.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
+
+                    int cum = 0;
+                    for (int i = 0; i < tps.Count; i++)
+                    {
+                        var tp = tps[i];
+                        cum += tp.Quantity;
+                        if (tp.IsAttached && cum <= held)
+                        {
+                            tp.Status = Order.Statuses.Open;       // rests as a buy-limit reserving 0 (draws the pool)
+                            tp.UpdatedAt = TimeHelper.NowUtc();
+                            await _db.UpdateOrder(tp, ct).ConfigureAwait(false);
+                            book.UpsertOrder(tp);
+                        }
+                    }
+                    if (fund.UserId != 0) await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+                    await tx.CommitAsync(ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    if (fund.ReservedBalance != resBefore) fund.ReservedBalance = resBefore;
+                    sl.RestoreReservationFromSnapshot(slBefore, sl.CurrentSellReservedQty);
+                    throw;
+                }
+                _ledger.LogFund(sl.UserId, sl.CurrencyType, sl.OrderId, "Bracket:Short:ArmSLPool",
+                    Math.Max(0m, delta), resBefore, fund.ReservedBalance, fund.TotalBalance, fund.TotalBalance);
+            }
+            else
+            {
+                // Take-profit-only short bracket: each TP reserves its own buyback cash.
+                await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await ArmShortTpsOwnCashAsync(book, fund, parent, tps, held, ct).ConfigureAwait(false);
+                    if (fund.UserId != 0) await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+                    await tx.CommitAsync(ct).ConfigureAwait(false);
+                }
+                catch { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); throw; }
+            }
+        }).ConfigureAwait(false);
+
+        if (!degraded && sl is not null && sl.IsArmed) _stopWatcher.Value.Arm(sl);
+        _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
+        if (degraded)
+            _logger.LogWarning("Bracket #{Parent}: insufficient cash to fund the stop-loss pool; the short is now " +
+                "UNPROTECTED (take-profit-only).", parent.OrderId);
+    }
+
+    // Arm the now-covered TP buy-limits, each reserving its own worst-case buyback (TP limit × qty) from the
+    // fund — the take-profit-only / degraded path (no shared SL pool to draw). Caller holds the fund gate+tx.
+    private async Task ArmShortTpsOwnCashAsync(OrderBook book, Fund fund, Order parent,
+        List<Order> tps, int held, CancellationToken ct)
+    {
+        int cum = 0;
+        for (int i = 0; i < tps.Count; i++)
+        {
+            var tp = tps[i];
+            cum += tp.Quantity;
+            if (!tp.IsAttached || cum > held) continue;
+            decimal need = CurrencyHelper.Notional(tp.Price, tp.Quantity, parent.CurrencyType);
+            if (CurrencyHelper.LessThan(fund.AvailableBalance, need, parent.CurrencyType))
+                need = fund.AvailableBalance;                      // defensive cap
+            if (need <= 0m) continue;
+            decimal posBefore = fund.ReservedBalance;
+            fund.ReserveFunds(need);
+            tp.TakeBuyReservation(need);
+            tp.Status = Order.Statuses.Open;
+            tp.UpdatedAt = TimeHelper.NowUtc();
+            await _db.UpdateOrder(tp, ct).ConfigureAwait(false);
+            book.UpsertOrder(tp);
+            _ledger.LogFund(parent.UserId, parent.CurrencyType, tp.OrderId, "Bracket:Short:ArmTPCash",
+                need, posBefore, fund.ReservedBalance, fund.TotalBalance, fund.TotalBalance);
+        }
+    }
+
+    public async Task OnChildFillShortAsync(Order tp, Order parent, int parentId, CancellationToken ct)
+    {
+        var (sl, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
+        int held = ComputeHeld(parent, sl, tps);
+
+        await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
+        {
+            await using var gate = await _accounts.AcquireUserGatesAsync(
+                new[] { (parent.UserId, parent.CurrencyType) },
+                new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
+            var fund = _accounts.GetFund(parent.UserId, parent.CurrencyType);
+            if (fund is null) return;
+            var pos = _accounts.GetPosition(parent.UserId, parent.StockId);
+            decimal collateral = pos?.ShortCollateral ?? 0m;
+
+            await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (sl is not null)
+                {
+                    // The TP buy already consumed its buyback from the shared Fund.ReservedBalance (settler,
+                    // reuse #1) and the collateral release ran pro-rata. The SL's per-order pool field lags;
+                    // bring it down to the new worst-case pool AND release the worst-case-vs-actual cushion so
+                    // ReservedBalance == Σ buy-reservation + Σ collateral again. The cushion is derived from
+                    // the post-settler fund vs target (== (SL_worst − fillPrice)·coverQty) — no need for the
+                    // per-fill price/qty here.
+                    decimal desiredPool = ShortBracketMath.Pool(SlWorst(sl), held);
+                    decimal target = desiredPool + collateral;
+                    decimal cushion = fund.ReservedBalance - target;
+                    if (cushion > 0m)
+                    {
+                        cushion = Math.Min(cushion, fund.ReservedBalance);
+                        var rb = fund.ReservedBalance; var tb = fund.TotalBalance;
+                        fund.UnreserveFunds(cushion);
+                        fund.UpdatedAt = TimeHelper.NowUtc();
+                        _ledger.LogFund(parent.UserId, parent.CurrencyType, sl.OrderId,
+                            "Bracket:Short:TPCushionRelease", cushion, rb, fund.ReservedBalance, tb, fund.TotalBalance);
+                    }
+                    decimal poolDrop = sl.CurrentBuyReservation - desiredPool;
+                    if (poolDrop > 0m) sl.ConsumeBuyReservation(Math.Min(poolDrop, sl.CurrentBuyReservation));
+
+                    if (held <= 0)
+                    {
+                        _stopWatcher.Value.Disarm(sl.OrderId);
+                        book.RemoveById(sl.OrderId);
+                        sl.Status = Order.Statuses.Cancelled;
+                        sl.UpdatedAt = TimeHelper.NowUtc();
+                        _bracketParents.TryRemove(parentId, out _);
+                    }
+                    else
+                    {
+                        sl.Quantity = held + sl.AmountFilled;
+                        sl.UpdatedAt = TimeHelper.NowUtc();
+                    }
+                    await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
+                    if (fund.UserId != 0) await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+                }
+                else if (held <= 0)
+                {
+                    // TP-only: the TP's own reservation + any savings were settled on its fill; just retire.
+                    _bracketParents.TryRemove(parentId, out _);
+                }
+
+                // Cancel-the-remainder of a still-resting limit short parent (protective leg fired while the
+                // entry hadn't fully filled): pull it and release its unfilled collateral inline (under the gate).
+                if (parent.IsOpen && parent.IsLimitOrder && parent.RemainingQuantity > 0)
+                {
+                    book.RemoveById(parent.OrderId);
+                    parent.Cancel();
+                    parent.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(parent, ct).ConfigureAwait(false);
+                    ReleaseShortCollateralInline(parent, fund);
+                    if (fund.UserId != 0) await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); throw; }
+        }).ConfigureAwait(false);
+
+        _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
+    }
+
+    public async Task OnStopFiringShortAsync(Order sl, Order parent, int parentId, CancellationToken ct)
+    {
+        var (_, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
+        int held = parent.AmountFilled;
+        for (int i = 0; i < tps.Count; i++) held -= tps[i].AmountFilled;
+        if (held < 0) held = 0;
+
+        await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
+        {
+            await using var gate = await _accounts.AcquireUserGatesAsync(
+                new[] { (parent.UserId, parent.CurrencyType) },
+                new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
+            var fund = _accounts.GetFund(parent.UserId, parent.CurrencyType);
+            if (fund is null) return;
+
+            await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                // Size the SL cash pool to the live held (release any over-reserved cushion); the SL then
+                // promotes and buys `held` back, and the settler's buy-savings path releases the final
+                // worst-case-vs-actual cushion on the fill.
+                decimal desiredPool = ShortBracketMath.Pool(SlWorst(sl), held);
+                decimal poolDrop = sl.CurrentBuyReservation - desiredPool;
+                if (poolDrop > 0m)
+                {
+                    poolDrop = Math.Min(poolDrop, sl.CurrentBuyReservation);
+                    var rel = Math.Min(poolDrop, fund.ReservedBalance);
+                    if (rel > 0m)
+                    {
+                        var rb = fund.ReservedBalance; var tb = fund.TotalBalance;
+                        fund.UnreserveFunds(rel);
+                        fund.UpdatedAt = TimeHelper.NowUtc();
+                        _ledger.LogFund(parent.UserId, parent.CurrencyType, sl.OrderId,
+                            "Bracket:Short:SLFireResize", rel, rb, fund.ReservedBalance, tb, fund.TotalBalance);
+                    }
+                    sl.ConsumeBuyReservation(poolDrop);
+                }
+                sl.Quantity = held + sl.AmountFilled;
+                sl.UpdatedAt = TimeHelper.NowUtc();
+                await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
+
+                // Cancel all open TP buy-limits first (they reserve 0 → nothing to release). SL still off-book.
+                for (int i = 0; i < tps.Count; i++)
+                {
+                    var tp = tps[i];
+                    if (!tp.IsOpen) continue;
+                    book.RemoveById(tp.OrderId);
+                    tp.Status = Order.Statuses.Cancelled;
+                    tp.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(tp, ct).ConfigureAwait(false);
+                }
+                if (fund.UserId != 0) await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+
+                // Cancel-the-remainder of a still-resting limit short parent.
+                if (parent.IsOpen && parent.IsLimitOrder && parent.RemainingQuantity > 0)
+                {
+                    book.RemoveById(parent.OrderId);
+                    parent.Cancel();
+                    parent.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(parent, ct).ConfigureAwait(false);
+                    ReleaseShortCollateralInline(parent, fund);
+                    if (fund.UserId != 0) await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+                }
+
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); throw; }
+        }).ConfigureAwait(false);
+
+        _bracketParents.TryRemove(parentId, out _);
+        _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
+    }
+
+    public async Task OnMemberCancelledShortAsync(Order cancelled, Order parent, int parentId, CancellationToken ct)
+    {
+        // Teardown rule mirrors the long path: cancel the whole group only when an UNFILLED parent or the SL
+        // (with a filled parent) is cancelled; a single-TP / partial-parent cancel leaves the rest.
+        bool teardown = (cancelled.OrderId == parentId && parent.AmountFilled == 0)
+                     || (cancelled.IsBracketChild && cancelled.IsStopOrder && parent.AmountFilled > 0);
+        if (!teardown)
+        {
+            if (cancelled.OrderId == parentId) _bracketParents.TryRemove(parentId, out _);
+            return;
+        }
+
+        var (sl, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
+        await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
+        {
+            await using var gate = await _accounts.AcquireUserGatesAsync(
+                new[] { (parent.UserId, parent.CurrencyType) },
+                new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
+            var fund = _accounts.GetFund(parent.UserId, parent.CurrencyType);
+
+            await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                // Cancel the SL sibling (release its cash pool, if any) unless it's the cancel target.
+                if (sl is not null && sl.OrderId != cancelled.OrderId && !sl.IsClosed)
+                {
+                    _stopWatcher.Value.Disarm(sl.OrderId);
+                    book.RemoveById(sl.OrderId);
+                    if (fund is not null) ReleaseLegBuyReservationInline(sl, fund);
+                    sl.Status = Order.Statuses.Cancelled;
+                    sl.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(sl, ct).ConfigureAwait(false);
+                }
+                // Cancel every TP sibling (release own buyback cash for a TP-only/degraded bracket; 0 otherwise).
+                for (int i = 0; i < tps.Count; i++)
+                {
+                    var tp = tps[i];
+                    if (tp.OrderId == cancelled.OrderId || tp.IsClosed) continue;
+                    if (tp.IsOpen) book.RemoveById(tp.OrderId);
+                    if (fund is not null) ReleaseLegBuyReservationInline(tp, fund);
+                    tp.Status = Order.Statuses.Cancelled;
+                    tp.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(tp, ct).ConfigureAwait(false);
+                }
+                // If the SL was cancelled while a limit short parent still rests, pull the parent + release
+                // its unfilled collateral.
+                if (parent.OrderId != cancelled.OrderId && parent.IsOpen
+                    && parent.IsLimitOrder && parent.RemainingQuantity > 0)
+                {
+                    book.RemoveById(parent.OrderId);
+                    parent.Cancel();
+                    parent.UpdatedAt = TimeHelper.NowUtc();
+                    await _db.UpdateOrder(parent, ct).ConfigureAwait(false);
+                    if (fund is not null) ReleaseShortCollateralInline(parent, fund);
+                }
+                if (fund is not null && fund.UserId != 0) await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch { await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false); throw; }
+        }).ConfigureAwait(false);
+
+        _bracketParents.TryRemove(parentId, out _);
+        _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
+    }
+
+    // Release a sibling leg's cash buy-reservation inline (caller holds the fund gate + tx). No-op when the
+    // leg reserves nothing (long legs, or a short SL-pool's TPs which reserve 0).
+    private void ReleaseLegBuyReservationInline(Order leg, Fund fund)
+    {
+        var amt = leg.CurrentBuyReservation;
+        if (amt <= 0m) return;
+        var rel = Math.Min(amt, fund.ReservedBalance);
+        if (rel <= 0m) return;
+        var rb = fund.ReservedBalance; var tb = fund.TotalBalance;
+        fund.UnreserveFunds(rel);
+        fund.UpdatedAt = TimeHelper.NowUtc();
+        leg.ConsumeBuyReservation(rel);
+        _ledger.LogFund(leg.UserId, leg.CurrencyType, leg.OrderId, "Bracket:Short:CancelLeg:Release",
+            rel, rb, fund.ReservedBalance, tb, fund.TotalBalance);
+    }
+
+    // Release a cancelled limit short parent's unfilled-portion collateral inline (caller holds fund gate+tx).
+    private void ReleaseShortCollateralInline(Order parent, Fund fund)
+    {
+        var amt = parent.CurrentShortCollateral;
+        if (amt <= 0m) return;
+        var rel = Math.Min(amt, fund.ReservedBalance);
+        if (rel <= 0m) return;
+        var rb = fund.ReservedBalance; var tb = fund.TotalBalance;
+        fund.UnreserveFunds(rel);
+        fund.UpdatedAt = TimeHelper.NowUtc();
+        parent.ConsumeShortCollateral(rel);
+        _ledger.LogFund(parent.UserId, parent.CurrencyType, parent.OrderId, "Bracket:Short:CancelRemainder:ReleaseCollateral",
+            rel, rb, fund.ReservedBalance, tb, fund.TotalBalance);
     }
 
     // Release a cancelled limit parent's remaining buy reservation (its unfilled portion's cash),

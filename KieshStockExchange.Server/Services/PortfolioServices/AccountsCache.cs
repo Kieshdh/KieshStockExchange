@@ -95,6 +95,9 @@ public sealed class AccountsCache : IAccountsCache
             //      and adds (not overwrites) ReservedBalance (Q2).
             var ordersToCancel = new List<Order>();
             ReseedBracketReservations(sellsByPos, ordersToCancel);
+            // §P5b: short-bracket cash pools (cash twin of ReseedBracketReservations) onto the Fund before
+            // ClampBuys, which then skips bracket children rather than mis-reserving the buy TPs.
+            ReseedBracketCashPools(buysByFund, ordersToCancel);
             ClampSellsToPositionQuantity(sellsByPos, ordersToCancel);
 
             // §3.6 P1 (risk #5): short collateral is intrinsic to the position (loaded from DB, not
@@ -287,6 +290,76 @@ public sealed class AccountsCache : IAccountsCache
         _logger.LogWarning(
             "Cancelled malformed bracket #{Parent} legs on cache load: pooled reservation exceeds position.",
             parentId);
+    }
+
+    // §P5b: rebuild an active SHORT bracket's cash reservations on cold-load — the fund-side twin of
+    // ReseedBracketReservations. A short bracket's legs load as BUYS: a Pending buy-stop SL owning the cash
+    // pool (SL_worst × held), and Open buy-limit TPs that reserve 0 (drawing the pool) — or, for a
+    // take-profit-only short, each TP reserving its own buyback. The generic ClampBuys would mis-reserve the
+    // buy TPs, so seed the right cash here and have ClampBuys skip bracket children. Runs single-threaded
+    // under _loadGate; direct fund.ReservedBalance += like BackfillShortCollateral.
+    private void ReseedBracketCashPools(
+        Dictionary<(int, CurrencyType), List<Order>> buysByFund, List<Order> ordersToCancel)
+    {
+        Dictionary<int, List<Order>>? byParent = null;
+        foreach (var kv in buysByFund)
+            for (int i = 0; i < kv.Value.Count; i++)
+            {
+                var o = kv.Value[i];
+                if (!o.IsBracketChild || o.ParentOrderId is not int pid) continue;
+                byParent ??= new Dictionary<int, List<Order>>();
+                if (!byParent.TryGetValue(pid, out var g)) byParent[pid] = g = new List<Order>();
+                g.Add(o);
+            }
+        if (byParent is null) return;
+
+        foreach (var kv in byParent)
+        {
+            var group = kv.Value;
+            Order? sl = null;
+            var tps = new List<Order>(group.Count);
+            for (int i = 0; i < group.Count; i++)
+            {
+                var o = group[i];
+                if (o.IsStopOrder) sl = o;
+                else if (o.IsLimitOrder) tps.Add(o);
+            }
+            if (!_funds.TryGetValue((group[0].UserId, group[0].CurrencyType), out var fund)) continue;
+
+            if (sl is not null)
+            {
+                // Coordinator persisted sl.Quantity = held + AmountFilled, so RemainingQuantity == held.
+                int held = sl.RemainingQuantity;
+                if (held <= 0) continue;
+                decimal pool = ShortBracketMath.Pool(
+                    ShortBracketMath.SlWorst(sl.IsStopLimitOrder, sl.Price, sl.StopPrice ?? 0m, sl.SlippagePercent ?? 0m),
+                    held);
+                if (pool <= 0m) continue;
+                var resBefore = fund.ReservedBalance;
+                fund.ReservedBalance += pool;
+                sl.TakeBuyReservation(pool);
+                _ledger.LogFund(sl.UserId, sl.CurrencyType, sl.OrderId, "Hydrate:BracketSLCashPool",
+                    pool, resBefore, fund.ReservedBalance, fund.TotalBalance, fund.TotalBalance);
+                // TPs reserve 0 (they draw the SL pool) — nothing to seed.
+            }
+            else
+            {
+                // Take-profit-only short: each TP reserves its own remaining buyback.
+                for (int i = 0; i < tps.Count; i++)
+                {
+                    var tp = tps[i];
+                    int rem = tp.RemainingQuantity;
+                    if (rem <= 0) continue;
+                    decimal need = CurrencyHelper.Notional(tp.Price, rem, tp.CurrencyType);
+                    if (need <= 0m) continue;
+                    var resBefore = fund.ReservedBalance;
+                    fund.ReservedBalance += need;
+                    tp.TakeBuyReservation(need);
+                    _ledger.LogFund(tp.UserId, tp.CurrencyType, tp.OrderId, "Hydrate:BracketTPCash",
+                        need, resBefore, fund.ReservedBalance, fund.TotalBalance, fund.TotalBalance);
+                }
+            }
+        }
     }
 
     private void ClampSellsToPositionQuantity(
@@ -484,6 +557,9 @@ public sealed class AccountsCache : IAccountsCache
             for (int i = 0; i < list.Count; i++)
             {
                 var o = list[i];
+                // §P5b: a short bracket's buy legs (SL pool + buy-limit TPs) are reserved by
+                // ReseedBracketCashPools, not the generic clamp — skip them (mirror of ClampSells).
+                if (o.IsBracketChild) continue;
                 var orderReservation = ReservationMath.RemainingBuyReservation(o);
                 if (orderReservation <= 0m) continue;
 
