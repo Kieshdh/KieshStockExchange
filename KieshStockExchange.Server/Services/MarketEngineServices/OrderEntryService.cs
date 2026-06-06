@@ -234,28 +234,11 @@ public sealed class OrderEntryService : IOrderEntryService
             if (entryRef <= 0m) return OrderResultFactory.InvalidParams("No live market price to anchor the bracket.");
         }
 
-        if (hasStop && stopPrice!.Value >= entryRef)
-            return OrderResultFactory.InvalidParams(
-                $"Stop-loss must be below the entry price ({CurrencyHelper.Format(entryRef, currency)}).");
-
-        // Take-profits: each above entry, strictly ascending, qty>0, Σ ≤ parent qty.
-        int tpSum = 0;
-        decimal prev = entryRef;
-        for (int i = 0; i < takeProfits.Count; i++)
-        {
-            var (px, qty) = takeProfits[i];
-            if (qty <= 0) return OrderResultFactory.InvalidParams("Each take-profit quantity must be positive.");
-            if (px <= entryRef)
-                return OrderResultFactory.InvalidParams(
-                    $"Take-profit #{i + 1} must be above the entry price ({CurrencyHelper.Format(entryRef, currency)}).");
-            if (px <= prev && i > 0)
-                return OrderResultFactory.InvalidParams("Take-profit prices must strictly increase.");
-            prev = px;
-            tpSum += qty;
-        }
-        if (tpSum > quantity)
-            return OrderResultFactory.InvalidParams(
-                $"Take-profit quantities ({tpSum}) exceed the bracket quantity ({quantity}).");
+        // §F5: shared long-bracket geometry rules (SL below entry; TPs above entry, strictly ascending,
+        // qty>0, Σ ≤ parent qty), extracted so ModifyBracketLegAsync checks an edited leg identically.
+        var geometryErr = BracketGeometryValidator.Validate(
+            entryRef, hasStop ? stopPrice : null, takeProfits, quantity, currency);
+        if (geometryErr != null) return geometryErr;
 
         // Build the parent buy entry.
         var parent = new Order

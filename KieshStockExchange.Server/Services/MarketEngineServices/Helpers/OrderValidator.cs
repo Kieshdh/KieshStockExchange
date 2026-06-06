@@ -293,8 +293,10 @@ public sealed class OrderValidator : IOrderValidator
     public OrderResult? ValidateCancel(Order order)
     {
         if (order is null) return OrderResultFactory.InvalidParams("Order not found.");
-        // An armed (Pending) stop is cancellable too — the user can pull it before it triggers.
-        if (!order.IsOpen && !order.IsArmed) return OrderResultFactory.AlreadyClosed();
+        // An armed (Pending) stop is cancellable — the user can pull it before it triggers — and §F5 a
+        // dormant (Attached) bracket leg too (per-leg cancel; the SL-cancel converts to TP-only).
+        if (!order.IsOpen && !order.IsArmed && !(order.IsAttached && order.IsBracketChild))
+            return OrderResultFactory.AlreadyClosed();
 
         if (!_stock.TryGetById(order.StockId, out _))
             return OrderResultFactory.InvalidParams("Invalid stock ID.");

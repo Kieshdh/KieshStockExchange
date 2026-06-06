@@ -390,8 +390,10 @@ public class Order : IValidatable
 
     public void Cancel()
     {
-        // An armed (Pending) stop is cancellable too — the user can pull it before it triggers.
-        if (!IsOpen && !IsArmed) throw new InvalidOperationException("Only open or armed orders can be cancelled.");
+        // An armed (Pending) stop is cancellable — the user can pull it before it triggers — and §F5 a
+        // dormant (Attached) bracket leg too (cancelling the SL converts a bracket to take-profit-only).
+        if (!IsOpen && !IsArmed && !IsAttached)
+            throw new InvalidOperationException("Only open, armed, or attached orders can be cancelled.");
         Status = Statuses.Cancelled;
         UpdatedAt = TimeHelper.NowUtc();
     }

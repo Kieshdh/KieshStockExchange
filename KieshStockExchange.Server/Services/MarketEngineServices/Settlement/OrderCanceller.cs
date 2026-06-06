@@ -55,7 +55,10 @@ internal sealed class OrderCanceller
 
         // §3.6 P2: an armed (Pending) stop is live — route it through the main cancel path
         // below (mark Cancelled + release its arm reservation), not the "closed elsewhere" branch.
-        if (!dbOrder.IsOpen && !dbOrder.IsArmed)
+        // §F5: a dormant (Attached) bracket leg also takes the main path — it reserves nothing, so the
+        // release calls are no-ops, but it must be marked Cancelled + persisted (the DbClosed branch
+        // skips the UpdateOrder, which would leave the leg stuck Attached).
+        if (!dbOrder.IsOpen && !dbOrder.IsArmed && !dbOrder.IsAttached)
         {
             if (order.IsOpen) order.Cancel(); // sync in-memory
             // DB row was closed by another path (fill, peer cancel) but this in-memory
@@ -74,7 +77,7 @@ internal sealed class OrderCanceller
         dbOrder.Cancel();
         await _db.UpdateOrder(dbOrder, ct).ConfigureAwait(false);
 
-        if (order.IsOpen || order.IsArmed) order.Cancel();
+        if (order.IsOpen || order.IsArmed || order.IsAttached) order.Cancel();
 
         // Release + persist so DB-backed Available* drops without waiting for full refresh
         await ReleaseSellReservationAndPersist(order, ct).ConfigureAwait(false);

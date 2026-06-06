@@ -114,6 +114,12 @@ public sealed class BracketCoordinator : IBracketCoordinator
         foreach (var r in raw)
         {
             var o = _registry.TryGet(r.OrderId, out var canon) ? canon : r;
+            // §F5: exclude CANCELLED legs only (NOT all closed). A cancelled SL must be invisible to
+            // OnParentFillAsync so the parent fills the take-profit-only path; but a FILLED TP must stay
+            // in the list because ComputeHeld sums its AmountFilled to size `held` — dropping it
+            // overstates held and breaks Σ CSR == Position.ReservedQuantity. A filled TP isn't Attached,
+            // so the arming loops skip it anyway.
+            if (o.IsCancelled) continue;
             if (o.IsStopOrder) sl = o;
             else if (o.IsLimitOrder) tps.Add(o);
         }
@@ -425,8 +431,12 @@ public sealed class BracketCoordinator : IBracketCoordinator
         // SL (the TPs can't rest unprotected). A single-TP cancel, or a partially-filled parent
         // cancel, leaves the surviving legs protecting the held shares. The cancelled order itself +
         // its reservation were already handled by the normal cancel path.
+        // §F5: cancelling the SL BEFORE the parent fills no longer tears down — the dormant TPs remain
+        // and the bracket survives as take-profit-only (the !teardown early-return keeps _bracketParents,
+        // and LoadLegsAsync's IsCancelled filter makes the cancelled SL invisible on the later fill). A
+        // filled parent's SL-cancel still tears down (live TPs can't rest unprotected).
         bool teardown = (cancelled.OrderId == parentId && parent.AmountFilled == 0)
-                     || (cancelled.IsBracketChild && cancelled.IsStopOrder);
+                     || (cancelled.IsBracketChild && cancelled.IsStopOrder && parent.AmountFilled > 0);
         if (!teardown)
         {
             if (cancelled.OrderId == parentId) _bracketParents.TryRemove(parentId, out _);
