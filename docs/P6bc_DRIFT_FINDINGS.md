@@ -39,6 +39,17 @@ All failures are in the **batch** path (`PlaceAndMatchBatchAsync` / `SettleTrade
    the entry/fire paths may not be fully covered for shorts). Confirm gate coverage across the entry-phase /
    watcher / coordinator vs the batch for a shorting user.
 
+## Sharper signal (post-soak heal run, advanced OFF)
+After stopping the soak and restarting with advanced **disabled**, the first reconcile was clean but the
+**next pass drifted again** (phantomTotal≈1012) — with no new shorts being opened. The only shorts in play
+were the **leftover bot shorts** from the broken soak, being traded by ordinary bot **plain buys**. So the
+drift reproduces from *any* bot short + a normal market buy — it is **not** an at-scale/concurrency-only
+effect. This points hard at suspects (1) cover-flip and/or (2) short-collateral-vs-fund-consume, and largely
+rules out (3) as the primary cause. **Best deterministic repro: one bot, open a short, then place a plain
+market buy on that same stock (a) partially and (b) past flat — watch the reconciler.** (Side effect: the
+demo DB carries residual bot shorts that will keep producing small, clamped drift until covered or the fix
+lands; DB integrity is preserved by the CK constraint + clamp.)
+
 ## What's solid vs what needs work
 - **Solid (committed, clean):** P6a (protective stop/trailing on longs) — zero phantoms; the two-phase
   submission route + determinism + entry-route plumbing are proven.
