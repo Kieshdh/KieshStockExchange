@@ -90,14 +90,15 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
     public async Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
         CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
-        IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default)
+        IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default,
+        OrderSide side = OrderSide.Buy)
     {
         var legs = new List<BracketLeg>(takeProfits?.Count ?? 0);
         if (takeProfits is not null)
             for (int i = 0; i < takeProfits.Count; i++)
                 legs.Add(new BracketLeg(takeProfits[i].Price, takeProfits[i].Quantity));
         var req = new PlaceBracketRequest(userId, stockId, quantity, entry, currency,
-            limitPrice, buyBudget, stopPrice, stopLimitPrice, stopSlippagePct, legs);
+            limitPrice, buyBudget, stopPrice, stopLimitPrice, stopSlippagePct, legs, side);
         var resp = await _http.PostAsJsonAsync("api/orders/place-bracket", req, ApiJsonOptions.Default, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<OrderResult>(ApiJsonOptions.Default, ct).ConfigureAwait(false)

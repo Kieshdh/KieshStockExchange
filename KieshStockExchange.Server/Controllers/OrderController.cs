@@ -182,7 +182,7 @@ public sealed class OrderController : ControllerBase
             .Select(l => (l.Price, l.Quantity)).ToList();
         var result = await _entry.PlaceBracketAsync(req.UserId, req.StockId, req.Quantity, req.Entry,
             req.Currency, req.Price, req.BuyBudget, req.StopPrice, req.StopLimitPrice, req.StopSlippagePct,
-            tps, ct);
+            tps, ct, req.Side);
         _marketEngine.LogInformation(
             "User {User} place BRACKET {Entry} qty {Qty} stock {Stock} {Ccy} SL {Stop} TPs {TpCount} → {Status}",
             caller, req.Entry, req.Quantity, req.StockId, req.Currency, req.StopPrice, tps.Count, result.Status);

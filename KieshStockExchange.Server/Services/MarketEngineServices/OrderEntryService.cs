@@ -317,10 +317,17 @@ public sealed class OrderEntryService : IOrderEntryService
     public async Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
         CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
-        IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default)
+        IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default,
+        OrderSide side = OrderSide.Buy)
     {
         ct.ThrowIfCancellationRequested();
         if (quantity <= 0) return OrderResultFactory.InvalidParams("Quantity must be positive.");
+        // §P5b stage 1: the side-aware geometry validator + DTO/plumbing are in; the short BUILD + the
+        // BracketCoordinator cash-pool arming land together in stage 2 (coupled — a placed short bracket
+        // whose legs never arm would strand the legs and leave the short unprotected). Gate it off here so
+        // no half-formed short bracket can be created until that arming exists.
+        if (side == OrderSide.Sell)
+            return OrderResultFactory.InvalidParams("Short brackets are not yet supported (P5b stage 2).");
         takeProfits ??= Array.Empty<(decimal, int)>();
         if (takeProfits.Count > 3) return OrderResultFactory.InvalidParams("A bracket supports at most 3 take-profits.");
         // stopPrice null ⇒ a take-profit-only bracket (no protective stop); then ≥1 TP is required.

@@ -51,8 +51,8 @@ public sealed record BracketLeg(decimal Price, int Quantity);
 // §3.6 P4: place a (long) bracket — a buy entry plus an optional protective stop-loss and/or up to
 // three scale-out take-profit legs, OCO-grouped, armed as the parent fills. Entry = Market (BuyBudget)
 // or Limit (Price). StopPrice null ⇒ take-profit-only bracket (no protective stop). StopLimitPrice
-// set ⇒ the SL is a stop-limit; null ⇒ a stop-market (StopSlippagePct optionally caps it). Short
-// brackets are not yet supported (rejected server-side).
+// set ⇒ the SL is a stop-limit; null ⇒ a stop-market (StopSlippagePct optionally caps it).
+// §P5b: Side selects long (Buy entry → sell legs, default) vs short (Sell entry → buy-to-close legs).
 public sealed record PlaceBracketRequest(
     int UserId,
     int StockId,
@@ -64,4 +64,5 @@ public sealed record PlaceBracketRequest(
     decimal? StopPrice,
     decimal? StopLimitPrice,
     decimal? StopSlippagePct,
-    IReadOnlyList<BracketLeg> TakeProfits);
+    IReadOnlyList<BracketLeg> TakeProfits,
+    OrderSide Side = OrderSide.Buy);

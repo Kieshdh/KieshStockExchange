@@ -47,7 +47,8 @@ public interface IOrderEntryService
     Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
         CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
-        IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default);
+        IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default,
+        OrderSide side = OrderSide.Buy);
 
     // §3.6 P2 stop orders — armed off-book, promoted when the price crosses stopPrice.
     Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
