@@ -24,7 +24,7 @@ public sealed class TradeBatchScope
     /// captured on first touch in the apply-pass and replayed on rollback so the per-order
     /// field stays in lock-step with the aggregate snapshots above.
     /// </summary>
-    public Dictionary<int, (decimal Buy, int Sell)> OrderReservationSnapshots { get; } = new();
+    public Dictionary<int, (decimal Buy, int Sell, decimal ShortCollateral)> OrderReservationSnapshots { get; } = new();
 
     /// <summary>
     /// Pre-mutation short-collateral snapshot (<see cref="Position.ShortCollateral"/> +

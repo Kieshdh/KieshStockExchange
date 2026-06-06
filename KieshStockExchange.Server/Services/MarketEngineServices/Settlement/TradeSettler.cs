@@ -115,7 +115,7 @@ internal sealed class TradeSettler
         {
             if (o is null) return;
             if (!orderResSnapshots.ContainsKey(o.OrderId))
-                orderResSnapshots[o.OrderId] = (o.CurrentBuyReservation, o.CurrentSellReservedQty);
+                orderResSnapshots[o.OrderId] = (o.CurrentBuyReservation, o.CurrentSellReservedQty, o.CurrentShortCollateral);
         }
 
         var userSet = new HashSet<int>();
@@ -635,7 +635,7 @@ internal sealed class TradeSettler
             }
             var orderBuyBefore = o.CurrentBuyReservation;
             var orderSellBefore = o.CurrentSellReservedQty;
-            o.RestoreReservationFromSnapshot(prev.Buy, prev.Sell);
+            o.RestoreReservationFromSnapshot(prev.Buy, prev.Sell, prev.ShortCollateral);
             _ledger.LogOrder(o.UserId, o.OrderId, "RestoreSnapshots:Order",
                 prev.Buy - orderBuyBefore, orderBuyBefore, o.CurrentBuyReservation,
                 orderSellBefore, o.CurrentSellReservedQty);
