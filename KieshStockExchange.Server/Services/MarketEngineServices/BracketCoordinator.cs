@@ -24,8 +24,12 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 /// cumulative threshold) rather than per-fill pro-rata: same scale-out behaviour and invariants
 /// without persisting a separate per-TP allocation or resizing TP orders.
 ///
-/// Scope: <b>long brackets only</b> (buy entry → sell-stop SL + sell-limit TPs). Short brackets are
-/// rejected at placement (risk register #7 sequencing) until a follow-up.
+/// §P5b short brackets (sell entry → buy-stop SL + buy-limit TPs) mirror this with cash: the SL owns a
+/// CASH pool (CurrentBuyReservation = SL_worst × held) on Fund.ReservedBalance, TPs reserve 0 and draw it
+/// at fill; the short entry's collateral is a separate lock. The short path lives in the OnParentFillShort
+/// / OnChildFillShort / OnStopFiringShort / OnMemberCancelledShort methods (the long path is unchanged);
+/// gating is fund→position via AcquireUserGatesAsync. Invariant: Σ leg buy-reservation + Σ short
+/// collateral == Fund.ReservedBalance.
 /// </summary>
 public interface IBracketCoordinator
 {
