@@ -292,6 +292,11 @@ public partial class ChartViewModel : StockAwareViewModel
             if (o.StockId != stockId || o.CurrencyType != currency) continue;
             if (o.UserId != _auth.CurrentUserId) continue;
             if (o.ActivatedAt is not DateTime firedAt) continue;
+            // §G10: blue arrow for fired stop-LIMIT only; a fired stop-market keeps just its green/red
+            // fill triangle (the fill price is its meaningful point). PromoteStop resets Stop→None, so
+            // IsStopLimitOrder is false after firing — but Entry is untouched, so Entry==Limit durably
+            // marks a fired stop-limit (a plain limit never gets ActivatedAt).
+            if (o.Entry != EntryType.Limit) continue;
             var price = o.StopPrice ?? 0m;
             if (price <= 0m) continue;
             TriggerMarkers.Add(new TriggerMarker(firedAt, price, o.IsBuyOrder));
