@@ -248,7 +248,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         stopProb:           _configuration.GetValue("Bots:Advanced:StopProb", 0m),
                         trailingProb:       _configuration.GetValue("Bots:Advanced:TrailingProb", 0m),
                         stopOffsetMin:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMin", 0.02m),
-                        stopOffsetMax:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMax", 0.05m));
+                        stopOffsetMax:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMax", 0.05m),
+                        shortProb:          _configuration.GetValue("Bots:Advanced:ShortProb", 0m),
+                        longBracketProb:    _configuration.GetValue("Bots:Advanced:LongBracketProb", 0m),
+                        shortBracketProb:   _configuration.GetValue("Bots:Advanced:ShortBracketProb", 0m),
+                        tpOffsetMin:        _configuration.GetValue("Bots:Advanced:TpOffsetPrcMin", 0.03m),
+                        tpOffsetMax:        _configuration.GetValue("Bots:Advanced:TpOffsetPrcMax", 0.08m),
+                        bracketSlippagePct: _configuration.GetValue("Bots:Advanced:BracketSlippagePct", 5m),
+                        advancedMaxQty:     _configuration.GetValue("Bots:Advanced:MaxQty", 50));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
@@ -502,6 +509,24 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     BotAdvancedKind.TrailingStopSell =>
                         await _entry.PlaceTrailingStopSellOrderAsync(
                             user.UserId, d.StockId, d.Quantity, d.TrailOffset, d.TrailIsPercent, d.Currency, ct).ConfigureAwait(false),
+                    // §P6b flat-only market short (opens a cash-collateralized short via the P1 path).
+                    BotAdvancedKind.ShortOpen =>
+                        await _entry.PlaceTrueMarketSellOrderAsync(
+                            user.UserId, d.StockId, d.Quantity, d.Currency, ct).ConfigureAwait(false),
+                    // §P6b long bracket (buy entry + sell-stop SL + sell-limit TPs).
+                    BotAdvancedKind.LongBracket =>
+                        await _entry.PlaceBracketAsync(
+                            user.UserId, d.StockId, d.Quantity, EntryType.Market, d.Currency,
+                            limitPrice: null, buyBudget: d.BuyBudget, stopPrice: d.StopPrice,
+                            stopLimitPrice: null, stopSlippagePct: null, takeProfits: d.TakeProfits!,
+                            ct, OrderSide.Buy).ConfigureAwait(false),
+                    // §P6c short bracket (flat market sell + slippage-capped buy-stop SL above + buy-limit TPs below).
+                    BotAdvancedKind.ShortBracket =>
+                        await _entry.PlaceBracketAsync(
+                            user.UserId, d.StockId, d.Quantity, EntryType.Market, d.Currency,
+                            limitPrice: null, buyBudget: null, stopPrice: d.StopPrice,
+                            stopLimitPrice: null, stopSlippagePct: d.StopSlippagePct, takeProfits: d.TakeProfits!,
+                            ct, OrderSide.Sell).ConfigureAwait(false),
                     _ => new OrderResult { Status = OrderStatus.OperationFailed, ErrorMessage = "unknown advanced kind" },
                 };
             }

@@ -10,12 +10,16 @@ using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
-// §P6a: a protective advanced-order decision, submitted via the entry/arm route (not the batch matcher).
-internal enum BotAdvancedKind { StopMarketSell, TrailingStopSell }
+// §P6: an advanced-order decision, submitted via the entry/arm route (not the batch matcher).
+//   StopMarketSell/TrailingStopSell (P6a): protect a held long.
+//   ShortOpen (P6b): flat-only market short.  LongBracket (P6b)/ShortBracket (P6c): bracketed entry.
+internal enum BotAdvancedKind { StopMarketSell, TrailingStopSell, ShortOpen, LongBracket, ShortBracket }
 
 internal sealed record BotAdvancedDecision(
     BotAdvancedKind Kind, int StockId, int Quantity, CurrencyType Currency,
-    decimal StopPrice, decimal TrailOffset, bool TrailIsPercent);
+    decimal StopPrice = 0m, decimal TrailOffset = 0m, bool TrailIsPercent = false,
+    decimal? BuyBudget = null, decimal? StopSlippagePct = null,
+    IReadOnlyList<(decimal Price, int Quantity)>? TakeProfits = null);
 
 /// <summary>
 /// Stateless order computation — given a context and a user, produces an Order or null.
@@ -50,12 +54,19 @@ internal sealed class AiBotDecisionService
     private readonly bool    _mmQuoting;
     private readonly decimal _quoteHalfSpreadPrc;
 
-    // §P6a protective stop / trailing-stop generation (off by default).
+    // §P6 advanced-order generation for the bot soak (all off by default).
     private readonly bool    _advancedEnabled;
-    private readonly decimal _stopProb;
-    private readonly decimal _trailingProb;
-    private readonly decimal _stopOffsetMin;
+    private readonly decimal _stopProb;          // P6a: protect a long with a sell-stop
+    private readonly decimal _trailingProb;      // P6a: protect a long with a trailing-sell
+    private readonly decimal _shortProb;         // P6b: open a flat-only market short
+    private readonly decimal _longBracketProb;   // P6b: open a long bracket
+    private readonly decimal _shortBracketProb;  // P6c: open a short bracket (flat-only)
+    private readonly decimal _stopOffsetMin;     // SL distance from entry/market (fraction)
     private readonly decimal _stopOffsetMax;
+    private readonly decimal _tpOffsetMin;       // TP distance from entry (fraction)
+    private readonly decimal _tpOffsetMax;
+    private readonly decimal _bracketSlippagePct;// short-bracket SL slippage cap (percent)
+    private readonly int     _advancedMaxQty;    // cap qty on advanced/bracket orders (keeps sizes modest)
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
@@ -64,7 +75,10 @@ internal sealed class AiBotDecisionService
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
         bool mmQuoting = true, decimal quoteHalfSpreadPrc = 0.003m,
         bool advancedEnabled = false, decimal stopProb = 0m, decimal trailingProb = 0m,
-        decimal stopOffsetMin = 0.02m, decimal stopOffsetMax = 0.05m)
+        decimal stopOffsetMin = 0.02m, decimal stopOffsetMax = 0.05m,
+        decimal shortProb = 0m, decimal longBracketProb = 0m, decimal shortBracketProb = 0m,
+        decimal tpOffsetMin = 0.03m, decimal tpOffsetMax = 0.08m,
+        decimal bracketSlippagePct = 5m, int advancedMaxQty = 50)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -81,8 +95,15 @@ internal sealed class AiBotDecisionService
         _advancedEnabled    = advancedEnabled;
         _stopProb           = stopProb;
         _trailingProb       = trailingProb;
+        _shortProb          = shortProb;
+        _longBracketProb    = longBracketProb;
+        _shortBracketProb   = shortBracketProb;
         _stopOffsetMin      = stopOffsetMin;
         _stopOffsetMax      = stopOffsetMax;
+        _tpOffsetMin        = tpOffsetMin;
+        _tpOffsetMax        = tpOffsetMax;
+        _bracketSlippagePct = bracketSlippagePct;
+        _advancedMaxQty     = advancedMaxQty;
     }
     #endregion
 
@@ -149,36 +170,144 @@ internal sealed class AiBotDecisionService
         CurrencyType currency, CancellationToken ct = default)
     {
         if (!_advancedEnabled) return null;
-        decimal advProb = _stopProb + _trailingProb;
+        decimal advProb = _stopProb + _trailingProb + _shortProb + _longBracketProb + _shortBracketProb;
         if (advProb <= 0m) return null;
-        if (ctx.Decimal01(user.AiUserId) >= advProb) return null;   // gate (seeded, reproducible)
+        decimal r = ctx.Decimal01(user.AiUserId);   // single seeded roll: gate + kind selection
+        if (r >= advProb) return null;
 
+        // Cumulative kind pick from the same roll (no extra draw). A builder that can't find an eligible
+        // stock returns null → the caller falls through to a normal plain order this tick.
+        decimal c = _stopProb;
+        if (r < c)                       return await BuildProtectiveStopAsync(ctx, user, currency, trailing: false, ct).ConfigureAwait(false);
+        c += _trailingProb; if (r < c)   return await BuildProtectiveStopAsync(ctx, user, currency, trailing: true,  ct).ConfigureAwait(false);
+        c += _shortProb;    if (r < c)   return await BuildShortOpenAsync(ctx, user, currency, ct).ConfigureAwait(false);
+        c += _longBracketProb; if (r < c) return await BuildBracketAsync(ctx, user, currency, isShort: false, ct).ConfigureAwait(false);
+        return await BuildBracketAsync(ctx, user, currency, isShort: true, ct).ConfigureAwait(false);
+    }
+
+    // P6a: protect the first watchlist long with FREE shares — sell-stop below market, or trailing-sell.
+    private async Task<BotAdvancedDecision?> BuildProtectiveStopAsync(AiBotContext ctx, AIUser user,
+        CurrencyType currency, bool trailing, CancellationToken ct)
+    {
         var watch = user.Watchlist?.Where(id => _stocks.IsListedIn(id, currency)).ToList();
         if (watch is null || watch.Count == 0) return null;
-
-        // First watchlist stock the bot holds long with FREE shares (not already protected/committed).
         int stockId = 0, qty = 0;
         foreach (var id in watch)
         {
             var avail = _accounts.GetPosition(user.UserId, id)?.AvailableQuantity ?? 0;
-            if (avail > 0) { stockId = id; qty = avail; break; }
+            if (avail > 0) { stockId = id; qty = Math.Min(avail, _advancedMaxQty); break; }
         }
         if (stockId <= 0 || qty <= 0) return null;
+        var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
+        if (price <= 0m) return null;
+        var offset = Lerp(_stopOffsetMin, _stopOffsetMax, ctx.Decimal01(user.AiUserId));
+        if (trailing)
+            return new BotAdvancedDecision(BotAdvancedKind.TrailingStopSell, stockId, qty, currency,
+                TrailOffset: offset * 100m, TrailIsPercent: true);
+        var stopPrice = CurrencyHelper.RoundMoney(price * (1m - offset), currency);
+        if (stopPrice <= 0m) return null;
+        return new BotAdvancedDecision(BotAdvancedKind.StopMarketSell, stockId, qty, currency, StopPrice: stopPrice);
+    }
 
+    // P6b: open a flat-only cash-collateralized short (market sell on a stock the bot doesn't hold). Flat-only
+    // so the bot never traverses the long→short flip (risk #7). Collateral is buying-power-neutral at open, so
+    // sizing is just an exposure cap, not a cash constraint.
+    private async Task<BotAdvancedDecision?> BuildShortOpenAsync(AiBotContext ctx, AIUser user,
+        CurrencyType currency, CancellationToken ct)
+    {
+        int stockId = FirstFlatStock(ctx, user, currency);
+        if (stockId <= 0) return null;
+        var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
+        if (price <= 0m) return null;
+        int qty = AdvancedExposureQty(ctx, user, currency, price);
+        if (qty <= 0) return null;
+        return new BotAdvancedDecision(BotAdvancedKind.ShortOpen, stockId, qty, currency);
+    }
+
+    // P6b/P6c: open a bracketed entry. Long = market buy + sell-stop below + buy-limit… *sell*-limit TPs above;
+    // short = flat-only market sell + slippage-capped buy-stop above + buy-limit TPs below. Sized so the entry
+    // (long: cash; short: SL cash pool) is affordable, and kept small via _advancedMaxQty.
+    private async Task<BotAdvancedDecision?> BuildBracketAsync(AiBotContext ctx, AIUser user,
+        CurrencyType currency, bool isShort, CancellationToken ct)
+    {
+        int stockId = isShort ? FirstFlatStock(ctx, user, currency) : FirstLongableStock(ctx, user, currency);
+        if (stockId <= 0) return null;
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
 
-        var offset = Lerp(_stopOffsetMin, _stopOffsetMax, ctx.Decimal01(user.AiUserId));
-        bool trailing = ctx.Decimal01(user.AiUserId) < (_trailingProb / advProb);
-        if (trailing)
-            // trailing sell-stop: offset is a percentage of the watermark (P5 semantics).
-            return new BotAdvancedDecision(BotAdvancedKind.TrailingStopSell, stockId, qty, currency,
-                StopPrice: 0m, TrailOffset: offset * 100m, TrailIsPercent: true);
+        // SL distance + two TP distances (sorted so TP1 is nearer market than TP2).
+        var slOff = Lerp(_stopOffsetMin, _stopOffsetMax, ctx.Decimal01(user.AiUserId));
+        var o1 = Lerp(_tpOffsetMin, _tpOffsetMax, ctx.Decimal01(user.AiUserId));
+        var o2 = Lerp(_tpOffsetMin, _tpOffsetMax, ctx.Decimal01(user.AiUserId));
+        var tpNear = Math.Min(o1, o2); var tpFar = Math.Max(o1, o2);
+        if (tpFar <= tpNear) tpFar = tpNear + 0.005m;   // keep TP2 strictly past TP1
 
-        var stopPrice = CurrencyHelper.RoundMoney(price * (1m - offset), currency);
-        if (stopPrice <= 0m) return null;
-        return new BotAdvancedDecision(BotAdvancedKind.StopMarketSell, stockId, qty, currency,
-            StopPrice: stopPrice, TrailOffset: 0m, TrailIsPercent: false);
+        var fund = _accounts.GetFund(user.UserId, currency);
+        decimal avail = fund?.AvailableBalance ?? 0m;
+
+        decimal stopPrice; decimal? slippage; decimal? buyBudget; int qty;
+        if (isShort)
+        {
+            stopPrice = CurrencyHelper.RoundMoney(price * (1m + slOff), currency);     // SL above entry
+            slippage  = _bracketSlippagePct;                                           // capped (uncapped rejected)
+            buyBudget = null;
+            decimal slWorst = stopPrice * (1m + _bracketSlippagePct / 100m);           // worst-case buyback / share
+            if (slWorst <= 0m) return null;
+            qty = (int)Math.Floor((avail - BuySafetyBuffer) / slWorst);                // SL cash pool must fit
+        }
+        else
+        {
+            stopPrice = CurrencyHelper.RoundMoney(price * (1m - slOff), currency);     // SL below entry
+            slippage  = null;                                                          // uncapped sell-stop ok (shares)
+            qty = (int)Math.Floor((avail - BuySafetyBuffer) / price);                  // entry cash must fit
+            buyBudget = 0m; // set after qty is known
+        }
+        qty = Math.Min(qty, _advancedMaxQty);
+        if (qty < 2) return null;   // need ≥2 for a 2-leg scale-out
+        if (!isShort) buyBudget = CurrencyHelper.RoundMoney(price * qty, currency);
+
+        var tp1Qty = qty / 2; var tp2Qty = qty - tp1Qty;
+        var tps = isShort
+            ? new List<(decimal, int)> { (CurrencyHelper.RoundMoney(price * (1m - tpNear), currency), tp1Qty),
+                                         (CurrencyHelper.RoundMoney(price * (1m - tpFar),  currency), tp2Qty) }
+            : new List<(decimal, int)> { (CurrencyHelper.RoundMoney(price * (1m + tpNear), currency), tp1Qty),
+                                         (CurrencyHelper.RoundMoney(price * (1m + tpFar),  currency), tp2Qty) };
+
+        return new BotAdvancedDecision(
+            isShort ? BotAdvancedKind.ShortBracket : BotAdvancedKind.LongBracket,
+            stockId, qty, currency, StopPrice: stopPrice, BuyBudget: buyBudget,
+            StopSlippagePct: slippage, TakeProfits: tps);
+    }
+
+    // First watchlist stock the bot is FLAT on (per the engine view) — for flat-only shorts/short-brackets.
+    private int FirstFlatStock(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        var watch = user.Watchlist?.Where(id => _stocks.IsListedIn(id, currency)).ToList();
+        if (watch is null) return 0;
+        foreach (var id in watch)
+            if ((_accounts.GetPosition(user.UserId, id)?.Quantity ?? 0) == 0) return id;
+        return 0;
+    }
+
+    // First watchlist stock the bot is flat-or-long on (never short) — for long brackets.
+    private int FirstLongableStock(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        var watch = user.Watchlist?.Where(id => _stocks.IsListedIn(id, currency)).ToList();
+        if (watch is null) return 0;
+        foreach (var id in watch)
+            if ((_accounts.GetPosition(user.UserId, id)?.Quantity ?? 0) >= 0) return id;
+        return 0;
+    }
+
+    // Modest exposure-capped quantity for an advanced entry: a slice of portfolio, ≤ _advancedMaxQty.
+    private int AdvancedExposureQty(AiBotContext ctx, AIUser user, CurrencyType currency, decimal price)
+    {
+        if (price <= 0m) return 0;
+        var portfolio = ctx.PortfolioValueByCurrency(user.UserId, currency);
+        if (portfolio <= 0m) return 0;
+        var notional = Lerp(user.MinTradeAmountPrc, user.MaxTradeAmountPrc, ctx.Decimal01(user.AiUserId)) * portfolio;
+        int qty = (int)Math.Floor(notional / price);
+        return Math.Min(Math.Max(qty, 0), _advancedMaxQty);
     }
     #endregion
 
