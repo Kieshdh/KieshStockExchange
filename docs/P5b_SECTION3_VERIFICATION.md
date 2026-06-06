@@ -47,12 +47,14 @@ uncapped market buy-stop (unbounded upward slippage) ⇒ **the cash pool can't b
 **must require the SL to be a stop-limit or a slippage-capped market buy-stop**; reject an uncapped market SL
 at validation. (The TP-only fork has no SL, so it's unaffected — each TP reserves its own bounded buyback.)
 
-## Needs a product decision (from the owner) — blocks the arm contract
-- **Funding-failure at entry-fill (§3.1):** if available cash `< SL_worst·N` when the short opens, do we
-  **(a) degrade to TP-only** (drop the SL, keep the profit-takers, alert "short now unprotected") — Ultraplan's
-  recommended default — or **(b) reserve the SL pool at placement** (ties up `(entry+SL)·N` up front but
-  guarantees the short is always protected), or **(c) cancel the whole bracket on open**? This changes the
-  coordinator's arm contract, so it must be decided before the mechanical mirror.
+## Product decision — RESOLVED (owner, 2026-06-06)
+- **Funding-failure at entry-fill (§3.1): DEGRADE TO TP-ONLY.** If available cash `< SL_worst·N` when the
+  short opens, the coordinator drops the SL leg (cancel it), keeps the take-profit legs (each then reserves
+  its own buyback per the TP-only fork), and alerts the user that the short is now unprotected. Never leave a
+  partially-funded SL pool. This mirrors the long TP-only fork and keeps the profit-takers alive. (Options
+  "reserve-at-placement" and "cancel-whole-bracket" were declined.) The arm contract for the mechanical
+  mirror: try to arm the SL pool; on insufficient cash, fall through to the TP-only arming path + emit an
+  "unprotected short" notification.
 
 ## Net for the mechanical-mirror artifact
 Proceed — the model is verified. Bake in: (1) the SL-field-lag re-sync in the inverted `OnChildFillAsync`
