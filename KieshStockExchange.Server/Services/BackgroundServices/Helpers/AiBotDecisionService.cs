@@ -10,6 +10,13 @@ using KieshStockExchange.Services.BackgroundServices.Interfaces;
 
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
+// §P6a: a protective advanced-order decision, submitted via the entry/arm route (not the batch matcher).
+internal enum BotAdvancedKind { StopMarketSell, TrailingStopSell }
+
+internal sealed record BotAdvancedDecision(
+    BotAdvancedKind Kind, int StockId, int Quantity, CurrencyType Currency,
+    decimal StopPrice, decimal TrailOffset, bool TrailIsPercent);
+
 /// <summary>
 /// Stateless order computation — given a context and a user, produces an Order or null.
 /// </summary>
@@ -43,12 +50,21 @@ internal sealed class AiBotDecisionService
     private readonly bool    _mmQuoting;
     private readonly decimal _quoteHalfSpreadPrc;
 
+    // §P6a protective stop / trailing-stop generation (off by default).
+    private readonly bool    _advancedEnabled;
+    private readonly decimal _stopProb;
+    private readonly decimal _trailingProb;
+    private readonly decimal _stopOffsetMin;
+    private readonly decimal _stopOffsetMax;
+
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
         ILogger<AiBotDecisionService> logger,
         bool fatTails = true, decimal tradeSizeTailShape = 0.5m,
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
-        bool mmQuoting = true, decimal quoteHalfSpreadPrc = 0.003m)
+        bool mmQuoting = true, decimal quoteHalfSpreadPrc = 0.003m,
+        bool advancedEnabled = false, decimal stopProb = 0m, decimal trailingProb = 0m,
+        decimal stopOffsetMin = 0.02m, decimal stopOffsetMax = 0.05m)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -62,6 +78,11 @@ internal sealed class AiBotDecisionService
         _blockTradeMultiple = blockTradeMultiple;
         _mmQuoting          = mmQuoting;
         _quoteHalfSpreadPrc = quoteHalfSpreadPrc;
+        _advancedEnabled    = advancedEnabled;
+        _stopProb           = stopProb;
+        _trailingProb       = trailingProb;
+        _stopOffsetMin      = stopOffsetMin;
+        _stopOffsetMax      = stopOffsetMax;
     }
     #endregion
 
@@ -115,6 +136,49 @@ internal sealed class AiBotDecisionService
             Entry = (type is OrderType.LimitBuy or OrderType.LimitSell) ? EntryType.Limit : EntryType.Market,
             Stop = StopKind.None,
         };
+    }
+
+    /// <summary>
+    /// §P6a: decide whether the bot attaches a PROTECTIVE stop to an existing long this decision — a
+    /// sell-stop-market below market or a P5 trailing-sell-stop. Returns null when disabled, when the gate
+    /// doesn't fire, or when the bot has no free (un-protected) long shares. <b>When disabled it returns at
+    /// the very top consuming NO seeded RNG</b>, so the plain-order stream stays byte-identical vs pre-P6.
+    /// Submitted via the entry/arm route (not the batch matcher); fires off-loop via the stop watcher.
+    /// </summary>
+    internal async Task<BotAdvancedDecision?> ComputeAdvancedDecisionAsync(AiBotContext ctx, AIUser user,
+        CurrencyType currency, CancellationToken ct = default)
+    {
+        if (!_advancedEnabled) return null;
+        decimal advProb = _stopProb + _trailingProb;
+        if (advProb <= 0m) return null;
+        if (ctx.Decimal01(user.AiUserId) >= advProb) return null;   // gate (seeded, reproducible)
+
+        var watch = user.Watchlist?.Where(id => _stocks.IsListedIn(id, currency)).ToList();
+        if (watch is null || watch.Count == 0) return null;
+
+        // First watchlist stock the bot holds long with FREE shares (not already protected/committed).
+        int stockId = 0, qty = 0;
+        foreach (var id in watch)
+        {
+            var avail = _accounts.GetPosition(user.UserId, id)?.AvailableQuantity ?? 0;
+            if (avail > 0) { stockId = id; qty = avail; break; }
+        }
+        if (stockId <= 0 || qty <= 0) return null;
+
+        var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
+        if (price <= 0m) return null;
+
+        var offset = Lerp(_stopOffsetMin, _stopOffsetMax, ctx.Decimal01(user.AiUserId));
+        bool trailing = ctx.Decimal01(user.AiUserId) < (_trailingProb / advProb);
+        if (trailing)
+            // trailing sell-stop: offset is a percentage of the watermark (P5 semantics).
+            return new BotAdvancedDecision(BotAdvancedKind.TrailingStopSell, stockId, qty, currency,
+                StopPrice: 0m, TrailOffset: offset * 100m, TrailIsPercent: true);
+
+        var stopPrice = CurrencyHelper.RoundMoney(price * (1m - offset), currency);
+        if (stopPrice <= 0m) return null;
+        return new BotAdvancedDecision(BotAdvancedKind.StopMarketSell, stockId, qty, currency,
+            StopPrice: stopPrice, TrailOffset: 0m, TrailIsPercent: false);
     }
     #endregion
 

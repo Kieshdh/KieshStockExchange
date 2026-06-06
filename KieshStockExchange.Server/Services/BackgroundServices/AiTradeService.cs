@@ -176,15 +176,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
     #region Services and Constructor
     private readonly IOrderExecutionService _marketOrders;
+    private readonly IOrderEntryService     _entry;   // §P6: stop/trailing/bracket entry route (not the batch matcher)
     private readonly IMarketDataService     _market;
     private readonly IStockService          _stocks;
     private readonly IAccountsCache         _accounts;
     private readonly IFxRateService         _fxRates;
     private readonly ILogger<AiTradeService> _logger;
     private readonly IConfiguration         _configuration;
+    private readonly int  _maxAdvancedPerTick;   // §P6a cap on entry-route submissions per tick
+    private readonly bool _advancedEnabled;       // §P6a master switch (default off)
 
     public AiTradeService(
         IOrderExecutionService marketOrders,
+        IOrderEntryService entry,
         IMarketDataService market,
         IStockService stocks,
         IDataBaseService db,
@@ -199,6 +203,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IConfiguration configuration)
     {
         _marketOrders = marketOrders ?? throw new ArgumentNullException(nameof(marketOrders));
+        _entry        = entry        ?? throw new ArgumentNullException(nameof(entry));
         _market       = market       ?? throw new ArgumentNullException(nameof(market));
         _stocks       = stocks       ?? throw new ArgumentNullException(nameof(stocks));
         _accounts     = accounts     ?? throw new ArgumentNullException(nameof(accounts));
@@ -236,7 +241,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         blockTradeProb:     _configuration.GetValue("Bots:BlockTradeProb", 0.01m),
                         blockTradeMultiple: _configuration.GetValue("Bots:BlockTradeMultiple", 4m),
                         mmQuoting:          _configuration.GetValue("Bots:MarketMakerQuoting", true),
-                        quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m));
+                        quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m),
+                        // §P6a: protective stop / trailing-stop generation (off by default → no behaviour
+                        // change vs pre-P6; the seeded plain-order stream is byte-identical when disabled).
+                        advancedEnabled:    _configuration.GetValue("Bots:Advanced:Enabled", false),
+                        stopProb:           _configuration.GetValue("Bots:Advanced:StopProb", 0m),
+                        trailingProb:       _configuration.GetValue("Bots:Advanced:TrailingProb", 0m),
+                        stopOffsetMin:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMin", 0.02m),
+                        stopOffsetMax:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMax", 0.05m));
+        _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
+        _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
         _market.QuoteUpdated += OnQuoteUpdated;
@@ -426,9 +440,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var now = TimeHelper.NowUtc();
                 await CheckTimers(now, ct).ConfigureAwait(false);
 
-                var pending = await CollectPendingOrdersAsync(now, ct).ConfigureAwait(false);
+                var (pending, advanced) = await CollectPendingOrdersAsync(now, ct).ConfigureAwait(false);
                 if (pending.Count > 0)
                     await SubmitAndApplyBatchAsync(pending, _engineCts?.Token ?? ct).ConfigureAwait(false);
+                // §P6a: advanced (stop/trailing) decisions go through the entry/arm route, sequentially and
+                // in aiUserId order, AFTER and OUTSIDE the batch matcher's locked region (each call owns its
+                // own gates; the loop holds none). Off the matching hot path; reconcile below is the gate.
+                if (advanced.Count > 0)
+                    await SubmitAdvancedAsync(advanced, _engineCts?.Token ?? ct).ConfigureAwait(false);
 
                 RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
                 Interlocked.Increment(ref _tickCount);
@@ -464,9 +483,62 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
     }
 
-    private async Task<List<(AIUser user, Order order)>> CollectPendingOrdersAsync(DateTime now, CancellationToken ct)
+    // §P6a: submit protective stop/trailing orders through the entry/arm route — sequentially, in ascending
+    // aiUserId order (part of the seed-determinism contract), each call owning its own book→fund→position
+    // gates while the loop holds none. Runs after the plain batch, outside the matcher's locked region.
+    private async Task SubmitAdvancedAsync(List<(AIUser user, BotAdvancedDecision dec)> advanced, CancellationToken ct)
+    {
+        advanced.Sort((a, b) => a.user.AiUserId.CompareTo(b.user.AiUserId));
+        foreach (var (user, d) in advanced)
+        {
+            OrderResult result;
+            try
+            {
+                result = d.Kind switch
+                {
+                    BotAdvancedKind.StopMarketSell =>
+                        await _entry.PlaceStopMarketSellOrderAsync(
+                            user.UserId, d.StockId, d.Quantity, d.StopPrice, d.Currency, null, ct).ConfigureAwait(false),
+                    BotAdvancedKind.TrailingStopSell =>
+                        await _entry.PlaceTrailingStopSellOrderAsync(
+                            user.UserId, d.StockId, d.Quantity, d.TrailOffset, d.TrailIsPercent, d.Currency, ct).ConfigureAwait(false),
+                    _ => new OrderResult { Status = OrderStatus.OperationFailed, ErrorMessage = "unknown advanced kind" },
+                };
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                _logger.LogInformation("Bot loop stop requested mid-advanced on tick {Tick}; skipping remaining.", _tickCount);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Advanced order ({Kind}) failed for AIUser {Id} stock {Stock}",
+                    d.Kind, user.AiUserId, d.StockId);
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+                continue;
+            }
+
+            if (result.PlacedSuccessfully)
+            {
+                Interlocked.Increment(ref _tradesPlacedThisSession);
+            }
+            else
+            {
+                if (DebugMode && (!DebugUserId.HasValue || user.UserId == DebugUserId.Value))
+                    _logger.LogWarning("Advanced order AIUser {Id} stock {Stock}: {Status} — {Error}",
+                        user.AiUserId, d.StockId, result.Status, result.ErrorMessage);
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+            }
+        }
+    }
+
+    private async Task<(List<(AIUser user, Order order)> Plain, List<(AIUser user, BotAdvancedDecision dec)> Advanced)>
+        CollectPendingOrdersAsync(DateTime now, CancellationToken ct)
     {
         var pending = new List<(AIUser user, Order order)>();
+        var advanced = new List<(AIUser user, BotAdvancedDecision dec)>();
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
             if (!user.IsEnabled || !_decisions.CanPlaceMoreOrder(_ctx, user)) continue;
@@ -498,11 +570,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             user.RecordDecision(now);
             if (_ctx.Decimal01(user.AiUserId) > effectiveTradeProb) continue;
 
+            // §P6a: try a protective advanced order first (entry/arm route). Disabled → returns null at the
+            // top with NO seeded RNG consumed, so the plain-order stream stays byte-identical vs pre-P6.
+            if (_advancedEnabled && advanced.Count < _maxAdvancedPerTick)
+            {
+                var adv = await _decisions.ComputeAdvancedDecisionAsync(_ctx, user, user.HomeCurrencyType, ct).ConfigureAwait(false);
+                if (adv is not null) { advanced.Add((user, adv)); continue; }
+            }
+
             // Bot decides in its home currency only.
             var order = await _decisions.ComputeOrderAsync(_ctx, user, user.HomeCurrencyType, ct).ConfigureAwait(false);
             if (order is not null) pending.Add((user, order));
         }
-        return pending;
+        return (pending, advanced);
     }
 
     private async Task SubmitAndApplyBatchAsync(List<(AIUser user, Order order)> pending, CancellationToken ct)
