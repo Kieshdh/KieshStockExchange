@@ -203,12 +203,10 @@ internal sealed class TradeSettler
 
             var apResBefore = buyerFund.ReservedBalance;
             var apTotBefore = buyerFund.TotalBalance;
-            // §P6 Fix B: consume only this buy order's OWN reservation from ReservedBalance — never more.
-            // A buyer who also holds shorts carries that short collateral in the same ReservedBalance; a
-            // blind ConsumeReservedFunds(notional) on an over-budget fill (e.g. a TrueMarketBuy filling
-            // above its estimate) would eat into that collateral and desync the buy-to-close release.
-            // Instead: consume up to the order's CurrentBuyReservation from reserved, and pay any excess
-            // from AVAILABLE cash (WithdrawFunds), which by construction can never touch reserved collateral.
+            // §P6: consume only this buy order's OWN reservation from ReservedBalance — never more. A buyer
+            // who also holds shorts carries that collateral in the same ReservedBalance, so a blind
+            // ConsumeReservedFunds(notional) on an over-budget fill would eat into it. Consume up to the
+            // order's CurrentBuyReservation, then pay any excess from AVAILABLE cash (never reserved).
             var reservedPortion = buyOrder is not null
                 ? Math.Min(notional, buyOrder.CurrentBuyReservation)
                 : notional;

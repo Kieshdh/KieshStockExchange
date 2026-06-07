@@ -90,9 +90,9 @@ internal sealed class StopModifier
         decimal? buyFundOldReserved = buyFund?.ReservedBalance;
         decimal orderOldBuyReservation = order.CurrentBuyReservation;
         int orderOldSellReservedQty = order.CurrentSellReservedQty;
-        // §merged_bug_001: snapshot the order-shape fields too — the catch restored only the reservations,
-        // leaving a modified StopPrice/Price/Quantity on the canonical after a rolled-back commit (the next
-        // modify then computes a wrong delta, and a fired stop would trade the modified params).
+        // Snapshot the order-shape fields too: a rolled-back commit must not leave a modified
+        // StopPrice/Price/Quantity on the canonical (the next modify would compute a wrong delta, and a
+        // fired stop would trade the modified params).
         decimal? orderOldStopPrice = order.StopPrice;
         decimal orderOldPrice = order.Price;
         int orderOldQuantity = order.Quantity;
@@ -202,7 +202,7 @@ internal sealed class StopModifier
             var orderBuyBefore = order.CurrentBuyReservation;
             var orderSellBefore = order.CurrentSellReservedQty;
             order.RestoreReservationFromSnapshot(orderOldBuyReservation, orderOldSellReservedQty);
-            // §merged_bug_001: also restore the order-shape fields the try mutated.
+            // Also restore the order-shape fields the try mutated.
             order.StopPrice = orderOldStopPrice;
             order.Price = orderOldPrice;
             order.Quantity = orderOldQuantity;

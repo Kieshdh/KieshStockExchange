@@ -568,7 +568,7 @@ internal sealed class AiBotDecisionService
             // branch's max(1, …) so small order fractions don't silently vanish.
             if (qty == 0 && spendableBalance >= estimatePrice && roomValue >= estimatePrice)
                 qty = 1;
-            // §P6 Fix A: never buy PAST flat on a stock the bot is short — the buy-side mirror of risk #7
+            // §P6: never buy PAST flat on a stock the bot is short — the buy-side mirror of risk #7
             // (a short→long flip), which P6 forbids. Clamp to the uncovered short (engine-authoritative, like
             // the sell branch); a cover can flatten but never overshoot into a long. Fully covered → qty 0.
             var enginePos = _accounts.GetPosition(user.UserId, stockId);
@@ -604,7 +604,7 @@ internal sealed class AiBotDecisionService
         return committed;
     }
 
-    // §P6 Fix A: shares of `stockId` already committed to covering a short via this user's open (resting)
+    // §P6: shares of `stockId` already committed to covering a short via this user's open (resting)
     // BUY limit orders — so concurrent cover-buys across ticks can't sum past flat. Mirror of
     // ComputeCommittedSellShares on the buy side.
     private static int ComputeCommittedCoverShares(AiBotContext ctx, int userId, int stockId)

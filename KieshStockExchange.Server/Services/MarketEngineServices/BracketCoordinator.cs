@@ -11,25 +11,19 @@ using System.Collections.Concurrent;
 namespace KieshStockExchange.Services.MarketEngineServices;
 
 /// <summary>
-/// §3.6 P4. Reacts to bracket fills (post-commit) and manages the child legs of a bracket:
-/// a stop-loss (SL) and up to three scale-out take-profit (TP) limits, OCO-grouped.
+/// Reacts to bracket fills (post-commit) and manages the child legs: a stop-loss (SL) and up to three
+/// scale-out take-profit (TP) limits, OCO-grouped.
 ///
-/// Model B (hardened design): the <b>SL reserves the full held position</b> (one shared pool on
-/// Position.ReservedQuantity); the TP limits rest on the book reserving <b>nothing</b>, drawing from
-/// the SL's pool. A TP fill drops Position.ReservedQuantity (the long-sell ConsumeReservedStock path)
-/// and this coordinator shrinks the SL's per-order field to match; an SL fire cancels all open TPs and
-/// sells the full held. The reconciler/clamp (P4 Step 0) counts the armed SL so the pool isn't zeroed.
+/// Model B: the SL reserves the full held position (one shared pool on Position.ReservedQuantity); the TP
+/// limits rest reserving nothing and draw from the SL's pool. A TP fill drops Position.ReservedQuantity and
+/// the coordinator shrinks the SL's per-order field to match; an SL fire cancels all open TPs and sells the
+/// full held. TPs arm whole-leg (a TP arms at its full allocation once <c>held</c> covers its cumulative
+/// threshold), so there's no per-TP allocation to persist or resize.
 ///
-/// TP arming uses fill-up-whole-legs (a TP arms at its full allocation once <c>held</c> covers its
-/// cumulative threshold) rather than per-fill pro-rata: same scale-out behaviour and invariants
-/// without persisting a separate per-TP allocation or resizing TP orders.
-///
-/// §P5b short brackets (sell entry → buy-stop SL + buy-limit TPs) mirror this with cash: the SL owns a
-/// CASH pool (CurrentBuyReservation = SL_worst × held) on Fund.ReservedBalance, TPs reserve 0 and draw it
-/// at fill; the short entry's collateral is a separate lock. The short path lives in the OnParentFillShort
-/// / OnChildFillShort / OnStopFiringShort / OnMemberCancelledShort methods (the long path is unchanged);
-/// gating is fund→position via AcquireUserGatesAsync. Invariant: Σ leg buy-reservation + Σ short
-/// collateral == Fund.ReservedBalance.
+/// Short brackets (sell entry → buy-stop SL + buy-limit TPs) invert this with cash: the SL owns a cash pool
+/// (CurrentBuyReservation = SL_worst × held) on Fund.ReservedBalance, TPs reserve 0 and draw it at fill; the
+/// short entry's collateral is a separate lock. Gating is fund→position via AcquireUserGatesAsync. Invariant:
+/// Σ leg buy-reservation + Σ short collateral == Fund.ReservedBalance.
 /// </summary>
 public interface IBracketCoordinator
 {
@@ -118,11 +112,9 @@ public sealed class BracketCoordinator : IBracketCoordinator
         foreach (var r in raw)
         {
             var o = _registry.TryGet(r.OrderId, out var canon) ? canon : r;
-            // §F5: exclude CANCELLED legs only (NOT all closed). A cancelled SL must be invisible to
-            // OnParentFillAsync so the parent fills the take-profit-only path; but a FILLED TP must stay
-            // in the list because ComputeHeld sums its AmountFilled to size `held` — dropping it
-            // overstates held and breaks Σ CSR == Position.ReservedQuantity. A filled TP isn't Attached,
-            // so the arming loops skip it anyway.
+            // Exclude cancelled legs only, not all closed: a cancelled SL must be invisible so the parent
+            // fills the take-profit-only path, but a FILLED TP must stay because ComputeHeld sums its
+            // AmountFilled to size `held` (dropping it overstates held and breaks Σ CSR == ReservedQuantity).
             if (o.IsCancelled) continue;
             if (o.IsStopOrder) sl = o;
             else if (o.IsLimitOrder) tps.Add(o);
@@ -144,7 +136,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
     {
         if (parent is null) return;
         await _accounts.EnsureLoadedAsync(parent.UserId, ct).ConfigureAwait(false);
-        if (parent.IsSellOrder) { await OnParentFillShortAsync(parent, ct).ConfigureAwait(false); return; } // §P5b
+        if (parent.IsSellOrder) { await OnParentFillShortAsync(parent, ct).ConfigureAwait(false); return; }
         if (!parent.IsBuyOrder) return; // long brackets beyond here
 
         var (sl, tps) = await LoadLegsAsync(parent.OrderId, ct).ConfigureAwait(false);
@@ -156,19 +148,17 @@ public sealed class BracketCoordinator : IBracketCoordinator
         // take-profit-only bracket has no pool, so each armed TP reserves its own shares.
         await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
         {
-            // §bug_003: acquire BOTH gates up-front in the canonical fund→position order (same as the
-            // short paths + OrderSettler) so the inline parent-buy-reservation release below never nests a
-            // fund gate inside a position gate — that inversion could AB/BA-deadlock with a concurrent
-            // same-user limit sell. Acquiring the fund gate even when unused is a harmless deterministic
-            // superset.
+            // Acquire BOTH gates up-front in fund→position order so the inline parent-buy-reservation
+            // release below never nests a fund gate inside the position gate (inversion risks an AB/BA
+            // deadlock with a concurrent same-user limit sell). The unused fund gate is a harmless superset.
             await using var gate = await _accounts.AcquireUserGatesAsync(
                 new[] { (parent.UserId, parent.CurrencyType) },
                 new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
             var pos = _accounts.GetPosition(parent.UserId, parent.StockId);
             if (pos is null) return;
 
-            // §merged_bug_001: snapshot legs for rollback (canonical fields + book + watcher + reservations);
-            // the Position cache reservation is restored separately in the catch via posResBefore.
+            // Snapshot legs for rollback (canonical fields + book + watcher + reservations); the Position
+            // cache reservation is restored separately in the catch via posResBefore.
             var snaps = new List<LegState>();
             if (sl is not null) snaps.Add(new LegState(sl));
             for (int i = 0; i < tps.Count; i++) snaps.Add(new LegState(tps[i]));
@@ -298,23 +288,21 @@ public sealed class BracketCoordinator : IBracketCoordinator
         Order? parent = _registry.TryGet(parentId, out var pc) ? pc
                        : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
         if (parent is null) return;
-        if (parent.IsSellOrder) { await OnChildFillShortAsync(tp, parent, parentId, ct).ConfigureAwait(false); return; } // §P5b
+        if (parent.IsSellOrder) { await OnChildFillShortAsync(tp, parent, parentId, ct).ConfigureAwait(false); return; }
         var (sl, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
         int held = ComputeHeld(parent, sl, tps);
 
         await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
         {
-            // §bug_003: acquire BOTH gates up-front in the canonical fund→position order (same as the
-            // short paths + OrderSettler) so the inline parent-buy-reservation release below never nests a
-            // fund gate inside a position gate — that inversion could AB/BA-deadlock with a concurrent
-            // same-user limit sell. Acquiring the fund gate even when unused is a harmless deterministic
-            // superset.
+            // Acquire BOTH gates up-front in fund→position order so the inline parent-buy-reservation
+            // release below never nests a fund gate inside the position gate (inversion risks an AB/BA
+            // deadlock with a concurrent same-user limit sell). The unused fund gate is a harmless superset.
             await using var gate = await _accounts.AcquireUserGatesAsync(
                 new[] { (parent.UserId, parent.CurrencyType) },
                 new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
 
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-            // §merged_bug_001: snapshot for rollback (canonical fields + book + watcher + fund cache).
+            // Snapshot for rollback (canonical fields + book + watcher + fund cache).
             var snaps = new List<LegState>();
             if (sl is not null) snaps.Add(new LegState(sl));
             snaps.Add(new LegState(parent));
@@ -362,8 +350,8 @@ public sealed class BracketCoordinator : IBracketCoordinator
                     parent.Cancel();
                     parent.UpdatedAt = TimeHelper.NowUtc();
                     await _db.UpdateOrder(parent, ct).ConfigureAwait(false);
-                    // Parent's residual buy reservation is released by the normal cancel path is
-                    // not invoked here; release it inline to keep funds reconciled.
+                    // The normal cancel path isn't invoked here; release the parent's residual buy
+                    // reservation inline to keep funds reconciled.
                     await ReleaseParentBuyReservationInline(parent, ct).ConfigureAwait(false);
                 }
 
@@ -387,7 +375,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
         Order? parent = _registry.TryGet(parentId, out var pc) ? pc
                        : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
         if (parent is null) return;
-        if (parent.IsSellOrder) { await OnStopFiringShortAsync(sl, parent, parentId, ct).ConfigureAwait(false); return; } // §P5b
+        if (parent.IsSellOrder) { await OnStopFiringShortAsync(sl, parent, parentId, ct).ConfigureAwait(false); return; }
         var (_, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
 
         // Held = what the parent acquired minus what the TPs already sold (the SL hasn't fired yet).
@@ -397,16 +385,14 @@ public sealed class BracketCoordinator : IBracketCoordinator
 
         await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
         {
-            // §bug_003: acquire BOTH gates up-front in the canonical fund→position order (same as the
-            // short paths + OrderSettler) so the inline parent-buy-reservation release below never nests a
-            // fund gate inside a position gate — that inversion could AB/BA-deadlock with a concurrent
-            // same-user limit sell. Acquiring the fund gate even when unused is a harmless deterministic
-            // superset.
+            // Acquire BOTH gates up-front in fund→position order so the inline parent-buy-reservation
+            // release below never nests a fund gate inside the position gate (inversion risks an AB/BA
+            // deadlock with a concurrent same-user limit sell). The unused fund gate is a harmless superset.
             await using var gate = await _accounts.AcquireUserGatesAsync(
                 new[] { (parent.UserId, parent.CurrencyType) },
                 new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-            // §merged_bug_001: snapshot for rollback (canonical fields + book + watcher + fund cache).
+            // Snapshot for rollback (canonical fields + book + watcher + fund cache).
             var snaps = new List<LegState> { new LegState(sl) };
             for (int i = 0; i < tps.Count; i++) snaps.Add(new LegState(tps[i]));
             snaps.Add(new LegState(parent));
@@ -414,9 +400,9 @@ public sealed class BracketCoordinator : IBracketCoordinator
             decimal fundResB = fund?.ReservedBalance ?? 0m, fundTotB = fund?.TotalBalance ?? 0m;
             try
             {
-                // Size the SL to the live held pool before it promotes (risk #4: a TP fill in the
-                // transient window may have dropped Position.ReservedQuantity below the SL's stale
-                // CSR — reconcile both so the promote sells exactly `held`, never more).
+                // Size the SL to the live held pool before it promotes: a TP fill in the transient window
+                // may have dropped Position.ReservedQuantity below the SL's stale CSR — reconcile both so
+                // the promote sells exactly `held`, never more.
                 int slOver = sl.CurrentSellReservedQty - held;
                 if (slOver > 0) sl.ConsumeSellReservation(slOver);
                 sl.Quantity = sl.CurrentSellReservedQty + sl.AmountFilled;
@@ -470,16 +456,12 @@ public sealed class BracketCoordinator : IBracketCoordinator
         Order? parent = _registry.TryGet(parentId, out var pc) ? pc
                        : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
         if (parent is null) { _bracketParents.TryRemove(parentId, out _); return; }
-        if (parent.IsSellOrder) { await OnMemberCancelledShortAsync(cancelled, parent, parentId, ct).ConfigureAwait(false); return; } // §P5b
+        if (parent.IsSellOrder) { await OnMemberCancelledShortAsync(cancelled, parent, parentId, ct).ConfigureAwait(false); return; }
 
-        // Group teardown only when the user cancels an UNFILLED parent (discard dormant legs) or the
-        // SL (the TPs can't rest unprotected). A single-TP cancel, or a partially-filled parent
-        // cancel, leaves the surviving legs protecting the held shares. The cancelled order itself +
-        // its reservation were already handled by the normal cancel path.
-        // §F5: cancelling the SL BEFORE the parent fills no longer tears down — the dormant TPs remain
-        // and the bracket survives as take-profit-only (the !teardown early-return keeps _bracketParents,
-        // and LoadLegsAsync's IsCancelled filter makes the cancelled SL invisible on the later fill). A
-        // filled parent's SL-cancel still tears down (live TPs can't rest unprotected).
+        // Group teardown only when the user cancels an UNFILLED parent (discard dormant legs) or the SL
+        // with a filled parent (live TPs can't rest unprotected). A single-TP or partial-parent cancel
+        // leaves the surviving legs intact. Cancelling the SL BEFORE the parent fills does NOT tear down:
+        // the dormant TPs remain and the bracket survives as take-profit-only.
         bool teardown = (cancelled.OrderId == parentId && parent.AmountFilled == 0)
                      || (cancelled.IsBracketChild && cancelled.IsStopOrder && parent.AmountFilled > 0);
         if (!teardown)
@@ -491,16 +473,14 @@ public sealed class BracketCoordinator : IBracketCoordinator
         var (sl, tps) = await LoadLegsAsync(parentId, ct).ConfigureAwait(false);
         await _books.WithBookLockAsync(parent.StockId, parent.CurrencyType, ct, async book =>
         {
-            // §bug_003: acquire BOTH gates up-front in the canonical fund→position order (same as the
-            // short paths + OrderSettler) so the inline parent-buy-reservation release below never nests a
-            // fund gate inside a position gate — that inversion could AB/BA-deadlock with a concurrent
-            // same-user limit sell. Acquiring the fund gate even when unused is a harmless deterministic
-            // superset.
+            // Acquire BOTH gates up-front in fund→position order so the inline parent-buy-reservation
+            // release below never nests a fund gate inside the position gate (inversion risks an AB/BA
+            // deadlock with a concurrent same-user limit sell). The unused fund gate is a harmless superset.
             await using var gate = await _accounts.AcquireUserGatesAsync(
                 new[] { (parent.UserId, parent.CurrencyType) },
                 new[] { (parent.UserId, parent.StockId) }, ct).ConfigureAwait(false);
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-            // §merged_bug_001: snapshot for rollback (canonical fields + book + watcher + fund cache).
+            // Snapshot for rollback (canonical fields + book + watcher + fund cache).
             var snaps = new List<LegState>();
             if (sl is not null) snaps.Add(new LegState(sl));
             for (int i = 0; i < tps.Count; i++) snaps.Add(new LegState(tps[i]));
@@ -555,11 +535,11 @@ public sealed class BracketCoordinator : IBracketCoordinator
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
-    // ───────────────────────── §P5b short brackets (sell entry → buy-to-close legs) ─────────────────────────
-    // Inverted Model B: the SL owns a CASH pool (its CurrentBuyReservation = SL_worst × held); TPs reserve 0
-    // and draw the pool at fill via the settler's shared-fund consume (reuse win #1). The short entry's
-    // collateral is a separate ReservedBalance lock. Invariant: Σ leg-buy-reservation + Σ short-collateral
-    // == Fund.ReservedBalance. Gate is fund→position (AcquireUserGatesAsync), never the legacy nesting.
+    // Short brackets (sell entry → buy-to-close legs). Inverted Model B: the SL owns a cash pool
+    // (CurrentBuyReservation = SL_worst × held); TPs reserve 0 and draw it at fill via the settler's
+    // shared-fund consume. The short entry's collateral is a separate ReservedBalance lock. Gate is
+    // fund→position (AcquireUserGatesAsync). Invariant: Σ leg-buy-reservation + Σ short-collateral ==
+    // Fund.ReservedBalance.
 
     private static decimal SlWorst(Order sl)
         => ShortBracketMath.SlWorst(sl.IsStopLimitOrder, sl.Price, sl.StopPrice ?? 0m, sl.SlippagePercent ?? 0m);
@@ -581,7 +561,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
             var fund = _accounts.GetFund(parent.UserId, parent.CurrencyType);
             if (fund is null) return;
 
-            // §merged_bug_001: snapshot legs + fund for rollback across all three arm sub-paths below.
+            // Snapshot legs + fund for rollback across all three arm sub-paths below.
             var snaps = new List<LegState>();
             if (sl is not null) snaps.Add(new LegState(sl));
             for (int i = 0; i < tps.Count; i++) snaps.Add(new LegState(tps[i]));
@@ -593,8 +573,8 @@ public sealed class BracketCoordinator : IBracketCoordinator
                 decimal delta = pool - sl.CurrentBuyReservation;   // grow toward the worst-case pool
                 if (delta > 0m && CurrencyHelper.LessThan(fund.AvailableBalance, delta, parent.CurrencyType))
                 {
-                    // Degrade-to-TP-only (verified policy): not enough cash to fund the SL pool → drop the
-                    // SL, keep the take-profits (each reserves its own buyback), flag the short unprotected.
+                    // Degrade to TP-only: not enough cash to fund the SL pool → drop the SL, keep the
+                    // take-profits (each reserves its own buyback), and flag the short unprotected.
                     degraded = true;
                     await using var dtx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
                     try
@@ -722,7 +702,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
             if (fund is null) return;
 
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-            // §merged_bug_001: snapshot for rollback (canonical fields + book + watcher + fund cache).
+            // Snapshot for rollback (canonical fields + book + watcher + fund cache).
             var snaps = new List<LegState>();
             if (sl is not null) snaps.Add(new LegState(sl));
             snaps.Add(new LegState(parent));
@@ -731,14 +711,10 @@ public sealed class BracketCoordinator : IBracketCoordinator
             {
                 if (sl is not null)
                 {
-                    // §P6: shrink the SL's cash pool to the new worst-case for the remaining held shares and
-                    // release ONLY that pool shrinkage from the fund. The previous formula derived the release
-                    // from whole-fund ReservedBalance (fund.ReservedBalance − desiredPool − collateral), which
-                    // under bot load wrongly swept up this user's OTHER shorts' collateral + other orders'
-                    // reservations (all share one Fund.ReservedBalance) as "cushion" and released them — a large
-                    // reservation-locking leak (single-bracket admin tests never hit it, the bot soak did). The
-                    // bracket-local poolDrop touches only this SL's pool, mirroring OnStopFiringShortAsync. The
-                    // TP's buyback + its pro-rata collateral release were already handled by the settler.
+                    // Shrink the SL's cash pool to the new worst-case for the remaining held and release ONLY
+                    // that pool shrinkage — the release must stay bracket-local, since this user's other shorts'
+                    // collateral and other orders' reservations share one Fund.ReservedBalance and must not be
+                    // swept up as "cushion". The TP's buyback + pro-rata collateral release were settled already.
                     decimal desiredPool = ShortBracketMath.Pool(SlWorst(sl), held);
                     decimal poolDrop = sl.CurrentBuyReservation - desiredPool;
                     if (poolDrop > 0m)
@@ -820,7 +796,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
             if (fund is null) return;
 
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-            // §merged_bug_001: snapshot for rollback (canonical fields + book + watcher + fund cache).
+            // Snapshot for rollback (canonical fields + book + watcher + fund cache).
             var snaps = new List<LegState> { new LegState(sl) };
             for (int i = 0; i < tps.Count; i++) snaps.Add(new LegState(tps[i]));
             snaps.Add(new LegState(parent));
@@ -909,7 +885,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
             var fund = _accounts.GetFund(parent.UserId, parent.CurrencyType);
 
             await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
-            // §merged_bug_001: snapshot for rollback (canonical fields + book + watcher + fund cache).
+            // Snapshot for rollback (canonical fields + book + watcher + fund cache).
             var snaps = new List<LegState>();
             if (sl is not null) snaps.Add(new LegState(sl));
             for (int i = 0; i < tps.Count; i++) snaps.Add(new LegState(tps[i]));
@@ -996,10 +972,9 @@ public sealed class BracketCoordinator : IBracketCoordinator
             rel, rb, fund.ReservedBalance, tb, fund.TotalBalance);
     }
 
-    // Release a cancelled limit parent's remaining buy reservation (its unfilled portion's cash).
-    // §bug_003: INLINE — the caller already holds this user's fund gate (acquired up-front via
-    // AcquireUserGatesAsync), so we must NOT re-acquire it here (the old nested AcquireFundGateAsync,
-    // taken inside the position gate, inverted the canonical fund→position order → AB/BA deadlock).
+    // Release a cancelled limit parent's remaining buy reservation (its unfilled portion's cash). INLINE:
+    // the caller already holds this user's fund gate (via AcquireUserGatesAsync), so re-acquiring it here
+    // would invert the fund→position order and risk an AB/BA deadlock.
     private async Task ReleaseParentBuyReservationInline(Order parent, CancellationToken ct)
     {
         if (!parent.IsBuyOrder || parent.CurrentBuyReservation <= 0m) return;
@@ -1021,13 +996,11 @@ public sealed class BracketCoordinator : IBracketCoordinator
         await _db.UpdateAllAsync(new[] { fund }, ct).ConfigureAwait(false);
     }
 
-    // §merged_bug_001: rollback safety. These methods mutate the registry-shared canonical Order, the
-    // OrderBook, and the stop watcher *before* the DB CommitAsync. If the commit fails (PG deadlock /
-    // transient drop) the tx rolls back but those in-memory mutations stick, diverging from the DB until
-    // a restart. LegState snapshots a leg's restorable state at the top of the try; RestoreLegs undoes the
-    // canonical-field, book, and watcher changes in the catch. Reservation fields are private-set, so they
-    // restore through RestoreReservationFromSnapshot. Fund/Position cache fields are restored inline by the
-    // caller (they're public-set value snapshots).
+    // Rollback safety: these methods mutate the registry-shared canonical Order, the OrderBook, and the stop
+    // watcher BEFORE CommitAsync. If the commit fails the tx rolls back, but those in-memory mutations stick
+    // and diverge from the DB until a restart. LegState snapshots a leg at the top of the try; RestoreLegs
+    // undoes the canonical-field/book/watcher changes in the catch (reservations restore via the snapshot
+    // setter). Fund/Position cache fields are restored inline by the caller.
     private readonly struct LegState
     {
         public readonly Order O;

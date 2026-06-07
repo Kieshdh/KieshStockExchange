@@ -200,18 +200,17 @@ USE_SLIP_SKEW             = 0.5
 # 0.5 so a bot is never more likely to be random than in character.
 EXTREME_RANDOMNESS_SKEW   = 2.0
 
-# Cash-injection knobs. Seeded inverse to portfolio value, so smaller bots inject MORE often and at
-# a HIGHER % — bumped up from the original conservative values so injections are actually visible and
-# the spread is wide (some bots inject a lot, some a little). Amount cap stays within the C# validator
-# bound (AIUser.CashInjectionAmountPrc ≤ 0.05); frequency cap stays ≤ 0.50.
-CASH_INJECTION_BASE_FREQUENCY = 0.25      # median: 25% chance / 1-hour cycle (was 0.15)
-CASH_INJECTION_BASE_AMOUNT    = 0.009     # median: 0.9% of portfolio / hit (was 0.004)
+# Cash-injection knobs. Seeded inverse to portfolio value, so smaller bots inject MORE often and at a
+# HIGHER % — tuned for a wide, visible spread (some bots inject a lot, some a little). Amount cap stays
+# within the C# validator bound (AIUser.CashInjectionAmountPrc ≤ 0.05); frequency cap stays ≤ 0.50.
+CASH_INJECTION_BASE_FREQUENCY = 0.25      # median: 25% chance / 1-hour cycle
+CASH_INJECTION_BASE_AMOUNT    = 0.009     # median: 0.9% of portfolio / hit
 CASH_INJECTION_SIZE_ALPHA     = 0.6       # inverse-size skew strength
-CASH_INJECTION_JITTER         = 0.25      # ±25% per-bot randomness (was 0.20)
-CASH_INJECTION_FREQ_FLOOR     = 0.05      # every bot injects at least sometimes (was 0.02)
-CASH_INJECTION_FREQ_CAP       = 0.50      # most-active bots: 50% hourly chance (was 0.45)
-CASH_INJECTION_AMOUNT_FLOOR   = 0.001     # (was 0.0005)
-CASH_INJECTION_AMOUNT_CAP     = 0.04      # biggest hits: 4% of portfolio (was 0.02)
+CASH_INJECTION_JITTER         = 0.25      # ±25% per-bot randomness
+CASH_INJECTION_FREQ_FLOOR     = 0.05      # every bot injects at least sometimes
+CASH_INJECTION_FREQ_CAP       = 0.50      # most-active bots: 50% hourly chance
+CASH_INJECTION_AMOUNT_FLOOR   = 0.001
+CASH_INJECTION_AMOUNT_CAP     = 0.04      # biggest hits: 4% of portfolio
 
 # Buy bias (_order_types).
 BUY_BIAS_BASE             = 0.45
