@@ -22,6 +22,7 @@ public sealed partial class PgDBService
         ""MinCashReservePrc"",""MaxCashReservePrc"",""SlippageTolerancePrc"",
         ""MinLimitOffsetPrc"",""MaxLimitOffsetPrc"",""AggressivenessPrc"",
         ""ExtremeReactionRandomnessPrc"",""CashInjectionFrequencyPrc"",""CashInjectionAmountPrc"",
+        ""StopProb"",""TrailingProb"",""ShortProb"",""LongBracketProb"",""ShortBracketProb"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy"" AS ""StrategyCode""";
 
@@ -32,6 +33,7 @@ public sealed partial class PgDBService
         ""MinCashReservePrc"",""MaxCashReservePrc"",""SlippageTolerancePrc"",
         ""MinLimitOffsetPrc"",""MaxLimitOffsetPrc"",""AggressivenessPrc"",
         ""ExtremeReactionRandomnessPrc"",""CashInjectionFrequencyPrc"",""CashInjectionAmountPrc"",
+        ""StopProb"",""TrailingProb"",""ShortProb"",""LongBracketProb"",""ShortBracketProb"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy""";
 
@@ -42,6 +44,7 @@ public sealed partial class PgDBService
         @MinCashReservePrc,@MaxCashReservePrc,@SlippageTolerancePrc,
         @MinLimitOffsetPrc,@MaxLimitOffsetPrc,@AggressivenessPrc,
         @ExtremeReactionRandomnessPrc,@CashInjectionFrequencyPrc,@CashInjectionAmountPrc,
+        @StopProb,@TrailingProb,@ShortProb,@LongBracketProb,@ShortBracketProb,
         @WatchlistCsv,
         @MaxOpenOrders,@HomeCurrency,@StrategyCode";
 
@@ -403,6 +406,8 @@ public sealed partial class PgDBService
               ""ExtremeReactionRandomnessPrc"" = @ExtremeReactionRandomnessPrc,
               ""CashInjectionFrequencyPrc"" = @CashInjectionFrequencyPrc,
               ""CashInjectionAmountPrc"" = @CashInjectionAmountPrc,
+              ""StopProb"" = @StopProb, ""TrailingProb"" = @TrailingProb, ""ShortProb"" = @ShortProb,
+              ""LongBracketProb"" = @LongBracketProb, ""ShortBracketProb"" = @ShortBracketProb,
               ""WatchlistCsv"" = @WatchlistCsv,
               ""MaxOpenOrders"" = @MaxOpenOrders,
               ""HomeCurrency"" = @HomeCurrency, ""Strategy"" = @StrategyCode

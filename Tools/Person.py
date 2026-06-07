@@ -96,6 +96,7 @@ class Person:
         self._portfolio()        # Balance, cash reserves, min/max open positions, watchlist, holdings
         self._order_types()      # Probabilities for market/slippage orders, buy bias
         self._trade_limits()     # Slippage tolerance, limit offsets, per-position max, min/max trade amounts, daily limits
+        self._advanced_orders()  # Per-strategy advanced-order probabilities (stop/trailing/short/brackets)
         # Cash-injection knobs are assigned by a second pass in GenerateAIUsers
         # once the population median is known. Default to 0 so an un-assigned
         # Person still passes C# validation (zero frequency = bot never injects).
@@ -223,6 +224,17 @@ class Person:
         base_open_orders = int(MAX_OPEN_ORDERS_BASE + MAX_OPEN_ORDERS_SLOPE * self.aggressive)
         self.max_orders = max(MAX_OPEN_ORDERS_FLOOR, int(jitter(base_open_orders, rel=MAX_OPEN_ORDERS_JITTER)))
 
+    def _advanced_orders(self):
+        # Per-bot advanced-order probabilities, drawn uniformly from this bot's strategy profile so
+        # behaviour matches the strategy (trend followers trail, mean-reverters bracket/short, etc.).
+        # Falls back to the Random (3) profile for any strategy id not in the table.
+        prof = ADVANCED_PROFILES.get(self.strategy, ADVANCED_PROFILES[3])
+        self.stop_prob          = clamp01(random.uniform(*prof["stop"]))
+        self.trailing_prob      = clamp01(random.uniform(*prof["trailing"]))
+        self.short_prob         = clamp01(random.uniform(*prof["short"]))
+        self.long_bracket_prob  = clamp01(random.uniform(*prof["long_bracket"]))
+        self.short_bracket_prob = clamp01(random.uniform(*prof["short_bracket"]))
+
     def portfolio_value(self) -> float:
         # Total seeded wealth = remaining cash + market value of initial holdings.
         return self.balance + sum(qty * STOCKS[sid]["price"]
@@ -274,8 +286,13 @@ class Person:
             self.strategy,                                  # int: strategy id
             round(self.extreme_randomness, 4),              # float: extreme-reaction randomness [0, 0.5]
             round(self.cash_injection_frequency_prc, 4),    # float: cash-injection frequency / cycle [0, 0.5]
-            round(self.cash_injection_amount_prc, 6),       # float: cash-injection amount % of portfolio [0, 0.025]
+            round(self.cash_injection_amount_prc, 6),       # float: cash-injection amount % of portfolio [0, 0.05]
             self.home_currency,                             # str: home currency ISO code (USD/EUR)
+            round(self.stop_prob, 4),                       # float: P(stop-market sell) per tick
+            round(self.trailing_prob, 4),                   # float: P(trailing-stop sell) per tick
+            round(self.short_prob, 4),                      # float: P(open flat short) per tick
+            round(self.long_bracket_prob, 4),               # float: P(long bracket) per tick
+            round(self.short_bracket_prob, 4),              # float: P(short bracket) per tick
         ]
 
     def ToHoldingList(self):

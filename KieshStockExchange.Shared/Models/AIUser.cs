@@ -112,6 +112,25 @@ public class AIUser : IValidatable
     private decimal _aggressivenessPrc = 0.5m;
     public decimal AggressivenessPrc { get => _aggressivenessPrc; set => _aggressivenessPrc = RequiredPrc(value, nameof(AggressivenessPrc)); }
 
+    // §3.6 P6: per-bot, per-tick probabilities of choosing each advanced order kind (seeded + assigned
+    // by strategy in Tools/Person.py). They REPLACE the global Bots:Advanced:*Prob config — the master
+    // Bots:Advanced:Enabled switch still gates the whole feature. Default 0 so a bot never does advanced
+    // orders unless seeded otherwise.
+    private decimal _stopProb = 0m;
+    public decimal StopProb { get => _stopProb; set => _stopProb = RequiredPrc(value, nameof(StopProb)); }
+
+    private decimal _trailingProb = 0m;
+    public decimal TrailingProb { get => _trailingProb; set => _trailingProb = RequiredPrc(value, nameof(TrailingProb)); }
+
+    private decimal _shortProb = 0m;
+    public decimal ShortProb { get => _shortProb; set => _shortProb = RequiredPrc(value, nameof(ShortProb)); }
+
+    private decimal _longBracketProb = 0m;
+    public decimal LongBracketProb { get => _longBracketProb; set => _longBracketProb = RequiredPrc(value, nameof(LongBracketProb)); }
+
+    private decimal _shortBracketProb = 0m;
+    public decimal ShortBracketProb { get => _shortBracketProb; set => _shortBracketProb = RequiredPrc(value, nameof(ShortBracketProb)); }
+
     // Probability of acting out-of-character at an extreme-sentiment event. Range [0, 0.5].
     private decimal _extremeReactionRandomnessPrc = 0.10m;
     public decimal ExtremeReactionRandomnessPrc
@@ -147,9 +166,9 @@ public class AIUser : IValidatable
         get => _cashInjectionAmountPrc;
         set
         {
-            if (value < 0m || value > 0.025m)
+            if (value < 0m || value > 0.05m)
                 throw new ArgumentOutOfRangeException(nameof(CashInjectionAmountPrc),
-                    "CashInjectionAmountPrc must be between 0 and 0.025.");
+                    "CashInjectionAmountPrc must be between 0 and 0.05.");
             _cashInjectionAmountPrc = value;
         }
     }
@@ -218,7 +237,9 @@ public class AIUser : IValidatable
         IsValidPrc(MinCashReservePrc) && IsValidPrc(MaxCashReservePrc) && IsValidPrc(SlippageTolerancePrc) && IsValidPrc(AggressivenessPrc) &&
         ExtremeReactionRandomnessPrc >= 0m && ExtremeReactionRandomnessPrc <= 0.5m &&
         CashInjectionFrequencyPrc >= 0m && CashInjectionFrequencyPrc <= 0.50m &&
-        CashInjectionAmountPrc    >= 0m && CashInjectionAmountPrc    <= 0.025m;
+        CashInjectionAmountPrc    >= 0m && CashInjectionAmountPrc    <= 0.05m &&
+        IsValidPrc(StopProb) && IsValidPrc(TrailingProb) && IsValidPrc(ShortProb) &&
+        IsValidPrc(LongBracketProb) && IsValidPrc(ShortBracketProb);
 
     private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc;
 

@@ -56,11 +56,8 @@ internal sealed class AiBotDecisionService
 
     // §P6 advanced-order generation for the bot soak (all off by default).
     private readonly bool    _advancedEnabled;
-    private readonly decimal _stopProb;          // P6a: protect a long with a sell-stop
-    private readonly decimal _trailingProb;      // P6a: protect a long with a trailing-sell
-    private readonly decimal _shortProb;         // P6b: open a flat-only market short
-    private readonly decimal _longBracketProb;   // P6b: open a long bracket
-    private readonly decimal _shortBracketProb;  // P6c: open a short bracket (flat-only)
+    // §3.6 P6: the per-kind advanced-order probabilities are now PER-BOT (AIUser.*Prob, seeded by
+    // strategy in Tools/Person.py), read directly off `user` in ComputeAdvancedDecisionAsync.
     private readonly decimal _stopOffsetMin;     // SL distance from entry/market (fraction)
     private readonly decimal _stopOffsetMax;
     private readonly decimal _tpOffsetMin;       // TP distance from entry (fraction)
@@ -74,9 +71,8 @@ internal sealed class AiBotDecisionService
         bool fatTails = true, decimal tradeSizeTailShape = 0.5m,
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
         bool mmQuoting = true, decimal quoteHalfSpreadPrc = 0.003m,
-        bool advancedEnabled = false, decimal stopProb = 0m, decimal trailingProb = 0m,
+        bool advancedEnabled = false,
         decimal stopOffsetMin = 0.02m, decimal stopOffsetMax = 0.05m,
-        decimal shortProb = 0m, decimal longBracketProb = 0m, decimal shortBracketProb = 0m,
         decimal tpOffsetMin = 0.03m, decimal tpOffsetMax = 0.08m,
         decimal bracketSlippagePct = 5m, int advancedMaxQty = 50)
     {
@@ -93,11 +89,6 @@ internal sealed class AiBotDecisionService
         _mmQuoting          = mmQuoting;
         _quoteHalfSpreadPrc = quoteHalfSpreadPrc;
         _advancedEnabled    = advancedEnabled;
-        _stopProb           = stopProb;
-        _trailingProb       = trailingProb;
-        _shortProb          = shortProb;
-        _longBracketProb    = longBracketProb;
-        _shortBracketProb   = shortBracketProb;
         _stopOffsetMin      = stopOffsetMin;
         _stopOffsetMax      = stopOffsetMax;
         _tpOffsetMin        = tpOffsetMin;
@@ -170,18 +161,20 @@ internal sealed class AiBotDecisionService
         CurrencyType currency, CancellationToken ct = default)
     {
         if (!_advancedEnabled) return null;
-        decimal advProb = _stopProb + _trailingProb + _shortProb + _longBracketProb + _shortBracketProb;
+        // §3.6 P6: the per-kind probabilities are PER-BOT (seeded by strategy in Tools/Person.py), not global
+        // config. The Bots:Advanced:Enabled master switch above still gates the whole feature.
+        decimal advProb = user.StopProb + user.TrailingProb + user.ShortProb + user.LongBracketProb + user.ShortBracketProb;
         if (advProb <= 0m) return null;
         decimal r = ctx.Decimal01(user.AiUserId);   // single seeded roll: gate + kind selection
         if (r >= advProb) return null;
 
         // Cumulative kind pick from the same roll (no extra draw). A builder that can't find an eligible
         // stock returns null → the caller falls through to a normal plain order this tick.
-        decimal c = _stopProb;
-        if (r < c)                       return await BuildProtectiveStopAsync(ctx, user, currency, trailing: false, ct).ConfigureAwait(false);
-        c += _trailingProb; if (r < c)   return await BuildProtectiveStopAsync(ctx, user, currency, trailing: true,  ct).ConfigureAwait(false);
-        c += _shortProb;    if (r < c)   return await BuildShortOpenAsync(ctx, user, currency, ct).ConfigureAwait(false);
-        c += _longBracketProb; if (r < c) return await BuildBracketAsync(ctx, user, currency, isShort: false, ct).ConfigureAwait(false);
+        decimal c = user.StopProb;
+        if (r < c)                          return await BuildProtectiveStopAsync(ctx, user, currency, trailing: false, ct).ConfigureAwait(false);
+        c += user.TrailingProb; if (r < c)  return await BuildProtectiveStopAsync(ctx, user, currency, trailing: true,  ct).ConfigureAwait(false);
+        c += user.ShortProb;    if (r < c)  return await BuildShortOpenAsync(ctx, user, currency, ct).ConfigureAwait(false);
+        c += user.LongBracketProb; if (r < c) return await BuildBracketAsync(ctx, user, currency, isShort: false, ct).ConfigureAwait(false);
         return await BuildBracketAsync(ctx, user, currency, isShort: true, ct).ConfigureAwait(false);
     }
 

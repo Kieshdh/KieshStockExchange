@@ -126,7 +126,33 @@ TRADE_PROB_SLOPE          = 0.50
 TRADE_PROB_JITTER         = 0.15
 
 # Strategy options (_trade_properties).
+# Ids match C# AiStrategy: 0=MarketMaker, 1=TrendFollower, 2=MeanReversion, 3=Random, 4=Scalper.
 STRATEGY_CHOICES          = (1, 2, 3, 4)
+
+# ───────────────────── Advanced-order probabilities (per bot, per tick) ───────────────────────
+# §3.6 P6: each bot is assigned its own probability of choosing each advanced order kind, drawn
+# uniformly from a per-strategy (lo, hi) range so behaviour matches the strategy. These feed the
+# Profile sheet -> server AIUser.*Prob -> AiBotDecisionService. Tuned HIGH (well above the ~10%
+# real-world figure) on purpose: more shorts + stop cascades make the chart genuinely chaotic
+# instead of drifting on a gentle slope. Sum per bot ≈ how often a tick yields an advanced order.
+# Keys: stop / trailing / short / long_bracket / short_bracket. Adjust freely + re-run the generator.
+ADVANCED_PROFILES = {
+    # MarketMaker — provides liquidity; small but non-zero so it still adds noise.
+    0: {"stop": (0.01, 0.03), "trailing": (0.005, 0.02), "short": (0.01, 0.03),
+        "long_bracket": (0.005, 0.02), "short_bracket": (0.005, 0.02)},
+    # TrendFollower — rides trends: heavy trailing stops, moderate stops/brackets.
+    1: {"stop": (0.03, 0.07), "trailing": (0.05, 0.12), "short": (0.02, 0.05),
+        "long_bracket": (0.02, 0.06), "short_bracket": (0.01, 0.03)},
+    # MeanReversion — bets on reversals: brackets + shorts heavy.
+    2: {"stop": (0.02, 0.05), "trailing": (0.01, 0.03), "short": (0.04, 0.08),
+        "long_bracket": (0.04, 0.10), "short_bracket": (0.03, 0.07)},
+    # Random — the chaos engine: a strong mix of everything.
+    3: {"stop": (0.04, 0.09), "trailing": (0.03, 0.08), "short": (0.04, 0.09),
+        "long_bracket": (0.03, 0.08), "short_bracket": (0.03, 0.08)},
+    # Scalper — quick risk control: stop-heavy, some shorts, light brackets.
+    4: {"stop": (0.05, 0.11), "trailing": (0.03, 0.07), "short": (0.03, 0.06),
+        "long_bracket": (0.02, 0.05), "short_bracket": (0.02, 0.05)},
+}
 
 # Starting balance (_portfolio): log-distributed. 10x larger so small order
 # fractions still clear ≥1 share on high-priced stocks and deepen the book.
@@ -174,15 +200,18 @@ USE_SLIP_SKEW             = 0.5
 # 0.5 so a bot is never more likely to be random than in character.
 EXTREME_RANDOMNESS_SKEW   = 2.0
 
-# Cash-injection knobs. Seeded inverse to portfolio value; median bot ≈ 5%/yr nominal.
-CASH_INJECTION_BASE_FREQUENCY = 0.15      # median: 15% chance / 1-hour cycle
-CASH_INJECTION_BASE_AMOUNT    = 0.004     # median: 0.4% of portfolio / hit
+# Cash-injection knobs. Seeded inverse to portfolio value, so smaller bots inject MORE often and at
+# a HIGHER % — bumped up from the original conservative values so injections are actually visible and
+# the spread is wide (some bots inject a lot, some a little). Amount cap stays within the C# validator
+# bound (AIUser.CashInjectionAmountPrc ≤ 0.05); frequency cap stays ≤ 0.50.
+CASH_INJECTION_BASE_FREQUENCY = 0.25      # median: 25% chance / 1-hour cycle (was 0.15)
+CASH_INJECTION_BASE_AMOUNT    = 0.009     # median: 0.9% of portfolio / hit (was 0.004)
 CASH_INJECTION_SIZE_ALPHA     = 0.6       # inverse-size skew strength
-CASH_INJECTION_JITTER         = 0.20      # ±20% per-bot randomness
-CASH_INJECTION_FREQ_FLOOR     = 0.02
-CASH_INJECTION_FREQ_CAP       = 0.45
-CASH_INJECTION_AMOUNT_FLOOR   = 0.0005
-CASH_INJECTION_AMOUNT_CAP     = 0.02
+CASH_INJECTION_JITTER         = 0.25      # ±25% per-bot randomness (was 0.20)
+CASH_INJECTION_FREQ_FLOOR     = 0.05      # every bot injects at least sometimes (was 0.02)
+CASH_INJECTION_FREQ_CAP       = 0.50      # most-active bots: 50% hourly chance (was 0.45)
+CASH_INJECTION_AMOUNT_FLOOR   = 0.001     # (was 0.0005)
+CASH_INJECTION_AMOUNT_CAP     = 0.04      # biggest hits: 4% of portfolio (was 0.02)
 
 # Buy bias (_order_types).
 BUY_BIAS_BASE             = 0.45

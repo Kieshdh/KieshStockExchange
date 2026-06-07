@@ -37,6 +37,13 @@ public class AIUserRow
     [Column("CashInjectionFrequencyPrc")] public decimal CashInjectionFrequencyPrc { get; set; }
     [Column("CashInjectionAmountPrc")] public decimal CashInjectionAmountPrc { get; set; }
 
+    // §3.6 P6: per-bot advanced-order probabilities.
+    [Column("StopProb")] public decimal StopProb { get; set; }
+    [Column("TrailingProb")] public decimal TrailingProb { get; set; }
+    [Column("ShortProb")] public decimal ShortProb { get; set; }
+    [Column("LongBracketProb")] public decimal LongBracketProb { get; set; }
+    [Column("ShortBracketProb")] public decimal ShortBracketProb { get; set; }
+
     [Column("WatchlistCsv")] public string WatchlistCsv { get; set; } = string.Empty;
 
     [Column("MaxOpenOrders")] public int MaxOpenOrders { get; set; } = 20;
@@ -75,6 +82,11 @@ public static class AIUserMapper
             ExtremeReactionRandomnessPrc = r.ExtremeReactionRandomnessPrc,
             CashInjectionFrequencyPrc = r.CashInjectionFrequencyPrc,
             CashInjectionAmountPrc = r.CashInjectionAmountPrc,
+            StopProb = r.StopProb,
+            TrailingProb = r.TrailingProb,
+            ShortProb = r.ShortProb,
+            LongBracketProb = r.LongBracketProb,
+            ShortBracketProb = r.ShortBracketProb,
             MaxOpenOrders = r.MaxOpenOrders,
             HomeCurrency = r.HomeCurrency,
             StrategyCode = r.StrategyCode,
@@ -109,6 +121,11 @@ public static class AIUserMapper
         ExtremeReactionRandomnessPrc = a.ExtremeReactionRandomnessPrc,
         CashInjectionFrequencyPrc = a.CashInjectionFrequencyPrc,
         CashInjectionAmountPrc = a.CashInjectionAmountPrc,
+        StopProb = a.StopProb,
+        TrailingProb = a.TrailingProb,
+        ShortProb = a.ShortProb,
+        LongBracketProb = a.LongBracketProb,
+        ShortBracketProb = a.ShortBracketProb,
         WatchlistCsv = a.WatchlistCsv,
         MaxOpenOrders = a.MaxOpenOrders,
         HomeCurrency = a.HomeCurrency,

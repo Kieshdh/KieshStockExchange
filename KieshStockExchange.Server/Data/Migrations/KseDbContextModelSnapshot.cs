@@ -55,6 +55,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<decimal>("LongBracketProb")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<decimal>("MaxCashReservePrc")
                         .HasColumnType("numeric(20,10)");
 
@@ -82,7 +85,16 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<int>("Seed")
                         .HasColumnType("integer");
 
+                    b.Property<decimal>("ShortBracketProb")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("ShortProb")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<decimal>("SlippageTolerancePrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("StopProb")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<int>("StrategyCode")
@@ -90,6 +102,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .HasColumnName("Strategy");
 
                     b.Property<decimal>("TradeProb")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("TrailingProb")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<DateTime>("UpdatedAt")

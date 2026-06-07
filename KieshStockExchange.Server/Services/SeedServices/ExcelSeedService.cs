@@ -311,6 +311,17 @@ public sealed class ExcelSeedService : IExcelSeedService
 
             var watchlistCsv = row["WatchlistCsv"]?.ToString() ?? string.Empty;
 
+            // §3.6 P6: per-bot advanced-order probabilities. Read defensively so an older workbook
+            // without these columns still loads (defaults to 0 = no advanced orders for that bot).
+            decimal ReadProb(string col)
+                => profileTable.Columns.Contains(col)
+                    && ParsingHelper.TryToDecimal(row[col]?.ToString(), out var v) ? v : 0m;
+            var stopProb = ReadProb("StopProb");
+            var trailingProb = ReadProb("TrailingProb");
+            var shortProb = ReadProb("ShortProb");
+            var longBracketProb = ReadProb("LongBracketProb");
+            var shortBracketProb = ReadProb("ShortBracketProb");
+
             string homeCurrency = "USD";
             if (profileTable.Columns.Contains("HomeCurrency"))
             {
@@ -335,6 +346,8 @@ public sealed class ExcelSeedService : IExcelSeedService
                     ExtremeReactionRandomnessPrc = extremeRandomnessPrc,
                     CashInjectionFrequencyPrc = cashInjectionFrequencyPrc,
                     CashInjectionAmountPrc = cashInjectionAmountPrc,
+                    StopProb = stopProb, TrailingProb = trailingProb, ShortProb = shortProb,
+                    LongBracketProb = longBracketProb, ShortBracketProb = shortBracketProb,
                     HomeCurrency = homeCurrency,
                 };
                 if (!aiUser.IsValid())

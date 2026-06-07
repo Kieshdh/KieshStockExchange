@@ -242,16 +242,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         blockTradeMultiple: _configuration.GetValue("Bots:BlockTradeMultiple", 4m),
                         mmQuoting:          _configuration.GetValue("Bots:MarketMakerQuoting", true),
                         quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m),
-                        // §P6a: protective stop / trailing-stop generation (off by default → no behaviour
-                        // change vs pre-P6; the seeded plain-order stream is byte-identical when disabled).
+                        // §P6: advanced-order generation. Master on/off is config; the per-kind probabilities
+                        // are PER-BOT (AIUser.*Prob, seeded by strategy in Tools/Person.py). Offsets + caps
+                        // remain global config. When disabled, the seeded plain-order stream is byte-identical.
                         advancedEnabled:    _configuration.GetValue("Bots:Advanced:Enabled", false),
-                        stopProb:           _configuration.GetValue("Bots:Advanced:StopProb", 0m),
-                        trailingProb:       _configuration.GetValue("Bots:Advanced:TrailingProb", 0m),
                         stopOffsetMin:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMin", 0.02m),
                         stopOffsetMax:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMax", 0.05m),
-                        shortProb:          _configuration.GetValue("Bots:Advanced:ShortProb", 0m),
-                        longBracketProb:    _configuration.GetValue("Bots:Advanced:LongBracketProb", 0m),
-                        shortBracketProb:   _configuration.GetValue("Bots:Advanced:ShortBracketProb", 0m),
                         tpOffsetMin:        _configuration.GetValue("Bots:Advanced:TpOffsetPrcMin", 0.03m),
                         tpOffsetMax:        _configuration.GetValue("Bots:Advanced:TpOffsetPrcMax", 0.08m),
                         bracketSlippagePct: _configuration.GetValue("Bots:Advanced:BracketSlippagePct", 5m),

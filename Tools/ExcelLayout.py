@@ -80,6 +80,9 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         "ExtremeReactionRandomnessPrc",
         "CashInjectionFrequencyPrc", "CashInjectionAmountPrc",
         "HomeCurrency",
+        # §3.6 P6: per-bot advanced-order probabilities (must stay in the same order as
+        # Person.ToProfileList; the server reads them by column name in ExcelSeedService).
+        "StopProb", "TrailingProb", "ShortProb", "LongBracketProb", "ShortBracketProb",
     ])
     return ws
 
