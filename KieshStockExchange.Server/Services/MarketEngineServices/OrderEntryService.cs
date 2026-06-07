@@ -24,10 +24,11 @@ public sealed class OrderEntryService : IOrderEntryService
     private readonly IDataBaseService _db;
     private readonly IStopWatcher _stopWatcher;
     private readonly IOrderCacheService _orderCache;
+    private readonly IOrderRegistry _registry;
 
     public OrderEntryService(IOrderExecutionService engine, ILogger<OrderEntryService> logger,
         IOrderValidator validator, IMarketDataService data, IDataBaseService db, IStopWatcher stopWatcher,
-        IOrderCacheService orderCache)
+        IOrderCacheService orderCache, IOrderRegistry registry)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -36,6 +37,7 @@ public sealed class OrderEntryService : IOrderEntryService
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _stopWatcher = stopWatcher ?? throw new ArgumentNullException(nameof(stopWatcher));
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
     }
     #endregion
 
@@ -91,9 +93,13 @@ public sealed class OrderEntryService : IOrderEntryService
     public async Task<OrderResult> ModifyBracketLegAsync(int userId, int legId, decimal newPrice,
         int newQuantity, CancellationToken ct = default)
     {
-        var leg = await _db.GetOrderById(legId, ct).ConfigureAwait(false);
-        if (leg is null || leg.UserId != userId || leg.ParentOrderId is not int parentId)
+        var legDb = await _db.GetOrderById(legId, ct).ConfigureAwait(false);
+        if (legDb is null || legDb.UserId != userId || legDb.ParentOrderId is not int parentId)
             return OrderResultFactory.InvalidParams("Order not found.");
+        // Resolve to the canonical registry instance — the same object the BracketCoordinator reads at
+        // arm time (LoadLegsAsync prefers canonical). Editing the DB-only copy would be silently
+        // overwritten by the stale canonical when the parent fills.
+        var leg = _registry.TryGet(legId, out var canon) ? canon : legDb;
 
         // Live legs: reuse the proven paths (book + reservation + notify already handled).
         if (leg.IsArmed && leg.IsStopOrder)   // parent filled, SL armed
@@ -123,9 +129,13 @@ public sealed class OrderEntryService : IOrderEntryService
             else if (s.IsLimitOrder)
                 tps.Add(isThis ? (newPrice, newQuantity) : (s.Price, s.Quantity));
         }
-        tps.Sort((a, b) => a.Price.CompareTo(b.Price));
+        // Side-aware: a short bracket (sell entry) needs the short geometry rules + TPs sorted
+        // toward-market-first (descending) for the validator's strict-monotonic check.
+        bool isShort = parent.IsSellOrder;
+        if (isShort) tps.Sort((a, b) => b.Price.CompareTo(a.Price));
+        else         tps.Sort((a, b) => a.Price.CompareTo(b.Price));
 
-        var geometryErr = BracketGeometryValidator.Validate(entryRef, slStop, tps, parent.Quantity, leg.CurrencyType);
+        var geometryErr = BracketGeometryValidator.Validate(entryRef, slStop, tps, parent.Quantity, leg.CurrencyType, isShort);
         if (geometryErr != null) return geometryErr;
 
         if (leg.IsStopOrder) leg.StopPrice = CurrencyHelper.RoundMoney(newPrice, leg.CurrencyType);
