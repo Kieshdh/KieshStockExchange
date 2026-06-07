@@ -191,6 +191,14 @@ integrity perfect); `insufAvail=0` (the TP-pays-from-available path never starve
 shortfalls remain (max $0.09, total **$0.56** across the whole sim), absorbed by the hardening + reconciler;
 reconcile bounded ~38 mismatches with phantomTotal $0.81 (was growing 5→263 before the fix).
 
+**Deterministic regression test:** `scripts/kse-p6c-short-bracket.ps1` (run against a fresh `kse_soak` with
+bots OFF) drives a two-account (admin owner + auto-created `p6ctest` counterparty) short bracket through
+(A) TP scale-out to flat and (B) SL-cancel teardown + plain cover, asserting the CK invariant (flat position
+carries 0 collateral), pro-rata collateral release, exact SL-pool release on cancel, and fund/position
+reservations returning to baseline — 18/18. (The SL-*fire* path itself is soak-covered, not in this harness:
+firing needs the continuous live quote feed bots drive, so it isn't force-triggerable with bots off, and bots
+on makes the book non-deterministic.)
+
 **Status:** Bug B, Fix A, CK hardening, and this cushion fix are all validated on clean soaks. Remaining dust
 is sub-cent SL-fire rounding (negligible, reconciler-tracked). Repro harness: fresh `kse_soak` (create +
 `dotnet ef database update` + auto-seed), `Bots__Advanced__Enabled=true` with the probs above, then compare
