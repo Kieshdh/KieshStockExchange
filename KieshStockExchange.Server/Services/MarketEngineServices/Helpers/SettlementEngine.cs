@@ -42,7 +42,7 @@ public sealed class SettlementEngine : ISettlementEngine
         _orderModifier  = new OrderModifier (db, accounts, ledger, SepLogger<OrderModifier>());
         _stopModifier   = new StopModifier  (db, accounts, ledger, SepLogger<StopModifier>());
         _tradeSettler   = new TradeSettler  (db, accounts, ledger, SepLogger<TradeSettler>(),
-                                             validator, probe);
+                                             validator, probe, registry);
     }
     #endregion
 

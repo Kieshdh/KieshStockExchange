@@ -196,20 +196,24 @@ is sub-cent SL-fire rounding (negligible, reconciler-tracked). Repro harness: fr
 `dotnet ef database update` + auto-seed), `Bots__Advanced__Enabled=true` with the probs above, then compare
 Σ position collateral vs Σ fund reserved (should be ≤ 0) and watch CK/shortfall/reconcile.
 
-### Known remaining edge (accepted): short-bracket TP buyback funding under heavy commitment
+### FIXED (2026-06-07): short-bracket TP buyback funding under heavy commitment
 
-In the multi-hour soak (~1 occurrence per 40 min) a heavily-committed bot's short-bracket TP cover failed with
-`Insufficient available balance` (e.g. available $5,390 vs buyback $8,586). Cause: §P6 Fix B routes a buy's
+A 3-hour soak revealed that a short-bracket TP cover could fail with `Insufficient available balance` (e.g.
+available $5,390 vs buyback $8,586), and — unlike the 24-min window suggested — it **accelerates** under
+sustained load (0 → 3 in the first hour, then 275 by t+175m) as bots get more leveraged. Each failure rolled
+back cleanly (no corruption, money conserved) but cancelled the bot's makers and drove the settlement-drift /
+reconcile counts up with it (drift→279, reconcile→435). Cause: §P6 Fix B routes a buy's
 over-its-own-reservation portion to AVAILABLE cash; a short-bracket TP reserves 0 (the sibling SL owns the
-shared pool), so its *entire* buyback is charged to available — but the funding pool sits reserved under the SL.
-When the bot has little free cash, available can't cover it and the settle fails **gracefully**: clean
-rollback, `badRows=0`, no corruption, **no reservation drift**, and the bot re-places next tick (self-healing).
+shared pool), so its *entire* buyback was charged to available — but the funding pool sits reserved under the SL.
 
-Why not "fall back to drawing reserved": the shared SL pool can't be isolated from the per-(user,currency)
-`Fund.ReservedBalance` (that opacity is the very thing that caused the whole-fund cushion leak above), so a
-settler draw can't update the SL's pool field in lock-step → the coordinator would double-release → it would
-inject a real ~$3k reconcile drift *per occurrence*, strictly worse than the current no-drift graceful reject.
-A proper fix is a Model B refinement — either the settler draws the **sibling SL's** pool directly (needs
-`IOrderRegistry` injected into `TradeSettler` + sibling lookup) or short-bracket TPs reserve their own buyback
-per-leg (like `ArmShortTpsOwnCashAsync` already does in the degraded/TP-only path, trading capital efficiency
-for simple order-level tracking). Deferred as a design choice; the current behavior is conservation-safe.
+**Fix (chosen: settler draws the sibling SL pool).** Injected `IOrderRegistry` into `TradeSettler`; new
+`DrawSiblingSlPool` helper. When a bracket-child buy's buyback exceeds its own reservation, the settler finds
+the sibling SL (an armed buy-stop with the same `ParentOrderId`) and draws the shortfall from its pool —
+reducing `Fund.ReservedBalance` AND `sl.CurrentBuyReservation` **in lock-step** — before any
+available-cash fallback. Keeping the SL pool field accurate means the coordinator's later `poolDrop` resize
+releases only the remaining cushion (no double-release, no drift). Preserves Model B's single shared pool.
+
+**Validated on a fresh clean soak past the prior danger zone (t+80m, where the old run had insufAvail=70 /
+drift=74):** `insufAvail = 0` throughout, `drift` flat at 3, `CK=0`, `badPos=0`, `badFund=0`, gap
+healthy-negative, reconcile bounded ~80–110 with phantomTotal **$0.5** (just the stable sub-cent SL-fire
+rounding residual, which is the only remaining minor item).
