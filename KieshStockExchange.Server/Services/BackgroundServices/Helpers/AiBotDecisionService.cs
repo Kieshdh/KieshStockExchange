@@ -54,6 +54,22 @@ internal sealed class AiBotDecisionService
     private readonly bool    _mmQuoting;
     private readonly decimal _quoteHalfSpreadPrc;
 
+    // Liquidity tuning: global multipliers over each bot's per-bot Excel values. >1 rests limit
+    // orders further from market (wider band) and allows more rungs, deepening the book so market
+    // sweeps hit walls instead of empty space.
+    private readonly decimal _limitOffsetMult;
+    private readonly decimal _maxOpenOrdersMult;
+
+    // Value anchor: a restoring force toward each stock's fundamental (seed) price. Without it the
+    // price is a driftless momentum walk with no pull back to value, so it wanders unbounded. Strength
+    // is the max buy/sell-probability tilt; Scale is the deviation fraction at which the tilt saturates.
+    private readonly decimal _valueAnchorStrength;
+    private readonly decimal _valueAnchorScale;
+    private readonly bool    _valueTargetSelection; // concentrate the anchor via stock selection (destabilizing at high gain)
+    private readonly decimal _overheatCap;          // refuse to buy above / sell below fundamental by more than this (0 = off)
+    private readonly decimal _marketSlippagePrc;    // low cap on every market order's slippage so none sweeps far
+    private readonly Dictionary<(int, CurrencyType), decimal> _fundamental = new();
+
     // §P6 advanced-order generation for the bot soak (all off by default).
     private readonly bool    _advancedEnabled;
     // §3.6 P6: the per-kind advanced-order probabilities are now PER-BOT (AIUser.*Prob, seeded by
@@ -71,6 +87,10 @@ internal sealed class AiBotDecisionService
         bool fatTails = true, decimal tradeSizeTailShape = 0.5m,
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
         bool mmQuoting = true, decimal quoteHalfSpreadPrc = 0.003m,
+        decimal limitOffsetMult = 1m, decimal maxOpenOrdersMult = 1m,
+        decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
+        bool valueTargetSelection = false, decimal overheatCap = 0m,
+        decimal marketSlippagePrc = 0.003m,
         bool advancedEnabled = false,
         decimal stopOffsetMin = 0.02m, decimal stopOffsetMax = 0.05m,
         decimal tpOffsetMin = 0.03m, decimal tpOffsetMax = 0.08m,
@@ -88,6 +108,13 @@ internal sealed class AiBotDecisionService
         _blockTradeMultiple = blockTradeMultiple;
         _mmQuoting          = mmQuoting;
         _quoteHalfSpreadPrc = quoteHalfSpreadPrc;
+        _limitOffsetMult    = limitOffsetMult <= 0m ? 1m : limitOffsetMult;
+        _maxOpenOrdersMult  = maxOpenOrdersMult <= 0m ? 1m : maxOpenOrdersMult;
+        _valueAnchorStrength = Math.Max(0m, valueAnchorStrength);
+        _valueAnchorScale    = valueAnchorScale <= 0m ? 0.15m : valueAnchorScale;
+        _valueTargetSelection = valueTargetSelection;
+        _overheatCap        = Math.Max(0m, overheatCap);
+        _marketSlippagePrc  = marketSlippagePrc <= 0m ? 0.003m : marketSlippagePrc;
         _advancedEnabled    = advancedEnabled;
         _stopOffsetMin      = stopOffsetMin;
         _stopOffsetMax      = stopOffsetMax;
@@ -104,7 +131,8 @@ internal sealed class AiBotDecisionService
         // A bot with persistent errors goes quiet for the day to avoid log spam
         if (user.ErrorsToday >= 10) return false;
 
-        if (ctx.OpenOrders.TryGetValue(user.UserId, out var orders) && orders.Count >= user.MaxOpenOrders)
+        var openCap = (int)Math.Ceiling(user.MaxOpenOrders * _maxOpenOrdersMult);
+        if (ctx.OpenOrders.TryGetValue(user.UserId, out var orders) && orders.Count >= openCap)
             return false;
 
         // No daily-trades cap — it would only force churning bots dormant mid-session;
@@ -125,6 +153,24 @@ internal sealed class AiBotDecisionService
         // override would point at zero shares (sell with no position).
         type = ApplyExtremeReaction(ctx, user, stockId, currency, type);
 
+        // Value-band veto: don't chase price past the band — refuse to buy a stock already far above
+        // fundamental or sell one far below it. Cuts the fuel that lets a minority of stocks escape to
+        // extreme prices (the anchor alone can't sell down a runaway no bot owns).
+        if (_overheatCap > 0m)
+        {
+            var fund = Fundamental(stockId, currency);
+            if (fund > 0m)
+            {
+                var mkt = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
+                if (mkt > 0m)
+                {
+                    var dev = (mkt - fund) / fund;
+                    if (IsBuyOrder(type) && dev > _overheatCap) return null;
+                    if (IsSellOrder(type) && dev < -_overheatCap) return null;
+                }
+            }
+        }
+
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
         var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
         if (quantity <= 0) return null;
@@ -142,7 +188,7 @@ internal sealed class AiBotDecisionService
         {
             UserId = user.UserId, StockId = stockId, CurrencyType = currency,
             Quantity = quantity, Price = price,
-            SlippagePercent = IsSlippageOrder(type) ? user.SlippageTolerancePrc * 100m : null,
+            SlippagePercent = IsSlippageOrder(type) ? EffectiveSlippage(user) * 100m : null,
             BuyBudget = buyBudget,
             Side = IsBuyOrder(type) ? OrderSide.Buy : OrderSide.Sell,
             Entry = (type is OrderType.LimitBuy or OrderType.LimitSell) ? EntryType.Limit : EntryType.Market,
@@ -355,6 +401,14 @@ internal sealed class AiBotDecisionService
         // applied later in ComputeOrderAsync.
         var sentimentClamped = ClampSigned(AverageWatchlistSentiment(ctx, user, currency), 1m);
         buyProb += sentimentClamped * SentimentMaxBias;
+
+        // Value anchor: tilt toward buying stocks trading below fundamental and selling those above,
+        // proportional to the deviation. This is the restoring force that keeps price bounded.
+        if (_valueAnchorStrength > 0m)
+        {
+            var gap = ClampSigned(AverageWatchlistValueGap(ctx, user, currency) / _valueAnchorScale, 1m);
+            buyProb += gap * _valueAnchorStrength;
+        }
         buyProb = Clamp01(buyProb);
 
         // 3. Strategy-aware market-order probability
@@ -369,18 +423,15 @@ internal sealed class AiBotDecisionService
                 break;
         }
 
-        // 4. Resolve to concrete order type
-        var isBuy      = ctx.Decimal01(user.AiUserId) < buyProb;
-        var isMarket   = ctx.Decimal01(user.AiUserId) < effectiveUseMarket;
-        var isSlippage = ctx.Decimal01(user.AiUserId) < user.UseSlippageMarketProb;
+        // 4. Resolve to concrete order type. Bots never place TRUE (uncapped) market orders — every
+        // market order is slippage-capped (EffectiveSlippage) so no single order can sweep a thin book
+        // far and start a cascade.
+        var isBuy    = ctx.Decimal01(user.AiUserId) < buyProb;
+        var isMarket = ctx.Decimal01(user.AiUserId) < effectiveUseMarket;
 
         return isBuy
-            ? isMarket
-                ? isSlippage ? OrderType.SlippageMarketBuy : OrderType.TrueMarketBuy
-                : OrderType.LimitBuy
-            : isMarket
-                ? isSlippage ? OrderType.SlippageMarketSell : OrderType.TrueMarketSell
-                : OrderType.LimitSell;
+            ? isMarket ? OrderType.SlippageMarketBuy : OrderType.LimitBuy
+            : isMarket ? OrderType.SlippageMarketSell : OrderType.LimitSell;
     }
 
     // Quote the side with fewer resting limit orders so the bot tends toward a
@@ -422,20 +473,36 @@ internal sealed class AiBotDecisionService
                 var engineAvail = enginePos?.AvailableQuantity ?? 0;
                 if (Math.Min(ctxAvail, engineAvail) > 0) candidates.Add(id);
             }
-            return candidates.Count > 0 ? WeightedPick(candidates, rng) : 0;
+            return candidates.Count > 0 ? PickStock(candidates, rng, currency, ctx, buySide: false) : 0;
         }
 
-        return WeightedPick(watch, rng);
+        return PickStock(watch, rng, currency, ctx, buySide: true);
     }
 
-    /// <summary> Roulette-wheel pick weighted by 1/StockId^alpha (lower ids = bigger cap = more weight). </summary>
-    private static int WeightedPick(IList<int> stockIds, Random rng)
+    /// <summary>
+    /// Roulette-wheel pick weighted by 1/StockId^alpha (lower ids = bigger cap = more weight), boosted
+    /// toward the stock whose correction this order serves — overvalued on a sell, undervalued on a buy.
+    /// The boost concentrates the value anchor on whatever is breaking loose instead of diluting it.
+    /// </summary>
+    private int PickStock(IList<int> stockIds, Random rng, CurrencyType currency, AiBotContext ctx, bool buySide)
     {
         double total = 0;
-        Span<double> cum = stackalloc double[stockIds.Count];
+        Span<double> cum = stockIds.Count <= 256 ? stackalloc double[stockIds.Count] : new double[stockIds.Count];
         for (int i = 0; i < stockIds.Count; i++)
         {
-            total += 1.0 / Math.Pow(stockIds[i], RuntimeWeightAlpha);
+            double w = 1.0 / Math.Pow(stockIds[i], RuntimeWeightAlpha);
+            if (_valueAnchorStrength > 0m && _valueTargetSelection)
+            {
+                var f = Fundamental(stockIds[i], currency);
+                if (f > 0m && ctx.SmoothedPrices.TryGetValue((stockIds[i], currency), out var p) && p > 0m)
+                {
+                    double gap = (double)((f - p) / f);        // >0 undervalued, <0 overvalued
+                    double corrective = buySide ? gap : -gap;  // a buy fixes undervalued; a sell fixes overvalued
+                    if (corrective > 0)
+                        w *= 1.0 + ValuePickGain * corrective / (double)_valueAnchorScale;
+                }
+            }
+            total += w;
             cum[i] = total;
         }
         double r = rng.NextDouble() * total;
@@ -445,6 +512,9 @@ internal sealed class AiBotDecisionService
     }
 
     private const double RuntimeWeightAlpha = 0.7;
+    // Selection boost per unit of normalized deviation when the value anchor is on: a stock 1×Scale
+    // off fundamental gets (1 + ValuePickGain)× the weight on the corrective side.
+    private const double ValuePickGain = 12.0;
     #endregion
 
     #region Price and Quantity Computation
@@ -478,10 +548,13 @@ internal sealed class AiBotDecisionService
         var anchor = await GetMidPriceAsync(stockId, currency, ct).ConfigureAwait(false)
                      ?? marketPrice;
 
-        // Limit order: compute offset with bidirectional jitter so some orders land closer to market
-        var offset = Clamp01(Lerp(user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, ctx.Decimal01(user.AiUserId)));
+        // Limit order: widen the per-bot band by the liquidity multiplier, then add bidirectional
+        // jitter so some orders land closer to market and others rest deeper out.
+        var minOff = user.MinLimitOffsetPrc * _limitOffsetMult;
+        var maxOff = user.MaxLimitOffsetPrc * _limitOffsetMult;
+        var offset = Clamp01(Lerp(minOff, maxOff, ctx.Decimal01(user.AiUserId)));
         var jitter = (ctx.Decimal01(user.AiUserId) * 2m - 1m) * user.AggressivenessPrc;
-        offset = Math.Max(user.MinLimitOffsetPrc, Math.Min(user.MaxLimitOffsetPrc, offset * (1m + jitter)));
+        offset = Math.Max(minOff, Math.Min(maxOff, offset * (1m + jitter)));
 
         var limitPrice = IsBuyOrder(type) ? anchor * (1m - offset) : anchor * (1m + offset);
 
@@ -538,8 +611,8 @@ internal sealed class AiBotDecisionService
         decimal estimatePrice = type switch
         {
             OrderType.TrueMarketBuy or OrderType.TrueMarketSell => marketPrice,
-            OrderType.SlippageMarketBuy  => CurrencyHelper.RoundMoney(marketPrice * (1m + user.SlippageTolerancePrc), currency),
-            OrderType.SlippageMarketSell => CurrencyHelper.RoundMoney(marketPrice * (1m - user.SlippageTolerancePrc), currency),
+            OrderType.SlippageMarketBuy  => CurrencyHelper.RoundMoney(marketPrice * (1m + EffectiveSlippage(user)), currency),
+            OrderType.SlippageMarketSell => CurrencyHelper.RoundMoney(marketPrice * (1m - EffectiveSlippage(user)), currency),
             _                            => marketPrice // limit
         };
         if (estimatePrice <= 0m) return 0;
@@ -653,6 +726,39 @@ internal sealed class AiBotDecisionService
         return count > 0 ? sum / count : 0m;
     }
 
+    // Average signed gap to fundamental across the watchlist: (seed − price)/seed. Positive = broadly
+    // below fundamental (cheap → bias to buy); negative = above (rich → bias to sell).
+    private decimal AverageWatchlistValueGap(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        if (user.Watchlist == null || user.Watchlist.Count == 0) return 0m;
+        decimal sum = 0m;
+        int count = 0;
+        foreach (var sid in user.Watchlist)
+        {
+            var f = Fundamental(sid, currency);
+            if (f <= 0m) continue;
+            if (!ctx.SmoothedPrices.TryGetValue((sid, currency), out var p) || p <= 0m) continue;
+            sum += (f - p) / f;
+            count++;
+        }
+        return count > 0 ? sum / count : 0m;
+    }
+
+    // A market order's slippage, capped low so no single market order sweeps a thin book far.
+    private decimal EffectiveSlippage(AIUser user) => Math.Min(user.SlippageTolerancePrc, _marketSlippagePrc);
+
+    // Per-(stock,currency) fundamental = its seed listing price, cached on first use.
+    private decimal Fundamental(int stockId, CurrencyType currency)
+    {
+        var key = (stockId, currency);
+        if (_fundamental.TryGetValue(key, out var f)) return f;
+        f = 0m;
+        foreach (var l in _stocks.GetListings(stockId))
+            if (l.CurrencyType == currency) { f = l.SeedPrice; break; }
+        _fundamental[key] = f;
+        return f;
+    }
+
     private OrderType ApplyExtremeReaction(AiBotContext ctx, AIUser user,
         int stockId, CurrencyType currency, OrderType currentType)
     {
@@ -678,8 +784,8 @@ internal sealed class AiBotDecisionService
 
         return dir switch
         {
-            ExtremeDirection.Buy  => OrderType.TrueMarketBuy,
-            ExtremeDirection.Sell => OrderType.TrueMarketSell,
+            ExtremeDirection.Buy  => OrderType.SlippageMarketBuy,
+            ExtremeDirection.Sell => OrderType.SlippageMarketSell,
             _                     => currentType,
         };
     }

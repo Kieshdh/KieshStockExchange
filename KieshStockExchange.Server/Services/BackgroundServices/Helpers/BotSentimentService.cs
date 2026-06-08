@@ -7,79 +7,79 @@ using System.Text;
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
 /// <summary>
-/// Multi-timescale shared market-mood state. Maintains independent
-/// mean-reverting AR(1) factors at 24h / 1h / 10m / 1m scales — per-stock
-/// at every scale, plus global factors at the 24h and 1h scales.
-/// <see cref="GetSentiment"/> returns the un-clamped sum per stock so
-/// callers can apply linear bias inside ±1 and react to the overflow
-/// above ±1 with style-dependent market orders.
+/// Shared market-mood state as a mixture of continuous mean-reverting AR(1) processes.
+/// Instead of encoding timeframe by reroll cadence (which froze the slow factors within a
+/// session and let a constant bias run prices away), every score updates each tick and its
+/// timescale is set purely by a persistence time-constant τ: α = exp(−Δt/τ). Fast scores
+/// (small τ) flip sign every few seconds and bound the price; slow scores (large τ) drift
+/// gently. Each score's steady-state amplitude is an independent weight σ (noise scaled by
+/// σ·√(1−α²)), so τ and σ tune independently.
 ///
-/// Driven by a single <see cref="Tick"/> call from the bot loop's
-/// <c>CheckTimers</c>. Tick and GetSentiment both run on the loop thread,
-/// so no locks are needed.
+/// Per stock: a ring of fast→slow scores driving cross-stock dispersion. Global: a smaller,
+/// slower ring shared by all stocks (common-mode regime). <see cref="GetSentiment"/> returns
+/// the cached combined value per stock (per-stock ring + global ring + news shock), un-clamped
+/// so callers can bias linearly inside ±1 and react to the overflow with market orders.
+///
+/// Driven by one <see cref="Tick"/> per bot-loop iteration (~1 Hz); Tick and GetSentiment both
+/// run on the loop thread, so no locks are needed. Tick caches each stock's combined value, so
+/// the per-bot GetSentiment hot path is a single dictionary read.
 /// </summary>
 internal sealed class BotSentimentService
 {
-    #region private constants
-    // Amplitude per factor. Combined max ≈ ±2.6; the consumer clamps to ±1
-    // for linear bias and uses the overflow for extreme-reaction market orders.
-    private const decimal AmpPerStock24h = 0.60m;
-    private const decimal AmpPerStock4h  = 0.50m;
-    private const decimal AmpPerStock1h  = 0.40m;
-    private const decimal AmpPerStock10m = 0.25m;
-    private const decimal AmpPerStock1m  = 0.10m;
-    private const decimal AmpGlobal24h   = 0.30m;
-    private const decimal AmpGlobal4h    = 0.25m;
-    private const decimal AmpGlobal1h    = 0.20m;
+    #region Ring configuration
+    // Per-stock ring: fast→slow. τ in seconds, σ = steady-state amplitude (weight). Weight is
+    // front-loaded on the fast scales so sentiment flips often (bounded) with gentle slow character.
+    private static readonly double[] PerStockTauSec = { 20, 90, 360, 1800, 10800 };
+    private static readonly double[] PerStockSigma  = { 0.25, 0.25, 0.20, 0.12, 0.08 };
 
-    // AR(1) mean-reversion: x_new = α·x_old + (1-α)·amp·U(-1,+1). Higher α means slower mean reversion.
-    private const decimal MeanReversionAlpha = 0.50m;
+    // Global ring: slower, common-mode, small weight (market regime, not dispersion).
+    private static readonly double[] GlobalTauSec = { 600, 3600, 21600 };
+    private static readonly double[] GlobalSigma  = { 0.10, 0.08, 0.06 };
 
-    private const decimal InvSqrt3 = 0.5773502691896258m; // seed half-width → AR(1) steady-state std (amp/3)
+    private static readonly int PerStockRings = PerStockTauSec.Length;
+    private static readonly int GlobalRings   = GlobalTauSec.Length;
+
+    private const double Sqrt3 = 1.7320508075688772; // makes U(-1,1)*Sqrt3 unit-variance
 
     // Deterministic seed so the simulation is reproducible across runs.
     private const int RngSeed = 43;
+
+    // Clamp the per-tick elapsed time so a stalled or first-after-reset loop can't distort α.
+    private const double MinDtSec = 0.05;
+    private const double MaxDtSec = 60.0;
 
     // 50 stocks × 60s sampling × ~33 hours of runway. Each row is small.
     private const int RecentSamplesMax = 100_000;
 
     // News/earnings shocks: drop a decaying shock once it shrinks below this.
-    private const decimal ShockFloor = 0.01m;
+    private const double ShockFloor = 0.01;
     #endregion
 
     #region State
-    private readonly Dictionary<int, decimal> _perStock24h = new();
-    private readonly Dictionary<int, decimal> _perStock4h  = new();
-    private readonly Dictionary<int, decimal> _perStock1h  = new();
-    private readonly Dictionary<int, decimal> _perStock10m = new();
-    private readonly Dictionary<int, decimal> _perStock1m  = new();
-    private decimal _global24h;
-    private decimal _global4h;
-    private decimal _global1h;
+    private readonly Dictionary<int, double[]> _perStock = new(); // stockId → ring of scores
+    private readonly double[] _global = new double[GlobalRings];
+    private double _globalSum;
 
     // Per-stock transient news shock; non-zero only while an event decays.
-    private readonly Dictionary<int, decimal> _shock = new();
+    private readonly Dictionary<int, double> _shock = new();
 
-    private DateTime _next1m;
-    private DateTime _next10m;
-    private DateTime _next1h;
-    private DateTime _next4h;
-    private DateTime _next24h;
+    // Combined per-stock value (per-stock ring + global + shock), refreshed each tick.
+    private readonly Dictionary<int, decimal> _combined = new();
+
+    private DateTime _lastTickUtc = DateTime.MinValue;
+    private DateTime _nextLogUtc   = DateTime.MaxValue;
 
     private Random _rng = new(RngSeed);
 
-    // Recent samples for export
     private readonly Queue<SentimentSample> _samples = new();
     private readonly RingBufferStore<SentimentSample> _store;
 
-    // News events
     private readonly bool _newsEvents;
-    private readonly decimal _shockMinMagnitude;
-    private readonly decimal _shockMaxMagnitude;
-    private readonly double  _shockMagnitudeExponent; // >1 skews events toward the small end
-    private readonly decimal _shockDecayPerTick;
-    private readonly double  _shockArrivalProbPerTick; // per stock per ~1s tick
-
+    private readonly double _shockMinMagnitude;
+    private readonly double _shockMaxMagnitude;
+    private readonly double _shockMagnitudeExponent; // >1 skews events toward the small end
+    private readonly double _shockDecayPerTick;
+    private readonly double _shockArrivalProbPerTick; // per stock per tick
     #endregion
 
     #region Services and Constructor
@@ -94,77 +94,88 @@ internal sealed class BotSentimentService
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _newsEvents = newsEvents;
-        _shockMinMagnitude = shockMinMagnitude;
-        _shockMaxMagnitude = Math.Max(shockMinMagnitude, shockMaxMagnitude);
+        _shockMinMagnitude = (double)shockMinMagnitude;
+        _shockMaxMagnitude = Math.Max((double)shockMinMagnitude, (double)shockMaxMagnitude);
         _shockMagnitudeExponent = Math.Max(1.0, shockMagnitudeExponent);
-        _shockDecayPerTick = shockDecayPerTick;
+        _shockDecayPerTick = (double)shockDecayPerTick;
         _shockArrivalProbPerTick = 1.0 / (Math.Max(0.0001, shockMeanIntervalHours) * 3600.0);
-        _store  = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
+        _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
         var prior = _store.LoadTail(RecentSamplesMax);
         foreach (var s in prior) _samples.Enqueue(s);
         if (prior.Count > 0)
             _logger.LogInformation("BotSentimentService: replayed {Count} sample(s) from disk.", prior.Count);
 
-        // Default to "never reroll" until Reset(now) is called; until then
-        // GetSentiment returns 0 (factor dictionaries empty). AiTradeService
-        // calls Reset before the bot loop starts.
-        _next1m = _next10m = _next1h = _next4h = _next24h = DateTime.MaxValue;
+        // Inert until Reset(now); AiTradeService calls Reset before the bot loop starts.
+        _lastTickUtc = DateTime.MaxValue;
     }
     #endregion
 
     #region Tick
     /// <summary>
-    /// Re-roll any factors whose clock has expired. Called every bot-loop
-    /// iteration; cheap when nothing has expired (four timestamp compares).
+    /// Advance every score by the elapsed time, decay/arrive news shocks, and refresh the
+    /// per-stock combined cache. Called once per bot-loop iteration.
     /// </summary>
     internal void Tick(DateTime now)
     {
-        bool rolled1m = false; // drives the once-per-minute combined snapshot below
+        if (_lastTickUtc == DateTime.MaxValue) return; // not reset yet
+        double dt = Math.Clamp((now - _lastTickUtc).TotalSeconds, MinDtSec, MaxDtSec);
+        _lastTickUtc = now;
 
-        if (now >= _next1m)
+        // Per-tick α and noise scale for each ring (α = exp(−Δt/τ); steady-state std == σ).
+        Span<double> gAlpha = stackalloc double[GlobalRings];
+        Span<double> gNoise = stackalloc double[GlobalRings];
+        for (int k = 0; k < GlobalRings; k++)
         {
-            RerollPerStock(_perStock1m, AmpPerStock1m);
-            _next1m = now + TimeSpan.FromMinutes(1);
-            rolled1m = true;
+            double a = Math.Exp(-dt / GlobalTauSec[k]);
+            gAlpha[k] = a;
+            gNoise[k] = GlobalSigma[k] * Math.Sqrt(1.0 - a * a);
         }
-        if (now >= _next10m)
+        Span<double> sAlpha = stackalloc double[PerStockRings];
+        Span<double> sNoise = stackalloc double[PerStockRings];
+        for (int k = 0; k < PerStockRings; k++)
         {
-            RerollPerStock(_perStock10m, AmpPerStock10m);
-            _next10m = now + TimeSpan.FromMinutes(10);
-        }
-        if (now >= _next1h)
-        {
-            RerollPerStock(_perStock1h, AmpPerStock1h);
-            _global1h = Step(_global1h, AmpGlobal1h);
-            _next1h = now + TimeSpan.FromHours(1);
-        }
-        if (now >= _next4h)
-        {
-            RerollPerStock(_perStock4h, AmpPerStock4h);
-            _global4h = Step(_global4h, AmpGlobal4h);
-            _next4h = now + TimeSpan.FromHours(4);
-        }
-        if (now >= _next24h)
-        {
-            RerollPerStock(_perStock24h, AmpPerStock24h);
-            _global24h = Step(_global24h, AmpGlobal24h);
-            _next24h = now + TimeSpan.FromHours(24);
+            double a = Math.Exp(-dt / PerStockTauSec[k]);
+            sAlpha[k] = a;
+            sNoise[k] = PerStockSigma[k] * Math.Sqrt(1.0 - a * a);
         }
 
-        if (_newsEvents) StepShocks(now);
+        // Global ring (computed once; common-mode across all stocks).
+        _globalSum = 0.0;
+        for (int k = 0; k < GlobalRings; k++)
+        {
+            _global[k] = gAlpha[k] * _global[k] + gNoise[k] * UnitNoise();
+            _globalSum += _global[k];
+        }
 
-        // One combined snapshot per minute (driven by the 1m reroll clock).
-        if (rolled1m) LogCombinedSentiment(now);
+        if (_newsEvents) StepShocks();
+
+        // Per-stock rings + combined cache.
+        foreach (var sid in _stocks.ById.Keys)
+        {
+            if (!_perStock.TryGetValue(sid, out var ring)) { ring = new double[PerStockRings]; _perStock[sid] = ring; }
+            double sum = _globalSum;
+            for (int k = 0; k < PerStockRings; k++)
+            {
+                ring[k] = sAlpha[k] * ring[k] + sNoise[k] * UnitNoise();
+                sum += ring[k];
+            }
+            if (_shock.TryGetValue(sid, out var sh)) sum += sh;
+            _combined[sid] = (decimal)sum;
+        }
+
+        if (now >= _nextLogUtc) { LogCombinedSentiment(now); _nextLogUtc = now + TimeSpan.FromSeconds(60); }
     }
 
+    // Unit-variance draw: U(-1,1)*√3.
+    private double UnitNoise() => (_rng.NextDouble() * 2.0 - 1.0) * Sqrt3;
+
     /// <summary>
-    /// Decay any active news shocks, then roll a low-rate Poisson arrival per stock.
-    /// A fired shock jumps the stock's sentiment past ±1 (sign random) and fades over
-    /// minutes. Rolls advance <see cref="_rng"/> only when news events are enabled, so
-    /// the disabled path leaves the AR(1) sequence bit-for-bit unchanged.
+    /// Decay active news shocks, then roll a low-rate Poisson arrival per stock. A fired shock
+    /// jumps a stock's sentiment past ±1 (sign random) and fades over minutes. Advances the RNG
+    /// only when news events are enabled, so the disabled path leaves the sequence unchanged.
     /// </summary>
-    private void StepShocks(DateTime now)
+    private void StepShocks()
     {
         if (_shock.Count > 0)
         {
@@ -179,10 +190,10 @@ internal sealed class BotSentimentService
         foreach (var sid in _stocks.ById.Keys)
         {
             if (_rng.NextDouble() >= _shockArrivalProbPerTick) continue;
-            var sign = _rng.NextDouble() < 0.5 ? -1m : 1m;
+            var sign = _rng.NextDouble() < 0.5 ? -1.0 : 1.0;
             // U^exp (exp>1) crowds the draw near the floor: many small events, few big.
             var span = _shockMaxMagnitude - _shockMinMagnitude;
-            var mag = _shockMinMagnitude + span * (decimal)Math.Pow(_rng.NextDouble(), _shockMagnitudeExponent);
+            var mag = _shockMinMagnitude + span * Math.Pow(_rng.NextDouble(), _shockMagnitudeExponent);
             var delta = sign * mag;
             _shock.TryGetValue(sid, out var cur);
             _shock[sid] = cur + delta;
@@ -195,10 +206,17 @@ internal sealed class BotSentimentService
     }
 
     /// <summary>
-    /// One combined snapshot per minute: the two global moods in the header, then the
-    /// per-stock COMBINED sentiment (what bots act on — per-stock scales + globals +
-    /// any news shock), 13 stocks per line. Per-bot personal sentiment is added per bot
-    /// downstream and is not shown here.
+    /// Combined sentiment for <paramref name="stockId"/> (per-stock ring + global ring + news
+    /// shock), read from the cache Tick maintains. Un-clamped: typically ±1, more during a shock.
+    /// </summary>
+    internal decimal GetSentiment(int stockId)
+        => _combined.TryGetValue(stockId, out var v) ? v : 0m;
+    #endregion
+
+    #region Logging
+    /// <summary>
+    /// One combined snapshot per minute: the global mood, then per-stock COMBINED sentiment
+    /// (what bots act on), 10 stocks per line. Per-bot personal sentiment is added downstream.
     /// </summary>
     private void LogCombinedSentiment(DateTime now)
     {
@@ -206,18 +224,13 @@ internal sealed class BotSentimentService
         const int PerLine = 10;
         const string NumFmt = ":+0.00;-0.00;0.00";
 
-        // One template hole per value so the console theme colours each number;
-        // a single pre-built string logs as one property and renders in one colour.
         var tpl = new StringBuilder(1024);
         var args = new List<object>(128);
-
         void Num(decimal v) { tpl.Append('{').Append(args.Count).Append(NumFmt).Append('}'); args.Add(v); }
 
         tpl.Append("Sentiment @ {").Append(args.Count).Append('}');
         args.Add(now.ToLocalTime().ToString("HH:mm:ss"));
-        tpl.Append(" G24="); Num(_global24h);
-        tpl.Append(" G4=");  Num(_global4h);
-        tpl.Append(" G1h="); Num(_global1h);
+        tpl.Append(" Global="); Num((decimal)_globalSum);
         tpl.Append(" |\n");
 
         int onThisLine = 0;
@@ -232,103 +245,44 @@ internal sealed class BotSentimentService
 
         _logger.LogInformation(tpl.ToString(), args.ToArray());
     }
-
-    /// <summary>
-    /// Combined sentiment for <paramref name="stockId"/>. Sum of per-stock
-    /// factors (24h / 4h / 1h / 10m / 1m), the global 24h / 4h / 1h moods, and any
-    /// active transient news shock.
-    /// Returned UN-CLAMPED — typical range is ±1 but can reach ±2.1 (more
-    /// during a news shock, which is intentional — it trips the extreme path).
-    /// Callers clamp to ±1 for linear bias; the overflow drives v2's
-    /// style-dependent extreme-reaction market orders.
-    /// </summary>
-    internal decimal GetSentiment(int stockId)
-    {
-        decimal sum = _global24h + _global4h + _global1h;
-        if (_perStock24h.TryGetValue(stockId, out var v24)) sum += v24;
-        if (_perStock4h.TryGetValue(stockId,  out var v4h)) sum += v4h;
-        if (_perStock1h.TryGetValue(stockId,  out var v1h)) sum += v1h;
-        if (_perStock10m.TryGetValue(stockId, out var v10)) sum += v10;
-        if (_perStock1m.TryGetValue(stockId,  out var v1m)) sum += v1m;
-        if (_shock.TryGetValue(stockId,       out var vsh)) sum += vsh;
-        return sum;
-    }
-    #endregion
-
-    #region Reroll
-    private void RerollPerStock(Dictionary<int, decimal> factors, decimal amp)
-    {
-        foreach (var sid in _stocks.ById.Keys)
-        {
-            factors.TryGetValue(sid, out var prev);
-            factors[sid] = Step(prev, amp);
-        }
-    }
-
-    private decimal Step(decimal prev, decimal amp)
-    {
-        // x_new = α·x + (1-α)·amp·U(-1, +1).
-        // α = Perc of prev value, x = prev value, amp = amplitude of change
-        // U(-1, +1) = uniform random value between -1 and 1
-        var noise = (decimal)(_rng.NextDouble() * 2.0 - 1.0);
-        return MeanReversionAlpha * prev + (1m - MeanReversionAlpha) * amp * noise;
-    }
     #endregion
 
     #region Reset
     /// <summary>
-    /// Re-seed all factors from their AR(1) steady-state spread (std amp/3)
-    /// and schedule the first reroll on each
-    /// scale one period from <paramref name="now"/>. Seeding avoids the
-    /// "calm start" artifact where sentiment is 0 for the first minute /
-    /// hour / day after a session start.
+    /// Seed every score at its steady-state spread (std σ) so a run starts at equilibrium rather
+    /// than a calm zero, and arm the tick clock from <paramref name="now"/>.
     /// </summary>
     internal void Reset(DateTime now)
     {
         _rng = new Random(RngSeed);
-        _perStock24h.Clear();
-        _perStock4h.Clear();
-        _perStock1h.Clear();
-        _perStock10m.Clear();
-        _perStock1m.Clear();
+        _perStock.Clear();
         _shock.Clear();
+        _combined.Clear();
         lock (_samples) _samples.Clear();
+
+        _globalSum = 0.0;
+        for (int k = 0; k < GlobalRings; k++) { _global[k] = GlobalSigma[k] * UnitNoise(); _globalSum += _global[k]; }
 
         foreach (var sid in _stocks.ById.Keys)
         {
-            _perStock24h[sid] = SteadyState(AmpPerStock24h);
-            _perStock4h[sid]  = SteadyState(AmpPerStock4h);
-            _perStock1h[sid]  = SteadyState(AmpPerStock1h);
-            _perStock10m[sid] = SteadyState(AmpPerStock10m);
-            _perStock1m[sid]  = SteadyState(AmpPerStock1m);
+            var ring = new double[PerStockRings];
+            double sum = _globalSum;
+            for (int k = 0; k < PerStockRings; k++) { ring[k] = PerStockSigma[k] * UnitNoise(); sum += ring[k]; }
+            _perStock[sid] = ring;
+            _combined[sid] = (decimal)sum;
         }
-        _global24h = SteadyState(AmpGlobal24h);
-        _global4h  = SteadyState(AmpGlobal4h);
-        _global1h  = SteadyState(AmpGlobal1h);
 
-        _next1m  = now + TimeSpan.FromMinutes(1);
-        _next10m = now + TimeSpan.FromMinutes(10);
-        _next1h  = now + TimeSpan.FromHours(1);
-        _next4h  = now + TimeSpan.FromHours(4);
-        _next24h = now + TimeSpan.FromHours(24);
-
-        _logger.LogDebug("BotSentimentService reset: {Stocks} stocks seeded across 4 scales.",
-            _stocks.ById.Count);
-    }
-
-    // Seed at the AR(1) steady-state spread (std amp/3), not the wider ±amp band.
-    private decimal SteadyState(decimal amp)
-    {
-        var u = (decimal)(_rng.NextDouble() * 2.0 - 1.0);
-        return amp * InvSqrt3 * u;
+        _lastTickUtc = now;
+        _nextLogUtc  = now + TimeSpan.FromSeconds(60);
+        _logger.LogDebug("BotSentimentService reset: {Stocks} stocks × {Rings} per-stock rings + {G} global.",
+            _stocks.ById.Count, PerStockRings, GlobalRings);
     }
     #endregion
 
-    #region Snapshot
+    #region Snapshot / Export
     /// <summary>
-    /// Append one row per known stock to the export ring, capturing the current
-    /// factor values across all four timescales plus the two global moods.
-    /// Drives the sentiment CSV that the Bot Dashboard exports.
+    /// Append one row per known stock to the export ring: combined value, global component, and
+    /// any active news shock. Drives the sentiment CSV the Bot Dashboard exports.
     /// </summary>
     internal void LogSnapshot()
     {
@@ -337,72 +291,44 @@ internal sealed class BotSentimentService
         {
             foreach (var sid in _stocks.ById.Keys)
             {
-                _perStock24h.TryGetValue(sid, out var v24);
-                _perStock4h.TryGetValue(sid,  out var v4h);
-                _perStock1h.TryGetValue(sid,  out var v1h);
-                _perStock10m.TryGetValue(sid, out var v10);
-                _perStock1m.TryGetValue(sid,  out var v1m);
-                _shock.TryGetValue(sid,       out var vsh);
-
+                _shock.TryGetValue(sid, out var sh);
+                _combined.TryGetValue(sid, out var combined);
                 var sample = new SentimentSample(
                     TimestampUtc: now,
                     StockId:      sid,
-                    PerStock24h:  v24,
-                    PerStock4h:   v4h,
-                    PerStock1h:   v1h,
-                    PerStock10m:  v10,
-                    PerStock1m:   v1m,
-                    Global24h:    _global24h,
-                    Global4h:     _global4h,
-                    Global1h:     _global1h,
-                    Shock:        vsh);
+                    Combined:     combined,
+                    GlobalSum:    (decimal)_globalSum,
+                    Shock:        (decimal)sh);
                 _samples.Enqueue(sample);
                 _store.Append(sample);
             }
             while (_samples.Count > RecentSamplesMax) _samples.Dequeue();
         }
     }
-    #endregion
 
-    #region Export
-    internal int SampleCount
-    {
-        get { lock (_samples) return _samples.Count; }
-    }
+    internal int SampleCount { get { lock (_samples) return _samples.Count; } }
 
-    internal string SuggestedExportFileName =>
-        $"bot_sentiment_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}";
+    internal string SuggestedExportFileName => $"bot_sentiment_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}";
 
     internal string BuildCsv(CancellationToken ct = default)
     {
         SentimentSample[] snapshot;
         lock (_samples) snapshot = _samples.ToArray();
 
-        var sb = new StringBuilder(512 + snapshot.Length * 96);
-        sb.AppendLine("TimestampUtc,StockId,PerStock24h,PerStock4h,PerStock1h,PerStock10m,PerStock1m," +
-                      "Global24h,Global4h,Global1h,Shock,Combined");
+        var sb = new StringBuilder(512 + snapshot.Length * 64);
+        sb.AppendLine("TimestampUtc,StockId,Combined,GlobalSum,Shock");
         var inv = CultureInfo.InvariantCulture;
         for (int i = 0; i < snapshot.Length; i++)
         {
             ct.ThrowIfCancellationRequested();
             var r = snapshot[i];
-            var combined = r.PerStock24h + r.PerStock4h + r.PerStock1h + r.PerStock10m + r.PerStock1m
-                         + r.Global24h + r.Global4h + r.Global1h + r.Shock;
             sb.Append(r.TimestampUtc.ToString("O", inv)).Append(',')
               .Append(r.StockId).Append(',')
-              .Append(r.PerStock24h.ToString(inv)).Append(',')
-              .Append(r.PerStock4h.ToString(inv)).Append(',')
-              .Append(r.PerStock1h.ToString(inv)).Append(',')
-              .Append(r.PerStock10m.ToString(inv)).Append(',')
-              .Append(r.PerStock1m.ToString(inv)).Append(',')
-              .Append(r.Global24h.ToString(inv)).Append(',')
-              .Append(r.Global4h.ToString(inv)).Append(',')
-              .Append(r.Global1h.ToString(inv)).Append(',')
-              .Append(r.Shock.ToString(inv)).Append(',')
-              .Append(combined.ToString(inv))
+              .Append(r.Combined.ToString(inv)).Append(',')
+              .Append(r.GlobalSum.ToString(inv)).Append(',')
+              .Append(r.Shock.ToString(inv))
               .Append('\n');
         }
-
         return sb.ToString();
     }
 
@@ -420,12 +346,6 @@ internal sealed class BotSentimentService
 internal readonly record struct SentimentSample(
     DateTime TimestampUtc,
     int      StockId,
-    decimal  PerStock24h,
-    decimal  PerStock4h,
-    decimal  PerStock1h,
-    decimal  PerStock10m,
-    decimal  PerStock1m,
-    decimal  Global24h,
-    decimal  Global4h,
-    decimal  Global1h,
+    decimal  Combined,
+    decimal  GlobalSum,
     decimal  Shock);

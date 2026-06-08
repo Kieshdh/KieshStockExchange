@@ -242,6 +242,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         blockTradeMultiple: _configuration.GetValue("Bots:BlockTradeMultiple", 4m),
                         mmQuoting:          _configuration.GetValue("Bots:MarketMakerQuoting", true),
                         quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m),
+                        limitOffsetMult:    _configuration.GetValue("Bots:Liquidity:OffsetMult", 1m),
+                        maxOpenOrdersMult:  _configuration.GetValue("Bots:Liquidity:MaxOpenMult", 1m),
+                        valueAnchorStrength: _configuration.GetValue("Bots:ValueAnchor:Strength", 0m),
+                        valueAnchorScale:    _configuration.GetValue("Bots:ValueAnchor:Scale", 0.15m),
+                        valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
+                        overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),
+                        marketSlippagePrc:   _configuration.GetValue("Bots:MarketSlippagePrc", 0.003m),
                         // §P6: advanced-order generation. Master on/off is config; the per-kind probabilities
                         // are PER-BOT (AIUser.*Prob, seeded by strategy in Tools/Person.py). Offsets + caps
                         // remain global config. When disabled, the seeded plain-order stream is byte-identical.
