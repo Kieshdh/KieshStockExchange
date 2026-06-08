@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 using System.Text;
 
 namespace KieshStockExchange.Services.PortfolioServices.Helpers;
@@ -103,11 +104,13 @@ public sealed class FxDeskTelemetry
             foreach (var kv in _byDirection.OrderBy(k => k.Key.From).ThenBy(k => k.Key.To))
                 sb.Append(' ').Append(kv.Key.From).Append("->").Append(kv.Key.To)
                   .Append(' ').Append(kv.Value.Count).Append('x')
-                  .Append(" (").Append(CurrencyHelper.Format(kv.Value.FromVolume, kv.Key.From)).Append(')');
+                  .Append(" (").Append(Money(kv.Value.FromVolume)).Append(' ').Append(kv.Key.From).Append(')');
         }
         return sb.ToString();
     }
 
+    // ISO code + invariant number (no locale currency symbol) so the line stays encoding-safe and
+    // greppable in a non-UTF8 console — this line IS the session conversion-data deliverable.
     private static void AppendCcyMap(StringBuilder sb, Dictionary<CurrencyType, decimal> map)
     {
         if (map.Count == 0) { sb.Append("none"); return; }
@@ -115,10 +118,12 @@ public sealed class FxDeskTelemetry
         foreach (var kv in map.OrderBy(k => k.Key))
         {
             if (!first) sb.Append(", ");
-            sb.Append(CurrencyHelper.Format(kv.Value, kv.Key));
+            sb.Append(Money(kv.Value)).Append(' ').Append(kv.Key);
             first = false;
         }
     }
+
+    private static string Money(decimal v) => v.ToString("N2", CultureInfo.InvariantCulture);
 
     private readonly record struct DirStat(long Count, decimal FromVolume, decimal ToVolume);
 }
