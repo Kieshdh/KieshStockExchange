@@ -84,14 +84,20 @@ internal sealed class BotSentimentService
 
     #region Services and Constructor
     private readonly IStockService _stocks;
+    private readonly StockProfileService _profiles;
     private readonly ILogger<BotSentimentService> _logger;
 
-    internal BotSentimentService(IStockService stocks, ILogger<BotSentimentService> logger,
+    // §P6 liveliness: per-stock sentiment amplitude multiplier (calm names quieter, meme names louder).
+    private double AmpMult(int stockId) => (double)_profiles.Get(stockId).SentimentAmplitudeMult;
+
+    internal BotSentimentService(IStockService stocks, StockProfileService profiles,
+        ILogger<BotSentimentService> logger,
         bool newsEvents = true, double shockMeanIntervalHours = 6.0,
         decimal shockMinMagnitude = 0.3m, decimal shockMaxMagnitude = 1.5m,
         double shockMagnitudeExponent = 3.0, decimal shockDecayPerTick = 0.999m)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
+        _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _newsEvents = newsEvents;
         _shockMinMagnitude = (double)shockMinMagnitude;
@@ -154,10 +160,11 @@ internal sealed class BotSentimentService
         foreach (var sid in _stocks.ById.Keys)
         {
             if (!_perStock.TryGetValue(sid, out var ring)) { ring = new double[PerStockRings]; _perStock[sid] = ring; }
+            double amp = AmpMult(sid);
             double sum = _globalSum;
             for (int k = 0; k < PerStockRings; k++)
             {
-                ring[k] = sAlpha[k] * ring[k] + sNoise[k] * UnitNoise();
+                ring[k] = sAlpha[k] * ring[k] + sNoise[k] * amp * UnitNoise();
                 sum += ring[k];
             }
             if (_shock.TryGetValue(sid, out var sh)) sum += sh;
@@ -266,8 +273,9 @@ internal sealed class BotSentimentService
         foreach (var sid in _stocks.ById.Keys)
         {
             var ring = new double[PerStockRings];
+            double amp = AmpMult(sid);
             double sum = _globalSum;
-            for (int k = 0; k < PerStockRings; k++) { ring[k] = PerStockSigma[k] * UnitNoise(); sum += ring[k]; }
+            for (int k = 0; k < PerStockRings; k++) { ring[k] = PerStockSigma[k] * amp * UnitNoise(); sum += ring[k]; }
             _perStock[sid] = ring;
             _combined[sid] = (decimal)sum;
         }

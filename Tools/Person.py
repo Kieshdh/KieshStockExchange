@@ -97,6 +97,7 @@ class Person:
         self._order_types()      # Probabilities for market/slippage orders, buy bias
         self._trade_limits()     # Slippage tolerance, limit offsets, per-position max, min/max trade amounts, daily limits
         self._advanced_orders()  # Per-strategy advanced-order probabilities (stop/trailing/short/brackets)
+        self._tiers()            # §P6 tiered-limit bands (Mid/Far), protective-stop distance band, Far budget
         # Cash-injection knobs are assigned by a second pass in GenerateAIUsers
         # once the population median is known. Default to 0 so an un-assigned
         # Person still passes C# validation (zero frequency = bot never injects).
@@ -235,6 +236,23 @@ class Person:
         self.long_bracket_prob  = clamp01(random.uniform(*prof["long_bracket"]))
         self.short_bracket_prob = clamp01(random.uniform(*prof["short_bracket"]))
 
+    def _tiers(self):
+        # §P6 tiered limit ladder + protective-stop band + Far budget. Close is the existing
+        # min/max_limit_offset (set in _trade_limits). Mid and Far are standing walls further out;
+        # ordering (Close ≤ Mid ≤ Far) and StopDistanceMax < FarLimitMin are enforced here so the C#
+        # AIUser.ValidateSizing invariants always hold and a fired stop stays inside the Far walls.
+        self.mid_limit_min = clamp01(random.uniform(*MID_LIMIT_MIN_RANGE))
+        self.mid_limit_max = clamp01(max(self.mid_limit_min, random.uniform(*MID_LIMIT_MAX_RANGE)))
+        self.far_limit_min = clamp01(max(self.mid_limit_max, random.uniform(*FAR_LIMIT_MIN_RANGE)))
+        self.far_limit_max = clamp01(max(self.far_limit_min, random.uniform(*FAR_LIMIT_MAX_RANGE)))
+
+        # Protective stop strictly inside the Far walls.
+        stop_cap = self.far_limit_min * 0.9
+        self.stop_distance_max = clamp01(min(random.uniform(*STOP_DISTANCE_MAX_RANGE), stop_cap))
+        self.stop_distance_min = clamp01(self.stop_distance_max * random.uniform(*STOP_DISTANCE_MIN_FRACTION))
+
+        self.far_budget = clamp01(random.uniform(*FAR_BUDGET_RANGE))
+
     def portfolio_value(self) -> float:
         # Total seeded wealth = remaining cash + market value of initial holdings.
         return self.balance + sum(qty * STOCKS[sid]["price"]
@@ -293,6 +311,15 @@ class Person:
             round(self.short_prob, 4),                      # float: P(open flat short) per tick
             round(self.long_bracket_prob, 4),               # float: P(long bracket) per tick
             round(self.short_bracket_prob, 4),              # float: P(short bracket) per tick
+            # §P6 tiered-limit bands + protective-stop band + Far budget (order must match
+            # ExcelLayout.prepare_profile_sheet; the server reads these by column name).
+            round(self.mid_limit_min, 4),                   # float: MidLimitMinPrc
+            round(self.mid_limit_max, 4),                   # float: MidLimitMaxPrc
+            round(self.far_limit_min, 4),                   # float: FarLimitMinPrc
+            round(self.far_limit_max, 4),                   # float: FarLimitMaxPrc
+            round(self.stop_distance_min, 4),               # float: StopDistanceMinPrc
+            round(self.stop_distance_max, 4),               # float: StopDistanceMaxPrc
+            round(self.far_budget, 4),                      # float: FarBudgetPrc
         ]
 
     def ToHoldingList(self):

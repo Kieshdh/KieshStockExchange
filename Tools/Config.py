@@ -127,7 +127,8 @@ TRADE_PROB_JITTER         = 0.15
 
 # Strategy options (_trade_properties).
 # Ids match C# AiStrategy: 0=MarketMaker, 1=TrendFollower, 2=MeanReversion, 3=Random, 4=Scalper.
-STRATEGY_CHOICES          = (1, 2, 3, 4)
+# §P6: MarketMaker (0) included so a slice of bots quote tight two-sided and keep the touch liquid.
+STRATEGY_CHOICES          = (0, 1, 2, 3, 4)
 
 # ───────────────────── Advanced-order probabilities (per bot, per tick) ───────────────────────
 # §3.6 P6: each bot is assigned its own probability of choosing each advanced order kind, drawn
@@ -232,6 +233,20 @@ MIN_LIMIT_FRACTION_LO     = 0.05    # min_limit = max_limit * U(LO, HI)
 MIN_LIMIT_FRACTION_HI     = 0.30
 MIN_LIMIT_FLOOR           = 0.001
 
+# §P6 tiered limit ladder (_tiers). Close = the existing Min/MaxLimitOffsetPrc (tight, near the touch).
+# Mid + Far are standing walls further out; a fired (slippage-capped) stop runs into the Far walls and is
+# absorbed. Each (lo,hi) is the per-bot uniform draw range; Person.py enforces ordering
+# (Close ≤ Mid ≤ Far) and StopDistanceMax < FarLimitMin so a stop never sits outside the walls.
+MID_LIMIT_MIN_RANGE       = (0.010, 0.020)   # MidLimitMinPrc
+MID_LIMIT_MAX_RANGE       = (0.030, 0.050)   # MidLimitMaxPrc
+FAR_LIMIT_MIN_RANGE       = (0.060, 0.100)   # FarLimitMinPrc
+FAR_LIMIT_MAX_RANGE       = (0.150, 0.250)   # FarLimitMaxPrc
+# Protective-stop distance band. Max is additionally clamped < FarLimitMin in Person.py.
+STOP_DISTANCE_MAX_RANGE   = (0.030, 0.050)   # StopDistanceMaxPrc (pre-clamp)
+STOP_DISTANCE_MIN_FRACTION = (0.50, 0.90)    # StopDistanceMinPrc = StopDistanceMaxPrc * U(lo,hi)
+# Total resting Far-order value the tier-aware prune allows, as a fraction of portfolio.
+FAR_BUDGET_RANGE          = (0.05, 0.15)     # FarBudgetPrc
+
 # Per-position max (_trade_limits): floored against 1/max_stocks downstream.
 PER_POS_BASE              = 0.08
 PER_POS_SLOPE             = 0.22
@@ -293,6 +308,21 @@ def _validate() -> None:
     _ordered("MAX_TRADE_FRACTION_LO",  MAX_TRADE_FRACTION_LO,  "MAX_TRADE_FRACTION_HI",  MAX_TRADE_FRACTION_HI)
     _ordered("WATCHLIST_EXTRA_LO",     WATCHLIST_EXTRA_LO,     "WATCHLIST_EXTRA_HI",     WATCHLIST_EXTRA_HI)
     _ordered("BUY_BIAS_MIN",           BUY_BIAS_MIN,           "BUY_BIAS_MAX",           BUY_BIAS_MAX)
+
+    # §P6 tiered ladder: each draw range must be inside [0,1] and lo ≤ hi; and the tier bands must not
+    # overlap (Mid < Far) with the protective stop strictly inside the Far walls (StopMax < FarMin).
+    for name, rng in [
+        ("MID_LIMIT_MIN_RANGE", MID_LIMIT_MIN_RANGE), ("MID_LIMIT_MAX_RANGE", MID_LIMIT_MAX_RANGE),
+        ("FAR_LIMIT_MIN_RANGE", FAR_LIMIT_MIN_RANGE), ("FAR_LIMIT_MAX_RANGE", FAR_LIMIT_MAX_RANGE),
+        ("STOP_DISTANCE_MAX_RANGE", STOP_DISTANCE_MAX_RANGE), ("FAR_BUDGET_RANGE", FAR_BUDGET_RANGE),
+        ("STOP_DISTANCE_MIN_FRACTION", STOP_DISTANCE_MIN_FRACTION),
+    ]:
+        _in_unit(name, rng[0], rng[1])
+        _ordered(f"{name}[0]", rng[0], f"{name}[1]", rng[1])
+    if MID_LIMIT_MAX_RANGE[1] > FAR_LIMIT_MIN_RANGE[0]:
+        raise ValueError("MID_LIMIT_MAX_RANGE must stay below FAR_LIMIT_MIN_RANGE (tiers must not overlap)")
+    if STOP_DISTANCE_MAX_RANGE[1] > FAR_LIMIT_MIN_RANGE[0]:
+        raise ValueError("STOP_DISTANCE_MAX_RANGE must stay below FAR_LIMIT_MIN_RANGE (stop inside Far walls)")
 
     # Aggressiveness band thresholds must be strictly increasing and inside (0,1).
     if not (0.0 < STOCKS_AGG_LOW_THR < STOCKS_AGG_MID_THR < 1.0):

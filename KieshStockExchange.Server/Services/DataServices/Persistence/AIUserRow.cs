@@ -44,6 +44,15 @@ public class AIUserRow
     [Column("LongBracketProb")] public decimal LongBracketProb { get; set; }
     [Column("ShortBracketProb")] public decimal ShortBracketProb { get; set; }
 
+    // §P6 balancing: per-bot tiered-limit bands, protective-stop distance band, and Far-order budget.
+    [Column("MidLimitMinPrc")] public decimal MidLimitMinPrc { get; set; }
+    [Column("MidLimitMaxPrc")] public decimal MidLimitMaxPrc { get; set; }
+    [Column("FarLimitMinPrc")] public decimal FarLimitMinPrc { get; set; }
+    [Column("FarLimitMaxPrc")] public decimal FarLimitMaxPrc { get; set; }
+    [Column("StopDistanceMinPrc")] public decimal StopDistanceMinPrc { get; set; }
+    [Column("StopDistanceMaxPrc")] public decimal StopDistanceMaxPrc { get; set; }
+    [Column("FarBudgetPrc")] public decimal FarBudgetPrc { get; set; }
+
     [Column("WatchlistCsv")] public string WatchlistCsv { get; set; } = string.Empty;
 
     [Column("MaxOpenOrders")] public int MaxOpenOrders { get; set; } = 20;
@@ -87,6 +96,13 @@ public static class AIUserMapper
             ShortProb = r.ShortProb,
             LongBracketProb = r.LongBracketProb,
             ShortBracketProb = r.ShortBracketProb,
+            MidLimitMinPrc = r.MidLimitMinPrc,
+            MidLimitMaxPrc = r.MidLimitMaxPrc,
+            FarLimitMinPrc = r.FarLimitMinPrc,
+            FarLimitMaxPrc = r.FarLimitMaxPrc,
+            StopDistanceMinPrc = r.StopDistanceMinPrc,
+            StopDistanceMaxPrc = r.StopDistanceMaxPrc,
+            FarBudgetPrc = r.FarBudgetPrc,
             MaxOpenOrders = r.MaxOpenOrders,
             HomeCurrency = r.HomeCurrency,
             StrategyCode = r.StrategyCode,
@@ -126,6 +142,13 @@ public static class AIUserMapper
         ShortProb = a.ShortProb,
         LongBracketProb = a.LongBracketProb,
         ShortBracketProb = a.ShortBracketProb,
+        MidLimitMinPrc = a.MidLimitMinPrc,
+        MidLimitMaxPrc = a.MidLimitMaxPrc,
+        FarLimitMinPrc = a.FarLimitMinPrc,
+        FarLimitMaxPrc = a.FarLimitMaxPrc,
+        StopDistanceMinPrc = a.StopDistanceMinPrc,
+        StopDistanceMaxPrc = a.StopDistanceMaxPrc,
+        FarBudgetPrc = a.FarBudgetPrc,
         WatchlistCsv = a.WatchlistCsv,
         MaxOpenOrders = a.MaxOpenOrders,
         HomeCurrency = a.HomeCurrency,

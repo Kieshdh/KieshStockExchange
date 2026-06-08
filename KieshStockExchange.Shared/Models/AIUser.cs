@@ -112,6 +112,34 @@ public class AIUser : IValidatable
     private decimal _aggressivenessPrc = 0.5m;
     public decimal AggressivenessPrc { get => _aggressivenessPrc; set => _aggressivenessPrc = RequiredPrc(value, nameof(AggressivenessPrc)); }
 
+    // §P6 balancing: tiered limit ladder. Close = the existing Min/MaxLimitOffsetPrc (tight, churns at
+    // the touch). Mid + Far are standing walls further out. A fired (slippage-capped) stop runs into the
+    // Far walls and is absorbed, so StopDistanceMax must stay below FarLimitMin (enforced in Person.py +
+    // ValidateSizing). All are fractions of price; seeded per-bot in Tools/Person.py.
+    private decimal _midLimitMinPrc = 0.01m;
+    public decimal MidLimitMinPrc { get => _midLimitMinPrc; set => _midLimitMinPrc = RequiredPrc(value, nameof(MidLimitMinPrc)); }
+
+    private decimal _midLimitMaxPrc = 0.05m;
+    public decimal MidLimitMaxPrc { get => _midLimitMaxPrc; set => _midLimitMaxPrc = RequiredPrc(value, nameof(MidLimitMaxPrc)); }
+
+    private decimal _farLimitMinPrc = 0.06m;
+    public decimal FarLimitMinPrc { get => _farLimitMinPrc; set => _farLimitMinPrc = RequiredPrc(value, nameof(FarLimitMinPrc)); }
+
+    private decimal _farLimitMaxPrc = 0.25m;
+    public decimal FarLimitMaxPrc { get => _farLimitMaxPrc; set => _farLimitMaxPrc = RequiredPrc(value, nameof(FarLimitMaxPrc)); }
+
+    // Protective-stop distance band (fraction below/above the reference). Kept inside the Far walls.
+    private decimal _stopDistanceMinPrc = 0.02m;
+    public decimal StopDistanceMinPrc { get => _stopDistanceMinPrc; set => _stopDistanceMinPrc = RequiredPrc(value, nameof(StopDistanceMinPrc)); }
+
+    private decimal _stopDistanceMaxPrc = 0.05m;
+    public decimal StopDistanceMaxPrc { get => _stopDistanceMaxPrc; set => _stopDistanceMaxPrc = RequiredPrc(value, nameof(StopDistanceMaxPrc)); }
+
+    // Cap on the bot's total resting Far-order value, as a fraction of portfolio. The tier-aware prune
+    // mass-cancels worst-first down to ½ of this when exceeded (hysteresis).
+    private decimal _farBudgetPrc = 0.10m;
+    public decimal FarBudgetPrc { get => _farBudgetPrc; set => _farBudgetPrc = RequiredPrc(value, nameof(FarBudgetPrc)); }
+
     // §3.6 P6: per-bot, per-tick probabilities of choosing each advanced order kind (seeded + assigned
     // by strategy in Tools/Person.py). They REPLACE the global Bots:Advanced:*Prob config — the master
     // Bots:Advanced:Enabled switch still gates the whole feature. Default 0 so a bot never does advanced
@@ -239,9 +267,15 @@ public class AIUser : IValidatable
         CashInjectionFrequencyPrc >= 0m && CashInjectionFrequencyPrc <= 0.50m &&
         CashInjectionAmountPrc    >= 0m && CashInjectionAmountPrc    <= 0.05m &&
         IsValidPrc(StopProb) && IsValidPrc(TrailingProb) && IsValidPrc(ShortProb) &&
-        IsValidPrc(LongBracketProb) && IsValidPrc(ShortBracketProb);
+        IsValidPrc(LongBracketProb) && IsValidPrc(ShortBracketProb) &&
+        IsValidPrc(MidLimitMinPrc) && IsValidPrc(MidLimitMaxPrc) &&
+        IsValidPrc(FarLimitMinPrc) && IsValidPrc(FarLimitMaxPrc) &&
+        IsValidPrc(StopDistanceMinPrc) && IsValidPrc(StopDistanceMaxPrc) && IsValidPrc(FarBudgetPrc);
 
-    private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc;
+    private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc &&
+        // §P6 tier ladder ordering: each tier's min ≤ max, and the protective stop sits inside the Far walls.
+        MidLimitMinPrc <= MidLimitMaxPrc && FarLimitMinPrc <= FarLimitMaxPrc &&
+        StopDistanceMinPrc <= StopDistanceMaxPrc && StopDistanceMaxPrc <= FarLimitMinPrc;
 
     private bool IsValidWatchlist() => Watchlist.Count > 0 && Watchlist.All(id => id > 0);
 

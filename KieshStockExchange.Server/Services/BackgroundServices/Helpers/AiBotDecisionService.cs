@@ -42,6 +42,8 @@ internal sealed class AiBotDecisionService
     private readonly IOrderBookEngine _books;
     private readonly IStockService _stocks;
     private readonly BotSentimentService _sentiment;
+    private readonly FundamentalService _funds;     // §P6 slowly-drifting per-stock fundamental
+    private readonly StockProfileService _profiles; // §P6 per-stock personality (volatility class)
     private readonly ILogger<AiBotDecisionService> _logger;
 
     // §1 order-size fat tails (shared config; per-bot variation comes from the draw).
@@ -68,7 +70,14 @@ internal sealed class AiBotDecisionService
     private readonly bool    _valueTargetSelection; // concentrate the anchor via stock selection (destabilizing at high gain)
     private readonly decimal _overheatCap;          // refuse to buy above / sell below fundamental by more than this (0 = off)
     private readonly decimal _marketSlippagePrc;    // low cap on every market order's slippage so none sweeps far
-    private readonly Dictionary<(int, CurrencyType), decimal> _fundamental = new();
+
+    // §P6 balancing: tiered-limit selection probabilities (Far = remainder), low slippage cap applied to
+    // every bot protective/bracket stop fire (percent), and the max fraction of resting opposite-side
+    // depth a single bot market order may sweep (structural anti-sweep).
+    private readonly decimal _tierCloseProb;
+    private readonly decimal _tierMidProb;
+    private readonly decimal _stopSlippagePct;
+    private readonly decimal _maxSweepFractionOfDepth;
 
     // §P6 advanced-order generation for the bot soak (all off by default).
     private readonly bool    _advancedEnabled;
@@ -83,6 +92,7 @@ internal sealed class AiBotDecisionService
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
+        FundamentalService funds, StockProfileService profiles,
         ILogger<AiBotDecisionService> logger,
         bool fatTails = true, decimal tradeSizeTailShape = 0.5m,
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
@@ -91,6 +101,8 @@ internal sealed class AiBotDecisionService
         decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal marketSlippagePrc = 0.003m,
+        decimal tierCloseProb = 0.6m, decimal tierMidProb = 0.3m,
+        decimal stopSlippagePct = 0.3m, decimal maxSweepFractionOfDepth = 0.25m,
         bool advancedEnabled = false,
         decimal stopOffsetMin = 0.02m, decimal stopOffsetMax = 0.05m,
         decimal tpOffsetMin = 0.03m, decimal tpOffsetMax = 0.08m,
@@ -101,6 +113,8 @@ internal sealed class AiBotDecisionService
         _books     = books     ?? throw new ArgumentNullException(nameof(books));
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
+        _funds     = funds     ?? throw new ArgumentNullException(nameof(funds));
+        _profiles  = profiles  ?? throw new ArgumentNullException(nameof(profiles));
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
         _fatTails           = fatTails;
         _tradeSizeTailShape = tradeSizeTailShape;
@@ -115,6 +129,10 @@ internal sealed class AiBotDecisionService
         _valueTargetSelection = valueTargetSelection;
         _overheatCap        = Math.Max(0m, overheatCap);
         _marketSlippagePrc  = marketSlippagePrc <= 0m ? 0.003m : marketSlippagePrc;
+        _tierCloseProb      = Clamp01(tierCloseProb);
+        _tierMidProb        = Clamp01(tierMidProb);
+        _stopSlippagePct    = Math.Max(0m, stopSlippagePct);
+        _maxSweepFractionOfDepth = Math.Max(0m, maxSweepFractionOfDepth);
         _advancedEnabled    = advancedEnabled;
         _stopOffsetMin      = stopOffsetMin;
         _stopOffsetMax      = stopOffsetMax;
@@ -147,29 +165,15 @@ internal sealed class AiBotDecisionService
         var stockId = ChooseStockId(ctx, user, type, currency);
         if (stockId <= 0) return null;
 
-        // When the chosen stock's raw sentiment crosses ±1, force the order
-        // into a TrueMarket{Buy,Sell} in the bot's style-appropriate direction
-        // with probability proportional to the overflow. No-op when the
-        // override would point at zero shares (sell with no position).
+        // When the chosen stock's raw sentiment crosses ±1, force the order into a slippage-capped market
+        // order in the bot's style-appropriate direction with probability proportional to the overflow.
+        // No-op when the override would point at zero shares (sell with no position).
         type = ApplyExtremeReaction(ctx, user, stockId, currency, type);
 
         // Value-band veto: don't chase price past the band — refuse to buy a stock already far above
-        // fundamental or sell one far below it. Cuts the fuel that lets a minority of stocks escape to
-        // extreme prices (the anchor alone can't sell down a runaway no bot owns).
-        if (_overheatCap > 0m)
-        {
-            var fund = Fundamental(stockId, currency);
-            if (fund > 0m)
-            {
-                var mkt = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
-                if (mkt > 0m)
-                {
-                    var dev = (mkt - fund) / fund;
-                    if (IsBuyOrder(type) && dev > _overheatCap) return null;
-                    if (IsSellOrder(type) && dev < -_overheatCap) return null;
-                }
-            }
-        }
+        // fundamental or sell one far below it. Cuts the fuel that lets a minority of stocks escape.
+        if (IsBuyOrder(type) && await IsOverBandAsync(ctx, stockId, currency, isBuy: true, ct).ConfigureAwait(false)) return null;
+        if (IsSellOrder(type) && await IsOverBandAsync(ctx, stockId, currency, isBuy: false, ct).ConfigureAwait(false)) return null;
 
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
         var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
@@ -216,17 +220,20 @@ internal sealed class AiBotDecisionService
 
         // Cumulative kind pick from the same roll (no extra draw). A builder that can't find an eligible
         // stock returns null → the caller falls through to a normal plain order this tick.
+        // StopProb and TrailingProb both now gate a slippage-capped STATIC protective stop — bots never
+        // arm an uncapped trailing fire (the §P6 "bound ALL stop fires" guarantee, bot-side).
         decimal c = user.StopProb;
-        if (r < c)                          return await BuildProtectiveStopAsync(ctx, user, currency, trailing: false, ct).ConfigureAwait(false);
-        c += user.TrailingProb; if (r < c)  return await BuildProtectiveStopAsync(ctx, user, currency, trailing: true,  ct).ConfigureAwait(false);
+        if (r < c)                          return await BuildProtectiveStopAsync(ctx, user, currency, ct).ConfigureAwait(false);
+        c += user.TrailingProb; if (r < c)  return await BuildProtectiveStopAsync(ctx, user, currency, ct).ConfigureAwait(false);
         c += user.ShortProb;    if (r < c)  return await BuildShortOpenAsync(ctx, user, currency, ct).ConfigureAwait(false);
         c += user.LongBracketProb; if (r < c) return await BuildBracketAsync(ctx, user, currency, isShort: false, ct).ConfigureAwait(false);
         return await BuildBracketAsync(ctx, user, currency, isShort: true, ct).ConfigureAwait(false);
     }
 
-    // P6a: protect the first watchlist long with FREE shares — sell-stop below market, or trailing-sell.
+    // P6a: protect the first watchlist long with FREE shares — a slippage-capped, fundamental-relative
+    // static sell-stop (bots no longer arm uncapped trailing stops; see ComputeAdvancedDecisionAsync).
     private async Task<BotAdvancedDecision?> BuildProtectiveStopAsync(AiBotContext ctx, AIUser user,
-        CurrencyType currency, bool trailing, CancellationToken ct)
+        CurrencyType currency, CancellationToken ct)
     {
         var watch = user.Watchlist?.Where(id => _stocks.IsListedIn(id, currency)).ToList();
         if (watch is null || watch.Count == 0) return null;
@@ -239,13 +246,21 @@ internal sealed class AiBotDecisionService
         if (stockId <= 0 || qty <= 0) return null;
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
-        var offset = Lerp(_stopOffsetMin, _stopOffsetMax, ctx.Decimal01(user.AiUserId));
-        if (trailing)
-            return new BotAdvancedDecision(BotAdvancedKind.TrailingStopSell, stockId, qty, currency,
-                TrailOffset: offset * 100m, TrailIsPercent: true);
-        var stopPrice = CurrencyHelper.RoundMoney(price * (1m - offset), currency);
+
+        // §P6 fundamental-relative + de-clustered trigger, bounded inside the Far walls, and a low
+        // slippage cap on the fire. Bots NEVER arm an uncapped trailing stop: the `trailing` gate now
+        // also produces a capped static stop (real users' trailing path is unchanged). The reference
+        // blends market with fundamental, but the trigger is forced strictly below market so a sell-stop
+        // is always valid and varied stops don't pile at one level and chain-fire.
+        var offset = StopOffset(ctx, user);
+        var fund = Fundamental(stockId, currency);
+        var refPrice = fund > 0m ? (price + fund) / 2m : price;
+        var candidate = refPrice * (1m - offset);
+        var ceiling = price * (1m - 0.002m);
+        var stopPrice = CurrencyHelper.RoundMoney(Math.Min(candidate, ceiling), currency);
         if (stopPrice <= 0m) return null;
-        return new BotAdvancedDecision(BotAdvancedKind.StopMarketSell, stockId, qty, currency, StopPrice: stopPrice);
+        return new BotAdvancedDecision(BotAdvancedKind.StopMarketSell, stockId, qty, currency,
+            StopPrice: stopPrice, StopSlippagePct: _stopSlippagePct);
     }
 
     // P6b: open a flat-only cash-collateralized short (market sell on a stock the bot doesn't hold). Flat-only
@@ -258,7 +273,12 @@ internal sealed class AiBotDecisionService
         if (stockId <= 0) return null;
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
+        // §P6: don't pile a fresh short into a stock already far below fundamental (downward runaway fuel).
+        if (await IsOverBandAsync(ctx, stockId, currency, isBuy: false, ct).ConfigureAwait(false)) return null;
         int qty = AdvancedExposureQty(ctx, user, currency, price);
+        if (qty <= 0) return null;
+        // §P6 anti-sweep: the market-sell entry can't take more than a fraction of the resting bids.
+        qty = await ApplyDepthCapAsync(qty, isBuy: false, stockId, currency, ct).ConfigureAwait(false);
         if (qty <= 0) return null;
         return new BotAdvancedDecision(BotAdvancedKind.ShortOpen, stockId, qty, currency);
     }
@@ -274,8 +294,14 @@ internal sealed class AiBotDecisionService
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
 
-        // SL distance + two TP distances (sorted so TP1 is nearer market than TP2).
-        var slOff = Lerp(_stopOffsetMin, _stopOffsetMax, ctx.Decimal01(user.AiUserId));
+        // §P6: brackets respect the same value-band veto as plain orders — don't open a long into a stock
+        // already far above fundamental (its market entry is the fuel that fed the runaway), nor a short
+        // into one already far below.
+        if (await IsOverBandAsync(ctx, stockId, currency, isBuy: !isShort, ct).ConfigureAwait(false)) return null;
+
+        // SL distance (per-bot, de-clustered, bounded inside Far walls) + two TP distances (sorted so
+        // TP1 is nearer market than TP2).
+        var slOff = StopOffset(ctx, user);
         var o1 = Lerp(_tpOffsetMin, _tpOffsetMax, ctx.Decimal01(user.AiUserId));
         var o2 = Lerp(_tpOffsetMin, _tpOffsetMax, ctx.Decimal01(user.AiUserId));
         var tpNear = Math.Min(o1, o2); var tpFar = Math.Max(o1, o2);
@@ -296,12 +322,21 @@ internal sealed class AiBotDecisionService
         }
         else
         {
-            stopPrice = CurrencyHelper.RoundMoney(price * (1m - slOff), currency);     // SL below entry
-            slippage  = null;                                                          // uncapped sell-stop ok (shares)
+            // §P6: fundamental-relative SL strictly below entry, and a low slippage cap on the fire
+            // (was uncapped null — the downward-cascade source). Share-reserved, so the cap is safe.
+            var fundVal  = Fundamental(stockId, currency);
+            var refPrice = fundVal > 0m ? (price + fundVal) / 2m : price;
+            var slCand   = refPrice * (1m - slOff);
+            var slCeil   = price * (1m - 0.002m);
+            stopPrice = CurrencyHelper.RoundMoney(Math.Min(slCand, slCeil), currency);  // SL below entry
+            slippage  = _stopSlippagePct;                                               // capped fire
             qty = (int)Math.Floor((avail - BuySafetyBuffer) / price);                  // entry cash must fit
             buyBudget = 0m; // set after qty is known
         }
         qty = Math.Min(qty, _advancedMaxQty);
+        // §P6 anti-sweep: the market entry leg can't take more than a fraction of the resting opposite
+        // side (long entry buys asks, short entry sells bids) — the same structural cap as plain orders.
+        qty = await ApplyDepthCapAsync(qty, isBuy: !isShort, stockId, currency, ct).ConfigureAwait(false);
         if (qty < 2) return null;   // need ≥2 for a 2-leg scale-out
         if (!isShort) buyBudget = CurrencyHelper.RoundMoney(price * qty, currency);
 
@@ -548,10 +583,12 @@ internal sealed class AiBotDecisionService
         var anchor = await GetMidPriceAsync(stockId, currency, ct).ConfigureAwait(false)
                      ?? marketPrice;
 
-        // Limit order: widen the per-bot band by the liquidity multiplier, then add bidirectional
-        // jitter so some orders land closer to market and others rest deeper out.
-        var minOff = user.MinLimitOffsetPrc * _limitOffsetMult;
-        var maxOff = user.MaxLimitOffsetPrc * _limitOffsetMult;
+        // §P6 tiered ladder: pick Close / Mid / Far, then widen the chosen band by the liquidity
+        // multiplier and add bidirectional jitter. Close churns at the touch; Far rests standing walls
+        // that absorb fired (slippage-capped) stops instead of letting them sweep empty space.
+        var (tierMin, tierMax) = PickLimitTier(ctx, user);
+        var minOff = tierMin * _limitOffsetMult;
+        var maxOff = tierMax * _limitOffsetMult;
         var offset = Clamp01(Lerp(minOff, maxOff, ctx.Decimal01(user.AiUserId)));
         var jitter = (ctx.Decimal01(user.AiUserId) * 2m - 1m) * user.AggressivenessPrc;
         offset = Math.Max(minOff, Math.Min(maxOff, offset * (1m + jitter)));
@@ -652,6 +689,9 @@ internal sealed class AiBotDecisionService
                 int coverable      = Math.Max(0, shortMag - committedCover);
                 qty = Math.Min(qty, coverable);
             }
+            // §P6 anti-sweep: a market buy can't take more than a fraction of resting asks.
+            if (IsSlippageOrder(type))
+                qty = await ApplyDepthCapAsync(qty, isBuy: true, stockId, currency, ct).ConfigureAwait(false);
             return qty;
         }
         else
@@ -663,7 +703,11 @@ internal sealed class AiBotDecisionService
             var engineAvailable = _accounts.GetPosition(user.UserId, stockId)?.AvailableQuantity ?? 0;
             var availableQty    = Math.Min(ctxAvailable, engineAvailable);
             var desiredQty      = Math.Max(1, (int)Math.Floor(rawTrade / estimatePrice));
-            return Math.Min(desiredQty, availableQty);
+            var sellQty         = Math.Min(desiredQty, availableQty);
+            // §P6 anti-sweep: a market sell can't take more than a fraction of resting bids.
+            if (IsSlippageOrder(type))
+                sellQty = await ApplyDepthCapAsync(sellQty, isBuy: false, stockId, currency, ct).ConfigureAwait(false);
+            return sellQty;
         }
     }
 
@@ -710,6 +754,82 @@ internal sealed class AiBotDecisionService
         }
         return price;
     }
+
+    // §P6 tiered ladder: roll Close / Mid / Far and return that tier's (min,max) offset band. Mid/Far
+    // fall back to the Close band if a bot pre-dates the tier columns (all-zero), so behaviour degrades
+    // gracefully on an un-regenerated workbook.
+    private (decimal min, decimal max) PickLimitTier(AiBotContext ctx, AIUser user)
+    {
+        var r = ctx.Decimal01(user.AiUserId);
+        if (r < _tierCloseProb) return (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc);
+        if (r < _tierCloseProb + _tierMidProb)
+            return user.MidLimitMaxPrc > 0m
+                ? (user.MidLimitMinPrc, user.MidLimitMaxPrc)
+                : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc);
+        return user.FarLimitMaxPrc > 0m
+            ? (user.FarLimitMinPrc, user.FarLimitMaxPrc)
+            : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc);
+    }
+
+    // §P6: per-bot protective-stop distance — drawn from the bot's StopDistance band (config fallback
+    // for un-regenerated bots), jittered ±20% to de-cluster trigger levels, and clamped strictly inside
+    // the Far walls so a fired (capped) stop runs into a standing wall instead of triggering the next stop.
+    private decimal StopOffset(AiBotContext ctx, AIUser user)
+    {
+        var lo = user.StopDistanceMinPrc > 0m ? user.StopDistanceMinPrc : _stopOffsetMin;
+        var hi = user.StopDistanceMaxPrc > 0m ? user.StopDistanceMaxPrc : _stopOffsetMax;
+        var off = Lerp(lo, hi, ctx.Decimal01(user.AiUserId));
+        var jitter = (ctx.Decimal01(user.AiUserId) * 2m - 1m) * 0.20m;
+        off *= (1m + jitter);
+        var farMin = user.FarLimitMinPrc > 0m ? user.FarLimitMinPrc : hi;
+        off = Math.Min(off, farMin * 0.9m);
+        return Math.Max(0.001m, off);
+    }
+
+    // §P6 value-band veto (shared by the plain and advanced order paths): true when an order would chase
+    // price past the personality-scaled overheat band — buying a stock already far above fundamental, or
+    // selling/shorting one already far below. Brackets and shorts route through this too, so the advanced
+    // path can't bypass the anchor and feed a runaway.
+    private async Task<bool> IsOverBandAsync(AiBotContext ctx, int stockId, CurrencyType currency,
+        bool isBuy, CancellationToken ct)
+    {
+        if (_overheatCap <= 0m) return false;
+        var fund = Fundamental(stockId, currency);
+        if (fund <= 0m) return false;
+        var mkt = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
+        if (mkt <= 0m) return false;
+        var cap = _overheatCap * _profiles.Get(stockId).OverheatCapMult;
+        var dev = (mkt - fund) / fund;
+        return isBuy ? dev > cap : dev < -cap;
+    }
+
+    // §P6 liquidity-aware anti-sweep: cap a bot MARKET order to a fraction of the resting opposite-side
+    // depth so no single order can sweep more than that share of the book, regardless of slippage. Pure
+    // size reduction — conservation-neutral. Limits are unaffected (they rest, they don't sweep).
+    private async Task<int> ApplyDepthCapAsync(int qty, bool isBuy, int stockId, CurrencyType currency,
+        CancellationToken ct)
+    {
+        if (qty <= 0 || _maxSweepFractionOfDepth <= 0m) return qty;
+        try
+        {
+            var book = await _books.GetAsync(stockId, currency, ct).ConfigureAwait(false);
+            var snap = book?.Snapshot();
+            if (snap is null) return qty;
+            var levels = isBuy ? snap.Sells : snap.Buys;
+            long oppQty = 0;
+            for (int i = 0; i < levels.Count; i++) oppQty += levels[i].Quantity;
+            if (oppQty <= 0) return qty; // empty opposite side — nothing to sweep
+            int cap = (int)Math.Floor((decimal)oppQty * _maxSweepFractionOfDepth);
+            return Math.Min(qty, Math.Max(0, cap));
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Depth-cap fetch failed for stock {Stock}/{Currency}; leaving qty uncapped.",
+                stockId, currency);
+            return qty;
+        }
+    }
     #endregion
 
     #region Sentiment Integration
@@ -747,17 +867,10 @@ internal sealed class AiBotDecisionService
     // A market order's slippage, capped low so no single market order sweeps a thin book far.
     private decimal EffectiveSlippage(AIUser user) => Math.Min(user.SlippageTolerancePrc, _marketSlippagePrc);
 
-    // Per-(stock,currency) fundamental = its seed listing price, cached on first use.
+    // Per-(stock,currency) fundamental — the slowly-drifting value the FundamentalService maintains
+    // (the fixed seed price when drift is disabled). The value anchor + overheat veto track this.
     private decimal Fundamental(int stockId, CurrencyType currency)
-    {
-        var key = (stockId, currency);
-        if (_fundamental.TryGetValue(key, out var f)) return f;
-        f = 0m;
-        foreach (var l in _stocks.GetListings(stockId))
-            if (l.CurrencyType == currency) { f = l.SeedPrice; break; }
-        _fundamental[key] = f;
-        return f;
-    }
+        => _funds.Get(stockId, currency);
 
     private OrderType ApplyExtremeReaction(AiBotContext ctx, AIUser user,
         int stockId, CurrencyType currency, OrderType currentType)

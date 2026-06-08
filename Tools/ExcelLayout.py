@@ -83,6 +83,9 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         # §3.6 P6: per-bot advanced-order probabilities (must stay in the same order as
         # Person.ToProfileList; the server reads them by column name in ExcelSeedService).
         "StopProb", "TrailingProb", "ShortProb", "LongBracketProb", "ShortBracketProb",
+        # §P6 balancing: tiered-limit bands, protective-stop distance band, Far-order budget.
+        "MidLimitMinPrc", "MidLimitMaxPrc", "FarLimitMinPrc", "FarLimitMaxPrc",
+        "StopDistanceMinPrc", "StopDistanceMaxPrc", "FarBudgetPrc",
     ])
     return ws
 

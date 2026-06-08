@@ -243,6 +243,13 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.ShortProb).HasColumnType(Money);
             b.Property(x => x.LongBracketProb).HasColumnType(Money);
             b.Property(x => x.ShortBracketProb).HasColumnType(Money);
+            b.Property(x => x.MidLimitMinPrc).HasColumnType(Money);
+            b.Property(x => x.MidLimitMaxPrc).HasColumnType(Money);
+            b.Property(x => x.FarLimitMinPrc).HasColumnType(Money);
+            b.Property(x => x.FarLimitMaxPrc).HasColumnType(Money);
+            b.Property(x => x.StopDistanceMinPrc).HasColumnType(Money);
+            b.Property(x => x.StopDistanceMaxPrc).HasColumnType(Money);
+            b.Property(x => x.FarBudgetPrc).HasColumnType(Money);
 
             b.HasIndex(x => x.UserId).IsUnique().HasDatabaseName("IX_UserAi");
             b.HasIndex(x => x.StrategyCode);

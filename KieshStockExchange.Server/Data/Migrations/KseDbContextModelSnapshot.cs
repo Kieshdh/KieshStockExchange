@@ -51,6 +51,15 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<decimal>("ExtremeReactionRandomnessPrc")
                         .HasColumnType("numeric(20,10)");
 
+                    b.Property<decimal>("FarBudgetPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("FarLimitMaxPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("FarLimitMinPrc")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<string>("HomeCurrency")
                         .IsRequired()
                         .HasColumnType("text");
@@ -68,6 +77,12 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .HasColumnType("integer");
 
                     b.Property<decimal>("MaxTradeAmountPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("MidLimitMaxPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("MidLimitMinPrc")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<decimal>("MinCashReservePrc")
@@ -92,6 +107,12 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<decimal>("SlippageTolerancePrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("StopDistanceMaxPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("StopDistanceMinPrc")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<decimal>("StopProb")

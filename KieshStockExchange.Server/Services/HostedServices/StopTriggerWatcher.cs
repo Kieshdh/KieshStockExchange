@@ -6,6 +6,7 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -61,6 +62,17 @@ public sealed class StopTriggerWatcher : BackgroundService, IStopWatcher
     private const decimal DirtyFraction = 0.10m;        // publish when watermark moves ≥ 10% of trail distance
     private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(3);
 
+    // §P6 stop-promotion circuit breaker: cap how many stops a single (stock,currency) can PROMOTE per
+    // short window. Excess fires are deferred (never dropped) and re-fed in the next window, so a chain
+    // reaction can't fire dozens of stops at once even when each is slippage-capped — the value anchor +
+    // far walls absorb the throttled trickle. Default cap/window only bite during an actual cascade.
+    private sealed class PromoWindow { public DateTime Start; public int Count; }
+    private readonly Dictionary<(int StockId, CurrencyType Ccy), PromoWindow> _promoBuckets = new();
+    private readonly List<FiredStop> _deferred = new();
+    private readonly object _breakerGate = new();
+    private readonly int _breakerCap;
+    private readonly TimeSpan _breakerWindow;
+
     // (stock,ccy) -> orderId -> watched stop.
     private readonly ConcurrentDictionary<(int StockId, CurrencyType Ccy), ConcurrentDictionary<int, WatchedStop>> _index = new();
     // orderId -> bucket key, so Disarm is O(1) without scanning every bucket.
@@ -78,13 +90,17 @@ public sealed class StopTriggerWatcher : BackgroundService, IStopWatcher
     private readonly ILogger<StopTriggerWatcher> _logger;
 
     public StopTriggerWatcher(IMarketDataService market, IOrderExecutionService engine,
-        IOrderRegistry registry, IDataBaseService db, ILogger<StopTriggerWatcher> logger)
+        IOrderRegistry registry, IDataBaseService db, ILogger<StopTriggerWatcher> logger,
+        IConfiguration config)
     {
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _breakerCap = Math.Max(1, config?.GetValue("Bots:StopBreaker:MaxPromotionsPerWindow", 3) ?? 3);
+        _breakerWindow = TimeSpan.FromSeconds(
+            Math.Max(1.0, config?.GetValue("Bots:StopBreaker:WindowSeconds", 10.0) ?? 10.0));
     }
 
     #region IStopWatcher
@@ -139,10 +155,14 @@ public sealed class StopTriggerWatcher : BackgroundService, IStopWatcher
         await ColdLoadAsync(stoppingToken).ConfigureAwait(false);
         _market.QuoteUpdated += OnQuoteUpdated;
         var flushTask = FlushLoopAsync(stoppingToken);
+        var refeedTask = BreakerRefeedLoopAsync(stoppingToken);
         try
         {
             await foreach (var fired in _toPromote.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
             {
+                // §P6 circuit breaker: throttle promotions per (stock,window). Over budget → defer this
+                // fire (re-fed next window); never dropped, so the armed stop is never orphaned.
+                if (!TryAdmitPromotion(fired.OrderId)) { Defer(fired); continue; }
                 try
                 {
                     // Persist the realized trigger on the canonical instance so PromoteStopAsync's
@@ -166,6 +186,7 @@ public sealed class StopTriggerWatcher : BackgroundService, IStopWatcher
         {
             _market.QuoteUpdated -= OnQuoteUpdated;
             try { await flushTask.ConfigureAwait(false); } catch { /* shutdown */ }
+            try { await refeedTask.ConfigureAwait(false); } catch { /* shutdown */ }
         }
     }
 
@@ -288,5 +309,57 @@ public sealed class StopTriggerWatcher : BackgroundService, IStopWatcher
         }
         if (batch.Count > 0)
             await _db.UpdateTrailStateAsync(batch, ct).ConfigureAwait(false);
+    }
+
+    // §P6 circuit breaker: admit a promotion only if this (stock,currency) is under its per-window cap.
+    // Single-threaded drain loop calls this, but the refeed loop also touches the buckets, so it's locked.
+    private bool TryAdmitPromotion(int orderId)
+    {
+        // Can't resolve the order's stock (shouldn't happen for an armed stop) — don't lose it: promote now.
+        if (!_registry.TryGet(orderId, out var o)) return true;
+        var key = (o.StockId, o.CurrencyType);
+        lock (_breakerGate)
+        {
+            var now = DateTime.UtcNow;
+            if (!_promoBuckets.TryGetValue(key, out var w))
+            {
+                w = new PromoWindow { Start = now, Count = 0 };
+                _promoBuckets[key] = w;
+            }
+            if (now - w.Start >= _breakerWindow) { w.Start = now; w.Count = 0; }
+            if (w.Count >= _breakerCap) return false;
+            w.Count++;
+            return true;
+        }
+    }
+
+    private void Defer(FiredStop fired)
+    {
+        lock (_breakerGate) _deferred.Add(fired);
+    }
+
+    // Once per window, push any deferred fires back into the promote channel; the drain loop re-checks
+    // each against the (now rolled) per-stock budget. Drains a throttled trickle of cap/window/stock.
+    private async Task BreakerRefeedLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(_breakerWindow);
+            using var cancelReg = ct.Register(static state => ((PeriodicTimer)state!).Dispose(), timer);
+            while (await timer.WaitForNextTickAsync().ConfigureAwait(false))
+            {
+                if (ct.IsCancellationRequested) break;
+                FiredStop[] batch;
+                lock (_breakerGate)
+                {
+                    if (_deferred.Count == 0) continue;
+                    batch = _deferred.ToArray();
+                    _deferred.Clear();
+                }
+                foreach (var f in batch) _toPromote.Writer.TryWrite(f);
+            }
+        }
+        catch (OperationCanceledException) { /* shutdown */ }
+        catch (Exception ex) { _logger.LogError(ex, "Stop-breaker refeed loop terminated unexpectedly."); }
     }
 }

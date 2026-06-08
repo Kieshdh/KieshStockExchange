@@ -322,6 +322,16 @@ public sealed class ExcelSeedService : IExcelSeedService
             var longBracketProb = ReadProb("LongBracketProb");
             var shortBracketProb = ReadProb("ShortBracketProb");
 
+            // §P6 balancing: tiered-limit bands, protective-stop distance band, Far-order budget.
+            // Read defensively (same as the probs) so an older workbook without these columns still loads.
+            var midLimitMinPrc = ReadProb("MidLimitMinPrc");
+            var midLimitMaxPrc = ReadProb("MidLimitMaxPrc");
+            var farLimitMinPrc = ReadProb("FarLimitMinPrc");
+            var farLimitMaxPrc = ReadProb("FarLimitMaxPrc");
+            var stopDistanceMinPrc = ReadProb("StopDistanceMinPrc");
+            var stopDistanceMaxPrc = ReadProb("StopDistanceMaxPrc");
+            var farBudgetPrc = ReadProb("FarBudgetPrc");
+
             string homeCurrency = "USD";
             if (profileTable.Columns.Contains("HomeCurrency"))
             {
@@ -348,6 +358,10 @@ public sealed class ExcelSeedService : IExcelSeedService
                     CashInjectionAmountPrc = cashInjectionAmountPrc,
                     StopProb = stopProb, TrailingProb = trailingProb, ShortProb = shortProb,
                     LongBracketProb = longBracketProb, ShortBracketProb = shortBracketProb,
+                    MidLimitMinPrc = midLimitMinPrc, MidLimitMaxPrc = midLimitMaxPrc,
+                    FarLimitMinPrc = farLimitMinPrc, FarLimitMaxPrc = farLimitMaxPrc,
+                    StopDistanceMinPrc = stopDistanceMinPrc, StopDistanceMaxPrc = stopDistanceMaxPrc,
+                    FarBudgetPrc = farBudgetPrc,
                     HomeCurrency = homeCurrency,
                 };
                 if (!aiUser.IsValid())

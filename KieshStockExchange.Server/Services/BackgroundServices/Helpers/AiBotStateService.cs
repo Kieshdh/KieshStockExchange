@@ -31,13 +31,6 @@ internal sealed class AiBotStateService
     private int? _lastLoggedCap;
     private int _lastLoggedEnabled = -1;
 
-    // Prune knobs: how stale before forced cancel, what fraction of MaxOpenOrders
-    // triggers capacity culling, how far off market a limit must be to qualify,
-    // and how many capacity-victims to cancel per bot per pass.
-    private static readonly TimeSpan PruneStaleAge = TimeSpan.FromMinutes(3);
-    private const decimal PruneDistanceFactor = 2.0m;
-    private const int PruneOrdersPerBot = 2;
-
     internal AiBotStateService(IDataBaseService db, IAccountsCache accounts,
         IOrderExecutionService orders, BotStatsLogger stats,
         ILogger<AiBotStateService> logger)
@@ -207,14 +200,20 @@ internal sealed class AiBotStateService
 
     #region Pruning
     /// <summary>
-    /// Cancels stale (older than <see cref="PruneStaleAge"/>) and worst-priced
-    /// open limit orders for bots over ~80% of their <c>MaxOpenOrders</c>. Issues
-    /// one batched <c>CancelOrdersBatchAsync</c> call regardless of victim count.
+    /// §P6 tier-aware prune. Replaces the old stale-age + 2×offset cull (which destroyed the standing
+    /// Far-wall ladder). Two rules, classified by each order's <b>current</b> distance from market:
+    /// <list type="number">
+    /// <item><b>Straggler cull</b> (every sweep, unconditional): cancel any limit order that has drifted
+    /// past the bot's <c>FarLimitMaxPrc</c> — dead weight far outside its own band.</item>
+    /// <item><b>Far value-budget mass-prune</b> (conditional): an order counts as Far once its current
+    /// distance ≥ <c>FarLimitMinPrc</c> (so a Mid that drifts out is included). When the bot's resting
+    /// Far value exceeds <c>FarBudgetPrc × portfolio</c> (per currency), cancel worst-first (furthest)
+    /// down to ½ the budget (hysteresis).</item>
+    /// </list>
+    /// Close orders (and in-band Mid) are never pruned — they churn and fill. One batched
+    /// <c>CancelOrdersBatchAsync</c> regardless of victim count.
     /// </summary>
-    /// <param name="sessionStart">Anchor for the stale-age check; orders from before
-    /// the current loop session get a fresh grace window so a session restart
-    /// doesn't wipe everything on first prune.</param>
-    internal async Task PruneWorstOrdersAsync(AiBotContext ctx, DateTime? sessionStart, CancellationToken ct)
+    internal async Task PruneWorstOrdersAsync(AiBotContext ctx, CancellationToken ct)
     {
         var toCancel = new List<(int userId, Order order)>();
 
@@ -222,36 +221,44 @@ internal sealed class AiBotStateService
         {
             if (!ctx.OpenOrders.TryGetValue(user.UserId, out var userOrders) || userOrders.Count == 0)
                 continue;
+            // Skip bots that pre-date the tier columns (all-zero) — no Far band to reason about.
+            if (user.FarLimitMaxPrc <= 0m) continue;
 
             var limitOrders = userOrders.Values.Where(o => o.IsOpenLimitOrder).ToList();
             if (limitOrders.Count == 0) continue;
 
-            // Criterion 1: stale age — cancel regardless of capacity.
-            var anchorTime = sessionStart ?? DateTime.MinValue;
-            foreach (var o in limitOrders)
+            // Per currency: the Far budget is a fraction of that currency's portfolio value.
+            foreach (var group in limitOrders.GroupBy(o => o.CurrencyType))
             {
-                var effectiveCreated = o.CreatedAt > anchorTime ? o.CreatedAt : anchorTime;
-                if (TimeHelper.NowUtc() - effectiveCreated >= PruneStaleAge)
+                var currency = group.Key;
+                var farBudget = user.FarBudgetPrc * ctx.PortfolioValueByCurrency(user.UserId, currency);
+
+                var farList = new List<(Order order, decimal dist, decimal value)>();
+                foreach (var o in group)
+                {
+                    if (!ctx.StockPrices.TryGetValue((o.StockId, o.CurrencyType), out var m) || m <= 0m) continue;
+                    var dist = o.IsBuyOrder ? (m - o.Price) / m : (o.Price - m) / m;
+
+                    // Rule 1: straggler — drifted past the bot's own Far band.
+                    if (dist > user.FarLimitMaxPrc) { toCancel.Add((user.UserId, o)); continue; }
+
+                    // Otherwise eligible for the Far budget once it sits at/beyond the Far band start.
+                    if (dist >= user.FarLimitMinPrc)
+                        farList.Add((o, dist, o.RemainingAmount));
+                }
+
+                // Rule 2: Far value-budget mass-prune, worst-first down to ½ budget (hysteresis).
+                if (farBudget <= 0m || farList.Count == 0) continue;
+                var farValue = farList.Sum(x => x.value);
+                if (farValue <= farBudget) continue;
+                var target = farBudget / 2m;
+                foreach (var (o, _, value) in farList.OrderByDescending(x => x.dist))
+                {
+                    if (farValue <= target) break;
                     toCancel.Add((user.UserId, o));
+                    farValue -= value;
+                }
             }
-
-            // Criterion 2: capacity — only when at ≥80% of MaxOpenOrders.
-            if (userOrders.Count < (int)Math.Ceiling(user.MaxOpenOrders * 0.8)) continue;
-
-            var alreadyQueued     = new HashSet<int>(toCancel.Select(x => x.order.OrderId));
-            var distanceThreshold = PruneDistanceFactor * user.MaxLimitOffsetPrc;
-
-            var scored = new List<(Order order, decimal distance)>();
-            foreach (var o in limitOrders)
-            {
-                if (alreadyQueued.Contains(o.OrderId)) continue;
-                if (!ctx.StockPrices.TryGetValue((o.StockId, o.CurrencyType), out var m) || m <= 0m) continue;
-                var dist = o.IsBuyOrder ? (m - o.Price) / m : (o.Price - m) / m;
-                if (dist > distanceThreshold) scored.Add((o, dist));
-            }
-
-            foreach (var (o, _) in scored.OrderByDescending(x => x.distance).Take(PruneOrdersPerBot))
-                toCancel.Add((user.UserId, o));
         }
 
         if (toCancel.Count == 0) return;

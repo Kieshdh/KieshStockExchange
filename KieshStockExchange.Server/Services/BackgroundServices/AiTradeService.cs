@@ -171,6 +171,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly ReservationAuditor   _auditor;
     private readonly BotEconomyTelemetry  _economy;
     private readonly BotSentimentService  _sentiment;
+    private readonly FundamentalService   _funds;     // §P6 slowly-drifting fundamentals
+    private readonly StockProfileService  _profiles;  // §P6 per-stock personality
     private readonly BotCashInjector      _injector;
     #endregion
 
@@ -223,7 +225,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions));
         _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, fxRates, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
-        _sentiment = new BotSentimentService(stocks, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
+        // §P6 liveliness: per-stock personality + slowly-drifting fundamentals. Built before the
+        // sentiment + decision services because both consume them.
+        _profiles  = new StockProfileService(
+                        enabled: _configuration.GetValue("Bots:Personality:Enabled", true));
+        _funds     = new FundamentalService(stocks, _profiles,
+                        new SeparatorLogger<FundamentalService>(loggerFactory, loggerOptions),
+                        enabled:          _configuration.GetValue("Bots:Fundamental:Enabled", true),
+                        band:             _configuration.GetValue("Bots:Fundamental:Band", 0.12m),
+                        theta:            _configuration.GetValue("Bots:Fundamental:Theta", 0.02),
+                        sigma:            _configuration.GetValue("Bots:Fundamental:Sigma", 0.004),
+                        driftIntervalSec: _configuration.GetValue("Bots:Fundamental:DriftIntervalSeconds", 60.0));
+        _sentiment = new BotSentimentService(stocks, _profiles, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
                         newsEvents:              _configuration.GetValue("Bots:NewsEvents", true),
                         shockMeanIntervalHours:  _configuration.GetValue("Bots:ShockMeanIntervalHours", 6.0),
                         shockMinMagnitude:       _configuration.GetValue("Bots:ShockMinMagnitude", 0.3m),
@@ -234,7 +247,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
-        _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment,
+        _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
                         fatTails:           _configuration.GetValue("Bots:FatTails", true),
                         tradeSizeTailShape: _configuration.GetValue("Bots:TradeSizeTailShape", 0.5m),
@@ -249,6 +262,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
                         overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),
                         marketSlippagePrc:   _configuration.GetValue("Bots:MarketSlippagePrc", 0.003m),
+                        // §P6 balancing: tier-selection probs, stop-fire slippage cap, anti-sweep depth fraction.
+                        tierCloseProb:       _configuration.GetValue("Bots:Tiers:CloseProb", 0.6m),
+                        tierMidProb:         _configuration.GetValue("Bots:Tiers:MidProb", 0.3m),
+                        stopSlippagePct:     _configuration.GetValue("Bots:Advanced:StopSlippagePct", 0.3m),
+                        maxSweepFractionOfDepth: _configuration.GetValue("Bots:Liquidity:MaxSweepFractionOfDepth", 0.25m),
                         // §P6: advanced-order generation. Master on/off is config; the per-kind probabilities
                         // are PER-BOT (AIUser.*Prob, seeded by strategy in Tools/Person.py). Offsets + caps
                         // remain global config. When disabled, the seeded plain-order stream is byte-identical.
@@ -415,6 +433,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // once disk persistence lands. Sentiment still re-rolls its starting
         // factors though (different semantics from the others).
         _sentiment.Reset(TimeHelper.NowUtc());
+        _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
 
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
@@ -508,7 +527,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 {
                     BotAdvancedKind.StopMarketSell =>
                         await _entry.PlaceStopMarketSellOrderAsync(
-                            user.UserId, d.StockId, d.Quantity, d.StopPrice, d.Currency, null, ct).ConfigureAwait(false),
+                            user.UserId, d.StockId, d.Quantity, d.StopPrice, d.Currency, d.StopSlippagePct, ct).ConfigureAwait(false),
                     BotAdvancedKind.TrailingStopSell =>
                         await _entry.PlaceTrailingStopSellOrderAsync(
                             user.UserId, d.StockId, d.Quantity, d.TrailOffset, d.TrailIsPercent, d.Currency, ct).ConfigureAwait(false),
@@ -521,7 +540,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         await _entry.PlaceBracketAsync(
                             user.UserId, d.StockId, d.Quantity, EntryType.Market, d.Currency,
                             limitPrice: null, buyBudget: d.BuyBudget, stopPrice: d.StopPrice,
-                            stopLimitPrice: null, stopSlippagePct: null, takeProfits: d.TakeProfits!,
+                            stopLimitPrice: null, stopSlippagePct: d.StopSlippagePct, takeProfits: d.TakeProfits!,
                             ct, OrderSide.Buy).ConfigureAwait(false),
                     // §P6c short bracket (flat market sell + slippage-capped buy-stop SL above + buy-limit TPs below).
                     BotAdvancedKind.ShortBracket =>
@@ -720,6 +739,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // it first matches the "advance external state before consumers" rule.
         _fxRates.Tick(now);
         _sentiment.Tick(now);
+        _funds.Tick(now);   // §P6: advance the slowly-drifting fundamentals (internally gated to its interval)
         if (now >= _nextDailyCheck)
         {
             _state.CheckDailyRefresh(_ctx);
@@ -732,7 +752,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
         if (now >= _nextPruneTime)
         {
-            await _state.PruneWorstOrdersAsync(_ctx, LoopStartedAtUtc, ct).ConfigureAwait(false);
+            await _state.PruneWorstOrdersAsync(_ctx, ct).ConfigureAwait(false);
             _nextPruneTime = now + PruneInterval;
         }
         if (now >= _nextStatsLogTime)
