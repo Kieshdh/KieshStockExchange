@@ -79,17 +79,13 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
         finally { IsBusy = false; }
     }
 
-    [RelayCommand] public async Task TradeAsync(PositionRow? row)
-    {
-        if (row is null) return;
-        await Selected.Set(row.StockId, row.Currency);
-    }
     #endregion
 
     #region Row Building
     protected override IEnumerable<PositionRow> BuildRows(int stockId, CurrencyType currency)
     {
-        var snapshot = _portfolio.GetPositions().Where(p => p.Quantity > 0).ToList();
+        // != 0 (not > 0) so cash-collateralized shorts (Quantity < 0) are visible too.
+        var snapshot = _portfolio.GetPositions().Where(p => p.Quantity != 0).ToList();
         var rows = new List<PositionRow>(snapshot.Count);
 
         if (ShowAll)
@@ -156,7 +152,7 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
             Currency = currency,
             Live = live,
             Pos = pos,
-            TradeCommand = TradeCommand,
+            GoToStockCommand = GoToStockCommand,
         };
     }
 
@@ -168,14 +164,18 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
     #endregion
 }
 
-public sealed partial class PositionRow : ObservableObject, IDisposable
+public sealed partial class PositionRow : ObservableObject, IDisposable, IStockNav
 {
     #region Initialization Properties
     public required Position Pos { get; init; }
     public required string Symbol { get; init; }
     public required CurrencyType Currency { get; init; }
-    // Injected by owner VM so Trade button binds directly.
-    public required ICommand TradeCommand { get; init; }
+    // Trade page: the ↗ (go-to-stock) glyph. Optional because the Portfolio page reuses this row
+    // with TradeCommand instead.
+    public ICommand? GoToStockCommand { get; init; }
+    // Portfolio page: select the stock AND navigate to the Trade page (Shell). Distinct from the
+    // trade page's in-page GoToStock.
+    public ICommand? TradeCommand { get; init; }
     #endregion
 
     #region Live Data Property
@@ -193,9 +193,13 @@ public sealed partial class PositionRow : ObservableObject, IDisposable
     #endregion
 
     #region Formatted Properties
+    public bool IsShort => Pos.Quantity < 0;
     public string Price => CurrentPrice <= 0m ? "-" : CurrencyHelper.Format(CurrentPrice, Currency);
-    public string Qty => Pos.Quantity.ToString();
-    public string Reserved => Pos.ReservedQuantity.ToString();
+    // Shorts read as "SHORT N" so a negative balance is unmistakable in the table.
+    public string Qty => IsShort ? $"SHORT {-Pos.Quantity}" : Pos.Quantity.ToString();
+    public string Reserved => IsShort
+        ? CurrencyHelper.Format(Pos.ShortCollateral, Pos.ShortCollateralCurrency)
+        : Pos.ReservedQuantity.ToString();
     public string Available => Pos.AvailableQuantity.ToString();
     public string Total => CurrencyHelper.Format(TotalValue, Currency);
     #endregion

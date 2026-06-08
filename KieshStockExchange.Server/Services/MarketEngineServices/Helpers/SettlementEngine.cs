@@ -15,6 +15,7 @@ public sealed class SettlementEngine : ISettlementEngine
     private readonly OrderSettler _orderSettler;
     private readonly OrderCanceller _orderCanceller;
     private readonly OrderModifier _orderModifier;
+    private readonly StopModifier _stopModifier;
     private readonly TradeSettler _tradeSettler;
 
     public SettlementEngine(IDataBaseService db, IAccountsCache accounts,
@@ -39,8 +40,9 @@ public sealed class SettlementEngine : ISettlementEngine
         _orderSettler   = new OrderSettler  (db, accounts, ledger, registry, SepLogger<OrderSettler>());
         _orderCanceller = new OrderCanceller(db, accounts, ledger, registry, SepLogger<OrderCanceller>());
         _orderModifier  = new OrderModifier (db, accounts, ledger, SepLogger<OrderModifier>());
+        _stopModifier   = new StopModifier  (db, accounts, ledger, SepLogger<StopModifier>());
         _tradeSettler   = new TradeSettler  (db, accounts, ledger, SepLogger<TradeSettler>(),
-                                             validator, probe);
+                                             validator, probe, registry);
     }
     #endregion
 
@@ -68,5 +70,9 @@ public sealed class SettlementEngine : ISettlementEngine
 
     public Task ApplyOrderChangeAsync(Order order, int? newQuantity, decimal? newPrice, CancellationToken ct = default)
         => _orderModifier.ApplyChangeAsync(order, newQuantity, newPrice, ct);
+
+    public Task ApplyStopChangeAsync(Order order, int? newQuantity, decimal? newStopPrice,
+        decimal? newLimitPrice, CancellationToken ct = default)
+        => _stopModifier.ApplyChangeAsync(order, newQuantity, newStopPrice, newLimitPrice, ct);
     #endregion
 }

@@ -49,6 +49,27 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
         }
     }
 
+    // §3.6 P2: arm/promote are server-internal (the arm goes through /api/orders/place with a
+    // Stop* type; promotion is driven by the server-side StopTriggerWatcher). The client never
+    // calls these directly on the execution surface.
+    public Task<OrderResult> ArmStopAsync(Order incoming, CancellationToken ct = default)
+        => throw new NotSupportedException("ArmStopAsync is server-side; place a Stop* order via /api/orders/place.");
+
+    public Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default)
+        => throw new NotSupportedException("PromoteStopAsync is server-side (driven by StopTriggerWatcher).");
+
+    // §3.6 P4: bracket placement is server-internal (via IOrderEntryService.PlaceBracketAsync →
+    // /api/orders/place-bracket); never called on the client execution surface.
+    public Task<OrderResult> PlaceBracketAsync(Order parent, Order? stopLoss,
+        IReadOnlyList<Order> takeProfits, CancellationToken ct = default)
+        => throw new NotSupportedException("PlaceBracketAsync is server-side; use IOrderEntryService.PlaceBracketAsync.");
+
+    // §3.6 P3: a stop modify goes through the user-facing IOrderEntryService.ModifyStopAsync →
+    // /api/orders/{id}/modify-stop, not this execution surface. Mirrors ArmStop/PromoteStop.
+    public Task<OrderResult> ModifyStopAsync(int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
+        => throw new NotSupportedException("ModifyStopAsync is server-side; use IOrderEntryService.ModifyStopAsync.");
+
     public async Task<OrderResult> CancelOrderAsync(int orderId, CancellationToken ct = default)
     {
         // The HTTP endpoint takes userId; admin-path callers don't have it readily
@@ -80,16 +101,22 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
     }
 
     private static PlaceOrderRequest OrderToPlaceRequest(Order o)
-    {
-        var type = o.OrderType;
-        return new PlaceOrderRequest(
+        => new(
             UserId: o.UserId,
             StockId: o.StockId,
             Quantity: o.Quantity,
-            Type: type,
+            Side: o.Side,
+            Entry: o.Entry,
+            Stop: o.Stop,
             Currency: o.CurrencyType,
-            Price: o.IsLimitOrder ? o.Price : null,
+            // Limit (incl. stop-limit) and a capped market carry a Price/anchor; true market does not.
+            Price: o.Entry == EntryType.Limit ? o.Price : (o.SlippagePercent.HasValue ? o.Price : (decimal?)null),
             SlippagePct: o.SlippagePercent,
-            BuyBudget: o.BuyBudget);
-    }
+            BuyBudget: o.BuyBudget,
+            StopPrice: o.StopPrice,
+            // Forward the trailing-stop dimensions too, so a Stop==Trailing Order routed through this
+            // surface (session-restore replay, admin/test harness, client bot) doesn't lose them and get
+            // rejected with "Trail offset must be positive." Dormant today (no such caller), kept symmetric.
+            TrailOffset: o.TrailOffset,
+            TrailIsPercent: o.TrailIsPercent);
 }

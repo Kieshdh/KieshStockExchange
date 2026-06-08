@@ -22,16 +22,20 @@ public sealed class OrderController : ControllerBase
     private readonly IOrderExecutionService _execution;
     private readonly IServerNotificationService _notifications;
     private readonly ILogger<OrderController> _logger;
+    // §3.6: a dedicated "MarketEngine" category so the website log shows every HUMAN order operation
+    // (place / bracket / modify / cancel) distinctly from the bot flood and the framework noise.
+    private readonly ILogger _marketEngine;
 
     public OrderController(IDataBaseService db, IOrderEntryService entry,
         IOrderExecutionService execution, IServerNotificationService notifications,
-        ILogger<OrderController> logger)
+        ILogger<OrderController> logger, ILoggerFactory loggerFactory)
     {
         _db = db;
         _entry = entry;
         _execution = execution;
         _notifications = notifications;
         _logger = logger;
+        _marketEngine = loggerFactory.CreateLogger("MarketEngine");
     }
 
     // Read endpoints below expose orders across all users (admin tables) or write raw
@@ -119,24 +123,69 @@ public sealed class OrderController : ControllerBase
         if (req is null) return BadRequest();
         if (User.GetUserId() is not int caller) return Forbid();
         if (req.UserId != caller) return Forbid();
-        var result = req.Type switch
+        // §3.6 decomposition: map the (Stop, Entry, Side) combination — plus a slippage cap on a
+        // market entry — to the matching named entry method. Trailing (Stop == Trailing) is P3.
+        var result = (req.Stop, req.Entry, req.Side) switch
         {
-            "LimitBuy"            => await _entry.PlaceLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
-            "LimitSell"           => await _entry.PlaceLimitSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
-            "SlippageMarketBuy"   => await _entry.PlaceSlippageMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.SlippagePct ?? 0m, req.Currency, ct),
-            "SlippageMarketSell"  => await _entry.PlaceSlippageMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.SlippagePct ?? 0m, req.Currency, ct),
-            "TrueMarketBuy"       => await _entry.PlaceTrueMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.BuyBudget ?? 0m, req.Currency, ct),
-            "TrueMarketSell"      => await _entry.PlaceTrueMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.Currency, ct),
+            (StopKind.None, EntryType.Limit, OrderSide.Buy)
+                => await _entry.PlaceLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
+            (StopKind.None, EntryType.Limit, OrderSide.Sell)
+                => await _entry.PlaceLimitSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.Price ?? 0m, req.Currency, ct),
+            (StopKind.None, EntryType.Market, OrderSide.Buy)
+                => req.SlippagePct.HasValue
+                    ? await _entry.PlaceSlippageMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.SlippagePct.Value, req.Currency, ct)
+                    : await _entry.PlaceTrueMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.BuyBudget ?? 0m, req.Currency, ct),
+            (StopKind.None, EntryType.Market, OrderSide.Sell)
+                => req.SlippagePct.HasValue
+                    ? await _entry.PlaceSlippageMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.SlippagePct.Value, req.Currency, ct)
+                    : await _entry.PlaceTrueMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.Currency, ct),
+            (StopKind.Stop, EntryType.Market, OrderSide.Buy)
+                => await _entry.PlaceStopMarketBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.BuyBudget ?? 0m, req.Currency, ct),
+            (StopKind.Stop, EntryType.Market, OrderSide.Sell)
+                => await _entry.PlaceStopMarketSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Currency, req.SlippagePct, ct),
+            (StopKind.Stop, EntryType.Limit, OrderSide.Buy)
+                => await _entry.PlaceStopLimitBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
+            (StopKind.Stop, EntryType.Limit, OrderSide.Sell)
+                => await _entry.PlaceStopLimitSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.StopPrice ?? 0m, req.Price ?? 0m, req.Currency, ct),
+            // §P5 trailing stops — market-only (trailing-stop-limit is gated out → falls through to BadRequest).
+            (StopKind.Trailing, EntryType.Market, OrderSide.Buy)
+                => await _entry.PlaceTrailingStopBuyOrderAsync(req.UserId, req.StockId, req.Quantity, req.TrailOffset ?? 0m, req.TrailIsPercent ?? false, req.BuyBudget ?? 0m, req.Currency, ct),
+            (StopKind.Trailing, EntryType.Market, OrderSide.Sell)
+                => await _entry.PlaceTrailingStopSellOrderAsync(req.UserId, req.StockId, req.Quantity, req.TrailOffset ?? 0m, req.TrailIsPercent ?? false, req.Currency, ct),
             _ => null!
         };
         if (result is null)
         {
-            _logger.LogWarning("Place: unknown order type {Type}", req.Type);
-            return BadRequest($"Unknown order type: {req.Type}");
+            _logger.LogWarning("Place: unsupported order ({Side},{Entry},{Stop})", req.Side, req.Entry, req.Stop);
+            return BadRequest($"Unsupported order combination: {req.Side}/{req.Entry}/{req.Stop}");
         }
+
+        _marketEngine.LogInformation(
+            "User {User} place {Side}/{Entry}/{Stop} qty {Qty} stock {Stock} {Ccy} → {Status}",
+            caller, req.Side, req.Entry, req.Stop, req.Quantity, req.StockId, req.Currency, result.Status);
 
         // Resting/failed placement notification (fills are notified by the engine's
         // OnFillsAsync). Human-gated inside the service; bots produce nothing.
+        await _notifications.OnOrderResultAsync(result, caller, ct);
+        return Ok(result);
+    }
+
+    // §3.6 P4: place a (long) bracket — entry + protective stop-loss + up to 3 take-profit legs.
+    [HttpPost("place-bracket")]
+    [EnableRateLimiting("orders")]
+    public async Task<ActionResult<OrderResult>> PlaceBracket([FromBody] PlaceBracketRequest req, CancellationToken ct)
+    {
+        if (req is null) return BadRequest();
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.UserId != caller) return Forbid();
+        var tps = (req.TakeProfits ?? Array.Empty<BracketLeg>())
+            .Select(l => (l.Price, l.Quantity)).ToList();
+        var result = await _entry.PlaceBracketAsync(req.UserId, req.StockId, req.Quantity, req.Entry,
+            req.Currency, req.Price, req.BuyBudget, req.StopPrice, req.StopLimitPrice, req.StopSlippagePct,
+            tps, ct, req.Side);
+        _marketEngine.LogInformation(
+            "User {User} place BRACKET {Entry} qty {Qty} stock {Stock} {Ccy} SL {Stop} TPs {TpCount} → {Status}",
+            caller, req.Entry, req.Quantity, req.StockId, req.Currency, req.StopPrice, tps.Count, result.Status);
         await _notifications.OnOrderResultAsync(result, caller, ct);
         return Ok(result);
     }
@@ -147,7 +196,38 @@ public sealed class OrderController : ControllerBase
     {
         if (User.GetUserId() is not int caller) return Forbid();
         if (req.UserId != caller) return Forbid();
-        return Ok(await _entry.ModifyOrderAsync(caller, id, req.Quantity, req.Price, ct));
+        var result = await _entry.ModifyOrderAsync(caller, id, req.Quantity, req.Price, ct);
+        _marketEngine.LogInformation("User {User} modify order #{Id} qty {Qty} px {Px} → {Status}",
+            caller, id, req.Quantity, req.Price, result.Status);
+        return Ok(result);
+    }
+
+    // §3.6 P3: modify an armed stop's trigger / stop-limit price / quantity (off-book).
+    [HttpPost("{id:int}/modify-stop")]
+    [EnableRateLimiting("orders")]
+    public async Task<ActionResult<OrderResult>> ModifyStop(int id, [FromBody] ModifyStopRequest req, CancellationToken ct)
+    {
+        if (req is null) return BadRequest();
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.UserId != caller) return Forbid();
+        var result = await _entry.ModifyStopAsync(caller, id, req.Quantity, req.StopPrice, req.LimitPrice, ct);
+        _marketEngine.LogInformation("User {User} modify TRIGGER #{Id} trigger {Trigger} limit {Limit} qty {Qty} → {Status}",
+            caller, id, req.StopPrice, req.LimitPrice, req.Quantity, result.Status);
+        return Ok(result);
+    }
+
+    // §F5: modify one bracket leg (the SL or a TP), dormant or live.
+    [HttpPost("{id:int}/modify-leg")]
+    [EnableRateLimiting("orders")]
+    public async Task<ActionResult<OrderResult>> ModifyLeg(int id, [FromBody] ModifyBracketLegRequest req, CancellationToken ct)
+    {
+        if (req is null) return BadRequest();
+        if (User.GetUserId() is not int caller) return Forbid();
+        if (req.UserId != caller) return Forbid();
+        var result = await _entry.ModifyBracketLegAsync(caller, id, req.Price, req.Quantity, ct);
+        _marketEngine.LogInformation("User {User} modify LEG #{Id} price {Price} qty {Qty} → {Status}",
+            caller, id, req.Price, req.Quantity, result.Status);
+        return Ok(result);
     }
 
     [HttpPost("{id:int}/cancel")]
@@ -156,7 +236,9 @@ public sealed class OrderController : ControllerBase
     {
         if (User.GetUserId() is not int caller) return Forbid();
         if (userId != caller) return Forbid();
-        return Ok(await _entry.CancelOrderAsync(caller, id, ct));
+        var result = await _entry.CancelOrderAsync(caller, id, ct);
+        _marketEngine.LogInformation("User {User} cancel order #{Id} → {Status}", caller, id, result.Status);
+        return Ok(result);
     }
 
     // Upper bound on a single user-initiated cancel batch — a person clearing their

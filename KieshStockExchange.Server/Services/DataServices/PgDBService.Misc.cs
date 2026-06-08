@@ -22,6 +22,10 @@ public sealed partial class PgDBService
         ""MinCashReservePrc"",""MaxCashReservePrc"",""SlippageTolerancePrc"",
         ""MinLimitOffsetPrc"",""MaxLimitOffsetPrc"",""AggressivenessPrc"",
         ""ExtremeReactionRandomnessPrc"",""CashInjectionFrequencyPrc"",""CashInjectionAmountPrc"",
+        ""StopProb"",""TrailingProb"",""ShortProb"",""LongBracketProb"",""ShortBracketProb"",
+        ""MidLimitMinPrc"",""MidLimitMaxPrc"",""FarLimitMinPrc"",""FarLimitMaxPrc"",
+        ""StopDistanceMinPrc"",""StopDistanceMaxPrc"",""FarBudgetPrc"",
+        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy"" AS ""StrategyCode""";
 
@@ -32,6 +36,10 @@ public sealed partial class PgDBService
         ""MinCashReservePrc"",""MaxCashReservePrc"",""SlippageTolerancePrc"",
         ""MinLimitOffsetPrc"",""MaxLimitOffsetPrc"",""AggressivenessPrc"",
         ""ExtremeReactionRandomnessPrc"",""CashInjectionFrequencyPrc"",""CashInjectionAmountPrc"",
+        ""StopProb"",""TrailingProb"",""ShortProb"",""LongBracketProb"",""ShortBracketProb"",
+        ""MidLimitMinPrc"",""MidLimitMaxPrc"",""FarLimitMinPrc"",""FarLimitMaxPrc"",
+        ""StopDistanceMinPrc"",""StopDistanceMaxPrc"",""FarBudgetPrc"",
+        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy""";
 
@@ -42,6 +50,10 @@ public sealed partial class PgDBService
         @MinCashReservePrc,@MaxCashReservePrc,@SlippageTolerancePrc,
         @MinLimitOffsetPrc,@MaxLimitOffsetPrc,@AggressivenessPrc,
         @ExtremeReactionRandomnessPrc,@CashInjectionFrequencyPrc,@CashInjectionAmountPrc,
+        @StopProb,@TrailingProb,@ShortProb,@LongBracketProb,@ShortBracketProb,
+        @MidLimitMinPrc,@MidLimitMaxPrc,@FarLimitMinPrc,@FarLimitMaxPrc,
+        @StopDistanceMinPrc,@StopDistanceMaxPrc,@FarBudgetPrc,
+        @TpOffsetMinPrc,@TpOffsetMaxPrc,
         @WatchlistCsv,
         @MaxOpenOrders,@HomeCurrency,@StrategyCode";
 
@@ -403,6 +415,13 @@ public sealed partial class PgDBService
               ""ExtremeReactionRandomnessPrc"" = @ExtremeReactionRandomnessPrc,
               ""CashInjectionFrequencyPrc"" = @CashInjectionFrequencyPrc,
               ""CashInjectionAmountPrc"" = @CashInjectionAmountPrc,
+              ""StopProb"" = @StopProb, ""TrailingProb"" = @TrailingProb, ""ShortProb"" = @ShortProb,
+              ""LongBracketProb"" = @LongBracketProb, ""ShortBracketProb"" = @ShortBracketProb,
+              ""MidLimitMinPrc"" = @MidLimitMinPrc, ""MidLimitMaxPrc"" = @MidLimitMaxPrc,
+              ""FarLimitMinPrc"" = @FarLimitMinPrc, ""FarLimitMaxPrc"" = @FarLimitMaxPrc,
+              ""StopDistanceMinPrc"" = @StopDistanceMinPrc, ""StopDistanceMaxPrc"" = @StopDistanceMaxPrc,
+              ""FarBudgetPrc"" = @FarBudgetPrc,
+              ""TpOffsetMinPrc"" = @TpOffsetMinPrc, ""TpOffsetMaxPrc"" = @TpOffsetMaxPrc,
               ""WatchlistCsv"" = @WatchlistCsv,
               ""MaxOpenOrders"" = @MaxOpenOrders,
               ""HomeCurrency"" = @HomeCurrency, ""Strategy"" = @StrategyCode

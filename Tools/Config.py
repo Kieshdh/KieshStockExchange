@@ -126,7 +126,34 @@ TRADE_PROB_SLOPE          = 0.50
 TRADE_PROB_JITTER         = 0.15
 
 # Strategy options (_trade_properties).
-STRATEGY_CHOICES          = (1, 2, 3, 4)
+# Ids match C# AiStrategy: 0=MarketMaker, 1=TrendFollower, 2=MeanReversion, 3=Random, 4=Scalper.
+# §P6: MarketMaker (0) included so a slice of bots quote tight two-sided and keep the touch liquid.
+STRATEGY_CHOICES          = (0, 1, 2, 3, 4)
+
+# ───────────────────── Advanced-order probabilities (per bot, per tick) ───────────────────────
+# §3.6 P6: each bot is assigned its own probability of choosing each advanced order kind, drawn
+# uniformly from a per-strategy (lo, hi) range so behaviour matches the strategy. These feed the
+# Profile sheet -> server AIUser.*Prob -> AiBotDecisionService. Tuned HIGH (well above the ~10%
+# real-world figure) on purpose: more shorts + stop cascades make the chart genuinely chaotic
+# instead of drifting on a gentle slope. Sum per bot ≈ how often a tick yields an advanced order.
+# Keys: stop / trailing / short / long_bracket / short_bracket. Adjust freely + re-run the generator.
+ADVANCED_PROFILES = {
+    # MarketMaker — provides liquidity; small but non-zero so it still adds noise.
+    0: {"stop": (0.01, 0.03), "trailing": (0.005, 0.02), "short": (0.01, 0.03),
+        "long_bracket": (0.005, 0.02), "short_bracket": (0.005, 0.02)},
+    # TrendFollower — rides trends: heavy trailing stops, moderate stops/brackets.
+    1: {"stop": (0.03, 0.07), "trailing": (0.05, 0.12), "short": (0.02, 0.05),
+        "long_bracket": (0.02, 0.06), "short_bracket": (0.01, 0.03)},
+    # MeanReversion — bets on reversals: brackets + shorts heavy.
+    2: {"stop": (0.02, 0.05), "trailing": (0.01, 0.03), "short": (0.04, 0.08),
+        "long_bracket": (0.04, 0.10), "short_bracket": (0.03, 0.07)},
+    # Random — the chaos engine: a strong mix of everything.
+    3: {"stop": (0.04, 0.09), "trailing": (0.03, 0.08), "short": (0.04, 0.09),
+        "long_bracket": (0.03, 0.08), "short_bracket": (0.03, 0.08)},
+    # Scalper — quick risk control: stop-heavy, some shorts, light brackets.
+    4: {"stop": (0.05, 0.11), "trailing": (0.03, 0.07), "short": (0.03, 0.06),
+        "long_bracket": (0.02, 0.05), "short_bracket": (0.02, 0.05)},
+}
 
 # Starting balance (_portfolio): log-distributed. 10x larger so small order
 # fractions still clear ≥1 share on high-priced stocks and deepen the book.
@@ -174,15 +201,17 @@ USE_SLIP_SKEW             = 0.5
 # 0.5 so a bot is never more likely to be random than in character.
 EXTREME_RANDOMNESS_SKEW   = 2.0
 
-# Cash-injection knobs. Seeded inverse to portfolio value; median bot ≈ 5%/yr nominal.
-CASH_INJECTION_BASE_FREQUENCY = 0.15      # median: 15% chance / 1-hour cycle
-CASH_INJECTION_BASE_AMOUNT    = 0.004     # median: 0.4% of portfolio / hit
+# Cash-injection knobs. Seeded inverse to portfolio value, so smaller bots inject MORE often and at a
+# HIGHER % — tuned for a wide, visible spread (some bots inject a lot, some a little). Amount cap stays
+# within the C# validator bound (AIUser.CashInjectionAmountPrc ≤ 0.05); frequency cap stays ≤ 0.50.
+CASH_INJECTION_BASE_FREQUENCY = 0.25      # median: 25% chance / 1-hour cycle
+CASH_INJECTION_BASE_AMOUNT    = 0.009     # median: 0.9% of portfolio / hit
 CASH_INJECTION_SIZE_ALPHA     = 0.6       # inverse-size skew strength
-CASH_INJECTION_JITTER         = 0.20      # ±20% per-bot randomness
-CASH_INJECTION_FREQ_FLOOR     = 0.02
-CASH_INJECTION_FREQ_CAP       = 0.45
-CASH_INJECTION_AMOUNT_FLOOR   = 0.0005
-CASH_INJECTION_AMOUNT_CAP     = 0.02
+CASH_INJECTION_JITTER         = 0.25      # ±25% per-bot randomness
+CASH_INJECTION_FREQ_FLOOR     = 0.05      # every bot injects at least sometimes
+CASH_INJECTION_FREQ_CAP       = 0.50      # most-active bots: 50% hourly chance
+CASH_INJECTION_AMOUNT_FLOOR   = 0.001
+CASH_INJECTION_AMOUNT_CAP     = 0.04      # biggest hits: 4% of portfolio
 
 # Buy bias (_order_types).
 BUY_BIAS_BASE             = 0.45
@@ -197,12 +226,33 @@ SLIP_TOL_SLOPE            = 0.025
 SLIP_TOL_JITTER           = 0.20
 
 # Limit offsets (_trade_limits). Tight so resting orders cluster near market and fill.
-MAX_LIMIT_BASE            = 0.003
-MAX_LIMIT_SLOPE           = 0.005
+# §P6 tightness: distances baked directly here (the old runtime DecisionDistanceMult=0.32 dial folded in)
+# so the generated per-bot values ARE the production geometry — no runtime multiplier. Far walls top out
+# ~8%, the whole ladder rides near the touch (validated: median drift ~5.3%, lively tail, 0 escapes).
+MAX_LIMIT_BASE            = 0.001
+MAX_LIMIT_SLOPE           = 0.0016
 MAX_LIMIT_JITTER          = 0.20
 MIN_LIMIT_FRACTION_LO     = 0.05    # min_limit = max_limit * U(LO, HI)
 MIN_LIMIT_FRACTION_HI     = 0.30
-MIN_LIMIT_FLOOR           = 0.001
+MIN_LIMIT_FLOOR           = 0.0003
+
+# §P6 tiered limit ladder (_tiers). Close = the existing Min/MaxLimitOffsetPrc (tight, near the touch).
+# Mid + Far are standing walls further out; a fired (slippage-capped) stop runs into the Far walls and is
+# absorbed. Each (lo,hi) is the per-bot uniform draw range; Person.py enforces ordering
+# (Close ≤ Mid ≤ Far) and StopDistanceMax < FarLimitMin so a stop never sits outside the walls.
+MID_LIMIT_MIN_RANGE       = (0.003, 0.006)   # MidLimitMinPrc
+MID_LIMIT_MAX_RANGE       = (0.010, 0.016)   # MidLimitMaxPrc
+FAR_LIMIT_MIN_RANGE       = (0.019, 0.032)   # FarLimitMinPrc
+FAR_LIMIT_MAX_RANGE       = (0.048, 0.080)   # FarLimitMaxPrc (Far walls cap ~8%)
+# Protective-stop distance band. Max is additionally clamped < FarLimitMin in Person.py.
+STOP_DISTANCE_MAX_RANGE   = (0.010, 0.016)   # StopDistanceMaxPrc (pre-clamp)
+STOP_DISTANCE_MIN_FRACTION = (0.50, 0.90)    # StopDistanceMinPrc = StopDistanceMaxPrc * U(lo,hi)
+# §P6: per-bot take-profit band — was the global Advanced:TpOffsetPrc (3-8%), now promoted to per-bot
+# and baked tight (×0.32). The two bracket TP legs are drawn from each bot's [TpOffsetMin, TpOffsetMax].
+TP_OFFSET_MIN_RANGE       = (0.010, 0.014)   # TpOffsetMinPrc
+TP_OFFSET_MAX_RANGE       = (0.018, 0.026)   # TpOffsetMaxPrc
+# Total resting Far-order value the tier-aware prune allows, as a fraction of portfolio.
+FAR_BUDGET_RANGE          = (0.05, 0.15)     # FarBudgetPrc
 
 # Per-position max (_trade_limits): floored against 1/max_stocks downstream.
 PER_POS_BASE              = 0.08
@@ -265,6 +315,24 @@ def _validate() -> None:
     _ordered("MAX_TRADE_FRACTION_LO",  MAX_TRADE_FRACTION_LO,  "MAX_TRADE_FRACTION_HI",  MAX_TRADE_FRACTION_HI)
     _ordered("WATCHLIST_EXTRA_LO",     WATCHLIST_EXTRA_LO,     "WATCHLIST_EXTRA_HI",     WATCHLIST_EXTRA_HI)
     _ordered("BUY_BIAS_MIN",           BUY_BIAS_MIN,           "BUY_BIAS_MAX",           BUY_BIAS_MAX)
+
+    # §P6 tiered ladder: each draw range must be inside [0,1] and lo ≤ hi; and the tier bands must not
+    # overlap (Mid < Far) with the protective stop strictly inside the Far walls (StopMax < FarMin).
+    for name, rng in [
+        ("MID_LIMIT_MIN_RANGE", MID_LIMIT_MIN_RANGE), ("MID_LIMIT_MAX_RANGE", MID_LIMIT_MAX_RANGE),
+        ("FAR_LIMIT_MIN_RANGE", FAR_LIMIT_MIN_RANGE), ("FAR_LIMIT_MAX_RANGE", FAR_LIMIT_MAX_RANGE),
+        ("STOP_DISTANCE_MAX_RANGE", STOP_DISTANCE_MAX_RANGE), ("FAR_BUDGET_RANGE", FAR_BUDGET_RANGE),
+        ("STOP_DISTANCE_MIN_FRACTION", STOP_DISTANCE_MIN_FRACTION),
+        ("TP_OFFSET_MIN_RANGE", TP_OFFSET_MIN_RANGE), ("TP_OFFSET_MAX_RANGE", TP_OFFSET_MAX_RANGE),
+    ]:
+        _in_unit(name, rng[0], rng[1])
+        _ordered(f"{name}[0]", rng[0], f"{name}[1]", rng[1])
+    if MID_LIMIT_MAX_RANGE[1] > FAR_LIMIT_MIN_RANGE[0]:
+        raise ValueError("MID_LIMIT_MAX_RANGE must stay below FAR_LIMIT_MIN_RANGE (tiers must not overlap)")
+    if STOP_DISTANCE_MAX_RANGE[1] > FAR_LIMIT_MIN_RANGE[0]:
+        raise ValueError("STOP_DISTANCE_MAX_RANGE must stay below FAR_LIMIT_MIN_RANGE (stop inside Far walls)")
+    if TP_OFFSET_MIN_RANGE[1] > TP_OFFSET_MAX_RANGE[0]:
+        raise ValueError("TP_OFFSET_MIN_RANGE must stay below TP_OFFSET_MAX_RANGE (per-bot TpMin ≤ TpMax)")
 
     # Aggressiveness band thresholds must be strictly increasing and inside (0,1).
     if not (0.0 < STOCKS_AGG_LOW_THR < STOCKS_AGG_MID_THR < 1.0):

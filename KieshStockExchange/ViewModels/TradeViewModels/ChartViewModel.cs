@@ -5,10 +5,12 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
@@ -129,6 +131,16 @@ public partial class ChartViewModel : StockAwareViewModel
     // buy, red for sell). Synced from IOrderCacheService.OrdersChanged.
     public ObservableCollection<OpenOrderLine> OpenOrderLines { get; } = new();
 
+    // The current user's executed fills for the selected stock+currency, rendered as
+    // green (buy) / red (sell) triangles. Sourced from ITransactionService and re-synced
+    // on stock change + whenever the transaction list refreshes.
+    public ObservableCollection<FillMarker> FillMarkers { get; } = new();
+
+    // §F2: fired triggers for the selected stock+currency+user, drawn as blue arrows at the trigger
+    // price/firing time. Sourced from the order cache (AllOrders) — a fired trigger is Filled, so it
+    // lives in ClosedOrders; ActivatedAt carries the firing moment.
+    public ObservableCollection<TriggerMarker> TriggerMarkers { get; } = new();
+
     // User-configurable line colour per side. Defaults to ChartBull / ChartBear
     // (the Binance + TradingView convention) but selectable from the same palette
     // the MA color picker uses, surfaced in the chart settings overlay.
@@ -163,6 +175,12 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly IOrderCacheService _orderCache;
     private readonly IAuthService _auth;
     private readonly IOrderEditService _editService;
+    private readonly ITransactionService _transactions;
+    private readonly IUserSessionService _session;
+
+    // §F7: one-shot viewport restore. Seeded from the session at construction and consumed once on the
+    // first candle load so a later stock switch still snaps to live instead of re-applying a stale view.
+    private (int Vis, int Off, bool YAuto, decimal? YMin, decimal? YMax)? _pendingRestore;
 
     // Atomic CTS swap. RestartStreamAsync cancels + disposes the previous CTS
     // before starting a new one. No SemaphoreSlim — aggressive switching
@@ -172,7 +190,8 @@ public partial class ChartViewModel : StockAwareViewModel
 
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
         IOrderCacheService orderCache, IAuthService auth, IOrderEditService editService,
-        ISelectedStockService selected, INotificationService notification)
+        ISelectedStockService selected, INotificationService notification, ITransactionService transactions,
+        IUserSessionService session)
         : base(selected, notification, logger)
     {
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
@@ -180,6 +199,16 @@ public partial class ChartViewModel : StockAwareViewModel
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
+        _transactions = transactions ?? throw new ArgumentNullException(nameof(transactions));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+
+        // §F7: restore the saved resolution + viewport. Seed the resolution before InitializeSelection
+        // kicks off the first stream so it loads at the remembered resolution; the viewport (count /
+        // offset / manual Y) is applied once on that first load via _pendingRestore.
+        if (ResolutionOptions.Contains(_session.DefaultCandleResolution))
+            SelectedResolution = _session.DefaultCandleResolution;
+        _pendingRestore = (_session.ChartVisibleCount, _session.ChartOffset,
+            _session.ChartYAutoFit, _session.ChartManualYMin, _session.ChartManualYMax);
 
         // Repaint on any MA edit; stamp RemoveCommand on each default row.
         MaSeries.CollectionChanged += OnMaSeriesCollectionChanged;
@@ -191,17 +220,28 @@ public partial class ChartViewModel : StockAwareViewModel
 
         Markers.CollectionChanged += (_, __) => RequestRedraw();
         OpenOrderLines.CollectionChanged += (_, __) => RequestRedraw();
+        FillMarkers.CollectionChanged += (_, __) => RequestRedraw();
+        TriggerMarkers.CollectionChanged += (_, __) => RequestRedraw();
 
         // Keep open-order overlays in sync with the cache. Rebuild on selection
         // change too so switching stocks shows the right user lines.
         _orderCache.OrdersChanged += OnOrdersChanged;
+        // Fill markers track the user's transaction history (refreshed elsewhere too).
+        _transactions.TransactionsChanged += OnTransactionsChanged;
 
         InitializeSelection();
     }
 
     private void OnOrdersChanged(object? sender, EventArgs e)
     {
-        try { MainThread.BeginInvokeOnMainThread(SyncOpenOrderLines); }
+        try
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                SyncOpenOrderLines();
+                SyncTriggerMarkers();   // §F2: a fired trigger leaves OpenOrders and gains an arrow
+            });
+        }
         catch (Exception ex) { _logger.LogError(ex, "Failed to sync chart open-order lines."); }
     }
 
@@ -220,9 +260,96 @@ public partial class ChartViewModel : StockAwareViewModel
         foreach (var o in _orderCache.OpenOrders)
         {
             if (o.StockId != stockId || o.CurrencyType != currency) continue;
-            if (o.IsMarketOrder) continue;
             if (o.UserId != _auth.CurrentUserId) continue;
+            // §3.6 P3: an armed stop draws at its StopPrice as a distinct dashed line so the
+            // user sees (and can drag) the trigger. A plain market order has no resting price.
+            if (o.IsStopOrder)
+            {
+                if (o.StopPrice is decimal sp && sp > 0m)
+                    OpenOrderLines.Add(new OpenOrderLine(
+                        o.OrderId, sp, o.IsBuyOrder, o.Quantity, IsStop: true, IsStopLimit: o.IsStopLimitOrder));
+                continue;
+            }
+            if (o.IsMarketOrder) continue;
             OpenOrderLines.Add(new OpenOrderLine(o.OrderId, o.Price, o.IsBuyOrder, o.Quantity));
+        }
+    }
+
+    /// <summary>
+    /// §F2: snapshot the user's fired triggers for the selected stock+currency and mirror them into
+    /// <see cref="TriggerMarkers"/> — a blue arrow at the trigger price/firing time. A fired trigger
+    /// is Filled (so it's in AllOrders, not OpenOrders) and carries ActivatedAt + StopPrice.
+    /// </summary>
+    private void SyncTriggerMarkers()
+    {
+        TriggerMarkers.Clear();
+        if (!Selected.HasSelectedStock || _auth.CurrentUserId <= 0) return;
+
+        var stockId = Selected.StockId!.Value;
+        var currency = Selected.Currency;
+        foreach (var o in _orderCache.AllOrders)
+        {
+            if (o.StockId != stockId || o.CurrencyType != currency) continue;
+            if (o.UserId != _auth.CurrentUserId) continue;
+            if (o.ActivatedAt is not DateTime firedAt) continue;
+            // §G10: blue arrow for fired stop-LIMIT only; a fired stop-market keeps just its green/red
+            // fill triangle (the fill price is its meaningful point). PromoteStop resets Stop→None, so
+            // IsStopLimitOrder is false after firing — but Entry is untouched, so Entry==Limit durably
+            // marks a fired stop-limit (a plain limit never gets ActivatedAt).
+            if (o.Entry != EntryType.Limit) continue;
+            var price = o.StopPrice ?? 0m;
+            if (price <= 0m) continue;
+            TriggerMarkers.Add(new TriggerMarker(firedAt, price, o.IsBuyOrder));
+        }
+    }
+
+    private void OnTransactionsChanged(object? sender, EventArgs e)
+    {
+        try { MainThread.BeginInvokeOnMainThread(SyncFillMarkers); }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to sync chart fill markers."); }
+    }
+
+    /// <summary>
+    /// Mirror the current user's fills for the selected stock+currency into
+    /// <see cref="FillMarkers"/> (buy = up triangle, sell = down triangle). The drawable
+    /// clips markers outside the visible viewport, so no time filtering is needed here.
+    /// </summary>
+    private void SyncFillMarkers()
+    {
+        FillMarkers.Clear();
+        if (!Selected.HasSelectedStock || _auth.CurrentUserId <= 0) return;
+
+        var stockId = Selected.StockId!.Value;
+        var currency = Selected.Currency;
+        var userId = _auth.CurrentUserId;
+
+        // Aggregate one order's fills that fall in the SAME candle bucket into a single VWAP arrow,
+        // so a many-fill order doesn't spray the chart with arrows. Fills of the same order in
+        // different buckets (≥1 bar apart in time) stay separate. Bucket size = the resolution's
+        // seconds (CandleResolution is seconds-valued).
+        long bucketTicks = Math.Max(1, (int)SelectedResolution) * TimeSpan.TicksPerSecond;
+        var groups = new Dictionary<(int OrderId, long Bucket), (decimal Notional, int Qty, bool IsBuy)>();
+        foreach (var t in _transactions.AllTransactions)
+        {
+            if (t.StockId != stockId || t.CurrencyType != currency) continue;
+            if (!t.InvolvesUser(userId)) continue;
+            bool isBuy = t.BuyerId == userId;                       // user is the buyer ⇒ a buy fill
+            int orderId = isBuy ? t.BuyOrderId : t.SellOrderId;     // the user's own order id
+            var key = (orderId, t.Timestamp.Ticks / bucketTicks);
+            groups.TryGetValue(key, out var agg);
+            agg.Notional += t.Price * t.Quantity;
+            agg.Qty += t.Quantity;
+            agg.IsBuy = isBuy;
+            groups[key] = agg;
+        }
+        foreach (var kv in groups)
+        {
+            var (notional, qty, isBuy) = kv.Value;
+            if (qty <= 0) continue;
+            var vwap = notional / qty;
+            // Bucket-start time → the drawable snaps it to that candle's center.
+            var atTime = new DateTime(kv.Key.Bucket * bucketTicks, DateTimeKind.Utc);
+            FillMarkers.Add(new FillMarker(atTime, vwap, isBuy));
         }
     }
 
@@ -244,6 +371,11 @@ public partial class ChartViewModel : StockAwareViewModel
         await RestartStreamAsync(stockId, currency, SelectedResolution, ct).ConfigureAwait(false);
         // After switching stock the open-order line set changes too.
         SyncOpenOrderLines();
+        SyncTriggerMarkers();   // §F2: fired-trigger arrows for the new stock
+        // Render fills already cached for the new stock, then pull the latest in the background
+        // (RefreshAsync raises TransactionsChanged → SyncFillMarkers when it completes).
+        SyncFillMarkers();
+        _ = _transactions.RefreshAsync(null, ct);
     }
 
     protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency,
@@ -258,6 +390,9 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         if (disposing)
         {
+            // §F7: snapshot the current viewport so the next Trade-page visit restores it.
+            _session.SetChartViewState(VisibleCount, OffsetFromLatest, IsYAutoFit, ManualYMin, ManualYMax);
+
             var prev = Interlocked.Exchange(ref _streamCts, null);
             if (prev is not null)
             {
@@ -266,6 +401,7 @@ public partial class ChartViewModel : StockAwareViewModel
             }
             StopCandleStream();
             _orderCache.OrdersChanged -= OnOrdersChanged;
+            _transactions.TransactionsChanged -= OnTransactionsChanged;
         }
         base.Dispose(disposing);
     }
@@ -498,18 +634,39 @@ public partial class ChartViewModel : StockAwareViewModel
             // History from CandleService is already sorted; preserve order on insert.
             _candleBuffer.AddRange(history);
 
-            // Auto-zoom: if the requested viewport is much wider than the data
-            // actually returned (e.g. a young server's 1h ring has 5 buckets but
-            // VisibleCount expects ~120), shrink VisibleCount to fit. Otherwise
-            // the chart renders 5 candle-dots spread across 600 bucket-widths of
-            // horizontal space — looks empty even though data is present.
-            if (history.Count > 0 && history.Count < VisibleCount)
+            if (_pendingRestore is { } vs)
             {
-                var fit = Math.Clamp(history.Count, MinVisible, MaxVisible);
-                if (fit != VisibleCount) VisibleCount = fit;
+                // §F7: first load after (re)entering the page — restore the saved viewport instead of
+                // the auto-zoom/snap-to-live defaults. Consume once so a later stock switch snaps live.
+                _pendingRestore = null;
+                if (vs.Vis >= MinVisible && vs.Vis <= MaxVisible) VisibleCount = vs.Vis;
+                OffsetFromLatest = Math.Clamp(vs.Off, MinOffset, MaxOffset);
+                if (!vs.YAuto && vs.YMin is decimal mn && vs.YMax is decimal mx && mx > mn)
+                {
+                    // Suppress autofit so the saved Y-window sticks. This runs inside the awaited
+                    // history-load block, after TradeViewModel's on-stock-change IsYAutoFit=true, so
+                    // it wins on restore.
+                    ManualYMin = mn;
+                    ManualYMax = mx;
+                    IsYAutoFit = false;
+                }
+            }
+            else
+            {
+                // Auto-zoom: if the requested viewport is much wider than the data
+                // actually returned (e.g. a young server's 1h ring has 5 buckets but
+                // VisibleCount expects ~120), shrink VisibleCount to fit. Otherwise
+                // the chart renders 5 candle-dots spread across 600 bucket-widths of
+                // horizontal space — looks empty even though data is present.
+                if (history.Count > 0 && history.Count < VisibleCount)
+                {
+                    var fit = Math.Clamp(history.Count, MinVisible, MaxVisible);
+                    if (fit != VisibleCount) VisibleCount = fit;
+                }
+
+                OffsetFromLatest = 0; // snap to live on (re)load
             }
 
-            OffsetFromLatest = 0; // snap to live on (re)load
             SyncLatestCandle();
             RequestRedraw();
         }).ConfigureAwait(false);
@@ -744,10 +901,14 @@ public partial class ChartViewModel : StockAwareViewModel
     #region Property change handlers
     partial void OnSelectedResolutionChanged(CandleResolution value)
     {
+        // §F7: remember the chosen resolution for the next visit to the Trade page.
+        _session.SetDefaultCandleResolution(value);
         if (Selected.StockId is null) return;
         // Use the most recent stock-token so a stock change cancels this restart too
         var ct = CtsStock?.Token ?? CancellationToken.None;
         _ = RestartStreamAsync(Selected.StockId, Selected.Currency, value, ct);
+        // Re-bucket the fill-marker VWAP aggregation against the new resolution.
+        SyncFillMarkers();
     }
 
     partial void OnVisibleCountChanged(int value)

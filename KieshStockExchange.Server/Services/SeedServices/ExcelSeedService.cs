@@ -311,6 +311,29 @@ public sealed class ExcelSeedService : IExcelSeedService
 
             var watchlistCsv = row["WatchlistCsv"]?.ToString() ?? string.Empty;
 
+            // §3.6 P6: per-bot advanced-order probabilities. Read defensively so an older workbook
+            // without these columns still loads (defaults to 0 = no advanced orders for that bot).
+            decimal ReadProb(string col)
+                => profileTable.Columns.Contains(col)
+                    && ParsingHelper.TryToDecimal(row[col]?.ToString(), out var v) ? v : 0m;
+            var stopProb = ReadProb("StopProb");
+            var trailingProb = ReadProb("TrailingProb");
+            var shortProb = ReadProb("ShortProb");
+            var longBracketProb = ReadProb("LongBracketProb");
+            var shortBracketProb = ReadProb("ShortBracketProb");
+
+            // §P6 balancing: tiered-limit bands, protective-stop distance band, Far-order budget.
+            // Read defensively (same as the probs) so an older workbook without these columns still loads.
+            var midLimitMinPrc = ReadProb("MidLimitMinPrc");
+            var midLimitMaxPrc = ReadProb("MidLimitMaxPrc");
+            var farLimitMinPrc = ReadProb("FarLimitMinPrc");
+            var farLimitMaxPrc = ReadProb("FarLimitMaxPrc");
+            var stopDistanceMinPrc = ReadProb("StopDistanceMinPrc");
+            var stopDistanceMaxPrc = ReadProb("StopDistanceMaxPrc");
+            var farBudgetPrc = ReadProb("FarBudgetPrc");
+            var tpOffsetMinPrc = ReadProb("TpOffsetMinPrc");
+            var tpOffsetMaxPrc = ReadProb("TpOffsetMaxPrc");
+
             string homeCurrency = "USD";
             if (profileTable.Columns.Contains("HomeCurrency"))
             {
@@ -335,6 +358,13 @@ public sealed class ExcelSeedService : IExcelSeedService
                     ExtremeReactionRandomnessPrc = extremeRandomnessPrc,
                     CashInjectionFrequencyPrc = cashInjectionFrequencyPrc,
                     CashInjectionAmountPrc = cashInjectionAmountPrc,
+                    StopProb = stopProb, TrailingProb = trailingProb, ShortProb = shortProb,
+                    LongBracketProb = longBracketProb, ShortBracketProb = shortBracketProb,
+                    MidLimitMinPrc = midLimitMinPrc, MidLimitMaxPrc = midLimitMaxPrc,
+                    FarLimitMinPrc = farLimitMinPrc, FarLimitMaxPrc = farLimitMaxPrc,
+                    StopDistanceMinPrc = stopDistanceMinPrc, StopDistanceMaxPrc = stopDistanceMaxPrc,
+                    FarBudgetPrc = farBudgetPrc,
+                    TpOffsetMinPrc = tpOffsetMinPrc, TpOffsetMaxPrc = tpOffsetMaxPrc,
                     HomeCurrency = homeCurrency,
                 };
                 if (!aiUser.IsValid())

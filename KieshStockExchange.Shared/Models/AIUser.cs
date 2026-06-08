@@ -112,6 +112,61 @@ public class AIUser : IValidatable
     private decimal _aggressivenessPrc = 0.5m;
     public decimal AggressivenessPrc { get => _aggressivenessPrc; set => _aggressivenessPrc = RequiredPrc(value, nameof(AggressivenessPrc)); }
 
+    // §P6 balancing: tiered limit ladder. Close = the existing Min/MaxLimitOffsetPrc (tight, churns at
+    // the touch). Mid + Far are standing walls further out. A fired (slippage-capped) stop runs into the
+    // Far walls and is absorbed, so StopDistanceMax must stay below FarLimitMin (enforced in Person.py +
+    // ValidateSizing). All are fractions of price; seeded per-bot in Tools/Person.py.
+    private decimal _midLimitMinPrc = 0.01m;
+    public decimal MidLimitMinPrc { get => _midLimitMinPrc; set => _midLimitMinPrc = RequiredPrc(value, nameof(MidLimitMinPrc)); }
+
+    private decimal _midLimitMaxPrc = 0.05m;
+    public decimal MidLimitMaxPrc { get => _midLimitMaxPrc; set => _midLimitMaxPrc = RequiredPrc(value, nameof(MidLimitMaxPrc)); }
+
+    private decimal _farLimitMinPrc = 0.06m;
+    public decimal FarLimitMinPrc { get => _farLimitMinPrc; set => _farLimitMinPrc = RequiredPrc(value, nameof(FarLimitMinPrc)); }
+
+    private decimal _farLimitMaxPrc = 0.25m;
+    public decimal FarLimitMaxPrc { get => _farLimitMaxPrc; set => _farLimitMaxPrc = RequiredPrc(value, nameof(FarLimitMaxPrc)); }
+
+    // Protective-stop distance band (fraction below/above the reference). Kept inside the Far walls.
+    private decimal _stopDistanceMinPrc = 0.02m;
+    public decimal StopDistanceMinPrc { get => _stopDistanceMinPrc; set => _stopDistanceMinPrc = RequiredPrc(value, nameof(StopDistanceMinPrc)); }
+
+    private decimal _stopDistanceMaxPrc = 0.05m;
+    public decimal StopDistanceMaxPrc { get => _stopDistanceMaxPrc; set => _stopDistanceMaxPrc = RequiredPrc(value, nameof(StopDistanceMaxPrc)); }
+
+    // Cap on the bot's total resting Far-order value, as a fraction of portfolio. The tier-aware prune
+    // mass-cancels worst-first down to ½ of this when exceeded (hysteresis).
+    private decimal _farBudgetPrc = 0.10m;
+    public decimal FarBudgetPrc { get => _farBudgetPrc; set => _farBudgetPrc = RequiredPrc(value, nameof(FarBudgetPrc)); }
+
+    // §P6: per-bot take-profit band (fraction from entry). Promoted from the global Advanced:TpOffsetPrc
+    // config so bracket TP distances vary per bot. The two bracket TP legs draw from [min, max].
+    private decimal _tpOffsetMinPrc = 0.01m;
+    public decimal TpOffsetMinPrc { get => _tpOffsetMinPrc; set => _tpOffsetMinPrc = RequiredPrc(value, nameof(TpOffsetMinPrc)); }
+
+    private decimal _tpOffsetMaxPrc = 0.025m;
+    public decimal TpOffsetMaxPrc { get => _tpOffsetMaxPrc; set => _tpOffsetMaxPrc = RequiredPrc(value, nameof(TpOffsetMaxPrc)); }
+
+    // §3.6 P6: per-bot, per-tick probabilities of choosing each advanced order kind (seeded + assigned
+    // by strategy in Tools/Person.py). They REPLACE the global Bots:Advanced:*Prob config — the master
+    // Bots:Advanced:Enabled switch still gates the whole feature. Default 0 so a bot never does advanced
+    // orders unless seeded otherwise.
+    private decimal _stopProb = 0m;
+    public decimal StopProb { get => _stopProb; set => _stopProb = RequiredPrc(value, nameof(StopProb)); }
+
+    private decimal _trailingProb = 0m;
+    public decimal TrailingProb { get => _trailingProb; set => _trailingProb = RequiredPrc(value, nameof(TrailingProb)); }
+
+    private decimal _shortProb = 0m;
+    public decimal ShortProb { get => _shortProb; set => _shortProb = RequiredPrc(value, nameof(ShortProb)); }
+
+    private decimal _longBracketProb = 0m;
+    public decimal LongBracketProb { get => _longBracketProb; set => _longBracketProb = RequiredPrc(value, nameof(LongBracketProb)); }
+
+    private decimal _shortBracketProb = 0m;
+    public decimal ShortBracketProb { get => _shortBracketProb; set => _shortBracketProb = RequiredPrc(value, nameof(ShortBracketProb)); }
+
     // Probability of acting out-of-character at an extreme-sentiment event. Range [0, 0.5].
     private decimal _extremeReactionRandomnessPrc = 0.10m;
     public decimal ExtremeReactionRandomnessPrc
@@ -147,9 +202,9 @@ public class AIUser : IValidatable
         get => _cashInjectionAmountPrc;
         set
         {
-            if (value < 0m || value > 0.025m)
+            if (value < 0m || value > 0.05m)
                 throw new ArgumentOutOfRangeException(nameof(CashInjectionAmountPrc),
-                    "CashInjectionAmountPrc must be between 0 and 0.025.");
+                    "CashInjectionAmountPrc must be between 0 and 0.05.");
             _cashInjectionAmountPrc = value;
         }
     }
@@ -218,9 +273,19 @@ public class AIUser : IValidatable
         IsValidPrc(MinCashReservePrc) && IsValidPrc(MaxCashReservePrc) && IsValidPrc(SlippageTolerancePrc) && IsValidPrc(AggressivenessPrc) &&
         ExtremeReactionRandomnessPrc >= 0m && ExtremeReactionRandomnessPrc <= 0.5m &&
         CashInjectionFrequencyPrc >= 0m && CashInjectionFrequencyPrc <= 0.50m &&
-        CashInjectionAmountPrc    >= 0m && CashInjectionAmountPrc    <= 0.025m;
+        CashInjectionAmountPrc    >= 0m && CashInjectionAmountPrc    <= 0.05m &&
+        IsValidPrc(StopProb) && IsValidPrc(TrailingProb) && IsValidPrc(ShortProb) &&
+        IsValidPrc(LongBracketProb) && IsValidPrc(ShortBracketProb) &&
+        IsValidPrc(MidLimitMinPrc) && IsValidPrc(MidLimitMaxPrc) &&
+        IsValidPrc(FarLimitMinPrc) && IsValidPrc(FarLimitMaxPrc) &&
+        IsValidPrc(StopDistanceMinPrc) && IsValidPrc(StopDistanceMaxPrc) && IsValidPrc(FarBudgetPrc) &&
+        IsValidPrc(TpOffsetMinPrc) && IsValidPrc(TpOffsetMaxPrc);
 
-    private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc;
+    private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc &&
+        // §P6 tier ladder ordering: each tier's min ≤ max, and the protective stop sits inside the Far walls.
+        MidLimitMinPrc <= MidLimitMaxPrc && FarLimitMinPrc <= FarLimitMaxPrc &&
+        StopDistanceMinPrc <= StopDistanceMaxPrc && StopDistanceMaxPrc <= FarLimitMinPrc &&
+        TpOffsetMinPrc <= TpOffsetMaxPrc;
 
     private bool IsValidWatchlist() => Watchlist.Count > 0 && Watchlist.All(id => id > 0);
 

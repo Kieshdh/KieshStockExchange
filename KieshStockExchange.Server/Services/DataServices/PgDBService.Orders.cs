@@ -9,8 +9,9 @@ namespace KieshStockExchange.Services.DataServices;
 public sealed partial class PgDBService
 {
     private const string OrderCols = @"
-        ""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",
-        ""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt""";
+        ""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
+        ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
+        ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"",""ActivatedAt""";
 
     private const string TransactionCols = @"
         ""TransactionId"",""StockId"",""BuyOrderId"",""SellOrderId"",""BuyerId"",""SellerId"",
@@ -51,33 +52,20 @@ public sealed partial class PgDBService
         if (userIdFilter is int uid) { clauses.Add(@"""UserId"" = @uid"); dp.Add("uid", uid); }
         if (stockIdFilter is int sid) { clauses.Add(@"""StockId"" = @sid"); dp.Add("sid", sid); }
 
+        // §3.6 decomposition: side/type filters now query the dimension columns directly.
         if (!string.IsNullOrWhiteSpace(sideFilter))
         {
             if (string.Equals(sideFilter, "Buy", StringComparison.OrdinalIgnoreCase))
-            {
-                clauses.Add(@"""OrderType"" = ANY(@buyTypes)");
-                dp.Add("buyTypes", new[] { Order.Types.LimitBuy, Order.Types.TrueMarketBuy, Order.Types.SlippageMarketBuy });
-            }
+            { clauses.Add(@"""Side"" = 'Buy'"); }
             else if (string.Equals(sideFilter, "Sell", StringComparison.OrdinalIgnoreCase))
-            {
-                clauses.Add(@"""OrderType"" = ANY(@sellTypes)");
-                dp.Add("sellTypes", new[] { Order.Types.LimitSell, Order.Types.TrueMarketSell, Order.Types.SlippageMarketSell });
-            }
+            { clauses.Add(@"""Side"" = 'Sell'"); }
         }
         if (!string.IsNullOrWhiteSpace(typeFilter))
         {
             if (string.Equals(typeFilter, "Limit", StringComparison.OrdinalIgnoreCase))
-            {
-                clauses.Add(@"""OrderType"" = ANY(@limitTypes)");
-                dp.Add("limitTypes", new[] { Order.Types.LimitBuy, Order.Types.LimitSell });
-            }
+            { clauses.Add(@"""Entry"" = 'Limit'"); }
             else if (string.Equals(typeFilter, "Market", StringComparison.OrdinalIgnoreCase))
-            {
-                clauses.Add(@"""OrderType"" = ANY(@marketTypes)");
-                dp.Add("marketTypes", new[] {
-                    Order.Types.TrueMarketBuy, Order.Types.TrueMarketSell,
-                    Order.Types.SlippageMarketBuy, Order.Types.SlippageMarketSell });
-            }
+            { clauses.Add(@"""Entry"" = 'Market'"); }
         }
 
         var where = "WHERE " + string.Join(" AND ", clauses);
@@ -143,14 +131,13 @@ public sealed partial class PgDBService
         var rows = await c.QueryAsync<OrderRow>($@"
             SELECT {OrderCols} FROM ""Orders""
             WHERE ""StockId"" = @stockId AND ""Currency"" = @currency AND ""Status"" = @open
-              AND ""OrderType"" = ANY(@limitTypes)
+              AND ""Entry"" = 'Limit' AND ""Stop"" = 'None'
             ORDER BY ""CreatedAt""",
             new
             {
                 stockId,
                 currency = currency.ToString(),
                 open = Order.Statuses.Open,
-                limitTypes = new[] { Order.Types.LimitBuy, Order.Types.LimitSell },
             });
         return rows.Select(OrderMapper.ToDomain).ToList();
     }
@@ -159,15 +146,55 @@ public sealed partial class PgDBService
     {
         if (userIds is null || userIds.Count == 0) return new List<Order>();
         await using var c = await OpenAsync(ct);
+        // Open limit orders hold a reservation on the book; armed (Pending) stops hold a
+        // reservation off-book (shares for a sell-stop, cash for a buy-stop). Both must come
+        // back so AccountsCache re-seeds their reservations on cold-load. (The book itself
+        // still loads only Open limit orders via GetOpenLimitOrders — Pending never enters it.)
         var rows = await c.QueryAsync<OrderRow>($@"
             SELECT {OrderCols} FROM ""Orders""
-            WHERE ""UserId"" = ANY(@ids) AND ""Status"" = @open AND ""OrderType"" = ANY(@limitTypes)",
+            WHERE ""UserId"" = ANY(@ids)
+              AND ( (""Status"" = @open AND ""Entry"" = 'Limit' AND ""Stop"" = 'None')
+                 OR (""Status"" = @pending AND ""Stop"" <> 'None') )",
             new
             {
                 ids = userIds.Distinct().ToArray(),
                 open = Order.Statuses.Open,
-                limitTypes = new[] { Order.Types.LimitBuy, Order.Types.LimitSell },
+                pending = Order.Statuses.Pending,
             });
+        return rows.Select(OrderMapper.ToDomain).ToList();
+    }
+
+    // §3.6 P2: all armed stops across every user, for the StopTriggerWatcher's cold-load
+    // index rebuild on server start.
+    public async Task<List<Order>> GetAllArmedStopsAsync(CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        var rows = await c.QueryAsync<OrderRow>($@"
+            SELECT {OrderCols} FROM ""Orders"" WHERE ""Status"" = @pending AND ""Stop"" <> 'None'",
+            new { pending = Order.Statuses.Pending });
+        return rows.Select(OrderMapper.ToDomain).ToList();
+    }
+
+    // §3.6 P4: a bracket's child legs by parent id (any status — the coordinator filters).
+    public async Task<List<Order>> GetBracketChildrenAsync(int parentOrderId, CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        var rows = await c.QueryAsync<OrderRow>(
+            $@"SELECT {OrderCols} FROM ""Orders"" WHERE ""ParentOrderId"" = @parentOrderId",
+            new { parentOrderId });
+        return rows.Select(OrderMapper.ToDomain).ToList();
+    }
+
+    // §3.6 P4: every non-terminal bracket child across all users, for the BracketCoordinator's
+    // cold-load index rebuild (dormant Attached + already-armed/open legs).
+    public async Task<List<Order>> GetActiveBracketChildrenAsync(CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        var rows = await c.QueryAsync<OrderRow>($@"
+            SELECT {OrderCols} FROM ""Orders""
+            WHERE ""ParentOrderId"" IS NOT NULL
+              AND ""Status"" IN (@attached, @pending, @open)",
+            new { attached = Order.Statuses.Attached, pending = Order.Statuses.Pending, open = Order.Statuses.Open });
         return rows.Select(OrderMapper.ToDomain).ToList();
     }
 
@@ -177,10 +204,12 @@ public sealed partial class PgDBService
         await using var c = await OpenAsync(ct);
         var row = OrderMapper.ToRow(order);
         row.OrderId = await c.ExecuteScalarAsync<int>(@"
-            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",
-                                   ""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
-            VALUES (@UserId,@StockId,@Quantity,@Price,@SlippagePercent,@BuyBudget,
-                    @Currency,@OrderType,@Status,@AmountFilled,@CreatedAt,@UpdatedAt)
+            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
+                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
+                                   ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
+            VALUES (@UserId,@StockId,@Quantity,@Price,@SlippagePercent,@BuyBudget,@StopPrice,
+                    @TrailOffset,@TrailIsPercent,@TrailWatermark,@ParentOrderId,
+                    @Currency,@Side,@Entry,@Stop,@Status,@AmountFilled,@CreatedAt,@UpdatedAt)
             RETURNING ""OrderId""", row);
         order.OrderId = row.OrderId;
     }
@@ -195,9 +224,12 @@ public sealed partial class PgDBService
         await c.ExecuteAsync(@"
             UPDATE ""Orders"" SET
               ""UserId"" = @UserId, ""StockId"" = @StockId, ""Quantity"" = @Quantity, ""Price"" = @Price,
-              ""SlippagePercent"" = @SlippagePercent, ""BuyBudget"" = @BuyBudget, ""Currency"" = @Currency,
-              ""OrderType"" = @OrderType, ""Status"" = @Status, ""AmountFilled"" = @AmountFilled,
-              ""CreatedAt"" = @CreatedAt, ""UpdatedAt"" = @UpdatedAt
+              ""SlippagePercent"" = @SlippagePercent, ""BuyBudget"" = @BuyBudget, ""StopPrice"" = @StopPrice,
+              ""TrailOffset"" = @TrailOffset, ""TrailIsPercent"" = @TrailIsPercent, ""TrailWatermark"" = @TrailWatermark,
+              ""ParentOrderId"" = @ParentOrderId,
+              ""Currency"" = @Currency, ""Side"" = @Side, ""Entry"" = @Entry, ""Stop"" = @Stop,
+              ""Status"" = @Status, ""AmountFilled"" = @AmountFilled,
+              ""CreatedAt"" = @CreatedAt, ""UpdatedAt"" = @UpdatedAt, ""ActivatedAt"" = @ActivatedAt
             WHERE ""OrderId"" = @OrderId", OrderMapper.ToRow(order));
     }
 
@@ -207,6 +239,23 @@ public sealed partial class PgDBService
             throw new ArgumentException("Order entity must have a valid OrderId", nameof(order));
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(@"DELETE FROM ""Orders"" WHERE ""OrderId"" = @OrderId", new { order.OrderId });
+    }
+
+    // §3.6 P5: narrow batched update of trailing-stop watermark + effective trigger. Called only by the
+    // watcher's throttled flusher (every few seconds), never per tick. Dapper runs the parameterized
+    // statement once per row over one connection.
+    public async Task UpdateTrailStateAsync(
+        IReadOnlyList<(int OrderId, decimal Watermark, decimal StopPrice)> updates, CancellationToken ct = default)
+    {
+        if (updates is null || updates.Count == 0) return;
+        var now = TimeHelper.NowUtc();
+        var rows = new List<object>(updates.Count);
+        for (int i = 0; i < updates.Count; i++)
+            rows.Add(new { OrderId = updates[i].OrderId, Watermark = updates[i].Watermark, StopPrice = updates[i].StopPrice, UpdatedAt = now });
+        await using var c = await OpenAsync(ct);
+        await c.ExecuteAsync(@"
+            UPDATE ""Orders"" SET ""TrailWatermark"" = @Watermark, ""StopPrice"" = @StopPrice, ""UpdatedAt"" = @UpdatedAt
+            WHERE ""OrderId"" = @OrderId", rows);
     }
     #endregion
 
@@ -396,8 +445,9 @@ public sealed partial class PgDBService
                 throw new ArgumentException("Order entity is not valid", nameof(orders));
 
         var sql = new StringBuilder(@"
-            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",
-                                   ""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
+            INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
+                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
+                                   ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
             VALUES ", capacity: 256 + orders.Count * 96);
         var p = new DynamicParameters();
         for (int i = 0; i < orders.Count; i++)
@@ -409,8 +459,15 @@ public sealed partial class PgDBService
                .Append(",@Price_").Append(i)
                .Append(",@SlippagePercent_").Append(i)
                .Append(",@BuyBudget_").Append(i)
+               .Append(",@StopPrice_").Append(i)
+               .Append(",@TrailOffset_").Append(i)
+               .Append(",@TrailIsPercent_").Append(i)
+               .Append(",@TrailWatermark_").Append(i)
+               .Append(",@ParentOrderId_").Append(i)
                .Append(",@Currency_").Append(i)
-               .Append(",@OrderType_").Append(i)
+               .Append(",@Side_").Append(i)
+               .Append(",@Entry_").Append(i)
+               .Append(",@Stop_").Append(i)
                .Append(",@Status_").Append(i)
                .Append(",@AmountFilled_").Append(i)
                .Append(",@CreatedAt_").Append(i)
@@ -424,8 +481,15 @@ public sealed partial class PgDBService
             p.Add($"Price_{i}",           r.Price);
             p.Add($"SlippagePercent_{i}", r.SlippagePercent);
             p.Add($"BuyBudget_{i}",       r.BuyBudget);
+            p.Add($"StopPrice_{i}",       r.StopPrice);
+            p.Add($"TrailOffset_{i}",     r.TrailOffset);
+            p.Add($"TrailIsPercent_{i}",  r.TrailIsPercent);
+            p.Add($"TrailWatermark_{i}",  r.TrailWatermark);
+            p.Add($"ParentOrderId_{i}",   r.ParentOrderId);
             p.Add($"Currency_{i}",        r.Currency);
-            p.Add($"OrderType_{i}",       r.OrderType);
+            p.Add($"Side_{i}",            r.Side);
+            p.Add($"Entry_{i}",           r.Entry);
+            p.Add($"Stop_{i}",            r.Stop);
             p.Add($"Status_{i}",          r.Status);
             p.Add($"AmountFilled_{i}",    r.AmountFilled);
             p.Add($"CreatedAt_{i}",       r.CreatedAt);
@@ -449,16 +513,19 @@ public sealed partial class PgDBService
             UPDATE ""Orders"" SET
               ""UserId"" = data.""UserId"", ""StockId"" = data.""StockId"", ""Quantity"" = data.""Quantity"",
               ""Price"" = data.""Price"", ""SlippagePercent"" = data.""SlippagePercent"", ""BuyBudget"" = data.""BuyBudget"",
-              ""Currency"" = data.""Currency"", ""OrderType"" = data.""OrderType"", ""Status"" = data.""Status"",
-              ""AmountFilled"" = data.""AmountFilled"", ""CreatedAt"" = data.""CreatedAt"", ""UpdatedAt"" = data.""UpdatedAt""
-            FROM (VALUES ", capacity: 512 + orders.Count * 128);
+              ""StopPrice"" = data.""StopPrice"", ""TrailOffset"" = data.""TrailOffset"",
+              ""TrailIsPercent"" = data.""TrailIsPercent"", ""TrailWatermark"" = data.""TrailWatermark"",
+              ""Currency"" = data.""Currency"", ""Side"" = data.""Side"", ""Entry"" = data.""Entry"", ""Stop"" = data.""Stop"",
+              ""Status"" = data.""Status"", ""AmountFilled"" = data.""AmountFilled"", ""CreatedAt"" = data.""CreatedAt"",
+              ""UpdatedAt"" = data.""UpdatedAt""
+            FROM (VALUES ", capacity: 512 + orders.Count * 160);
         var p = new DynamicParameters();
         for (int i = 0; i < orders.Count; i++)
         {
             if (i > 0) sql.Append(',');
             // First row carries explicit casts; Postgres infers subsequent rows.
             if (i == 0)
-                sql.Append("(@OrderId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@Price_0::numeric,@SlippagePercent_0::numeric,@BuyBudget_0::numeric,@Currency_0::text,@OrderType_0::text,@Status_0::text,@AmountFilled_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
+                sql.Append("(@OrderId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@Price_0::numeric,@SlippagePercent_0::numeric,@BuyBudget_0::numeric,@StopPrice_0::numeric,@TrailOffset_0::numeric,@TrailIsPercent_0::boolean,@TrailWatermark_0::numeric,@Currency_0::text,@Side_0::text,@Entry_0::text,@Stop_0::text,@Status_0::text,@AmountFilled_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
             else
                 sql.Append("(@OrderId_").Append(i)
                    .Append(",@UserId_").Append(i)
@@ -467,8 +534,14 @@ public sealed partial class PgDBService
                    .Append(",@Price_").Append(i)
                    .Append(",@SlippagePercent_").Append(i)
                    .Append(",@BuyBudget_").Append(i)
+                   .Append(",@StopPrice_").Append(i)
+                   .Append(",@TrailOffset_").Append(i)
+                   .Append(",@TrailIsPercent_").Append(i)
+                   .Append(",@TrailWatermark_").Append(i)
                    .Append(",@Currency_").Append(i)
-                   .Append(",@OrderType_").Append(i)
+                   .Append(",@Side_").Append(i)
+                   .Append(",@Entry_").Append(i)
+                   .Append(",@Stop_").Append(i)
                    .Append(",@Status_").Append(i)
                    .Append(",@AmountFilled_").Append(i)
                    .Append(",@CreatedAt_").Append(i)
@@ -483,14 +556,20 @@ public sealed partial class PgDBService
             p.Add($"Price_{i}",           r.Price);
             p.Add($"SlippagePercent_{i}", r.SlippagePercent);
             p.Add($"BuyBudget_{i}",       r.BuyBudget);
+            p.Add($"StopPrice_{i}",       r.StopPrice);
+            p.Add($"TrailOffset_{i}",     r.TrailOffset);
+            p.Add($"TrailIsPercent_{i}",  r.TrailIsPercent);
+            p.Add($"TrailWatermark_{i}",  r.TrailWatermark);
             p.Add($"Currency_{i}",        r.Currency);
-            p.Add($"OrderType_{i}",       r.OrderType);
+            p.Add($"Side_{i}",            r.Side);
+            p.Add($"Entry_{i}",           r.Entry);
+            p.Add($"Stop_{i}",            r.Stop);
             p.Add($"Status_{i}",          r.Status);
             p.Add($"AmountFilled_{i}",    r.AmountFilled);
             p.Add($"CreatedAt_{i}",       r.CreatedAt);
             p.Add($"UpdatedAt_{i}",       r.UpdatedAt);
         }
-        sql.Append(@") AS data(""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""Currency"",""OrderType"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"") WHERE ""Orders"".""OrderId"" = data.""OrderId""");
+        sql.Append(@") AS data(""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"") WHERE ""Orders"".""OrderId"" = data.""OrderId""");
 
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(sql.ToString(), p);

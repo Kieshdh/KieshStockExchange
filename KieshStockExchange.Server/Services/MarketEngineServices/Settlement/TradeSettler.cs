@@ -17,10 +17,11 @@ internal sealed class TradeSettler
     private readonly ILogger<TradeSettler> _logger;
     private readonly SellerCapacityValidator _validator;
     private readonly ConservationProbe _probe;
+    private readonly IOrderRegistry _registry;
 
     public TradeSettler(IDataBaseService db, IAccountsCache accounts,
         IReservationLedger ledger, ILogger<TradeSettler> logger,
-        SellerCapacityValidator validator, ConservationProbe probe)
+        SellerCapacityValidator validator, ConservationProbe probe, IOrderRegistry registry)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
@@ -28,6 +29,30 @@ internal sealed class TradeSettler
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
+    }
+
+    // §P6: fund a short-bracket TP's buyback from its sibling SL's shared cash pool. The TP (a bracket-child
+    // buy) reserves 0 of its own; its sibling SL is an armed buy-stop holding the pool as CurrentBuyReservation.
+    // Draw up to `want` from that pool, reducing the fund's ReservedBalance AND the SL's pool field in lock-step
+    // so the coordinator's later poolDrop resize releases only the remaining cushion (no double-release/drift).
+    // Returns the amount actually drawn (0 when the buy isn't a bracket child or has no sibling pool).
+    private decimal DrawSiblingSlPool(Order? buyOrder, int buyerId, CurrencyType ccy, Fund buyerFund, decimal want)
+    {
+        if (want <= 0m || buyOrder is not { IsBracketChild: true }) return 0m;
+        Order? sl = null;
+        foreach (var o in _registry.GetArmedBuyStopsForUser(buyerId, ccy))
+            if (o.ParentOrderId == buyOrder.ParentOrderId && o.CurrentBuyReservation > 0m) { sl = o; break; }
+        if (sl is null) return 0m;
+        var fromPool = Math.Min(want, Math.Min(sl.CurrentBuyReservation, buyerFund.ReservedBalance));
+        if (fromPool <= 0m) return 0m;
+        var resB = buyerFund.ReservedBalance; var totB = buyerFund.TotalBalance;
+        buyerFund.ConsumeReservedFunds(fromPool);   // pay the buyback from the pool (Reserved + Total down)
+        buyerFund.UpdatedAt = TimeHelper.NowUtc();
+        sl.ConsumeBuyReservation(fromPool);          // keep the SL pool field in lock-step with the fund
+        _ledger.LogFund(buyerId, ccy, buyOrder.OrderId, "ApplyPass:TPBuyback:DrawSLPool",
+            fromPool, resB, buyerFund.ReservedBalance, totB, buyerFund.TotalBalance);
+        return fromPool;
     }
 
     public async Task<(OrderResult? Error, IReadOnlyList<RejectedFill> Rejected)> SettleAsync(
@@ -102,6 +127,7 @@ internal sealed class TradeSettler
 
         var fundSnapshots = scope.FundSnapshots;
         var posSnapshots = scope.PosSnapshots;
+        var posCollSnapshots = scope.PosShortCollateralSnapshots;
         var budgetSnapshots = scope.BudgetSnapshots;
         var pendingNewPositions = scope.PendingNewPositions;
         var orderResSnapshots = scope.OrderReservationSnapshots;
@@ -114,7 +140,7 @@ internal sealed class TradeSettler
         {
             if (o is null) return;
             if (!orderResSnapshots.ContainsKey(o.OrderId))
-                orderResSnapshots[o.OrderId] = (o.CurrentBuyReservation, o.CurrentSellReservedQty);
+                orderResSnapshots[o.OrderId] = (o.CurrentBuyReservation, o.CurrentSellReservedQty, o.CurrentShortCollateral);
         }
 
         var userSet = new HashSet<int>();
@@ -177,9 +203,29 @@ internal sealed class TradeSettler
 
             var apResBefore = buyerFund.ReservedBalance;
             var apTotBefore = buyerFund.TotalBalance;
+            // §P6: consume only this buy order's OWN reservation from ReservedBalance — never more. A buyer
+            // who also holds shorts carries that collateral in the same ReservedBalance, so a blind
+            // ConsumeReservedFunds(notional) on an over-budget fill would eat into it. Consume up to the
+            // order's CurrentBuyReservation, then pay any excess from AVAILABLE cash (never reserved).
+            var reservedPortion = buyOrder is not null
+                ? Math.Min(notional, buyOrder.CurrentBuyReservation)
+                : notional;
+            var excess = notional - reservedPortion;
             try
             {
-                buyerFund.ConsumeReservedFunds(notional);
+                if (reservedPortion > 0m) buyerFund.ConsumeReservedFunds(reservedPortion);
+                if (excess > 0m)
+                {
+                    // §P6: a short-bracket TP reserves 0 of its own — its buyback is funded by the sibling
+                    // SL's shared cash pool (Model B). Draw the excess from that pool FIRST: consume it from
+                    // the fund AND shrink the SL's CurrentBuyReservation in lock-step, so the SL's pool field
+                    // stays accurate and the coordinator's poolDrop resize releases only the remaining cushion
+                    // (no double-release, no drift). Falling straight to AvailableBalance instead would fail a
+                    // heavily-committed bot whose buyback cash is locked in the reserved pool, not free.
+                    var fromPool = DrawSiblingSlPool(buyOrder, t.BuyerId, ccy, buyerFund, excess);
+                    excess -= fromPool;
+                    if (excess > 0m) buyerFund.WithdrawFunds(excess);   // remainder from available
+                }
             }
             catch (ArgumentException ex)
             {
@@ -276,6 +322,7 @@ internal sealed class TradeSettler
                 else if (buyerPos!.PositionId != 0 && !posSnapshots.ContainsKey(buyerPosKey))
                 {
                     posSnapshots[buyerPosKey] = (buyerPos.Quantity, buyerPos.ReservedQuantity);
+                    posCollSnapshots[buyerPosKey] = (buyerPos.ShortCollateral, buyerPos.ShortCollateralCurrency);
                 }
                 posMap[buyerPosKey] = buyerPos;
             }
@@ -286,61 +333,241 @@ internal sealed class TradeSettler
                 t.Quantity, buyerPos.ReservedQuantity, buyerPos.ReservedQuantity,
                 buyerPosQtyBefore, buyerPos.Quantity);
 
-            // Seller position: validate-pass already guaranteed sufficient Quantity
+            // §3.6 P1 buy-to-close: if the buyer was short before this fill, the buy reduces
+            // the short toward zero — release the proportional cash collateral back to
+            // AvailableBalance. Collateral is a ReservedBalance lock (never TotalBalance),
+            // so this is invisible to the conservation probe; realized P/L already sits in
+            // TotalBalance via the consume above and the original short proceeds.
+            if (buyerPosQtyBefore < 0 && buyerPos.ShortCollateral > 0m)
+            {
+                if (buyerPos.ShortCollateralCurrency == ccy)
+                {
+                    var coverQty = Math.Min(t.Quantity, -buyerPosQtyBefore);
+                    // Full cover (now flat or long) MUST clear ALL remaining position collateral — the DB
+                    // invariant forbids a non-negative position carrying collateral. A partial cover (still
+                    // short) releases pro-rata; residual collateral on a still-short position is legal.
+                    var posRelease = buyerPos.Quantity >= 0
+                        ? buyerPos.ShortCollateral
+                        : CurrencyHelper.RoundMoney(
+                            buyerPos.ShortCollateral * coverQty / -buyerPosQtyBefore, ccy);
+                    posRelease = Math.Min(posRelease, buyerPos.ShortCollateral);
+                    // §P6: decouple the POSITION release from the FUND unreserve. The position release is
+                    // authoritative for the invariant and is applied in full; the fund unreserve is clamped to
+                    // what's actually reserved. If the fund falls a few units short (SL-pool vs collateral
+                    // rounding when a short-bracket SL fires and covers — its buyback consume and this release
+                    // both draw ReservedBalance), the position is still cleared and the tiny fund
+                    // over-reservation is left for the reconciler to clamp — never hard-fail the settle and
+                    // desync order vs position.
+                    var fundRelease = Math.Min(posRelease, buyerFund.ReservedBalance);
+                    if (posRelease > 0m)
+                    {
+                        var cResB = buyerFund.ReservedBalance;
+                        var cTotB = buyerFund.TotalBalance;
+                        if (fundRelease > 0m) buyerFund.UnreserveFunds(fundRelease);
+                        buyerFund.UpdatedAt = TimeHelper.NowUtc();
+                        buyerPos.ReleaseShortCollateral(posRelease);
+                        _ledger.LogFund(t.BuyerId, ccy, t.BuyOrderId,
+                            "ApplyPass:ShortClose:ReleaseCollateral", -fundRelease,
+                            cResB, buyerFund.ReservedBalance, cTotB, buyerFund.TotalBalance);
+                        _ledger.LogPosition(t.BuyerId, t.StockId, t.BuyOrderId,
+                            "ApplyPass:ShortClose:ReleaseCollateral", 0,
+                            buyerPos.ReservedQuantity, buyerPos.ReservedQuantity,
+                            buyerPos.Quantity, buyerPos.Quantity);
+                        if (fundRelease < posRelease)
+                            _logger.LogWarning(
+                                "Short-close collateral shortfall buyer {Buyer} stock {Stock}: position released " +
+                                "{Pos} but fund had only {Fund} reserved ({Diff} left for reconciler) — likely " +
+                                "SL-pool/collateral rounding on a short-bracket SL fire.",
+                                t.BuyerId, t.StockId, posRelease, fundRelease, posRelease - fundRelease);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Short-close currency mismatch buyer {Buyer} stock {Stock}: collateral in " +
+                        "{CollCcy}, close in {Ccy}; collateral not released this fill.",
+                        t.BuyerId, t.StockId, buyerPos.ShortCollateralCurrency, ccy);
+                }
+            }
+
+            // Resolve the sell order up front — short detection needs its type.
+            ordersById.TryGetValue(t.SellOrderId, out var sellOrder);
+
+            // Seller position: validate-pass already guaranteed either sufficient long
+            // Quantity (long sell) or a collateral-backed short open (flat seller).
             var sellerPosKey = (t.SellerId, t.StockId);
             if (!posMap.TryGetValue(sellerPosKey, out var sellerPos))
             {
                 sellerPos = _accounts.GetPosition(t.SellerId, t.StockId);
                 if (sellerPos is null) pendingNewPositions.TryGetValue(sellerPosKey, out sellerPos);
+
+                // A flat seller's market sell opens a short; create the row if it never existed.
+                var startQty0 = sellerPos?.Quantity ?? 0;
+                bool willShort = sellOrder is not null && sellOrder.IsMarketOrder && startQty0 <= 0;
                 if (sellerPos is null)
-                    return (OrderResultFactory.OperationFailed(
-                        $"Position not found for seller {t.SellerId} on stock {t.StockId}."),
-                        Array.Empty<RejectedFill>());
-                posMap[sellerPosKey] = sellerPos;
-                if (sellerPos.PositionId != 0 && !posSnapshots.ContainsKey(sellerPosKey))
+                {
+                    if (!willShort)
+                        return (OrderResultFactory.OperationFailed(
+                            $"Position not found for seller {t.SellerId} on stock {t.StockId}."),
+                            Array.Empty<RejectedFill>());
+                    sellerPos = new Position { UserId = t.SellerId, StockId = t.StockId };
+                    pendingNewPositions[sellerPosKey] = sellerPos;
+                    newPositionsThisCall.Add(sellerPos);
+                }
+                else if (sellerPos.PositionId != 0 && !posSnapshots.ContainsKey(sellerPosKey))
+                {
                     posSnapshots[sellerPosKey] = (sellerPos.Quantity, sellerPos.ReservedQuantity);
+                    posCollSnapshots[sellerPosKey] = (sellerPos.ShortCollateral, sellerPos.ShortCollateralCurrency);
+                }
+                posMap[sellerPosKey] = sellerPos;
             }
 
-            ordersById.TryGetValue(t.SellOrderId, out var sellOrder);
+            // Pre-batch Quantity decides short vs long (stable across this order's fills and
+            // matching SellerCapacityValidator's decision). New rows were flat ⇒ 0.
+            int sellerStartQty = posSnapshots.TryGetValue(sellerPosKey, out var sps) ? sps.Quantity : 0;
+            // §F14: a resting LIMIT short (carrying a place-time collateral hold) opens/extends a short
+            // at fill just like a market short — pure short when flat (startQty<=0), straddle/flip when a
+            // long holder's covered shares are exhausted (startQty>0). The short blocks below source the
+            // collateral from the order's hold (already reserved) instead of ReserveFunds.
+            bool sellHasShortPart = sellOrder is not null
+                && (sellOrder.IsMarketOrder || (sellOrder.IsLimitOrder && sellOrder.CurrentShortCollateral > 0m));
+            bool isShortFill = sellHasShortPart && sellerStartQty <= 0;
+            bool isFlipFill = sellHasShortPart && sellerStartQty > 0;
 
-            // Top up reservation from AvailableQuantity for taker sells that skipped place-time reserve
-            if (sellerPos.ReservedQuantity < t.Quantity)
+            if (isShortFill)
             {
-                var needed = t.Quantity - sellerPos.ReservedQuantity;
-                if (sellerPos.AvailableQuantity < needed)
-                    return (OrderResultFactory.OperationFailed(
-                        $"Insufficient reservation for seller {t.SellerId} on stock {t.StockId}: " +
-                        $"has avail {sellerPos.AvailableQuantity}, needs {needed}."),
-                        Array.Empty<RejectedFill>());
-                var posResBefore = sellerPos.ReservedQuantity;
-                sellerPos.ReserveStock(needed);
-                _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:TakerSellTopUp",
-                    needed, posResBefore, sellerPos.ReservedQuantity,
+                // §3.6 P1 short open: reserve cash collateral == this fill's proceeds (just
+                // credited above), so AvailableBalance covers it and buying power is unchanged
+                // at open. Push Quantity negative; collateral lives on the position. No
+                // ReservedQuantity (shares) involved.
+                var collateral = ReservationMath.ShortCollateralForFill(t.Quantity, t.Price, ccy);
+                // §F14: a resting short's collateral is already in ReservedBalance from placement —
+                // consume the order's hold (snapshot for rollback), don't re-reserve. A market short
+                // reserves it now (P1). Either way it's posted to Position.ShortCollateral below, so
+                // Σ holds == Fund.ReservedBalance is preserved.
+                if (sellOrder!.CurrentShortCollateral >= collateral)
+                {
+                    SnapshotOrderIfNew(sellOrder);
+                    sellOrder.ConsumeShortCollateral(collateral);
+                }
+                else
+                {
+                    var cResB = sellerFund.ReservedBalance;
+                    var cTotB = sellerFund.TotalBalance;
+                    sellerFund.ReserveFunds(collateral);
+                    sellerFund.UpdatedAt = TimeHelper.NowUtc();
+                    _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
+                        "ApplyPass:ShortOpen:ReserveCollateral", collateral,
+                        cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
+                }
+
+                var sQtyBefore = sellerPos.Quantity;
+                sellerPos.ApplyDelta(-t.Quantity);
+                sellerPos.TakeShortCollateral(collateral, ccy);
+                _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:ShortOpen",
+                    -t.Quantity, sellerPos.ReservedQuantity, sellerPos.ReservedQuantity,
+                    sQtyBefore, sellerPos.Quantity);
+            }
+            else if (isFlipFill)
+            {
+                // §3.6 risk #7 long→short flip: split this crossing fill at the order's remaining
+                // long reservation. CurrentSellReservedQty is the order's OWN long pool (seeded to
+                // the held shares at place time, drawn down per fill) — using it, not live
+                // Position.Quantity (which other orders' reservations also move), keeps the long
+                // part bounded to THIS order. Consume the long part FIRST so ReservedQuantity
+                // reaches 0 before ApplyDelta pushes Quantity negative (a short can't hold a share
+                // reservation — Position.ApplyDelta guards this).
+                int longPart = Math.Min(t.Quantity, sellOrder!.CurrentSellReservedQty);
+                int shortPart = t.Quantity - longPart;
+
+                if (longPart > 0)
+                {
+                    var flipResBefore = sellerPos.ReservedQuantity;
+                    var flipQtyBefore = sellerPos.Quantity;
+                    sellerPos.ConsumeReservedStock(longPart);
+                    _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:Flip:ConsumeReservedStock",
+                        longPart, flipResBefore, sellerPos.ReservedQuantity,
+                        flipQtyBefore, sellerPos.Quantity);
+                    SnapshotOrderIfNew(sellOrder);
+                    var orderBefore = sellOrder.CurrentSellReservedQty;
+                    sellOrder.ConsumeSellReservation(longPart);
+                    _ledger.LogOrder(sellOrder.UserId, sellOrder.OrderId, "ApplyPass:Flip:ConsumeSellReservation",
+                        longPart, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
+                        orderBefore, sellOrder.CurrentSellReservedQty);
+                }
+
+                if (shortPart > 0)
+                {
+                    var collateral = ReservationMath.ShortCollateralForFill(shortPart, t.Price, ccy);
+                    // §F14: resting-short straddle — consume the order's place-time hold (already in
+                    // ReservedBalance); a market flip reserves now. SnapshotOrderIfNew already ran for the
+                    // long part above, but call again (idempotent — snapshots once per OrderId).
+                    if (sellOrder!.CurrentShortCollateral >= collateral)
+                    {
+                        SnapshotOrderIfNew(sellOrder);
+                        sellOrder.ConsumeShortCollateral(collateral);
+                    }
+                    else
+                    {
+                        var cResB = sellerFund.ReservedBalance;
+                        var cTotB = sellerFund.TotalBalance;
+                        sellerFund.ReserveFunds(collateral);
+                        sellerFund.UpdatedAt = TimeHelper.NowUtc();
+                        _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
+                            "ApplyPass:Flip:ShortOpen:ReserveCollateral", collateral,
+                            cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
+                    }
+
+                    var sQtyBefore = sellerPos.Quantity;
+                    sellerPos.ApplyDelta(-shortPart);
+                    sellerPos.TakeShortCollateral(collateral, ccy);
+                    _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:Flip:ShortOpen",
+                        -shortPart, sellerPos.ReservedQuantity, sellerPos.ReservedQuantity,
+                        sQtyBefore, sellerPos.Quantity);
+                }
+            }
+            else
+            {
+                // Long sell — top up reservation from AvailableQuantity for taker sells that
+                // skipped place-time reserve, then consume.
+                if (sellerPos.ReservedQuantity < t.Quantity)
+                {
+                    var needed = t.Quantity - sellerPos.ReservedQuantity;
+                    if (sellerPos.AvailableQuantity < needed)
+                        return (OrderResultFactory.OperationFailed(
+                            $"Insufficient reservation for seller {t.SellerId} on stock {t.StockId}: " +
+                            $"has avail {sellerPos.AvailableQuantity}, needs {needed}."),
+                            Array.Empty<RejectedFill>());
+                    var posResBefore = sellerPos.ReservedQuantity;
+                    sellerPos.ReserveStock(needed);
+                    _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:TakerSellTopUp",
+                        needed, posResBefore, sellerPos.ReservedQuantity,
+                        sellerPos.Quantity, sellerPos.Quantity);
+                    if (sellOrder is not null)
+                    {
+                        SnapshotOrderIfNew(sellOrder);
+                        var orderBefore = sellOrder.CurrentSellReservedQty;
+                        sellOrder.TakeSellReservation(needed);
+                        _ledger.LogOrder(sellOrder.UserId, sellOrder.OrderId, "ApplyPass:TakerSellTopUp",
+                            needed, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
+                            orderBefore, sellOrder.CurrentSellReservedQty);
+                    }
+                }
+                var sellerPosResBefore = sellerPos.ReservedQuantity;
+                sellerPos.ConsumeReservedStock(t.Quantity);
+                _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:ConsumeReservedStock",
+                    t.Quantity, sellerPosResBefore, sellerPos.ReservedQuantity,
                     sellerPos.Quantity, sellerPos.Quantity);
                 if (sellOrder is not null)
                 {
                     SnapshotOrderIfNew(sellOrder);
                     var orderBefore = sellOrder.CurrentSellReservedQty;
-                    sellOrder.TakeSellReservation(needed);
-                    _ledger.LogOrder(sellOrder.UserId, sellOrder.OrderId, "ApplyPass:TakerSellTopUp",
-                        needed, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
+                    var consumeQty = Math.Min(t.Quantity, sellOrder.CurrentSellReservedQty);
+                    if (consumeQty > 0) sellOrder.ConsumeSellReservation(consumeQty);
+                    _ledger.LogOrder(sellOrder.UserId, sellOrder.OrderId, "ApplyPass:ConsumeSellReservation",
+                        consumeQty, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
                         orderBefore, sellOrder.CurrentSellReservedQty);
                 }
-            }
-            var sellerPosResBefore = sellerPos.ReservedQuantity;
-            sellerPos.ConsumeReservedStock(t.Quantity);
-            _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:ConsumeReservedStock",
-                t.Quantity, sellerPosResBefore, sellerPos.ReservedQuantity,
-                sellerPos.Quantity, sellerPos.Quantity);
-            if (sellOrder is not null)
-            {
-                SnapshotOrderIfNew(sellOrder);
-                var orderBefore = sellOrder.CurrentSellReservedQty;
-                var consumeQty = Math.Min(t.Quantity, sellOrder.CurrentSellReservedQty);
-                if (consumeQty > 0) sellOrder.ConsumeSellReservation(consumeQty);
-                _ledger.LogOrder(sellOrder.UserId, sellOrder.OrderId, "ApplyPass:ConsumeSellReservation",
-                    consumeQty, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
-                    orderBefore, sellOrder.CurrentSellReservedQty);
             }
         }
 
@@ -467,6 +694,19 @@ internal sealed class TradeSettler
             }
         }
 
+        // Restore short collateral in lock-step with the Position/Fund snapshots above
+        // (Fund.ReservedBalance is restored via FundSnapshots; this restores the position's
+        // ShortCollateral field that the open/close mutated).
+        foreach (var (key, prev) in scope.PosShortCollateralSnapshots)
+        {
+            var p = _accounts.GetPosition(key.UserId, key.StockId);
+            if (p != null)
+            {
+                p.ShortCollateral = prev.Collateral;
+                p.ShortCollateralCurrency = prev.Ccy;
+            }
+        }
+
         // Restore per-order reservation fields in lock-step with Fund/Position restoration.
         foreach (var (orderId, prev) in scope.OrderReservationSnapshots)
         {
@@ -482,7 +722,7 @@ internal sealed class TradeSettler
             }
             var orderBuyBefore = o.CurrentBuyReservation;
             var orderSellBefore = o.CurrentSellReservedQty;
-            o.RestoreReservationFromSnapshot(prev.Buy, prev.Sell);
+            o.RestoreReservationFromSnapshot(prev.Buy, prev.Sell, prev.ShortCollateral);
             _ledger.LogOrder(o.UserId, o.OrderId, "RestoreSnapshots:Order",
                 prev.Buy - orderBuyBefore, orderBuyBefore, o.CurrentBuyReservation,
                 orderSellBefore, o.CurrentSellReservedQty);

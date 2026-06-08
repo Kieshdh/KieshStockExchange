@@ -1,16 +1,17 @@
 using System.Net.Http;
 using System.Net.Http.Json;
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
-// Phase 3 Step 7: thin HTTP proxy over /api/orders/* that the server's
-// OrderController exposes. Six Place*Async overloads serialize into the
-// discriminated PlaceOrderRequest. ViewModels keep calling IOrderEntryService
-// — only the impl behind the interface changes.
+// Phase 3 Step 7: thin HTTP proxy over /api/orders/*. §3.6 decomposition — each named
+// Place*Async builds a PlaceOrderRequest carrying the (Side, Entry, Stop) dimensions + value
+// fields; the server maps the combination back to the matching named method. ViewModels keep
+// calling IOrderEntryService by name — only the request shape changed.
 public sealed class ApiOrderEntryClient : IOrderEntryService
 {
     private readonly HttpClient _http;
@@ -20,29 +21,61 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         _http = factory.CreateClient("KSE.Server");
     }
 
+    private PlaceOrderRequest Req(int userId, int stockId, int quantity, OrderSide side, EntryType entry,
+        StopKind stop, CurrencyType currency, decimal? price = null, decimal? slippagePct = null,
+        decimal? buyBudget = null, decimal? stopPrice = null, decimal? trailOffset = null, bool? trailIsPercent = null)
+        => new(userId, stockId, quantity, side, entry, stop, currency, price, slippagePct, buyBudget, stopPrice,
+            trailOffset, trailIsPercent);
+
     public Task<OrderResult> PlaceLimitBuyOrderAsync(int userId, int stockId, int quantity,
         decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
-        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "LimitBuy", currency, limitPrice, null, null), ct);
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Limit, StopKind.None, currency, price: limitPrice), ct);
 
     public Task<OrderResult> PlaceLimitSellOrderAsync(int userId, int stockId, int quantity,
         decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
-        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "LimitSell", currency, limitPrice, null, null), ct);
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Limit, StopKind.None, currency, price: limitPrice), ct);
 
     public Task<OrderResult> PlaceSlippageMarketBuyOrderAsync(int userId, int stockId, int quantity,
         decimal slippagePct, CurrencyType currency, CancellationToken ct = default)
-        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "SlippageMarketBuy", currency, null, slippagePct, null), ct);
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Market, StopKind.None, currency, slippagePct: slippagePct), ct);
 
     public Task<OrderResult> PlaceSlippageMarketSellOrderAsync(int userId, int stockId, int quantity,
         decimal slippagePct, CurrencyType currency, CancellationToken ct = default)
-        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "SlippageMarketSell", currency, null, slippagePct, null), ct);
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.None, currency, slippagePct: slippagePct), ct);
 
     public Task<OrderResult> PlaceTrueMarketBuyOrderAsync(int userId, int stockId, int quantity,
         decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
-        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "TrueMarketBuy", currency, null, null, buyBudget), ct);
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Market, StopKind.None, currency, buyBudget: buyBudget), ct);
 
     public Task<OrderResult> PlaceTrueMarketSellOrderAsync(int userId, int stockId, int quantity,
         CurrencyType currency, CancellationToken ct = default)
-        => PlaceAsync(new PlaceOrderRequest(userId, stockId, quantity, "TrueMarketSell", currency, null, null, null), ct);
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.None, currency), ct);
+
+    public Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Market, StopKind.Stop, currency, buyBudget: buyBudget, stopPrice: stopPrice), ct);
+
+    public Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.Stop, currency, slippagePct: slippagePct, stopPrice: stopPrice), ct);
+
+    public Task<OrderResult> PlaceStopLimitBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Limit, StopKind.Stop, currency, price: limitPrice, stopPrice: stopPrice), ct);
+
+    public Task<OrderResult> PlaceStopLimitSellOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, decimal limitPrice, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Limit, StopKind.Stop, currency, price: limitPrice, stopPrice: stopPrice), ct);
+
+    public Task<OrderResult> PlaceTrailingStopBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Market, StopKind.Trailing, currency,
+            buyBudget: buyBudget, trailOffset: trailOffset, trailIsPercent: isPercent), ct);
+
+    public Task<OrderResult> PlaceTrailingStopSellOrderAsync(int userId, int stockId, int quantity,
+        decimal trailOffset, bool isPercent, CurrencyType currency, CancellationToken ct = default)
+        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.Trailing, currency,
+            trailOffset: trailOffset, trailIsPercent: isPercent), ct);
 
     public async Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default)
@@ -52,6 +85,44 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<OrderResult>(ApiJsonOptions.Default, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("modify-order returned no body.");
+    }
+
+    public async Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
+        CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
+        decimal? stopLimitPrice, decimal? stopSlippagePct,
+        IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default,
+        OrderSide side = OrderSide.Buy)
+    {
+        var legs = new List<BracketLeg>(takeProfits?.Count ?? 0);
+        if (takeProfits is not null)
+            for (int i = 0; i < takeProfits.Count; i++)
+                legs.Add(new BracketLeg(takeProfits[i].Price, takeProfits[i].Quantity));
+        var req = new PlaceBracketRequest(userId, stockId, quantity, entry, currency,
+            limitPrice, buyBudget, stopPrice, stopLimitPrice, stopSlippagePct, legs, side);
+        var resp = await _http.PostAsJsonAsync("api/orders/place-bracket", req, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<OrderResult>(ApiJsonOptions.Default, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("place-bracket returned no body.");
+    }
+
+    public async Task<OrderResult> ModifyStopAsync(int userId, int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"api/orders/{orderId}/modify-stop",
+            new ModifyStopRequest(userId, newQuantity, newStopPrice, newLimitPrice), ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<OrderResult>(ApiJsonOptions.Default, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("modify-stop returned no body.");
+    }
+
+    public async Task<OrderResult> ModifyBracketLegAsync(int userId, int legId, decimal newPrice,
+        int newQuantity, CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsJsonAsync($"api/orders/{legId}/modify-leg",
+            new ModifyBracketLegRequest(userId, newPrice, newQuantity), ApiJsonOptions.Default, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<OrderResult>(ApiJsonOptions.Default, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("modify-leg returned no body.");
     }
 
     public async Task<OrderResult> CancelOrderAsync(int userId, int orderId, CancellationToken ct = default)

@@ -82,13 +82,23 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.Price).HasColumnType(Money);
             b.Property(x => x.SlippagePercent).HasColumnType(Money);
             b.Property(x => x.BuyBudget).HasColumnType(Money);
+            b.Property(x => x.StopPrice).HasColumnType(Money);
+            // §3.6 P3 trailing schema (decimals as Money; Side/Entry/Stop are text by convention).
+            b.Property(x => x.TrailOffset).HasColumnType(Money);
+            b.Property(x => x.TrailWatermark).HasColumnType(Money);
             b.Property(x => x.CreatedAt).HasColumnType(TimestampTz);
             b.Property(x => x.UpdatedAt).HasColumnType(TimestampTz);
+            // §F2: nullable firing-point timestamp (null for non-triggers / still-armed).
+            b.Property(x => x.ActivatedAt).HasColumnType(TimestampTz);
             // Two overlapping composites both terminating on Status — both must survive.
             b.HasIndex(x => new { x.UserId, x.Status })
              .HasDatabaseName("IX_Orders_User_Status");
             b.HasIndex(x => new { x.StockId, x.Status })
              .HasDatabaseName("IX_Orders_Stock_Status");
+            // §3.6 P4: bracket children look up by parent; index it for the coordinator's
+            // child queries + cold-load rehydration.
+            b.HasIndex(x => x.ParentOrderId)
+             .HasDatabaseName("IX_Orders_ParentOrderId");
         });
 
         modelBuilder.Entity<TransactionRow>(b =>
@@ -106,11 +116,17 @@ public sealed class KseDbContext : DbContext
 
         modelBuilder.Entity<PositionRow>(b =>
         {
+            // §3.6 P1: Quantity may be negative (a short). ReservedQuantity is share-side
+            // (long-only), so it stays in [0, max(Quantity,0)]; ShortCollateral is the cash
+            // backing a short and only exists while Quantity < 0.
             b.ToTable("Positions", t => t.HasCheckConstraint(
                 "CK_Positions_Quantity_Invariants",
-                "\"Quantity\" >= 0 AND \"ReservedQuantity\" >= 0 AND \"ReservedQuantity\" <= \"Quantity\""));
+                "\"ReservedQuantity\" >= 0 AND \"ReservedQuantity\" <= GREATEST(\"Quantity\", 0) " +
+                "AND \"ShortCollateral\" >= 0 AND (\"Quantity\" >= 0 OR \"ReservedQuantity\" = 0) " +
+                "AND (\"Quantity\" < 0 OR \"ShortCollateral\" = 0)"));
             b.HasKey(x => x.PositionId);
             b.Property(x => x.PositionId).ValueGeneratedOnAdd();
+            b.Property(x => x.ShortCollateral).HasColumnType(Money);
             b.Property(x => x.CreatedAt).HasColumnType(TimestampTz);
             b.Property(x => x.UpdatedAt).HasColumnType(TimestampTz);
             b.HasIndex(x => new { x.UserId, x.StockId })
@@ -222,6 +238,20 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.ExtremeReactionRandomnessPrc).HasColumnType(Money);
             b.Property(x => x.CashInjectionFrequencyPrc).HasColumnType(Money);
             b.Property(x => x.CashInjectionAmountPrc).HasColumnType(Money);
+            b.Property(x => x.StopProb).HasColumnType(Money);
+            b.Property(x => x.TrailingProb).HasColumnType(Money);
+            b.Property(x => x.ShortProb).HasColumnType(Money);
+            b.Property(x => x.LongBracketProb).HasColumnType(Money);
+            b.Property(x => x.ShortBracketProb).HasColumnType(Money);
+            b.Property(x => x.MidLimitMinPrc).HasColumnType(Money);
+            b.Property(x => x.MidLimitMaxPrc).HasColumnType(Money);
+            b.Property(x => x.FarLimitMinPrc).HasColumnType(Money);
+            b.Property(x => x.FarLimitMaxPrc).HasColumnType(Money);
+            b.Property(x => x.StopDistanceMinPrc).HasColumnType(Money);
+            b.Property(x => x.StopDistanceMaxPrc).HasColumnType(Money);
+            b.Property(x => x.FarBudgetPrc).HasColumnType(Money);
+            b.Property(x => x.TpOffsetMinPrc).HasColumnType(Money);
+            b.Property(x => x.TpOffsetMaxPrc).HasColumnType(Money);
 
             b.HasIndex(x => x.UserId).IsUnique().HasDatabaseName("IX_UserAi");
             b.HasIndex(x => x.StrategyCode);

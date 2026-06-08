@@ -25,6 +25,18 @@ internal sealed class SellerCapacityValidator
         // Two pools per seller: order's own reservation first, then top-up from AvailableQuantity
         var availableBySeller = new Dictionary<(int, int), int>(trades.Count);
         var reservedRemainingByOrder = new Dictionary<int, int>(trades.Count);
+        // Per-seller starting Quantity + whether a Position row exists, resolved once.
+        var startQtyBySeller = new Dictionary<(int, int), int>(trades.Count);
+        var posExistsBySeller = new Dictionary<(int, int), bool>(trades.Count);
+        // §3.6 P1: per sell order, is this a short-opening market sell (flat/short seller)?
+        var shortByOrder = new Dictionary<int, bool>(trades.Count);
+        // §3.6 P4: per sell order, is this a bracket TP (limit sell whose shares are reserved on the
+        // Position by its sibling SL, not by itself)? And the per-position reserved pool those TP
+        // fills draw from, decremented per accepted fill so two TP fills in one batch can't over-draw.
+        var bracketTpByOrder = new Dictionary<int, bool>(trades.Count);
+        var bracketPoolBySeller = new Dictionary<(int, int), int>(trades.Count);
+        // §3.6 risk #7: per sell order, is this a MARKET sell by a long holder that flips to short?
+        var flipByOrder = new Dictionary<int, bool>(trades.Count);
         var rejected = new List<RejectedFill>();
         var accepted = new List<Transaction>(trades.Count);
 
@@ -34,25 +46,108 @@ internal sealed class SellerCapacityValidator
             var t = trades[ti];
             var sellerKey = (t.SellerId, t.StockId);
 
-            // Lazy-init available pool
-            if (!availableBySeller.TryGetValue(sellerKey, out var available))
+            // Resolve the seller's starting state once (pre-apply, so it's stable across
+            // this order's fills even though the apply-pass will push Quantity negative).
+            if (!startQtyBySeller.TryGetValue(sellerKey, out var startQty))
             {
                 var sellerPos = accounts.GetPosition(t.SellerId, t.StockId);
-                if (sellerPos is null && !pendingNewPositions.TryGetValue(sellerKey, out sellerPos))
-                    return (OrderResultFactory.OperationFailed(
-                        $"Position not found for seller {t.SellerId} on stock {t.StockId}."),
-                        new List<Transaction>(), new List<RejectedFill>());
-                available = sellerPos!.AvailableQuantity;
-                availableBySeller[sellerKey] = available;
+                if (sellerPos is null) pendingNewPositions.TryGetValue(sellerKey, out sellerPos);
+                startQty = sellerPos?.Quantity ?? 0;
+                startQtyBySeller[sellerKey] = startQty;
+                posExistsBySeller[sellerKey] = sellerPos is not null;
+                availableBySeller[sellerKey] = sellerPos?.AvailableQuantity ?? 0;
             }
 
-            // Lazy-init order reservation pool. Missing from ordersById = brand-new mid-batch sell with no reservation.
+            // A market sell by a flat (or already-short) seller opens/extends a
+            // cash-collateralized short. Accept without drawing on the share pools —
+            // the cash collateral posted at fill time is the backing, not shares.
+            if (!shortByOrder.TryGetValue(t.SellOrderId, out var isShort))
+            {
+                ordersById.TryGetValue(t.SellOrderId, out var so);
+                // §F14: a PURE resting short (flat/short seller, no covered shares) is a LIMIT sell
+                // carrying a place-time collateral hold — accept it like a market short (no share draw)
+                // so it doesn't hit the no-position hard-fail below. Cash was checked at placement.
+                isShort = so is not null && startQty <= 0
+                    && (so.IsMarketOrder || (so.IsLimitOrder && so.CurrentShortCollateral > 0m));
+                shortByOrder[t.SellOrderId] = isShort;
+            }
+            if (isShort)
+            {
+                accepted.Add(t);
+                continue;
+            }
+
+            // §3.6 P4 bracket TP: a resting limit sell whose ParentOrderId is set holds NO
+            // reservation of its own — its shares are reserved on the Position by the sibling SL
+            // (the shared pool). Accept it by drawing from a per-position pool seeded to
+            // Position.ReservedQuantity, decremented per accepted fill (risk #2: two TP fills in one
+            // batch can't over-draw the held position). TradeSettler's long-sell ConsumeReservedStock
+            // then drops Position.ReservedQuantity; the coordinator shrinks the SL post-commit.
+            if (!bracketTpByOrder.TryGetValue(t.SellOrderId, out var isBracketTp))
+            {
+                ordersById.TryGetValue(t.SellOrderId, out var tpo);
+                isBracketTp = tpo is not null && tpo.IsBracketChild && tpo.IsSellOrder && tpo.IsLimitOrder;
+                bracketTpByOrder[t.SellOrderId] = isBracketTp;
+            }
+            if (isBracketTp)
+            {
+                if (!bracketPoolBySeller.TryGetValue(sellerKey, out var pool))
+                {
+                    var bp = accounts.GetPosition(t.SellerId, t.StockId);
+                    if (bp is null) pendingNewPositions.TryGetValue(sellerKey, out bp);
+                    pool = bp?.ReservedQuantity ?? 0;
+                    bracketPoolBySeller[sellerKey] = pool;
+                }
+                if (pool < t.Quantity)
+                {
+                    rejected.Add(new RejectedFill(
+                        t, t.SellOrderId,
+                        $"Bracket TP for seller {t.SellerId} on stock {t.StockId}: " +
+                        $"reserved pool {pool} < needs {t.Quantity}."));
+                    continue;
+                }
+                bracketPoolBySeller[sellerKey] = pool - t.Quantity;
+                accepted.Add(t);
+                continue;
+            }
+
+            // Long sell with no Position row should never reach matching (place-time guards
+            // it); treat as a hard batch failure, not a recoverable rejected fill.
+            if (!posExistsBySeller[sellerKey])
+                return (OrderResultFactory.OperationFailed(
+                    $"Position not found for seller {t.SellerId} on stock {t.StockId}."),
+                    new List<Transaction>(), new List<RejectedFill>());
+
+            var available = availableBySeller[sellerKey];
+
+            // Lazy-init order reservation pool from the order's ACTUAL share reservation
+            // (CurrentSellReservedQty), not RemainingQuantity: MatchingEngine already called
+            // taker.Fill() during Match, so RemainingQuantity reads 0 for a fully-filling sell of
+            // an entire (fully-reserved) holding — which, with AvailableQuantity also 0, would
+            // wrongly reject it. CurrentSellReservedQty is set at place time and untouched by Match.
+            // Missing from ordersById = brand-new mid-batch sell with no reservation → 0 (covered
+            // by the available pool / the apply-pass top-up).
             if (!reservedRemainingByOrder.TryGetValue(t.SellOrderId, out var reservedThis))
             {
                 reservedThis = ordersById.TryGetValue(t.SellOrderId, out var sellOrder)
-                    ? sellOrder.RemainingQuantity
+                    ? sellOrder.CurrentSellReservedQty
                     : 0;
                 reservedRemainingByOrder[t.SellOrderId] = reservedThis;
+            }
+
+            // §3.6 risk #7: a MARKET sell by a long holder (startQty > 0) flips to short once its
+            // shares run out — the uncovered portion opens a collateral-backed short, exactly like
+            // the flat-seller branch above. Limit sells can't flip (out of scope). The per-fill
+            // long/short split is done in TradeSettler; here we just accept it.
+            if (!flipByOrder.TryGetValue(t.SellOrderId, out var isFlip))
+            {
+                ordersById.TryGetValue(t.SellOrderId, out var fo);
+                // §F14: a straddle resting short — a LIMIT sell by a long holder whose covered shares
+                // run out, the uncovered remainder collateral-backed at placement — flips to short
+                // exactly like a market sell beyond holdings, so the same accept-the-remainder applies.
+                isFlip = fo is not null && startQty > 0
+                    && (fo.IsMarketOrder || (fo.IsLimitOrder && fo.CurrentShortCollateral > 0m));
+                flipByOrder[t.SellOrderId] = isFlip;
             }
 
             // Reject if both pools combined can't cover; caller cancels the offending maker
@@ -60,6 +155,14 @@ internal sealed class SellerCapacityValidator
             var fromAvailable = t.Quantity - fromReserved;
             if (fromAvailable > available)
             {
+                if (isFlip)
+                {
+                    // Long close draws every share both pools hold; the remainder opens the short.
+                    reservedRemainingByOrder[t.SellOrderId] = 0;
+                    availableBySeller[sellerKey] = 0;
+                    accepted.Add(t);
+                    continue;
+                }
                 rejected.Add(new RejectedFill(
                     t,
                     t.SellOrderId,

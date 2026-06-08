@@ -37,6 +37,25 @@ public class AIUserRow
     [Column("CashInjectionFrequencyPrc")] public decimal CashInjectionFrequencyPrc { get; set; }
     [Column("CashInjectionAmountPrc")] public decimal CashInjectionAmountPrc { get; set; }
 
+    // §3.6 P6: per-bot advanced-order probabilities.
+    [Column("StopProb")] public decimal StopProb { get; set; }
+    [Column("TrailingProb")] public decimal TrailingProb { get; set; }
+    [Column("ShortProb")] public decimal ShortProb { get; set; }
+    [Column("LongBracketProb")] public decimal LongBracketProb { get; set; }
+    [Column("ShortBracketProb")] public decimal ShortBracketProb { get; set; }
+
+    // §P6 balancing: per-bot tiered-limit bands, protective-stop distance band, and Far-order budget.
+    [Column("MidLimitMinPrc")] public decimal MidLimitMinPrc { get; set; }
+    [Column("MidLimitMaxPrc")] public decimal MidLimitMaxPrc { get; set; }
+    [Column("FarLimitMinPrc")] public decimal FarLimitMinPrc { get; set; }
+    [Column("FarLimitMaxPrc")] public decimal FarLimitMaxPrc { get; set; }
+    [Column("StopDistanceMinPrc")] public decimal StopDistanceMinPrc { get; set; }
+    [Column("StopDistanceMaxPrc")] public decimal StopDistanceMaxPrc { get; set; }
+    [Column("FarBudgetPrc")] public decimal FarBudgetPrc { get; set; }
+    // §P6: per-bot take-profit band (promoted from global config).
+    [Column("TpOffsetMinPrc")] public decimal TpOffsetMinPrc { get; set; }
+    [Column("TpOffsetMaxPrc")] public decimal TpOffsetMaxPrc { get; set; }
+
     [Column("WatchlistCsv")] public string WatchlistCsv { get; set; } = string.Empty;
 
     [Column("MaxOpenOrders")] public int MaxOpenOrders { get; set; } = 20;
@@ -75,6 +94,20 @@ public static class AIUserMapper
             ExtremeReactionRandomnessPrc = r.ExtremeReactionRandomnessPrc,
             CashInjectionFrequencyPrc = r.CashInjectionFrequencyPrc,
             CashInjectionAmountPrc = r.CashInjectionAmountPrc,
+            StopProb = r.StopProb,
+            TrailingProb = r.TrailingProb,
+            ShortProb = r.ShortProb,
+            LongBracketProb = r.LongBracketProb,
+            ShortBracketProb = r.ShortBracketProb,
+            MidLimitMinPrc = r.MidLimitMinPrc,
+            MidLimitMaxPrc = r.MidLimitMaxPrc,
+            FarLimitMinPrc = r.FarLimitMinPrc,
+            FarLimitMaxPrc = r.FarLimitMaxPrc,
+            StopDistanceMinPrc = r.StopDistanceMinPrc,
+            StopDistanceMaxPrc = r.StopDistanceMaxPrc,
+            FarBudgetPrc = r.FarBudgetPrc,
+            TpOffsetMinPrc = r.TpOffsetMinPrc,
+            TpOffsetMaxPrc = r.TpOffsetMaxPrc,
             MaxOpenOrders = r.MaxOpenOrders,
             HomeCurrency = r.HomeCurrency,
             StrategyCode = r.StrategyCode,
@@ -109,6 +142,20 @@ public static class AIUserMapper
         ExtremeReactionRandomnessPrc = a.ExtremeReactionRandomnessPrc,
         CashInjectionFrequencyPrc = a.CashInjectionFrequencyPrc,
         CashInjectionAmountPrc = a.CashInjectionAmountPrc,
+        StopProb = a.StopProb,
+        TrailingProb = a.TrailingProb,
+        ShortProb = a.ShortProb,
+        LongBracketProb = a.LongBracketProb,
+        ShortBracketProb = a.ShortBracketProb,
+        MidLimitMinPrc = a.MidLimitMinPrc,
+        MidLimitMaxPrc = a.MidLimitMaxPrc,
+        FarLimitMinPrc = a.FarLimitMinPrc,
+        FarLimitMaxPrc = a.FarLimitMaxPrc,
+        StopDistanceMinPrc = a.StopDistanceMinPrc,
+        StopDistanceMaxPrc = a.StopDistanceMaxPrc,
+        FarBudgetPrc = a.FarBudgetPrc,
+        TpOffsetMinPrc = a.TpOffsetMinPrc,
+        TpOffsetMaxPrc = a.TpOffsetMaxPrc,
         WatchlistCsv = a.WatchlistCsv,
         MaxOpenOrders = a.MaxOpenOrders,
         HomeCurrency = a.HomeCurrency,

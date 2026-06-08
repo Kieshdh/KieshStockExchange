@@ -25,4 +25,8 @@
     <!-- Price-marker line accent. Drawn for user-placed horizontal markers. -->
     <Color x:Key="ChartMarker">#EAB308</Color>
 
+    <!-- §F2: fired-trigger firing-point arrow. Blue so it reads distinctly from the green/red
+         fill triangles and the amber armed-trigger line. -->
+    <Color x:Key="ChartTrigger">#3B82F6</Color>
+
 </ResourceDictionary>

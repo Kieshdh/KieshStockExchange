@@ -56,11 +56,24 @@
                        HorizontalTextAlignment="End" />
             </VerticalStackLayout>
 
-            <!-- Limit price -->
+            <!-- Primary price field: limit price for a normal order, trigger price for a stop.
+                 The label flips via PriceFieldLabel (§3.6 P3). This is the field the chart drag
+                 tracks. -->
             <VerticalStackLayout Spacing="0">
-                <Label Text="Limit price"
+                <Label Text="{Binding PriceFieldLabel}"
                        Style="{StaticResource FormLabelStyle}" />
                 <Entry Text="{Binding PriceString, Mode=TwoWay}"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric"
+                       HorizontalTextAlignment="End" />
+            </VerticalStackLayout>
+
+            <!-- Stop-limit only: the separate limit price the stop promotes to (§3.6 P3). -->
+            <VerticalStackLayout Spacing="0"
+                                 IsVisible="{Binding IsStopLimit}">
+                <Label Text="Limit price"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding LimitPriceString, Mode=TwoWay}"
                        Style="{StaticResource FormEntryStyle}"
                        Keyboard="Numeric"
                        HorizontalTextAlignment="End" />
@@ -72,16 +85,29 @@
                    TextColor="{DynamicResource SellRed}"
                    FontSize="12" />
 
-            <!-- Cancel + Confirm CTA pair -->
-            <Grid ColumnDefinitions="*,*"
-                  ColumnSpacing="8"
-                  Margin="0,4,0,0">
-                <Button Grid.Column="0"
-                        Text="Cancel"
-                        Command="{Binding CancelCommand}"
-                        Style="{StaticResource UnselectedSegmentButtonStyle}" />
-                <Button Grid.Column="1"
-                        Text="Confirm"
+            <!-- Non-blocking warning: the edited price crosses the market (fills like a market order). -->
+            <Label Text="{Binding WarningMessage}"
+                   IsVisible="{Binding HasWarning}"
+                   Style="{StaticResource MutedLabelStyle}"
+                   FontSize="12" />
+
+            <!-- Row 1: Cancel (back out) · Remove (cancel the order). Row 2: full-width Confirm. -->
+            <VerticalStackLayout Spacing="8" Margin="0,4,0,0">
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                    <Button Grid.Column="0"
+                            Text="Cancel"
+                            FontSize="13"
+                            Command="{Binding CancelCommand}"
+                            Style="{StaticResource UnselectedSegmentButtonStyle}" />
+                    <Button Grid.Column="1"
+                            Text="Remove"
+                            FontSize="13"
+                            Command="{Binding RemoveCommand}"
+                            Style="{StaticResource BuyButtonStyle}"
+                            BackgroundColor="{DynamicResource SellRed}" />
+                </Grid>
+                <Button Text="Confirm modification"
+                        FontSize="13"
                         Command="{Binding ConfirmCommand}"
                         Style="{StaticResource BuyButtonStyle}">
                     <Button.Triggers>
@@ -92,7 +118,7 @@
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-            </Grid>
+            </VerticalStackLayout>
 
         </VerticalStackLayout>
     </Border>

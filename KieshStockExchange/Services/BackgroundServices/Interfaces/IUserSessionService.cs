@@ -28,6 +28,16 @@ public interface IUserSessionService
     CandleResolution DefaultCandleResolution { get; }
     int? CurrentStockId { get; }
 
+    // Chart viewport restore (F7).
+    int ChartVisibleCount { get; }
+    int ChartOffset { get; }
+    bool ChartYAutoFit { get; }
+    decimal? ChartManualYMin { get; }
+    decimal? ChartManualYMax { get; }
+
+    // Trade-page tables "current stock only" filter (F11).
+    bool TablesShowAll { get; }
+
     /// <summary>Set the logged-in user and basic preferences.</summary>
     void SetAuthenticatedUser(
         User user,
@@ -41,6 +51,12 @@ public interface IUserSessionService
     void SetBaseCurrency(CurrencyType currency);
     void SetDefaultCandleResolution(CandleResolution resolution);
     void SetCurrentStockId(int? stockId);
+
+    /// <summary>Persist the chart viewport so it can be restored on return to the Trade page (F7).</summary>
+    void SetChartViewState(int visibleCount, int offset, bool yAutoFit, decimal? yMin, decimal? yMax);
+
+    /// <summary>Persist the trade-page tables filter: true = show all stocks, false = current only (F11).</summary>
+    void SetTablesShowAll(bool showAll);
 }
 
 // SessionSnapshot record moved to KieshStockExchange.Shared/Services/BackgroundServices/

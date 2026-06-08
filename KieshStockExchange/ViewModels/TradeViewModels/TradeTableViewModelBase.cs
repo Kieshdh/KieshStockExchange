@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
@@ -16,6 +17,15 @@ public abstract partial class TradeTableViewModelBase<TRow> : StockAwareViewMode
     protected TradeTableViewModelBase(ISelectedStockService selected, INotificationService notification,
         ILogger? logger = null)
         : base(selected, notification, logger) { }
+
+    // The ↗ next to each row's symbol: point the trade page at that row's stock. Shared so all four
+    // tables (open orders, history, transactions, positions) navigate identically.
+    [RelayCommand]
+    protected async Task GoToStockAsync(IStockNav? row)
+    {
+        if (row is null || row.StockId <= 0) return;
+        await Selected.Set(row.StockId, row.Currency);
+    }
 
     public void SetShowAll(bool show)
     {

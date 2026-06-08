@@ -16,7 +16,14 @@ namespace KieshStockExchange.Server.Controllers;
 public sealed class EngineController : ControllerBase
 {
     private readonly IUserPortfolioService _portfolio;
-    public EngineController(IUserPortfolioService portfolio) => _portfolio = portfolio;
+    // Cash movements are logged under a dedicated "Funds" category so they stand out next to the
+    // MarketEngine order log during testing (and aren't muted by the bot-log silencing).
+    private readonly ILogger _funds;
+    public EngineController(IUserPortfolioService portfolio, ILoggerFactory loggerFactory)
+    {
+        _portfolio = portfolio;
+        _funds = loggerFactory.CreateLogger("Funds");
+    }
 
     [HttpPost("portfolio/deposit-withdraw")]
     [EnableRateLimiting("orders")]
@@ -33,6 +40,10 @@ public sealed class EngineController : ControllerBase
             "Withdrawal" => await _portfolio.WithdrawAsync(cmd.Amount, cmd.Currency, cmd.Note, caller, ct),
             _            => false
         };
+        // Human-only by construction: this endpoint is JWT-authed + self-only; bots top up via
+        // BotCashInjector calling the service directly, never this route.
+        _funds.LogInformation("User {User} {Kind} {Amount} {Currency} → {Status} (note: {Note})",
+            caller, cmd.Kind, cmd.Amount, cmd.Currency, ok ? "OK" : "FAILED", cmd.Note);
         return Ok(ok);
     }
 

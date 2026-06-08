@@ -6,10 +6,11 @@
              x:Name="PositionRoot"
              x:DataType="vm:UserPositionsViewModel">
 
-    <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
+    <Grid RowDefinitions="Auto,*" Style="{StaticResource TradeTableContainerGrid}">
 
         <!-- Table headers -->
-        <Grid ColumnDefinitions="*,*,*,*,*,*,*"
+        <Grid Grid.Row="0"
+              ColumnDefinitions="*,*,*,*,*,*"
               Style="{StaticResource TradeTableHeaderGrid}">
             <Label Grid.Column="0" Text="Symbol"    Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="1" Text="Price"     Style="{StaticResource TradeTableHeaderLabel}" />
@@ -17,13 +18,12 @@
             <Label Grid.Column="3" Text="Reserved"  Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="4" Text="Available" Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="5" Text="Total"     Style="{StaticResource TradeTableHeaderLabel}" />
-            <Label Grid.Column="6" Text="Action"    Style="{StaticResource TradeTableHeaderLabel}" />
         </Grid>
 
         <!-- Rows -->
-        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
+        <RefreshView Grid.Row="1" Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
             <CollectionView ItemsSource="{Binding CurrentView}"
-                            SelectionMode="None" Margin="0,4,0,0">
+                            SelectionMode="None">
                 <CollectionView.EmptyView>
                     <StackLayout Padding="12" Spacing="4">
                         <Label Text="No open positions" Opacity="0.7" />
@@ -32,23 +32,31 @@
 
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="vm:PositionRow">
-                        <Grid ColumnDefinitions="*,*,*,*,*,*,*"
+                        <Grid ColumnDefinitions="*,*,*,*,*,*"
                               Style="{StaticResource TradeTableRowGrid}">
-                            <Label Grid.Column="0" Text="{Binding Symbol}"    Style="{StaticResource TradeTableSymbolLabel}" />
+                            <HorizontalStackLayout Grid.Column="0" Spacing="3" VerticalOptions="Center">
+                                <Label Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" VerticalOptions="Center" />
+                                <Label Style="{StaticResource TableSymbolNavGlyph}">
+                                    <Label.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding GoToStockCommand}" CommandParameter="{Binding .}" />
+                                    </Label.GestureRecognizers>
+                                </Label>
+                            </HorizontalStackLayout>
                             <Label Grid.Column="1" Text="{Binding Price}"     Style="{StaticResource TradeTableRowLabel}" />
-                            <Label Grid.Column="2" Text="{Binding Qty}"       Style="{StaticResource TradeTableRowLabel}" />
+                            <Label Grid.Column="2" Text="{Binding Qty}"       Style="{StaticResource TradeTableRowLabel}">
+                                <Label.Triggers>
+                                    <DataTrigger TargetType="Label" Binding="{Binding IsShort}" Value="True">
+                                        <Setter Property="TextColor" Value="OrangeRed" />
+                                    </DataTrigger>
+                                </Label.Triggers>
+                            </Label>
                             <Label Grid.Column="3" Text="{Binding Reserved}"  Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="4" Text="{Binding Available}" Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="5" Text="{Binding Total}"     Style="{StaticResource TradeTableRowLabel}" />
-
-                            <Button Grid.Column="6" Text="Trade"
-                                    Style="{StaticResource TableActionButton}"
-                                    Command="{Binding TradeCommand}"
-                                    CommandParameter="{Binding .}" />
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
             </CollectionView>
         </RefreshView>
-    </VerticalStackLayout>
+    </Grid>
 </ContentView>

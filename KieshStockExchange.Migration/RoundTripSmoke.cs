@@ -360,18 +360,20 @@ internal static class RoundTripSmoke
 
     private static async Task OrderAsync(NpgsqlConnection conn)
     {
+        // §3.6 decomposition: type is now Side/Entry/Stop columns (was the flat OrderType).
         var row = new OrderRow
         {
             UserId = 1, StockId = 1, Quantity = 10, Price = 50.5m,
             SlippagePercent = 1.5m, BuyBudget = null, Currency = "USD",
-            OrderType = Order.Types.LimitBuy, Status = Order.Statuses.Open,
+            Side = nameof(OrderSide.Buy), Entry = nameof(EntryType.Limit), Stop = nameof(StopKind.None),
+            Status = Order.Statuses.Open,
             AmountFilled = 0, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
         };
         row.OrderId = await conn.ExecuteScalarAsync<int>("""
             INSERT INTO "Orders" ("UserId","StockId","Quantity","Price","SlippagePercent","BuyBudget",
-                                 "Currency","OrderType","Status","AmountFilled","CreatedAt","UpdatedAt")
+                                 "Currency","Side","Entry","Stop","Status","AmountFilled","CreatedAt","UpdatedAt")
             VALUES (@UserId,@StockId,@Quantity,@Price,@SlippagePercent,@BuyBudget,
-                    @Currency,@OrderType,@Status,@AmountFilled,@CreatedAt,@UpdatedAt)
+                    @Currency,@Side,@Entry,@Stop,@Status,@AmountFilled,@CreatedAt,@UpdatedAt)
             RETURNING "OrderId"
         """, row);
 

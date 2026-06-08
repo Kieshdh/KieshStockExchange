@@ -44,9 +44,12 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
                             or nameof(ISelectedStockService.Currency))
             FireStockChanged();
 
-        // Notify about price changes
-        if (e.PropertyName  is nameof(ISelectedStockService.PriceUpdatedAt))
-                            //or nameof(ISelectedStockService.CurrentPrice))
+        // Notify about price changes. Fire on CurrentPrice too (not just PriceUpdatedAt): a quote
+        // can carry a new price under the same LastUpdated timestamp, and the [ObservableProperty]
+        // equality check then suppresses the PriceUpdatedAt change — so the chart missed those ticks
+        // while the top price (bound to CurrentPrice) updated. RequestRedraw coalesces the extra fires.
+        if (e.PropertyName  is nameof(ISelectedStockService.PriceUpdatedAt)
+                            or nameof(ISelectedStockService.CurrentPrice))
             FirePriceChanged();
     }
 

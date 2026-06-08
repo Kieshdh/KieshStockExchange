@@ -2,12 +2,22 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:views="clr-namespace:KieshStockExchange.Views.OtherViews"
+             xmlns:behaviors="clr-namespace:KieshStockExchange.Behaviors"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              x:Class="KieshStockExchange.Views.TradePageViews.PlaceOrderView"
              x:DataType="vm:PlaceOrderViewModel">
 
-    <Border Style="{StaticResource TradingPanelStyle}">
-        <VerticalStackLayout Spacing="12">
+    <!-- Right padding trimmed to 2 so the ScrollView reaches the panel edge and its scrollbar sits
+         flush right; the content keeps its own right gutter (VSL Padding) so fields clear the bar. -->
+    <Border Style="{StaticResource TradingPanelStyle}"
+            Padding="12,12,2,12">
+        <!-- §3.6 P4: the ticket can grow tall (trigger + bracket SL/trailing + up to 3 TP rows). Only
+             the FORM scrolls; the order-value + submit footer is pinned (row Auto) so the CTA is always
+             reachable and showing/hiding the bracket can't budge the layout. Right padding leaves a
+             gutter so the scrollbar doesn't hover over the fields. TradePage bounds the panel height. -->
+        <Grid RowDefinitions="*,Auto" RowSpacing="8">
+        <ScrollView Grid.Row="0">
+        <VerticalStackLayout Spacing="12" Padding="0,0,10,8">
 
             <!-- Card head: title + Buy/Sell pill -->
             <Grid ColumnDefinitions="*,Auto"
@@ -31,62 +41,111 @@
                 </views:SegmentedTabView>
             </Grid>
 
-            <!-- Order type segment, left-aligned -->
+            <!-- Order type segment: Market | Limit | Trigger. MinTabWidth=0 so buttons hug their
+                 labels (the equal-width pill clipped "Trigger" at the panel width). -->
             <views:SegmentedTabView
                 SelectedIndex="{Binding SelectedTypeIndex}"
                 SelectedButtonStyle="{StaticResource SelectedSegmentButtonStyle}"
                 UnselectedButtonStyle="{StaticResource UnselectedSegmentButtonStyle}"
-                HeaderContainerHorizontalOptions="Start">
+                HeaderContainerHorizontalOptions="Start"
+                MinTabWidth="0">
                 <views:SegmentedTabView.Tabs>
                     <views:SegmentedTabItem Header="Market" />
                     <views:SegmentedTabItem Header="Limit" />
+                    <views:SegmentedTabItem Header="Trigger" />
                 </views:SegmentedTabView.Tabs>
             </views:SegmentedTabView>
 
-            <!-- Available assets row -->
-            <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+            <!-- Available assets — funds + shares, shown at the top for every tab/side. -->
+            <Grid ColumnDefinitions="*,Auto" Margin="0,2,0,0">
                 <Label Grid.Column="0"
-                       Text="{Binding AssetText}"
+                       Text="Available funds"
                        Style="{StaticResource OrderTotalsLabel}"
                        VerticalTextAlignment="Center" />
                 <Label Grid.Column="1"
-                       Text="{Binding AvailableAssetsText}"
+                       Text="{Binding AvailableFundsDisplay}"
+                       Style="{StaticResource OrderTotalsValue}"
+                       VerticalTextAlignment="Center" />
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto">
+                <Label Grid.Column="0"
+                       Text="Shares (available / total)"
+                       Style="{StaticResource OrderTotalsLabel}"
+                       VerticalTextAlignment="Center" />
+                <Label Grid.Column="1"
+                       Text="{Binding AvailableSharesDisplay}"
                        Style="{StaticResource OrderTotalsValue}"
                        VerticalTextAlignment="Center" />
             </Grid>
 
-            <!-- "Convert cash first" hint when the user has no Fund in the selected currency. -->
+            <!-- "Convert cash first" / short / flip hint. -->
             <Label Text="{Binding HintText}"
                    IsVisible="{Binding HasHint}"
                    Style="{StaticResource MutedLabelStyle}"
                    TextColor="{DynamicResource SellRed}"
                    Margin="0,2,0,0" />
 
-            <!-- Limit price (Limit mode only) -->
+            <!-- §F4 region divider: available funds/shares above, order fields below. -->
+            <BoxView Style="{StaticResource TicketDivider}" />
+
+            <!-- Trigger price (Trigger tab only) -->
             <VerticalStackLayout Spacing="0"
-                                 IsVisible="{Binding IsLimitSelected}">
-                <Label Text="Limit price"
+                                 IsVisible="{Binding IsStopOrder}">
+                <Label Text="Trigger price"
                        Style="{StaticResource FormLabelStyle}" />
-                <Entry Text="{Binding LimitPriceString, Mode=TwoWay}"
+                <Entry Text="{Binding StopPriceString, Mode=TwoWay}"
                        Placeholder="{Binding Selected.CurrentPriceDisplay}"
                        Style="{StaticResource FormEntryStyle}"
                        Keyboard="Numeric"
-                       HorizontalTextAlignment="End" />
+                       HorizontalTextAlignment="End">
+                    <Entry.Behaviors>
+                        <behaviors:CurrencyEntryBehavior Currency="{Binding Selected.Currency}" />
+                    </Entry.Behaviors>
+                </Entry>
+                <Label Text="Activates the order when the market reaches this level."
+                       Style="{StaticResource MutedLabelStyle}"
+                       FontSize="11" Margin="0,2,0,0" />
             </VerticalStackLayout>
 
-            <!-- Quantity -->
-            <VerticalStackLayout Spacing="0">
-                <Label Text="Quantity"
-                       Style="{StaticResource FormLabelStyle}" />
-                <Entry Text="{Binding QuantityString, Mode=TwoWay}"
-                       Style="{StaticResource FormEntryStyle}"
-                       Keyboard="Numeric"
-                       HorizontalTextAlignment="End" />
+            <!-- Trigger-limit toggle + the limit entry, grouped tight (label→entry rhythm). The morphing
+                 "Limit order"/"Limit price" checkbox doubles as the caption under Trigger; the plain
+                 Limit tab uses the inline caption instead. -->
+            <VerticalStackLayout Spacing="2">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4"
+                      IsVisible="{Binding IsStopOrder}">
+                    <Label Grid.Column="0"
+                           Text="{Binding TriggerLimitLabel}"
+                           Style="{StaticResource ToggleRowLabel}" />
+                    <CheckBox Grid.Column="1"
+                              IsChecked="{Binding TriggerHasLimit}"
+                              Style="{StaticResource ToggleRowCheck}" />
+                </Grid>
+
+                <VerticalStackLayout Spacing="0"
+                                     IsVisible="{Binding IsLimitSelected}">
+                    <Label Text="Limit price"
+                           Style="{StaticResource FormLabelStyle}"
+                           IsVisible="{Binding ShowPlainLimitLabel}" />
+                    <Entry Text="{Binding LimitPriceString, Mode=TwoWay}"
+                           Placeholder="{Binding Selected.CurrentPriceDisplay}"
+                           Style="{StaticResource FormEntryStyle}"
+                           Keyboard="Numeric"
+                           HorizontalTextAlignment="End">
+                        <Entry.Behaviors>
+                            <behaviors:CurrencyEntryBehavior Currency="{Binding Selected.Currency}" />
+                        </Entry.Behaviors>
+                    </Entry>
+                    <Label Text="Fills at this price or better."
+                           Style="{StaticResource MutedLabelStyle}"
+                           FontSize="11" Margin="0,2,0,0"
+                           IsVisible="{Binding IsStopOrder}" />
+                </VerticalStackLayout>
             </VerticalStackLayout>
 
-            <!-- Slippage guard (Market mode only) -->
+            <!-- Slippage guard sits in the same slot as the limit price (both above quantity), so
+                 switching Market↔Limit swaps one for the other. Market only; slider hides on None. -->
             <VerticalStackLayout Spacing="0"
-                                 IsVisible="{Binding IsMarketSelected}">
+                                 IsVisible="{Binding ShowSlippageGuard}">
                 <Grid ColumnDefinitions="*,Auto,Auto"
                       ColumnSpacing="4">
                     <Label Grid.Column="0"
@@ -100,12 +159,14 @@
                            VerticalTextAlignment="Center" />
                     <CheckBox Grid.Column="2"
                               IsChecked="{Binding NoSlippageGuard}"
-                              VerticalOptions="Center" />
+                              Style="{StaticResource ToggleRowCheck}" />
                 </Grid>
                 <Grid ColumnDefinitions="*,Auto"
-                      ColumnSpacing="8">
+                      ColumnSpacing="8"
+                      Margin="4,0,0,0"
+                      IsVisible="{Binding ShowSlippageSlider}">
                     <Slider Grid.Column="0"
-                            Minimum="0" Maximum="0.05"
+                            Minimum="0" Maximum="0.01"
                             Value="{Binding SlippagePrc, Mode=TwoWay}"
                             VerticalOptions="Center" />
                     <Label Grid.Column="1"
@@ -116,10 +177,160 @@
                 </Grid>
             </VerticalStackLayout>
 
-            <!-- Divider + order value -->
+            <!-- Quantity + snap slider (dots at 0/25/50/75/100% of the affordable/held max). Sits above
+                 the bracket section now (§F3) so SL/Trailing/TP read below the quantity. -->
+            <VerticalStackLayout Spacing="2">
+                <Label Text="Quantity"
+                       Style="{StaticResource FormLabelStyle}" />
+                <Entry Text="{Binding QuantityString, Mode=TwoWay}"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric"
+                       HorizontalTextAlignment="End" />
+                <Grid HeightRequest="30">
+                    <!-- 0..1 fraction; Maximum is constant so changing the affordable max never
+                         re-coerces the thumb (that coercion caused a feedback-loop freeze). -->
+                    <!-- Negative side margin extends the track past the thumb's glow inset so the thumb
+                         reaches the visual ends of the bar (lines up with the end dots). -->
+                    <Slider Minimum="0" Maximum="1"
+                            Value="{Binding QuantitySliderValue, Mode=TwoWay}"
+                            VerticalOptions="Center"
+                            WidthRequest="230"
+                            Margin="0,0" />
+                    <!-- Dot guides ON TOP of the track (InputTransparent so drags still reach the
+                         slider). Margin nudges them onto the track centre; widen balls / narrow side
+                         margins to line the end dots up with the track ends. Fine-align as needed. -->
+                    <Grid ColumnDefinitions="*,*,*,*" InputTransparent="True"
+                          VerticalOptions="Center" Margin="2,2,2,0">
+                        <BoxView Grid.Column="0" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
+                        <BoxView Grid.Column="1" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
+                        <BoxView Grid.Column="2" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
+                        <BoxView Grid.Column="3" Style="{StaticResource SliderDot}" HorizontalOptions="Start" />
+                        <BoxView Grid.Column="3" Style="{StaticResource SliderDot}" HorizontalOptions="End" />
+                    </Grid>
+                </Grid>
+            </VerticalStackLayout>
+
+            <!-- §F4 region divider before the bracket section; hidden on the Trigger tab / Sell side
+                 (no bracket section there) so the ticket never shows a trailing rule. -->
+            <BoxView Style="{StaticResource TicketDivider}"
+                     IsVisible="{Binding ShowBracket}" />
+
+            <!-- §3.6 P4 bracket (buy entry only). Stop-loss / trailing / take-profits toggle here. -->
+            <VerticalStackLayout Spacing="8"
+                                 IsVisible="{Binding ShowBracket}">
+
+                <!-- Stop-loss toggle: the label before the box doubles as the field caption. -->
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                    <Label Grid.Column="0"
+                           Text="{Binding StopLossLabel}"
+                           Style="{StaticResource ToggleRowLabel}" />
+                    <CheckBox Grid.Column="1"
+                              IsChecked="{Binding HasStopLoss}"
+                              Style="{StaticResource ToggleRowCheck}" />
+                </Grid>
+                <Entry IsVisible="{Binding HasStopLoss}"
+                       Text="{Binding BracketStopPriceString, Mode=TwoWay}"
+                       Placeholder="below entry"
+                       Style="{StaticResource FormEntryStyle}"
+                       Keyboard="Numeric" HorizontalTextAlignment="End">
+                    <Entry.Behaviors>
+                        <behaviors:CurrencyEntryBehavior Currency="{Binding Selected.Currency}" />
+                    </Entry.Behaviors>
+                </Entry>
+
+                <!-- Trailing stop (§3.6 P5 — UI prep only; mutually exclusive with stop-loss). -->
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                    <Label Grid.Column="0"
+                           Text="Trailing stop"
+                           Style="{StaticResource ToggleRowLabel}" />
+                    <CheckBox Grid.Column="1"
+                              IsChecked="{Binding HasTrailing}"
+                              Style="{StaticResource ToggleRowCheck}" />
+                </Grid>
+
+                <!-- Take-profit stepper + rows, tightened spacing (label→entry like the rest). -->
+                <VerticalStackLayout Spacing="2">
+                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="2">
+                        <Label Grid.Column="0"
+                               Text="Take profit"
+                               Style="{StaticResource FormLabelStyle}"
+                               Margin="0"
+                               VerticalOptions="Center" />
+                        <Button Grid.Column="1"
+                                Text="&#x25C0;"
+                                Style="{StaticResource StepperArrowButton}"
+                                TextColor="{Binding TpDecrementColor}"
+                                Command="{Binding DecrementTpCommand}" />
+                        <Label Grid.Column="2"
+                               Text="{Binding TpCount}"
+                               Style="{StaticResource OrderTotalsValue}"
+                               HorizontalTextAlignment="Center"
+                               VerticalTextAlignment="Center"
+                               MinimumWidthRequest="24" />
+                        <Button Grid.Column="3"
+                                Text="&#x25B6;"
+                                Style="{StaticResource StepperArrowButton}"
+                                TextColor="{Binding TpIncrementColor}"
+                                Command="{Binding IncrementTpCommand}" />
+                    </Grid>
+
+                    <Grid ColumnDefinitions="Auto,*,70" ColumnSpacing="8"
+                          IsVisible="{Binding ShowTp1}">
+                        <Label Grid.Column="0" Text="TP1" Style="{StaticResource FormLabelStyle}"
+                               VerticalTextAlignment="Center" />
+                        <Entry Grid.Column="1" Text="{Binding Tp1PriceString, Mode=TwoWay}"
+                               Placeholder="price" Style="{StaticResource FormEntryStyle}"
+                               Keyboard="Numeric" HorizontalTextAlignment="End">
+                            <Entry.Behaviors>
+                                <behaviors:CurrencyEntryBehavior Currency="{Binding Selected.Currency}" />
+                            </Entry.Behaviors>
+                        </Entry>
+                        <Entry Grid.Column="2" Text="{Binding Tp1QtyString, Mode=TwoWay}"
+                               Placeholder="qty" Style="{StaticResource FormEntryStyle}"
+                               Keyboard="Numeric" HorizontalTextAlignment="End" />
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,70" ColumnSpacing="8"
+                          IsVisible="{Binding ShowTp2}">
+                        <Label Grid.Column="0" Text="TP2" Style="{StaticResource FormLabelStyle}"
+                               VerticalTextAlignment="Center" />
+                        <Entry Grid.Column="1" Text="{Binding Tp2PriceString, Mode=TwoWay}"
+                               Placeholder="price" Style="{StaticResource FormEntryStyle}"
+                               Keyboard="Numeric" HorizontalTextAlignment="End">
+                            <Entry.Behaviors>
+                                <behaviors:CurrencyEntryBehavior Currency="{Binding Selected.Currency}" />
+                            </Entry.Behaviors>
+                        </Entry>
+                        <Entry Grid.Column="2" Text="{Binding Tp2QtyString, Mode=TwoWay}"
+                               Placeholder="qty" Style="{StaticResource FormEntryStyle}"
+                               Keyboard="Numeric" HorizontalTextAlignment="End" />
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*,70" ColumnSpacing="8"
+                          IsVisible="{Binding ShowTp3}">
+                        <Label Grid.Column="0" Text="TP3" Style="{StaticResource FormLabelStyle}"
+                               VerticalTextAlignment="Center" />
+                        <Entry Grid.Column="1" Text="{Binding Tp3PriceString, Mode=TwoWay}"
+                               Placeholder="price" Style="{StaticResource FormEntryStyle}"
+                               Keyboard="Numeric" HorizontalTextAlignment="End">
+                            <Entry.Behaviors>
+                                <behaviors:CurrencyEntryBehavior Currency="{Binding Selected.Currency}" />
+                            </Entry.Behaviors>
+                        </Entry>
+                        <Entry Grid.Column="2" Text="{Binding Tp3QtyString, Mode=TwoWay}"
+                               Placeholder="qty" Style="{StaticResource FormEntryStyle}"
+                               Keyboard="Numeric" HorizontalTextAlignment="End" />
+                    </Grid>
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+
+        </VerticalStackLayout>
+        </ScrollView>
+
+        <!-- Pinned footer (row Auto): order value + CTA stay visible; only the form above scrolls.
+             This is what guarantees the submit button is always reachable and keeps the layout from
+             budging when the bracket section shows/hides. Right padding matches the scroll gutter. -->
+        <VerticalStackLayout Grid.Row="1" Spacing="8" Padding="0,0,10,0">
             <BoxView HeightRequest="1"
-                     BackgroundColor="{DynamicResource Divider}"
-                     Margin="0,4,0,0" />
+                     BackgroundColor="{DynamicResource Divider}" />
             <Grid ColumnDefinitions="*,Auto">
                 <Label Grid.Column="0"
                        Text="Order value"
@@ -129,9 +340,7 @@
                        Style="{StaticResource OrderTotalsValue}" />
             </Grid>
 
-            <!-- Submit CTA — green for Buy, red for Sell (via DataTrigger,
-                 so it follows the active theme tokens, not the legacy
-                 ForestGreen/OrangeRed exposed by SubmitButtonColor). -->
+            <!-- Submit CTA — green for Buy, red for Sell (via DataTrigger). -->
             <Button Text="{Binding SubmitButtonText}"
                     Command="{Binding PlaceOrderCommand}"
                     Style="{StaticResource BuyButtonStyle}">
@@ -144,6 +353,13 @@
                 </Button.Triggers>
             </Button>
 
+            <!-- Blocking validation error (e.g. wrong-side trigger) — set on a rejected submit. -->
+            <Label Text="{Binding ValidationMessage}"
+                   IsVisible="{Binding HasValidationMessage}"
+                   Style="{StaticResource MutedLabelStyle}"
+                   TextColor="{DynamicResource SellRed}"
+                   Margin="0,2,0,0" />
         </VerticalStackLayout>
+        </Grid>
     </Border>
 </ContentView>

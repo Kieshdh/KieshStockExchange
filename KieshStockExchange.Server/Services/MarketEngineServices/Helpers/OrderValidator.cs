@@ -18,6 +18,10 @@ public interface IOrderValidator
     /// <summary> Returns null when valid; otherwise an OrderResult explaining the failure. </summary>
     OrderResult? ValidateModify(Order order, int? newQty, decimal? newPrice);
 
+    /// <summary> §3.6 P3: validate a modify on an armed stop (StopPrice / stop-limit price / qty).
+    /// Returns null when valid; otherwise an OrderResult explaining the failure. </summary>
+    OrderResult? ValidateModifyStop(Order order, int? newQty, decimal? newStopPrice, decimal? newLimitPrice);
+
     /// <summary> Returns null when valid; otherwise an OrderResult explaining the failure. </summary>
     OrderResult? ValidateCancel(Order order);
 }
@@ -152,6 +156,65 @@ public sealed class OrderValidator : IOrderValidator
                 return OrderResultFactory.InvalidParams("Slippage market order cannot have BuyBudget.");
         }
 
+        // §3.6 stop orders, validated like their promotion target. StopLimit → limit
+        // (positive Price, no slippage). StopMarket → market: either a slippage-capped market
+        // (SlippagePercent set + a positive anchor Price) or a true market (Price 0). Buys
+        // fund an uncapped market from BuyBudget; sells/limits/capped markets carry none. All
+        // need a positive StopPrice. Direction sanity is enforced at the arm entry point.
+        if (order.IsStopOrder)
+        {
+            if (!order.StopPrice.HasValue || order.StopPrice.Value <= 0m)
+                return OrderResultFactory.InvalidParams("Stop order requires a positive stop price.");
+            if (NotionalOverflows(order.StopPrice.Value, order.Quantity))
+                return OrderResultFactory.InvalidParams("Stop price is too large.");
+
+            // §3.6 P5 trailing stop: market-only this patch (a moving limit price is a second moving
+            // part — its own design); requires a positive offset; a percent offset is 0–100%. The
+            // StopPrice carried here is the arm-time effective trigger, validated above. After this it
+            // falls through to the StopMarket checks (Price 0, BuyBudget rules) which it satisfies.
+            if (order.Stop == StopKind.Trailing)
+            {
+                if (order.Entry != EntryType.Market)
+                    return OrderResultFactory.InvalidParams("Trailing stops are market-only.");
+                if (!order.TrailOffset.HasValue || order.TrailOffset.Value <= 0m)
+                    return OrderResultFactory.InvalidParams("Trailing stop requires a positive trail offset.");
+                if ((order.TrailIsPercent ?? false) && order.TrailOffset.Value > 100m)
+                    return OrderResultFactory.InvalidParams("Trailing percent offset must be between 0 and 100%.");
+            }
+
+            if (order.IsStopLimitOrder)
+            {
+                if (order.SlippagePercent.HasValue)
+                    return OrderResultFactory.InvalidParams("Stop-limit order cannot have slippage.");
+                if (order.Price <= 0m)
+                    return OrderResultFactory.InvalidParams("Stop-limit requires a positive limit price.");
+                if (order.BuyBudget.HasValue)
+                    return OrderResultFactory.InvalidParams("Stop-limit order cannot have BuyBudget.");
+            }
+            else // StopMarket
+            {
+                if (order.SlippagePercent.HasValue)
+                {
+                    // Slippage-capped stop-market: needs a positive anchor Price and a 0–100% cap.
+                    if (order.Price <= 0m)
+                        return OrderResultFactory.InvalidParams("Capped StopMarket requires a positive anchor price.");
+                    if (order.SlippagePercent.Value < 0m || order.SlippagePercent.Value > 100m)
+                        return OrderResultFactory.InvalidParams("Slippage percent must be between 0 and 100%.");
+                    if (order.BuyBudget.HasValue)
+                        return OrderResultFactory.InvalidParams("Capped StopMarket order cannot have BuyBudget.");
+                }
+                else // true (uncapped) market stop
+                {
+                    if (order.Price != 0m)
+                        return OrderResultFactory.InvalidParams("StopMarket must have Price = 0.");
+                    if (order.IsBuyOrder && (!order.BuyBudget.HasValue || order.BuyBudget.Value <= 0m))
+                        return OrderResultFactory.InvalidParams("BuyBudget is required for StopMarket BUY orders and must be > 0.");
+                    if (order.IsSellOrder && order.BuyBudget.HasValue)
+                        return OrderResultFactory.InvalidParams("StopMarket SELL orders cannot have BuyBudget.");
+                }
+            }
+        }
+
         if (order.IsInvalid) return OrderResultFactory.InvalidParams("Order is invalid.");
         return null;
     }
@@ -193,10 +256,61 @@ public sealed class OrderValidator : IOrderValidator
         return null;
     }
 
+    public OrderResult? ValidateModifyStop(Order order, int? newQty, decimal? newStopPrice, decimal? newLimitPrice)
+    {
+        if (order is null) return OrderResultFactory.InvalidParams("Order not found.");
+        // Only an armed (Pending) stop is modifiable here — once promoted it's a normal open
+        // order and goes through ValidateModify instead.
+        if (!order.IsArmed || !order.IsStopOrder)
+            return OrderResultFactory.InvalidParams("Only an armed stop can be modified.");
+        if (!_stock.TryGetById(order.StockId, out _))
+            return OrderResultFactory.InvalidParams("Invalid stock ID.");
+
+        if (newStopPrice.HasValue && newStopPrice.Value <= 0m)
+            return OrderResultFactory.InvalidParams("New stop price must be positive.");
+
+        // A limit price only applies to a stop-limit; reject it for a stop-market so a bad
+        // request can't silently set a meaningless field.
+        if (newLimitPrice.HasValue)
+        {
+            if (!order.IsStopLimitOrder)
+                return OrderResultFactory.InvalidParams("Only a stop-limit order has a limit price.");
+            if (newLimitPrice.Value <= 0m)
+                return OrderResultFactory.InvalidParams("New limit price must be positive.");
+        }
+
+        if (newQty.HasValue)
+        {
+            if (newQty.Value <= 0)
+                return OrderResultFactory.InvalidParams("New quantity must be positive.");
+            if (newQty.Value > MaxOrderQuantity)
+                return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
+        }
+
+        // Guard the reservation multiply for a buy-stop-limit (qty × limit price). The stop-price
+        // anchor is also bounded so a promoted/triggered notional can't overflow decimal.
+        var effQty = newQty ?? order.Quantity;
+        if (order.IsStopLimitOrder && order.IsBuyOrder)
+        {
+            var effLimit = newLimitPrice ?? order.Price;
+            if (NotionalOverflows(effLimit, effQty))
+                return OrderResultFactory.InvalidParams("Limit price is too large.");
+        }
+        var effStop = newStopPrice ?? order.StopPrice ?? 0m;
+        if (NotionalOverflows(effStop, effQty))
+            return OrderResultFactory.InvalidParams("Stop price is too large.");
+
+        if (order.IsInvalid) return OrderResultFactory.InvalidParams("Order is invalid.");
+        return null;
+    }
+
     public OrderResult? ValidateCancel(Order order)
     {
         if (order is null) return OrderResultFactory.InvalidParams("Order not found.");
-        if (!order.IsOpen) return OrderResultFactory.AlreadyClosed();
+        // An armed (Pending) stop is cancellable — the user can pull it before it triggers — and §F5 a
+        // dormant (Attached) bracket leg too (per-leg cancel; the SL-cancel converts to TP-only).
+        if (!order.IsOpen && !order.IsArmed && !(order.IsAttached && order.IsBracketChild))
+            return OrderResultFactory.AlreadyClosed();
 
         if (!_stock.TryGetById(order.StockId, out _))
             return OrderResultFactory.InvalidParams("Invalid stock ID.");

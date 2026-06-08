@@ -32,6 +32,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly IReservationLedger _ledger;
     private readonly IOrderRegistry _registry;
     private readonly IServerNotificationService _notifications;
+    private readonly IBracketCoordinator _bracket;
     private readonly ILogger<OrderExecutionService> _logger;
     // Caps concurrent per-group settlement txs so the fan-out can't exhaust the Npgsql pool.
     private readonly SemaphoreSlim _groupGate;
@@ -42,6 +43,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         IOrderCacheService orderCache, IReservationLedger ledger,
         IOrderRegistry registry,
         IServerNotificationService notifications,
+        IBracketCoordinator bracket,
         IConfiguration config,
         ILogger<OrderExecutionService> logger)
     {
@@ -56,6 +58,7 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _bracket = bracket ?? throw new ArgumentNullException(nameof(bracket));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _groupGate = new SemaphoreSlim(Math.Max(1, config.GetValue("Db:MaxConcurrentGroups", 24)));
     }
@@ -66,6 +69,49 @@ public sealed class OrderExecutionService : IOrderExecutionService
         var set = new HashSet<int>(ordersById.Count + 1) { taker.UserId };
         foreach (var o in ordersById.Values) set.Add(o.UserId);
         return set;
+    }
+
+    // §3.6 P4/P5b: after fills commit, drive the bracket coordinator (post-commit, outside the book
+    // lock). Side-aware: a LONG bracket's parent is a BUY (BuyOrderId) with SELL-limit TP legs; a SHORT
+    // bracket's parent is a SELL (SellOrderId) with BUY-limit TP legs. So a fill's parent may be on either
+    // side, and a TP-child fill may be on either side — collect both and let the coordinator (and the
+    // IsBracketChild/IsLimitOrder filter) sort it out. Hooks are best-effort + idempotent (recompute from
+    // state); a failure is logged loudly rather than unwinding a committed trade, and the
+    // reconciler/clamp is the safety net.
+    private async Task FireBracketHooksAsync(IReadOnlyList<Transaction> trades, CancellationToken ct)
+    {
+        if (trades is null || trades.Count == 0) return;
+
+        HashSet<int>? parentIds = null;
+        HashSet<int>? childIds = null;
+        for (int i = 0; i < trades.Count; i++)
+        {
+            if (_bracket.IsBracketParent(trades[i].BuyOrderId)) (parentIds ??= new()).Add(trades[i].BuyOrderId);
+            if (_bracket.IsBracketParent(trades[i].SellOrderId)) (parentIds ??= new()).Add(trades[i].SellOrderId);
+            (childIds ??= new()).Add(trades[i].BuyOrderId);
+            (childIds ??= new()).Add(trades[i].SellOrderId);
+        }
+
+        if (parentIds is not null)
+            foreach (var pid in parentIds)
+            {
+                var parent = _registry.TryGet(pid, out var pc) ? pc
+                            : await _db.GetOrderById(pid, ct).ConfigureAwait(false);
+                if (parent is null) continue;
+                try { await _bracket.OnParentFillAsync(parent, ct).ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogError(ex, "Bracket parent-fill hook failed for order #{Id}", pid); }
+            }
+
+        if (childIds is not null)
+            foreach (var cid in childIds)
+            {
+                var o = _registry.TryGet(cid, out var sc) ? sc
+                       : await _db.GetOrderById(cid, ct).ConfigureAwait(false);
+                // TP legs are limits (long = sell, short = buy); the SL (a stop) fires via PromoteStopAsync.
+                if (o is null || !o.IsBracketChild || !o.IsLimitOrder) continue;
+                try { await _bracket.OnChildFillAsync(o, ct).ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogError(ex, "Bracket child-fill hook failed for order #{Id}", cid); }
+            }
     }
     #endregion
 
@@ -82,6 +128,17 @@ public sealed class OrderExecutionService : IOrderExecutionService
         var reserveError = await _settlement.SettleOrderAsync(incoming, ct).ConfigureAwait(false);
         if (reserveError != null) return reserveError;
 
+        return await MatchAndSettleAsync(incoming, ct).ConfigureAwait(false);
+    }
+
+    // §3.6 P2: the post-reserve match + settle body, shared by normal placement and stop
+    // promotion. The caller MUST have already reserved + persisted `incoming` — SettleOrderAsync
+    // inserts+reserves for a new order; stop promotion flips the armed order's type + UpdateOrder
+    // while its arm-time reservation is still held. This method neither reserves nor inserts; it
+    // only matches, settles, and publishes. (Risk #4: re-calling PlaceAndMatchAsync to promote
+    // would double-reserve and double-insert.)
+    public async Task<OrderResult> MatchAndSettleAsync(Order incoming, CancellationToken ct = default)
+    {
         // Matching & settlement under book lock
         List<Transaction> trades = new();
         HashSet<int>? affectedUsers = null;
@@ -212,7 +269,115 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (affectedUsers is not null)
             _orderCache.NotifyOrdersMutated(affectedUsers);
 
+        await FireBracketHooksAsync(trades, ct).ConfigureAwait(false);
+
         return OrderResultFactory.Success(incoming, trades);
+    }
+
+    // §3.6 P4: place a (long) bracket. Reserve + insert the parent first so it has an OrderId, then
+    // insert the SL + TP legs as dormant Attached children pointing at it (they reserve nothing yet),
+    // register the bracket, and match the parent. A market parent fills immediately → the post-commit
+    // bracket hook arms the SL (full pooled reservation) + the covered TP legs; a limit parent rests
+    // and its legs arm when it later fills.
+    public async Task<OrderResult> PlaceBracketAsync(Order parent, Order? stopLoss,
+        IReadOnlyList<Order> takeProfits, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var validationError = _validator.ValidateNew(parent);
+        if (validationError != null) return validationError;
+
+        var reserveError = await _settlement.SettleOrderAsync(parent, ct).ConfigureAwait(false);
+        if (reserveError != null) return reserveError;
+
+        // Insert the child legs as dormant (Attached) — ParentOrderId links them; they reserve
+        // nothing until the parent fills and the coordinator arms them. stopLoss null ⇒ a
+        // take-profit-only bracket (no protective stop leg).
+        var children = new List<Order>(takeProfits.Count + 1);
+        if (stopLoss is not null)
+        {
+            stopLoss.ParentOrderId = parent.OrderId;
+            stopLoss.Status = Order.Statuses.Attached;
+            children.Add(stopLoss);
+        }
+        for (int i = 0; i < takeProfits.Count; i++)
+        {
+            takeProfits[i].ParentOrderId = parent.OrderId;
+            takeProfits[i].Status = Order.Statuses.Attached;
+            children.Add(takeProfits[i]);
+        }
+        foreach (var ch in children)
+        {
+            await _db.CreateOrder(ch, ct).ConfigureAwait(false);
+            _registry.Register(ch);
+        }
+
+        _bracket.RegisterBracket(parent.OrderId);
+
+        return await MatchAndSettleAsync(parent, ct).ConfigureAwait(false);
+    }
+
+    // §3.6 P2: arm a stop — reserve (shares for a sell-stop, cash/budget for a buy-stop) and
+    // persist it Pending WITHOUT matching. SettleOrderAsync does the reserve + insert + registry
+    // register; the order never touches the book. The caller (OrderEntryService) registers it
+    // with the trigger watcher on success.
+    public async Task<OrderResult> ArmStopAsync(Order incoming, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var validationError = _validator.ValidateNew(incoming);
+        if (validationError != null) return validationError;
+        if (!incoming.IsStopOrder)
+            return OrderResultFactory.InvalidParams("ArmStopAsync requires a stop order.");
+
+        incoming.Arm(); // Status = Pending before SettleOrderAsync inserts it
+
+        // Reserves shares (sell-stop) or cash/budget (buy-stop) and persists the Pending row.
+        var reserveError = await _settlement.SettleOrderAsync(incoming, ct).ConfigureAwait(false);
+        if (reserveError != null) return reserveError;
+
+        _orderCache.NotifyOrdersMutated(new[] { incoming.UserId });
+        return OrderResultFactory.Success(incoming, new List<Transaction>());
+    }
+
+    // §3.6 P2: promote an armed stop to its active type and run it through the shared
+    // match/settle body. The arm-time reservation is already held by the canonical registry
+    // instance, so this does NOT reserve — it flips the type, persists the flip, and matches.
+    public async Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        Order? order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
+        if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+        // Ensure the owner's accounts are loaded first: after a restart this both registers
+        // the armed stop in the registry and re-seeds its arm reservation (GetOpenOrdersForUsers
+        // returns armed stops). Without it, a cold promote would use the zero-reservation DB copy.
+        await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
+        // Canonical instance carries the live arm reservation; a fresh DB copy has zeros.
+        if (_registry.TryGet(order.OrderId, out var canon)) order = canon;
+        if (!order.IsArmed || !order.IsStopOrder)
+            return OrderResultFactory.InvalidParams("Order is not an armed stop.");
+
+        // §3.6 P4: a firing bracket SL must cancel its TP siblings (and size to the held pool)
+        // BEFORE it promotes, so there's no double-sell. The SL is still off-book here.
+        if (order.IsBracketChild)
+            await _bracket.OnStopFiringAsync(order, ct).ConfigureAwait(false);
+
+        order.PromoteStop();                                   // Pending->Open, clears the Stop dimension
+
+        // §3.6 slippage-capped stop: once promoted it's a slippage market order whose cap is
+        // relative to its anchor Price. Re-anchor that to the live trigger price so the guard
+        // brackets the trigger, not the (stale) arm-time price. Share-reserved sell side only —
+        // the reservation is in shares, so changing the anchor doesn't desync it.
+        if (order.IsSlippageOrder && order.IsSellOrder)
+        {
+            var trigger = _marketData.Quotes.TryGetValue((order.StockId, order.CurrencyType), out var q) && q.LastPrice > 0m
+                ? q.LastPrice
+                : await _marketData.GetLastPriceAsync(order.StockId, order.CurrencyType, ct).ConfigureAwait(false);
+            if (trigger > 0m) order.Price = CurrencyHelper.RoundMoney(trigger, order.CurrencyType);
+        }
+
+        await _db.UpdateOrder(order, ct).ConfigureAwait(false); // persist the flip; reservation already held
+        return await MatchAndSettleAsync(order, ct).ConfigureAwait(false);
     }
 
     public async Task<OrderResult> CancelOrderAsync(int orderId, CancellationToken ct = default)
@@ -234,6 +399,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
             book.RemoveById(order.OrderId);
             await _settlement.CancelRemainderAsync(order, ct);
         });
+
+        // §3.6 P4 cancel-semantics: cancelling an unfilled parent or the SL tears down the bracket
+        // group; a single-TP / partial-parent cancel leaves the rest. No-op for non-bracket orders.
+        if (order.IsBracketChild || _bracket.IsBracketParent(order.OrderId))
+        {
+            try { await _bracket.OnMemberCancelledAsync(order, ct).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogError(ex, "Bracket cancel-semantics failed for order #{Id}", order.OrderId); }
+        }
 
         _orderCache.NotifyOrdersMutated(new[] { order.UserId });
         return OrderResultFactory.Cancelled(order);
@@ -356,12 +529,39 @@ public sealed class OrderExecutionService : IOrderExecutionService
         if (affectedUsers is not null)
             _orderCache.NotifyOrdersMutated(affectedUsers);
 
+        await FireBracketHooksAsync(txs, ct).ConfigureAwait(false);
+
         if (trace)
             _logger.LogInformation(
                 "ModifyOrderAsync EXIT order #{OrderId} OK fills={Fills} ({ElapsedMs}ms).",
                 orderId, txs.Count, sw.ElapsedMilliseconds);
 
         return OrderResultFactory.Modified(order, txs);
+    }
+
+    // §3.6 P3: modify an armed stop off-book. No book lock, no match — an armed stop isn't on
+    // the book; StopModifier mutates StopPrice/limit/qty + the reservation delta under the user's
+    // gate. The caller (OrderEntryService) re-indexes the trigger watcher on success.
+    public async Task<OrderResult> ModifyStopAsync(int orderId, int? newQuantity = null,
+        decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        Order? order = await _db.GetOrderById(orderId, ct).ConfigureAwait(false);
+        if (order == null) return OrderResultFactory.InvalidParams("Order not found.");
+
+        // Resolve to canonical so StopModifier sees the live arm-time reservation, not the zero
+        // on a freshly DB-loaded instance (mirrors CancelOrderAsync/ModifyOrderAsync).
+        await _accounts.EnsureLoadedAsync(order.UserId, ct).ConfigureAwait(false);
+        if (_registry.TryGet(order.OrderId, out var canon)) order = canon;
+
+        var validation = _validator.ValidateModifyStop(order, newQuantity, newStopPrice, newLimitPrice);
+        if (validation != null) return validation;
+
+        await _settlement.ApplyStopChangeAsync(order, newQuantity, newStopPrice, newLimitPrice, ct).ConfigureAwait(false);
+
+        _orderCache.NotifyOrdersMutated(new[] { order.UserId });
+        return OrderResultFactory.ModifiedStop(order);
     }
 
     #endregion
@@ -682,6 +882,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
             await _marketData.OnTicksAsync(allFills, ct).ConfigureAwait(false);
             await _notifications.OnFillsAsync(allFills, ct).ConfigureAwait(false);
         }
+
+        await FireBracketHooksAsync(allFills, ct).ConfigureAwait(false);
 
         return results;
     }

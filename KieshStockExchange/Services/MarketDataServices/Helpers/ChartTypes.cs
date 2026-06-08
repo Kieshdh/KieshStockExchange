@@ -50,7 +50,22 @@ public readonly record struct MovingAverageSeries(
 
 public readonly record struct PriceMarker(Guid Id, decimal Price);
 
-// Snapshot of one of the user's open limit orders rendered on the chart as a
-// horizontal price line. IsBuy drives the line colour (green vs red); Quantity
-// shows in the right-gutter tag so the user can see the size at a glance.
-public readonly record struct OpenOrderLine(int OrderId, decimal Price, bool IsBuy, int Quantity);
+// Snapshot of one of the user's open orders rendered on the chart as a horizontal
+// price line. IsBuy drives the line colour (green vs red); Quantity shows in the
+// right-gutter tag so the user can see the size at a glance. §3.6 P3: an armed stop
+// is drawn at its StopPrice with a distinct dash + STOP/STOP-LIM pill — IsStop marks
+// it, IsStopLimit distinguishes the pill label (a stop-limit also carries a limit price).
+public readonly record struct OpenOrderLine(
+    int OrderId, decimal Price, bool IsBuy, int Quantity, bool IsStop = false, bool IsStopLimit = false);
+
+// One of the user's executed fills, rendered on the chart as a small triangle at
+// (AtTime, Price). IsBuy drives the shape + colour: a buy is an up-pointing green
+// triangle sitting just below the fill price; a sell is a down-pointing red triangle
+// just above it — the active-trader "filled here" convention.
+public readonly record struct FillMarker(DateTime AtTime, decimal Price, bool IsBuy);
+
+// §F2: a fired trigger's activation point, drawn as a blue directional arrow at (AtTime, Price).
+// Price is the trigger level (Order.StopPrice). Distinct from FillMarker, which sits at the *fill*
+// price — for a stop-market the two differ, conveying "crossed here" vs "filled here". IsBuy → up
+// arrow, sell → down.
+public readonly record struct TriggerMarker(DateTime AtTime, decimal Price, bool IsBuy);

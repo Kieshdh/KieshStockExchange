@@ -29,6 +29,14 @@ public class UserSessionService : IUserSessionService
     public CurrencyType BaseCurrency => _snapshot.BaseCurrency;
     public CandleResolution DefaultCandleResolution => _snapshot.DefaultCandleResolution;
     public int? CurrentStockId => _snapshot.CurrentStockId;
+
+    public int ChartVisibleCount => _snapshot.ChartVisibleCount;
+    public int ChartOffset => _snapshot.ChartOffset;
+    public bool ChartYAutoFit => _snapshot.ChartYAutoFit;
+    public decimal? ChartManualYMin => _snapshot.ChartManualYMin;
+    public decimal? ChartManualYMax => _snapshot.ChartManualYMax;
+
+    public bool TablesShowAll => _snapshot.TablesShowAll;
     #endregion
 
     #region Constructor
@@ -76,6 +84,19 @@ public class UserSessionService : IUserSessionService
 
     public void SetCurrentStockId(int? stockId)
         => SetSnapshot(_snapshot with { CurrentStockId = stockId });
+
+    public void SetChartViewState(int visibleCount, int offset, bool yAutoFit, decimal? yMin, decimal? yMax)
+        => SetSnapshot(_snapshot with
+        {
+            ChartVisibleCount = visibleCount,
+            ChartOffset = offset,
+            ChartYAutoFit = yAutoFit,
+            ChartManualYMin = yMin,
+            ChartManualYMax = yMax,
+        });
+
+    public void SetTablesShowAll(bool showAll)
+        => SetSnapshot(_snapshot with { TablesShowAll = showAll });
     #endregion
 
     #region Private helpers

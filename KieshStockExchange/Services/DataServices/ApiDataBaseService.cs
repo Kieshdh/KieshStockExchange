@@ -267,6 +267,20 @@ public sealed class ApiDataBaseService : IDataBaseService
     public async Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default)
         => await PostListAsync<List<int>, Order>("api/orders/open-for-users", userIds, ct);
 
+    // Server-only: the stop trigger watcher lives on the server; the client never enumerates armed stops.
+    public Task<List<Order>> GetAllArmedStopsAsync(CancellationToken ct = default)
+        => throw new NotSupportedException("GetAllArmedStopsAsync is server-only (stop watcher runs server-side).");
+
+    // Server-only: the trailing-stop watermark flusher runs server-side.
+    public Task UpdateTrailStateAsync(IReadOnlyList<(int OrderId, decimal Watermark, decimal StopPrice)> updates, CancellationToken ct = default)
+        => throw new NotSupportedException("UpdateTrailStateAsync is server-only (stop watcher runs server-side).");
+
+    public Task<List<Order>> GetBracketChildrenAsync(int parentOrderId, CancellationToken ct = default)
+        => throw new NotSupportedException("GetBracketChildrenAsync is server-only (bracket coordinator runs server-side).");
+
+    public Task<List<Order>> GetActiveBracketChildrenAsync(CancellationToken ct = default)
+        => throw new NotSupportedException("GetActiveBracketChildrenAsync is server-only (bracket coordinator runs server-side).");
+
     public Task CreateOrder(Order order, CancellationToken ct = default)
         => PostWriteBackAsync("api/orders", order, (d, r) => { if (d.OrderId == 0) d.OrderId = r.OrderId; }, ct);
 

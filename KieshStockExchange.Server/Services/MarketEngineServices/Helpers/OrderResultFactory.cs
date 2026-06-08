@@ -89,18 +89,25 @@ public static class OrderResultFactory
     /// </summary>
     public static OrderResult Success(Order order, List<Transaction> txs)
     {
-        var status = order.IsOpen
-            ? txs.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook
-            : order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled;
+        // An armed (Pending) stop / trailing rests off-book with 0 fills — treat it as PlacedOnBook,
+        // NOT PartialFill (it isn't IsOpen and has full RemainingQuantity, which the else-branch would
+        // mislabel PartialFill → the notification layer then drops it as a "fill handled elsewhere").
+        var status = order.IsArmed
+            ? OrderStatus.PlacedOnBook
+            : order.IsOpen
+                ? txs.Count > 0 ? OrderStatus.PartialFill : OrderStatus.PlacedOnBook
+                : order.RemainingQuantity > 0 ? OrderStatus.PartialFill : OrderStatus.Filled;
 
         return new OrderResult
         {
             PlacedOrder = order,
             FillTransactions = txs,
             Status = status,
-            SuccessMessage = order.IsOpen
-                ? txs.Count > 0 ? "Order partially filled." : "Order placed on book."
-                : order.RemainingQuantity > 0 ? "Order partially filled." : "Order fully filled."
+            SuccessMessage = order.IsArmed
+                ? "Trigger order armed."
+                : order.IsOpen
+                    ? txs.Count > 0 ? "Order partially filled." : "Order placed on book."
+                    : order.RemainingQuantity > 0 ? "Order partially filled." : "Order fully filled."
         };
     }
 
@@ -126,5 +133,28 @@ public static class OrderResultFactory
                                                : "Order fully filled after modification."
         };
     }
+
+    /// <summary>
+    /// §3.6 P3: an armed stop was modified in place (off-book, nothing matched). Its status
+    /// stays Pending, so the fill-based <see cref="Modified"/> status logic doesn't apply —
+    /// report a plain Success.
+    /// </summary>
+    public static OrderResult ModifiedStop(Order order) => new()
+    {
+        PlacedOrder = order,
+        Status = OrderStatus.Success,
+        SuccessMessage = "Stop order modified."
+    };
+
+    /// <summary>
+    /// §F5: a dormant (Attached) bracket leg was edited in place (off-book, reserves nothing) — its
+    /// status is unchanged, so report a plain Success rather than the fill-derived statuses above.
+    /// </summary>
+    public static OrderResult BracketLegModified(Order leg) => new()
+    {
+        PlacedOrder = leg,
+        Status = OrderStatus.Success,
+        SuccessMessage = "Bracket leg modified."
+    };
     #endregion
 }

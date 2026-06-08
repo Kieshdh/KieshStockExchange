@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!-- TradeStyles.xaml - PlaceOrderView, stock selector, quote strip, order action buttons.
-     Legacy keys preserved; new styles use theme semantic tokens. -->
+     Legacy keys preserved; new styles use theme semantic tokens.
+     Trade-table styles live in TradeTableStyles.xaml. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
 
@@ -67,5 +68,44 @@
         <Setter Property="HorizontalOptions" Value="Fill" />
     </Style>
 
+    <!-- Flat triangle arrows for the take-profit stepper (◀ [n] ▶). TextColor is bound per-arrow
+         in the view so it tints by side / greys at the bound; keep the chrome minimal here. -->
+    <Style x:Key="StepperArrowButton" TargetType="Button">
+        <Setter Property="BackgroundColor"   Value="Transparent" />
+        <Setter Property="BorderWidth"       Value="0" />
+        <Setter Property="FontSize"          Value="16" />
+        <Setter Property="Padding"           Value="6,0" />
+        <Setter Property="MinimumWidthRequest" Value="32" />
+        <Setter Property="HeightRequest"     Value="32" />
+        <Setter Property="VerticalOptions"   Value="Center" />
+    </Style>
+
+    <!-- Shared "label + checkbox" toggle row (Stop-loss / Trailing / Trigger-limit / Slippage-None).
+         One style for the caption + one for the box so spacing and the checkbox's right edge line up
+         across every toggle. -->
+    <Style x:Key="ToggleRowLabel" TargetType="Label" BasedOn="{StaticResource FormLabelStyle}">
+        <Setter Property="Margin"           Value="0" />
+        <Setter Property="VerticalOptions"  Value="Center" />
+    </Style>
+    <Style x:Key="ToggleRowCheck" TargetType="CheckBox">
+        <Setter Property="VerticalOptions"   Value="Center" />
+        <Setter Property="HorizontalOptions" Value="End" />
+    </Style>
+
+    <!-- Quantity-slider tick dots (0/25/50/75/100%). Size/colour live here so all five tune in one
+         place; each dot only sets its Grid.Column + HorizontalOptions in the view. -->
+    <Style x:Key="SliderDot" TargetType="BoxView">
+        <Setter Property="WidthRequest"  Value="9" />
+        <Setter Property="HeightRequest" Value="9" />
+        <Setter Property="CornerRadius"  Value="5" />
+        <Setter Property="Color"         Value="{DynamicResource TextMuted}" />
+    </Style>
+
+    <!-- §F4 thin region divider for the order ticket (matches the order-value footer rule). -->
+    <Style x:Key="TicketDivider" TargetType="BoxView">
+        <Setter Property="HeightRequest"    Value="1" />
+        <Setter Property="BackgroundColor"  Value="{DynamicResource Divider}" />
+        <Setter Property="Margin"           Value="0,2" />
+    </Style>
 
 </ResourceDictionary>

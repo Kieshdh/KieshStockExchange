@@ -1,6 +1,8 @@
 # run_generate_aiusers.py
 
+import os
 import random
+import shutil
 import statistics
 from pathlib import Path
 
@@ -11,10 +13,16 @@ from Config import (
 from Person import Person, fake
 from ExcelLayout import *
 
-# Where to store the Excel
+# Where to store the Excel. The workbook must exist in BOTH the client and the server Resources/Raw so
+# the embedded-seed path (server) and any client-side use stay in sync.
 BASE_DIR = Path(__file__).resolve().parent
 EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange" / "Resources" / "Raw" / "AIUserData.xlsx"
+SERVER_EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange.Server" / "Resources" / "Raw" / "AIUserData.xlsx"
 NUM_PEOPLE = 20000
+
+# §P6 "layout/userinfo skip for speed": set KSE_FAST_GEN=1 to skip the dark-theme styling + autofit
+# (by far the slowest step over 20000 rows). Data is identical; only the cosmetic sheet styling differs.
+FAST_GEN = bool(os.environ.get("KSE_FAST_GEN"))
 
 # Seeding both `random` and the Faker instance
 GENERATOR_SEED = 42
@@ -96,18 +104,23 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
     print(f"✅ Appended admin account (UserId {admin_id}, username 'admin').")
 
 
-    # Apply dark theme and autofit columns
-    for ws in sheets.values():
-        apply_dark_theme(ws)
-        autofit_columns(ws)
+    # Apply dark theme and autofit columns (skipped in fast mode — purely cosmetic, the slowest step).
+    if FAST_GEN:
+        print("⚡ KSE_FAST_GEN set — skipping dark theme + autofit (layout/userinfo skip).")
+    else:
+        for ws in sheets.values():
+            apply_dark_theme(ws)
+            autofit_columns(ws)
 
     # Drop the placeholder sheet that Workbook() creates by default.
     if "Template" in wb.sheetnames:
         del wb["Template"]
 
-    # Save file
+    # Save file (client copy) then mirror to the server copy so both Resources/Raw stay identical.
     wb.save(str(excel_path))
-    print(f"✅ Applied dark theme and saved all {num_people} AI users.")
+    SERVER_EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(str(excel_path), str(SERVER_EXCEL_PATH))
+    print(f"✅ Saved all {num_people} AI users to:\n   {excel_path}\n   {SERVER_EXCEL_PATH}")
 
 
 if __name__ == "__main__":

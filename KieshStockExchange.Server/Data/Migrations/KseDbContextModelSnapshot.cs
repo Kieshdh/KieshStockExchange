@@ -51,9 +51,21 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<decimal>("ExtremeReactionRandomnessPrc")
                         .HasColumnType("numeric(20,10)");
 
+                    b.Property<decimal>("FarBudgetPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("FarLimitMaxPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("FarLimitMinPrc")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<string>("HomeCurrency")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<decimal>("LongBracketProb")
+                        .HasColumnType("numeric(20,10)");
 
                     b.Property<decimal>("MaxCashReservePrc")
                         .HasColumnType("numeric(20,10)");
@@ -65,6 +77,12 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .HasColumnType("integer");
 
                     b.Property<decimal>("MaxTradeAmountPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("MidLimitMaxPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("MidLimitMinPrc")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<decimal>("MinCashReservePrc")
@@ -82,14 +100,38 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<int>("Seed")
                         .HasColumnType("integer");
 
+                    b.Property<decimal>("ShortBracketProb")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("ShortProb")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<decimal>("SlippageTolerancePrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("StopDistanceMaxPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("StopDistanceMinPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("StopProb")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<int>("StrategyCode")
                         .HasColumnType("integer")
                         .HasColumnName("Strategy");
 
+                    b.Property<decimal>("TpOffsetMaxPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("TpOffsetMinPrc")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<decimal>("TradeProb")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("TrailingProb")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<DateTime>("UpdatedAt")
@@ -296,6 +338,9 @@ namespace KieshStockExchange.Server.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("OrderId"));
 
+                    b.Property<DateTime?>("ActivatedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("AmountFilled")
                         .HasColumnType("integer");
 
@@ -309,15 +354,22 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("OrderType")
+                    b.Property<string>("Entry")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("ParentOrderId")
+                        .HasColumnType("integer");
 
                     b.Property<decimal>("Price")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<int>("Quantity")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Side")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<decimal?>("SlippagePercent")
                         .HasColumnType("numeric(20,10)");
@@ -329,6 +381,22 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<int>("StockId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Stop")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("StopPrice")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<bool?>("TrailIsPercent")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal?>("TrailOffset")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal?>("TrailWatermark")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -336,6 +404,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("OrderId");
+
+                    b.HasIndex("ParentOrderId")
+                        .HasDatabaseName("IX_Orders_ParentOrderId");
 
                     b.HasIndex("StockId", "Status")
                         .HasDatabaseName("IX_Orders_Stock_Status");
@@ -363,6 +434,13 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<int>("ReservedQuantity")
                         .HasColumnType("integer");
 
+                    b.Property<decimal>("ShortCollateral")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<string>("ShortCollateralCurrency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<int>("StockId")
                         .HasColumnType("integer");
 
@@ -380,7 +458,7 @@ namespace KieshStockExchange.Server.Data.Migrations
 
                     b.ToTable("Positions", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Positions_Quantity_Invariants", "\"Quantity\" >= 0 AND \"ReservedQuantity\" >= 0 AND \"ReservedQuantity\" <= \"Quantity\"");
+                            t.HasCheckConstraint("CK_Positions_Quantity_Invariants", "\"ReservedQuantity\" >= 0 AND \"ReservedQuantity\" <= GREATEST(\"Quantity\", 0) AND \"ShortCollateral\" >= 0 AND (\"Quantity\" >= 0 OR \"ReservedQuantity\" = 0) AND (\"Quantity\" < 0 OR \"ShortCollateral\" = 0)");
                         });
                 });
 

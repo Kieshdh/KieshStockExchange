@@ -45,11 +45,13 @@ public sealed class OrderCacheService : IOrderCacheService
             var all = (await _db.GetOrdersByUserId(userId, ct).ConfigureAwait(false)).ToList();
 
             // Partition once so UI bindings don't re-filter on every property access.
+            // §3.6 P2: armed (Pending) stops are live working orders — show them in the
+            // Open list so the user can see and cancel them before they trigger.
             var open = new List<Order>(all.Count);
             var closed = new List<Order>(all.Count);
             foreach (var o in all)
             {
-                if (o.IsOpen) open.Add(o);
+                if (o.IsOpen || o.IsArmed) open.Add(o);
                 else closed.Add(o);
             }
 

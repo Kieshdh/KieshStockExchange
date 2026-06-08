@@ -143,8 +143,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // Economy snapshot: 60s is frequent enough to spot drift trends without the
     // per-call walk (bots × positions) crowding the log.
     private static readonly TimeSpan EconomyLogInterval = TimeSpan.FromSeconds(60);
-    // Sentiment snapshot: matches the economy cadence so the two CSVs can be joined on timestamp.
-    private static readonly TimeSpan SentimentLogInterval = TimeSpan.FromSeconds(60);
+    // Sentiment snapshot cadence (config Bots:SentimentLogIntervalSeconds, default 60). Lower it (e.g.
+    // 15s) for a denser sentiment/price correlation export; higher to thin production telemetry.
+    private readonly TimeSpan _sentimentLogInterval;
     // Cash injection: 1-hour nominal-growth driver; per-bot frequency knob
     // gates each bot's actual deposit within the cycle.
     private static readonly TimeSpan CashInjectionInterval = TimeSpan.FromHours(1);
@@ -171,20 +172,26 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly ReservationAuditor   _auditor;
     private readonly BotEconomyTelemetry  _economy;
     private readonly BotSentimentService  _sentiment;
+    private readonly FundamentalService   _funds;     // §P6 slowly-drifting fundamentals
+    private readonly StockProfileService  _profiles;  // §P6 per-stock personality
     private readonly BotCashInjector      _injector;
     #endregion
 
     #region Services and Constructor
     private readonly IOrderExecutionService _marketOrders;
+    private readonly IOrderEntryService     _entry;   // §P6: stop/trailing/bracket entry route (not the batch matcher)
     private readonly IMarketDataService     _market;
     private readonly IStockService          _stocks;
     private readonly IAccountsCache         _accounts;
     private readonly IFxRateService         _fxRates;
     private readonly ILogger<AiTradeService> _logger;
     private readonly IConfiguration         _configuration;
+    private readonly int  _maxAdvancedPerTick;   // §P6a cap on entry-route submissions per tick
+    private readonly bool _advancedEnabled;       // §P6a master switch (default off)
 
     public AiTradeService(
         IOrderExecutionService marketOrders,
+        IOrderEntryService entry,
         IMarketDataService market,
         IStockService stocks,
         IDataBaseService db,
@@ -199,6 +206,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IConfiguration configuration)
     {
         _marketOrders = marketOrders ?? throw new ArgumentNullException(nameof(marketOrders));
+        _entry        = entry        ?? throw new ArgumentNullException(nameof(entry));
         _market       = market       ?? throw new ArgumentNullException(nameof(market));
         _stocks       = stocks       ?? throw new ArgumentNullException(nameof(stocks));
         _accounts     = accounts     ?? throw new ArgumentNullException(nameof(accounts));
@@ -212,13 +220,26 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (loggerFactory  is null) throw new ArgumentNullException(nameof(loggerFactory));
         if (loggerOptions  is null) throw new ArgumentNullException(nameof(loggerOptions));
 
+        _sentimentLogInterval = TimeSpan.FromSeconds(
+                        Math.Max(1.0, _configuration.GetValue("Bots:SentimentLogIntervalSeconds", 60.0)));
         _ctx       = new AiBotContext(accounts,
                         personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true));
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions));
         _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, fxRates, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
-        _sentiment = new BotSentimentService(stocks, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
+        // §P6 liveliness: per-stock personality + slowly-drifting fundamentals. Built before the
+        // sentiment + decision services because both consume them.
+        _profiles  = new StockProfileService(
+                        enabled: _configuration.GetValue("Bots:Personality:Enabled", true));
+        _funds     = new FundamentalService(stocks, _profiles,
+                        new SeparatorLogger<FundamentalService>(loggerFactory, loggerOptions),
+                        enabled:          _configuration.GetValue("Bots:Fundamental:Enabled", true),
+                        band:             _configuration.GetValue("Bots:Fundamental:Band", 0.12m),
+                        theta:            _configuration.GetValue("Bots:Fundamental:Theta", 0.02),
+                        sigma:            _configuration.GetValue("Bots:Fundamental:Sigma", 0.004),
+                        driftIntervalSec: _configuration.GetValue("Bots:Fundamental:DriftIntervalSeconds", 60.0));
+        _sentiment = new BotSentimentService(stocks, _profiles, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
                         newsEvents:              _configuration.GetValue("Bots:NewsEvents", true),
                         shockMeanIntervalHours:  _configuration.GetValue("Bots:ShockMeanIntervalHours", 6.0),
                         shockMinMagnitude:       _configuration.GetValue("Bots:ShockMinMagnitude", 0.3m),
@@ -228,15 +249,41 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
-                        new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
-        _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment,
+                        new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
+                        distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m));
+        _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
                         fatTails:           _configuration.GetValue("Bots:FatTails", true),
                         tradeSizeTailShape: _configuration.GetValue("Bots:TradeSizeTailShape", 0.5m),
                         blockTradeProb:     _configuration.GetValue("Bots:BlockTradeProb", 0.01m),
                         blockTradeMultiple: _configuration.GetValue("Bots:BlockTradeMultiple", 4m),
                         mmQuoting:          _configuration.GetValue("Bots:MarketMakerQuoting", true),
-                        quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m));
+                        quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m),
+                        limitOffsetMult:    _configuration.GetValue("Bots:Liquidity:OffsetMult", 1m),
+                        distanceMult:       _configuration.GetValue("Bots:DecisionDistanceMult", 1m),
+                        maxOpenOrdersMult:  _configuration.GetValue("Bots:Liquidity:MaxOpenMult", 1m),
+                        valueAnchorStrength: _configuration.GetValue("Bots:ValueAnchor:Strength", 0m),
+                        valueAnchorScale:    _configuration.GetValue("Bots:ValueAnchor:Scale", 0.15m),
+                        valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
+                        overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),
+                        marketSlippagePrc:   _configuration.GetValue("Bots:MarketSlippagePrc", 0.003m),
+                        // §P6 balancing: tier-selection probs, stop-fire slippage cap, anti-sweep depth fraction.
+                        tierCloseProb:       _configuration.GetValue("Bots:Tiers:CloseProb", 0.6m),
+                        tierMidProb:         _configuration.GetValue("Bots:Tiers:MidProb", 0.3m),
+                        stopSlippagePct:     _configuration.GetValue("Bots:Advanced:StopSlippagePct", 0.3m),
+                        maxSweepFractionOfDepth: _configuration.GetValue("Bots:Liquidity:MaxSweepFractionOfDepth", 0.25m),
+                        // §P6: advanced-order generation. Master on/off is config; the per-kind probabilities
+                        // are PER-BOT (AIUser.*Prob, seeded by strategy in Tools/Person.py). Offsets + caps
+                        // remain global config. When disabled, the seeded plain-order stream is byte-identical.
+                        advancedEnabled:    _configuration.GetValue("Bots:Advanced:Enabled", false),
+                        stopOffsetMin:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMin", 0.02m),
+                        stopOffsetMax:      _configuration.GetValue("Bots:Advanced:StopOffsetPrcMax", 0.05m),
+                        tpOffsetMin:        _configuration.GetValue("Bots:Advanced:TpOffsetPrcMin", 0.03m),
+                        tpOffsetMax:        _configuration.GetValue("Bots:Advanced:TpOffsetPrcMax", 0.08m),
+                        bracketSlippagePct: _configuration.GetValue("Bots:Advanced:BracketSlippagePct", 5m),
+                        advancedMaxQty:     _configuration.GetValue("Bots:Advanced:MaxQty", 50));
+        _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
+        _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
         _market.QuoteUpdated += OnQuoteUpdated;
@@ -391,11 +438,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // once disk persistence lands. Sentiment still re-rolls its starting
         // factors though (different semantics from the others).
         _sentiment.Reset(TimeHelper.NowUtc());
+        _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
 
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
-        _nextSentimentLogTime  = TimeHelper.NowUtc() + SentimentLogInterval;
+        _nextSentimentLogTime  = TimeHelper.NowUtc() + _sentimentLogInterval;
         _nextCashInjectionTime = TimeHelper.NowUtc() + CashInjectionInterval;
         LastTradeAtUtc   = null;
         LoopStartedAtUtc = TimeHelper.NowUtc();
@@ -426,9 +474,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var now = TimeHelper.NowUtc();
                 await CheckTimers(now, ct).ConfigureAwait(false);
 
-                var pending = await CollectPendingOrdersAsync(now, ct).ConfigureAwait(false);
+                var (pending, advanced) = await CollectPendingOrdersAsync(now, ct).ConfigureAwait(false);
                 if (pending.Count > 0)
                     await SubmitAndApplyBatchAsync(pending, _engineCts?.Token ?? ct).ConfigureAwait(false);
+                // §P6a: advanced (stop/trailing) decisions go through the entry/arm route, sequentially and
+                // in aiUserId order, AFTER and OUTSIDE the batch matcher's locked region (each call owns its
+                // own gates; the loop holds none). Off the matching hot path; reconcile below is the gate.
+                if (advanced.Count > 0)
+                    await SubmitAdvancedAsync(advanced, _engineCts?.Token ?? ct).ConfigureAwait(false);
 
                 RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
                 Interlocked.Increment(ref _tickCount);
@@ -464,9 +517,80 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
     }
 
-    private async Task<List<(AIUser user, Order order)>> CollectPendingOrdersAsync(DateTime now, CancellationToken ct)
+    // §P6a: submit protective stop/trailing orders through the entry/arm route — sequentially, in ascending
+    // aiUserId order (part of the seed-determinism contract), each call owning its own book→fund→position
+    // gates while the loop holds none. Runs after the plain batch, outside the matcher's locked region.
+    private async Task SubmitAdvancedAsync(List<(AIUser user, BotAdvancedDecision dec)> advanced, CancellationToken ct)
+    {
+        advanced.Sort((a, b) => a.user.AiUserId.CompareTo(b.user.AiUserId));
+        foreach (var (user, d) in advanced)
+        {
+            OrderResult result;
+            try
+            {
+                result = d.Kind switch
+                {
+                    BotAdvancedKind.StopMarketSell =>
+                        await _entry.PlaceStopMarketSellOrderAsync(
+                            user.UserId, d.StockId, d.Quantity, d.StopPrice, d.Currency, d.StopSlippagePct, ct).ConfigureAwait(false),
+                    BotAdvancedKind.TrailingStopSell =>
+                        await _entry.PlaceTrailingStopSellOrderAsync(
+                            user.UserId, d.StockId, d.Quantity, d.TrailOffset, d.TrailIsPercent, d.Currency, ct).ConfigureAwait(false),
+                    // §P6b flat-only market short (opens a cash-collateralized short via the P1 path).
+                    BotAdvancedKind.ShortOpen =>
+                        await _entry.PlaceTrueMarketSellOrderAsync(
+                            user.UserId, d.StockId, d.Quantity, d.Currency, ct).ConfigureAwait(false),
+                    // §P6b long bracket (buy entry + sell-stop SL + sell-limit TPs).
+                    BotAdvancedKind.LongBracket =>
+                        await _entry.PlaceBracketAsync(
+                            user.UserId, d.StockId, d.Quantity, EntryType.Market, d.Currency,
+                            limitPrice: null, buyBudget: d.BuyBudget, stopPrice: d.StopPrice,
+                            stopLimitPrice: null, stopSlippagePct: d.StopSlippagePct, takeProfits: d.TakeProfits!,
+                            ct, OrderSide.Buy).ConfigureAwait(false),
+                    // §P6c short bracket (flat market sell + slippage-capped buy-stop SL above + buy-limit TPs below).
+                    BotAdvancedKind.ShortBracket =>
+                        await _entry.PlaceBracketAsync(
+                            user.UserId, d.StockId, d.Quantity, EntryType.Market, d.Currency,
+                            limitPrice: null, buyBudget: null, stopPrice: d.StopPrice,
+                            stopLimitPrice: null, stopSlippagePct: d.StopSlippagePct, takeProfits: d.TakeProfits!,
+                            ct, OrderSide.Sell).ConfigureAwait(false),
+                    _ => new OrderResult { Status = OrderStatus.OperationFailed, ErrorMessage = "unknown advanced kind" },
+                };
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                _logger.LogInformation("Bot loop stop requested mid-advanced on tick {Tick}; skipping remaining.", _tickCount);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Advanced order ({Kind}) failed for AIUser {Id} stock {Stock}",
+                    d.Kind, user.AiUserId, d.StockId);
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+                continue;
+            }
+
+            if (result.PlacedSuccessfully)
+            {
+                Interlocked.Increment(ref _tradesPlacedThisSession);
+            }
+            else
+            {
+                if (DebugMode && (!DebugUserId.HasValue || user.UserId == DebugUserId.Value))
+                    _logger.LogWarning("Advanced order AIUser {Id} stock {Stock}: {Status} — {Error}",
+                        user.AiUserId, d.StockId, result.Status, result.ErrorMessage);
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+            }
+        }
+    }
+
+    private async Task<(List<(AIUser user, Order order)> Plain, List<(AIUser user, BotAdvancedDecision dec)> Advanced)>
+        CollectPendingOrdersAsync(DateTime now, CancellationToken ct)
     {
         var pending = new List<(AIUser user, Order order)>();
+        var advanced = new List<(AIUser user, BotAdvancedDecision dec)>();
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
             if (!user.IsEnabled || !_decisions.CanPlaceMoreOrder(_ctx, user)) continue;
@@ -498,11 +622,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             user.RecordDecision(now);
             if (_ctx.Decimal01(user.AiUserId) > effectiveTradeProb) continue;
 
+            // §P6a: try a protective advanced order first (entry/arm route). Disabled → returns null at the
+            // top with NO seeded RNG consumed, so the plain-order stream stays byte-identical vs pre-P6.
+            if (_advancedEnabled && advanced.Count < _maxAdvancedPerTick)
+            {
+                var adv = await _decisions.ComputeAdvancedDecisionAsync(_ctx, user, user.HomeCurrencyType, ct).ConfigureAwait(false);
+                if (adv is not null) { advanced.Add((user, adv)); continue; }
+            }
+
             // Bot decides in its home currency only.
             var order = await _decisions.ComputeOrderAsync(_ctx, user, user.HomeCurrencyType, ct).ConfigureAwait(false);
             if (order is not null) pending.Add((user, order));
         }
-        return pending;
+        return (pending, advanced);
     }
 
     private async Task SubmitAndApplyBatchAsync(List<(AIUser user, Order order)> pending, CancellationToken ct)
@@ -612,6 +744,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // it first matches the "advance external state before consumers" rule.
         _fxRates.Tick(now);
         _sentiment.Tick(now);
+        _funds.Tick(now);   // §P6: advance the slowly-drifting fundamentals (internally gated to its interval)
         if (now >= _nextDailyCheck)
         {
             _state.CheckDailyRefresh(_ctx);
@@ -624,7 +757,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
         if (now >= _nextPruneTime)
         {
-            await _state.PruneWorstOrdersAsync(_ctx, LoopStartedAtUtc, ct).ConfigureAwait(false);
+            await _state.PruneWorstOrdersAsync(_ctx, ct).ConfigureAwait(false);
             _nextPruneTime = now + PruneInterval;
         }
         if (now >= _nextStatsLogTime)
@@ -640,7 +773,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (now >= _nextSentimentLogTime)
         {
             _sentiment.LogSnapshot();
-            _nextSentimentLogTime = now + SentimentLogInterval;
+            _nextSentimentLogTime = now + _sentimentLogInterval;
         }
         if (now >= _nextCashInjectionTime)
         {

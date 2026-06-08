@@ -6,10 +6,11 @@
              x:Name="OrderHistoryRoot"
              x:DataType="vm:OrderHistoryViewModel">
 
-    <VerticalStackLayout Style="{StaticResource TradeTableContainer}">
+    <Grid RowDefinitions="Auto,*" Style="{StaticResource TradeTableContainerGrid}">
 
         <!-- Table headers -->
-        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
+        <Grid Grid.Row="0"
+              ColumnDefinitions="*,*,*,*,*,*,*,*,*"
               Style="{StaticResource TradeTableHeaderGrid}">
             <Label Grid.Column="0" Text="Symbol"  Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="1" Text="Created" Style="{StaticResource TradeTableHeaderLabel}" />
@@ -19,12 +20,13 @@
             <Label Grid.Column="5" Text="Qty"     Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="6" Text="Price"   Style="{StaticResource TradeTableHeaderLabel}" />
             <Label Grid.Column="7" Text="Total"   Style="{StaticResource TradeTableHeaderLabel}" />
+            <Label Grid.Column="8" Text="Status"  Style="{StaticResource TradeTableHeaderLabel}" />
         </Grid>
 
         <!-- Rows -->
-        <RefreshView Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
+        <RefreshView Grid.Row="1" Command="{Binding RefreshCommand}" IsRefreshing="{Binding IsBusy}">
             <CollectionView ItemsSource="{Binding CurrentView}"
-                            SelectionMode="None" Margin="0,4,0,0">
+                            SelectionMode="None">
                 <CollectionView.EmptyView>
                     <StackLayout Padding="12" Spacing="4">
                         <Label Text="No order history" Opacity="0.7" />
@@ -33,9 +35,16 @@
 
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="vm:ClosedOrderRow">
-                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*"
+                        <Grid ColumnDefinitions="*,*,*,*,*,*,*,*,*"
                               Style="{StaticResource TradeTableRowGrid}">
-                            <Label Grid.Column="0" Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" />
+                            <HorizontalStackLayout Grid.Column="0" Spacing="3" VerticalOptions="Center">
+                                <Label Text="{Binding Symbol}" Style="{StaticResource TradeTableSymbolLabel}" VerticalOptions="Center" />
+                                <Label Style="{StaticResource TableSymbolNavGlyph}">
+                                    <Label.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding GoToStockCommand}" CommandParameter="{Binding .}" />
+                                    </Label.GestureRecognizers>
+                                </Label>
+                            </HorizontalStackLayout>
                             <Label Grid.Column="1" Text="{Binding Opened}" Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="2" Text="{Binding Closed}" Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="3" Text="{Binding Side}"   Style="{StaticResource TradeTableSideLabel}" />
@@ -43,10 +52,45 @@
                             <Label Grid.Column="5" Text="{Binding Qty}"    Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="6" Text="{Binding Price}"  Style="{StaticResource TradeTableRowLabel}" />
                             <Label Grid.Column="7" Text="{Binding Total}"  Style="{StaticResource TradeTableRowLabel}" />
+
+                            <!-- Status pill (§G Part 1): mirrors Open Orders. A fired trigger reads FILLED
+                                 (green), a cancelled armed trigger reads CANCELLED (red). Same Order bindings. -->
+                            <Border Grid.Column="8"
+                                    HorizontalOptions="Center"
+                                    VerticalOptions="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border" BasedOn="{StaticResource StatusPillOpen}">
+                                        <Style.Triggers>
+                                            <DataTrigger TargetType="Border" Binding="{Binding Order.IsFilled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource BuyGreen}" />
+                                                <Setter Property="Stroke"     Value="Transparent" />
+                                            </DataTrigger>
+                                            <DataTrigger TargetType="Border" Binding="{Binding Order.IsCancelled}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource SellRed}" />
+                                                <Setter Property="Stroke"     Value="Transparent" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Label Text="{Binding Order.StatusDisplay}">
+                                    <Label.Style>
+                                        <Style TargetType="Label" BasedOn="{StaticResource StatusPillLabelMuted}">
+                                            <Style.Triggers>
+                                                <DataTrigger TargetType="Label" Binding="{Binding Order.IsFilled}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource White}" />
+                                                </DataTrigger>
+                                                <DataTrigger TargetType="Label" Binding="{Binding Order.IsCancelled}" Value="True">
+                                                    <Setter Property="TextColor" Value="{DynamicResource White}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Label.Style>
+                                </Label>
+                            </Border>
                         </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
             </CollectionView>
         </RefreshView>
-    </VerticalStackLayout>
+    </Grid>
 </ContentView>
