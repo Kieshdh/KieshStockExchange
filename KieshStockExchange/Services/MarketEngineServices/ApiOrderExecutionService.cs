@@ -113,5 +113,10 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
             Price: o.Entry == EntryType.Limit ? o.Price : (o.SlippagePercent.HasValue ? o.Price : (decimal?)null),
             SlippagePct: o.SlippagePercent,
             BuyBudget: o.BuyBudget,
-            StopPrice: o.StopPrice);
+            StopPrice: o.StopPrice,
+            // Forward the trailing-stop dimensions too, so a Stop==Trailing Order routed through this
+            // surface (session-restore replay, admin/test harness, client bot) doesn't lose them and get
+            // rejected with "Trail offset must be positive." Dormant today (no such caller), kept symmetric.
+            TrailOffset: o.TrailOffset,
+            TrailIsPercent: o.TrailIsPercent);
 }
