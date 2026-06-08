@@ -39,7 +39,7 @@ try {
     if (Select-String -Path $log -Pattern "starting bot loop" -Quiet -ErrorAction SilentlyContinue) { $ready = $true; break }
   }
   if (-not $ready) { throw "server never reached bot loop" }
-  Write-Host "[$(Stamp)] SOAK4H READY — soaking $Minutes min, sampling every $([int]($SampleEverySec/60))m"
+  Write-Host "[$(Stamp)] SOAK4H READY - soaking $Minutes min, sampling every $([int]($SampleEverySec/60))m"
 
   $start = Get-Date; $deadline = $start.AddMinutes($Minutes)
   while ((Get-Date) -lt $deadline) {
@@ -51,10 +51,12 @@ try {
     $short = Cnt "Short-close collateral shortfall"
     $rec   = (Select-String -Path $log -Pattern "Reservation reconcile:" -ErrorAction SilentlyContinue | Select-Object -Last 1).Line
     $el    = [int]((Get-Date) - $start).TotalMinutes
-    Write-Host "[$(Stamp)] t=${el}m drift=$drift | depth=$depth | ERR=$err CK=$ck CONS=$cons shortfall=$short | $rec"
+    $line  = "[{0}] t={1}m drift={2} // depth={3} // ERR={4} CK={5} CONS={6} shortfall={7} // {8}" -f (Stamp),$el,$drift,$depth,$err,$ck,$cons,$short,$rec
+    Write-Host $line
     "$(Stamp),$el,$drift,$depth,$err,$ck,$cons,$short,$rec" | Out-File $res -Append -Encoding utf8
   }
-  Write-Host "[$(Stamp)] SOAK4H DONE final drift=$(Q $driftSql) | totals ERR=$(Cnt '\[ERR\]') CK=$(Cnt 'check constraint|CK_Positions|CK_Funds') CONS=$(Cnt 'Conservation') shortfall=$(Cnt 'Short-close collateral shortfall')"
+  $fDrift = Q $driftSql; $fErr = Cnt "\[ERR\]"; $fCk = Cnt "check constraint|CK_Positions|CK_Funds"; $fCons = Cnt "Conservation"; $fShort = Cnt "Short-close collateral shortfall"
+  Write-Host ("[{0}] SOAK4H DONE final drift={1} // totals ERR={2} CK={3} CONS={4} shortfall={5}" -f (Stamp),$fDrift,$fErr,$fCk,$fCons,$fShort)
 }
 finally {
   if (-not $proc.HasExited) {
