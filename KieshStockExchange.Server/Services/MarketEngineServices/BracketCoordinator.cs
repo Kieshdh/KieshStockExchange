@@ -170,25 +170,26 @@ public sealed class BracketCoordinator : IBracketCoordinator
                 int delta = held - sl.CurrentSellReservedQty;
                 int posResBefore = pos.ReservedQuantity;
                 int slBefore = sl.CurrentSellReservedQty;
-                if (delta > 0)
+                // Cap delta to available shares (read-only here); the cache mutation is deferred to INSIDE
+                // the tx so a BeginTransactionAsync throw can't leak the reservation past the restoring catch.
+                if (delta > 0 && pos.AvailableQuantity < delta)
                 {
-                    if (pos.AvailableQuantity < delta)
-                    {
-                        _logger.LogWarning(
-                            "Bracket #{Parent}: SL can't reserve {Delta} more (avail {Avail}); capping to available.",
-                            parent.OrderId, delta, pos.AvailableQuantity);
-                        delta = pos.AvailableQuantity;
-                    }
-                    if (delta > 0)
-                    {
-                        pos.ReserveStock(delta);
-                        sl.TakeSellReservation(delta);
-                    }
+                    _logger.LogWarning(
+                        "Bracket #{Parent}: SL can't reserve {Delta} more (avail {Avail}); capping to available.",
+                        parent.OrderId, delta, pos.AvailableQuantity);
+                    delta = pos.AvailableQuantity;
                 }
 
                 await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
                 try
                 {
+                    // Reserve only after the tx is open, so the catch (RestoreLegs + posResBefore rewind)
+                    // covers these mutations.
+                    if (delta > 0)
+                    {
+                        pos.ReserveStock(delta);
+                        sl.TakeSellReservation(delta);
+                    }
                     sl.Quantity = sl.CurrentSellReservedQty + sl.AmountFilled; // RemainingQuantity == held pool
                     if (sl.IsAttached) sl.Arm();                              // Attached → Pending
                     else { sl.Status = Order.Statuses.Pending; }
@@ -598,11 +599,13 @@ public sealed class BracketCoordinator : IBracketCoordinator
                 }
 
                 decimal resBefore = fund.ReservedBalance;
-                if (delta > 0m) { fund.ReserveFunds(delta); sl.TakeBuyReservation(delta); }
 
                 await using var tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
                 try
                 {
+                    // Reserve only after the tx is open so the catch (RestoreLegs + fund restore) covers it,
+                    // not leaking the reservation if BeginTransactionAsync throws (pool exhaustion/cancel).
+                    if (delta > 0m) { fund.ReserveFunds(delta); sl.TakeBuyReservation(delta); }
                     sl.Quantity = held + sl.AmountFilled;          // RemainingQuantity == held shares to buy back
                     if (sl.IsAttached) sl.Arm(); else sl.Status = Order.Statuses.Pending;
                     sl.UpdatedAt = TimeHelper.NowUtc();
