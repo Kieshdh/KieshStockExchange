@@ -143,8 +143,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // Economy snapshot: 60s is frequent enough to spot drift trends without the
     // per-call walk (bots × positions) crowding the log.
     private static readonly TimeSpan EconomyLogInterval = TimeSpan.FromSeconds(60);
-    // Sentiment snapshot: matches the economy cadence so the two CSVs can be joined on timestamp.
-    private static readonly TimeSpan SentimentLogInterval = TimeSpan.FromSeconds(60);
+    // Sentiment snapshot cadence (config Bots:SentimentLogIntervalSeconds, default 60). Lower it (e.g.
+    // 15s) for a denser sentiment/price correlation export; higher to thin production telemetry.
+    private readonly TimeSpan _sentimentLogInterval;
     // Cash injection: 1-hour nominal-growth driver; per-bot frequency knob
     // gates each bot's actual deposit within the cycle.
     private static readonly TimeSpan CashInjectionInterval = TimeSpan.FromHours(1);
@@ -219,6 +220,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (loggerFactory  is null) throw new ArgumentNullException(nameof(loggerFactory));
         if (loggerOptions  is null) throw new ArgumentNullException(nameof(loggerOptions));
 
+        _sentimentLogInterval = TimeSpan.FromSeconds(
+                        Math.Max(1.0, _configuration.GetValue("Bots:SentimentLogIntervalSeconds", 60.0)));
         _ctx       = new AiBotContext(accounts,
                         personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true));
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
@@ -246,7 +249,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
-                        new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions));
+                        new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
+                        distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m));
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
                         fatTails:           _configuration.GetValue("Bots:FatTails", true),
@@ -256,6 +260,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         mmQuoting:          _configuration.GetValue("Bots:MarketMakerQuoting", true),
                         quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m),
                         limitOffsetMult:    _configuration.GetValue("Bots:Liquidity:OffsetMult", 1m),
+                        distanceMult:       _configuration.GetValue("Bots:DecisionDistanceMult", 1m),
                         maxOpenOrdersMult:  _configuration.GetValue("Bots:Liquidity:MaxOpenMult", 1m),
                         valueAnchorStrength: _configuration.GetValue("Bots:ValueAnchor:Strength", 0m),
                         valueAnchorScale:    _configuration.GetValue("Bots:ValueAnchor:Scale", 0.15m),
@@ -438,7 +443,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
-        _nextSentimentLogTime  = TimeHelper.NowUtc() + SentimentLogInterval;
+        _nextSentimentLogTime  = TimeHelper.NowUtc() + _sentimentLogInterval;
         _nextCashInjectionTime = TimeHelper.NowUtc() + CashInjectionInterval;
         LastTradeAtUtc   = null;
         LoopStartedAtUtc = TimeHelper.NowUtc();
@@ -768,7 +773,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (now >= _nextSentimentLogTime)
         {
             _sentiment.LogSnapshot();
-            _nextSentimentLogTime = now + SentimentLogInterval;
+            _nextSentimentLogTime = now + _sentimentLogInterval;
         }
         if (now >= _nextCashInjectionTime)
         {

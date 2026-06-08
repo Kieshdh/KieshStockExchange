@@ -250,6 +250,8 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.StopDistanceMinPrc).HasColumnType(Money);
             b.Property(x => x.StopDistanceMaxPrc).HasColumnType(Money);
             b.Property(x => x.FarBudgetPrc).HasColumnType(Money);
+            b.Property(x => x.TpOffsetMinPrc).HasColumnType(Money);
+            b.Property(x => x.TpOffsetMaxPrc).HasColumnType(Money);
 
             b.HasIndex(x => x.UserId).IsUnique().HasDatabaseName("IX_UserAi");
             b.HasIndex(x => x.StrategyCode);

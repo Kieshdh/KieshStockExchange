@@ -62,6 +62,12 @@ internal sealed class AiBotDecisionService
     private readonly decimal _limitOffsetMult;
     private readonly decimal _maxOpenOrdersMult;
 
+    // §P6 "tightness dial": one global multiplier over EVERY order-placement distance — limit tiers
+    // (Close/Mid/Far), protective-stop + bracket-SL trigger distance, and bracket take-profit distance.
+    // <1 holds the whole book closer to the current price (calmer market); 1 = unchanged. Does NOT touch
+    // trade size or the slippage caps. Distinct from _limitOffsetMult, which scales only the limit ladder.
+    private readonly decimal _distanceMult;
+
     // Value anchor: a restoring force toward each stock's fundamental (seed) price. Without it the
     // price is a driftless momentum walk with no pull back to value, so it wanders unbounded. Strength
     // is the max buy/sell-probability tilt; Scale is the deviation fraction at which the tilt saturates.
@@ -98,6 +104,7 @@ internal sealed class AiBotDecisionService
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
         bool mmQuoting = true, decimal quoteHalfSpreadPrc = 0.003m,
         decimal limitOffsetMult = 1m, decimal maxOpenOrdersMult = 1m,
+        decimal distanceMult = 1m,
         decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal marketSlippagePrc = 0.003m,
@@ -124,6 +131,7 @@ internal sealed class AiBotDecisionService
         _quoteHalfSpreadPrc = quoteHalfSpreadPrc;
         _limitOffsetMult    = limitOffsetMult <= 0m ? 1m : limitOffsetMult;
         _maxOpenOrdersMult  = maxOpenOrdersMult <= 0m ? 1m : maxOpenOrdersMult;
+        _distanceMult       = distanceMult <= 0m ? 1m : distanceMult;
         _valueAnchorStrength = Math.Max(0m, valueAnchorStrength);
         _valueAnchorScale    = valueAnchorScale <= 0m ? 0.15m : valueAnchorScale;
         _valueTargetSelection = valueTargetSelection;
@@ -302,10 +310,15 @@ internal sealed class AiBotDecisionService
         // SL distance (per-bot, de-clustered, bounded inside Far walls) + two TP distances (sorted so
         // TP1 is nearer market than TP2).
         var slOff = StopOffset(ctx, user);
-        var o1 = Lerp(_tpOffsetMin, _tpOffsetMax, ctx.Decimal01(user.AiUserId));
-        var o2 = Lerp(_tpOffsetMin, _tpOffsetMax, ctx.Decimal01(user.AiUserId));
+        // §P6: take-profit distances are PER-BOT (TpOffsetMin/MaxPrc, baked tight in the Excel pipeline),
+        // falling back to the global Advanced:TpOffsetPrc config for un-regenerated bots. The tightness
+        // dial still applies for any leftover global-config use (1.0 in production now the values are baked).
+        var tpLo = user.TpOffsetMaxPrc > 0m ? user.TpOffsetMinPrc : _tpOffsetMin;
+        var tpHi = user.TpOffsetMaxPrc > 0m ? user.TpOffsetMaxPrc : _tpOffsetMax;
+        var o1 = Lerp(tpLo, tpHi, ctx.Decimal01(user.AiUserId)) * _distanceMult;
+        var o2 = Lerp(tpLo, tpHi, ctx.Decimal01(user.AiUserId)) * _distanceMult;
         var tpNear = Math.Min(o1, o2); var tpFar = Math.Max(o1, o2);
-        if (tpFar <= tpNear) tpFar = tpNear + 0.005m;   // keep TP2 strictly past TP1
+        if (tpFar <= tpNear) tpFar = tpNear + 0.005m * _distanceMult;   // keep TP2 strictly past TP1
 
         var fund = _accounts.GetFund(user.UserId, currency);
         decimal avail = fund?.AvailableBalance ?? 0m;
@@ -587,8 +600,8 @@ internal sealed class AiBotDecisionService
         // multiplier and add bidirectional jitter. Close churns at the touch; Far rests standing walls
         // that absorb fired (slippage-capped) stops instead of letting them sweep empty space.
         var (tierMin, tierMax) = PickLimitTier(ctx, user);
-        var minOff = tierMin * _limitOffsetMult;
-        var maxOff = tierMax * _limitOffsetMult;
+        var minOff = tierMin * _limitOffsetMult * _distanceMult;
+        var maxOff = tierMax * _limitOffsetMult * _distanceMult;
         var offset = Clamp01(Lerp(minOff, maxOff, ctx.Decimal01(user.AiUserId)));
         var jitter = (ctx.Decimal01(user.AiUserId) * 2m - 1m) * user.AggressivenessPrc;
         offset = Math.Max(minOff, Math.Min(maxOff, offset * (1m + jitter)));
@@ -781,9 +794,12 @@ internal sealed class AiBotDecisionService
         var off = Lerp(lo, hi, ctx.Decimal01(user.AiUserId));
         var jitter = (ctx.Decimal01(user.AiUserId) * 2m - 1m) * 0.20m;
         off *= (1m + jitter);
-        var farMin = user.FarLimitMinPrc > 0m ? user.FarLimitMinPrc : hi;
+        // Clamp strictly inside the Far wall. The far wall and the stop both get the global distance dial
+        // on the way out, so the clamp is computed pre-dial — include _limitOffsetMult (the far wall has it)
+        // so the "stop fires into a standing wall" invariant survives any limit-ladder scaling.
+        var farMin = user.FarLimitMinPrc > 0m ? user.FarLimitMinPrc * _limitOffsetMult : hi;
         off = Math.Min(off, farMin * 0.9m);
-        return Math.Max(0.001m, off);
+        return Math.Max(0.001m, off) * _distanceMult;   // §P6 tightness dial
     }
 
     // §P6 value-band veto (shared by the plain and advanced order paths): true when an order would chase

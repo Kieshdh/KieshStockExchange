@@ -122,6 +122,12 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("Strategy");
 
+                    b.Property<decimal>("TpOffsetMaxPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("TpOffsetMinPrc")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<decimal>("TradeProb")
                         .HasColumnType("numeric(20,10)");
 

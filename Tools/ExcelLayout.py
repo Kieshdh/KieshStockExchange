@@ -86,6 +86,8 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         # §P6 balancing: tiered-limit bands, protective-stop distance band, Far-order budget.
         "MidLimitMinPrc", "MidLimitMaxPrc", "FarLimitMinPrc", "FarLimitMaxPrc",
         "StopDistanceMinPrc", "StopDistanceMaxPrc", "FarBudgetPrc",
+        # §P6: per-bot take-profit band (promoted from the global Advanced:TpOffsetPrc config).
+        "TpOffsetMinPrc", "TpOffsetMaxPrc",
     ])
     return ws
 

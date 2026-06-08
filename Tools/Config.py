@@ -226,24 +226,31 @@ SLIP_TOL_SLOPE            = 0.025
 SLIP_TOL_JITTER           = 0.20
 
 # Limit offsets (_trade_limits). Tight so resting orders cluster near market and fill.
-MAX_LIMIT_BASE            = 0.003
-MAX_LIMIT_SLOPE           = 0.005
+# §P6 tightness: distances baked directly here (the old runtime DecisionDistanceMult=0.32 dial folded in)
+# so the generated per-bot values ARE the production geometry — no runtime multiplier. Far walls top out
+# ~8%, the whole ladder rides near the touch (validated: median drift ~5.3%, lively tail, 0 escapes).
+MAX_LIMIT_BASE            = 0.001
+MAX_LIMIT_SLOPE           = 0.0016
 MAX_LIMIT_JITTER          = 0.20
 MIN_LIMIT_FRACTION_LO     = 0.05    # min_limit = max_limit * U(LO, HI)
 MIN_LIMIT_FRACTION_HI     = 0.30
-MIN_LIMIT_FLOOR           = 0.001
+MIN_LIMIT_FLOOR           = 0.0003
 
 # §P6 tiered limit ladder (_tiers). Close = the existing Min/MaxLimitOffsetPrc (tight, near the touch).
 # Mid + Far are standing walls further out; a fired (slippage-capped) stop runs into the Far walls and is
 # absorbed. Each (lo,hi) is the per-bot uniform draw range; Person.py enforces ordering
 # (Close ≤ Mid ≤ Far) and StopDistanceMax < FarLimitMin so a stop never sits outside the walls.
-MID_LIMIT_MIN_RANGE       = (0.010, 0.020)   # MidLimitMinPrc
-MID_LIMIT_MAX_RANGE       = (0.030, 0.050)   # MidLimitMaxPrc
-FAR_LIMIT_MIN_RANGE       = (0.060, 0.100)   # FarLimitMinPrc
-FAR_LIMIT_MAX_RANGE       = (0.150, 0.250)   # FarLimitMaxPrc
+MID_LIMIT_MIN_RANGE       = (0.003, 0.006)   # MidLimitMinPrc
+MID_LIMIT_MAX_RANGE       = (0.010, 0.016)   # MidLimitMaxPrc
+FAR_LIMIT_MIN_RANGE       = (0.019, 0.032)   # FarLimitMinPrc
+FAR_LIMIT_MAX_RANGE       = (0.048, 0.080)   # FarLimitMaxPrc (Far walls cap ~8%)
 # Protective-stop distance band. Max is additionally clamped < FarLimitMin in Person.py.
-STOP_DISTANCE_MAX_RANGE   = (0.030, 0.050)   # StopDistanceMaxPrc (pre-clamp)
+STOP_DISTANCE_MAX_RANGE   = (0.010, 0.016)   # StopDistanceMaxPrc (pre-clamp)
 STOP_DISTANCE_MIN_FRACTION = (0.50, 0.90)    # StopDistanceMinPrc = StopDistanceMaxPrc * U(lo,hi)
+# §P6: per-bot take-profit band — was the global Advanced:TpOffsetPrc (3-8%), now promoted to per-bot
+# and baked tight (×0.32). The two bracket TP legs are drawn from each bot's [TpOffsetMin, TpOffsetMax].
+TP_OFFSET_MIN_RANGE       = (0.010, 0.014)   # TpOffsetMinPrc
+TP_OFFSET_MAX_RANGE       = (0.018, 0.026)   # TpOffsetMaxPrc
 # Total resting Far-order value the tier-aware prune allows, as a fraction of portfolio.
 FAR_BUDGET_RANGE          = (0.05, 0.15)     # FarBudgetPrc
 
@@ -316,6 +323,7 @@ def _validate() -> None:
         ("FAR_LIMIT_MIN_RANGE", FAR_LIMIT_MIN_RANGE), ("FAR_LIMIT_MAX_RANGE", FAR_LIMIT_MAX_RANGE),
         ("STOP_DISTANCE_MAX_RANGE", STOP_DISTANCE_MAX_RANGE), ("FAR_BUDGET_RANGE", FAR_BUDGET_RANGE),
         ("STOP_DISTANCE_MIN_FRACTION", STOP_DISTANCE_MIN_FRACTION),
+        ("TP_OFFSET_MIN_RANGE", TP_OFFSET_MIN_RANGE), ("TP_OFFSET_MAX_RANGE", TP_OFFSET_MAX_RANGE),
     ]:
         _in_unit(name, rng[0], rng[1])
         _ordered(f"{name}[0]", rng[0], f"{name}[1]", rng[1])
@@ -323,6 +331,8 @@ def _validate() -> None:
         raise ValueError("MID_LIMIT_MAX_RANGE must stay below FAR_LIMIT_MIN_RANGE (tiers must not overlap)")
     if STOP_DISTANCE_MAX_RANGE[1] > FAR_LIMIT_MIN_RANGE[0]:
         raise ValueError("STOP_DISTANCE_MAX_RANGE must stay below FAR_LIMIT_MIN_RANGE (stop inside Far walls)")
+    if TP_OFFSET_MIN_RANGE[1] > TP_OFFSET_MAX_RANGE[0]:
+        raise ValueError("TP_OFFSET_MIN_RANGE must stay below TP_OFFSET_MAX_RANGE (per-bot TpMin ≤ TpMax)")
 
     # Aggressiveness band thresholds must be strictly increasing and inside (0,1).
     if not (0.0 < STOCKS_AGG_LOW_THR < STOCKS_AGG_MID_THR < 1.0):

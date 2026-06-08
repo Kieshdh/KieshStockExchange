@@ -23,6 +23,11 @@ internal sealed class AiBotStateService
     private readonly BotStatsLogger _stats;
     private readonly ILogger<AiBotStateService> _logger;
 
+    // §P6 tightness dial: must match the decision service so the prune's Far-distance thresholds track
+    // where Far orders are actually placed (FarLimit*Prc × this). Otherwise orders placed at the dialed
+    // distance drift far past it before the straggler cull fires, leaving the book wider than intended.
+    private readonly decimal _distanceMult;
+
     // Throttle "Applied active bot cap" — the scaler may toggle the cap several
     // times per minute when load wobbles. One INFO per change buries everything
     // else; collapse identical state and rate-limit the rest to ApplyCapLogInterval.
@@ -33,13 +38,14 @@ internal sealed class AiBotStateService
 
     internal AiBotStateService(IDataBaseService db, IAccountsCache accounts,
         IOrderExecutionService orders, BotStatsLogger stats,
-        ILogger<AiBotStateService> logger)
+        ILogger<AiBotStateService> logger, decimal distanceMult = 1m)
     {
         _db       = db       ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _orders   = orders   ?? throw new ArgumentNullException(nameof(orders));
         _stats    = stats    ?? throw new ArgumentNullException(nameof(stats));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _distanceMult = distanceMult <= 0m ? 1m : distanceMult;
     }
     #endregion
 
@@ -227,6 +233,11 @@ internal sealed class AiBotStateService
             var limitOrders = userOrders.Values.Where(o => o.IsOpenLimitOrder).ToList();
             if (limitOrders.Count == 0) continue;
 
+            // Dial the Far band thresholds to match where the decision service actually places Far orders
+            // (FarLimit*Prc × the tightness dial), so the straggler cull fires at the dialed Far edge.
+            var farMaxPrc = user.FarLimitMaxPrc * _distanceMult;
+            var farMinPrc = user.FarLimitMinPrc * _distanceMult;
+
             // Per currency: the Far budget is a fraction of that currency's portfolio value.
             foreach (var group in limitOrders.GroupBy(o => o.CurrencyType))
             {
@@ -239,11 +250,11 @@ internal sealed class AiBotStateService
                     if (!ctx.StockPrices.TryGetValue((o.StockId, o.CurrencyType), out var m) || m <= 0m) continue;
                     var dist = o.IsBuyOrder ? (m - o.Price) / m : (o.Price - m) / m;
 
-                    // Rule 1: straggler — drifted past the bot's own Far band.
-                    if (dist > user.FarLimitMaxPrc) { toCancel.Add((user.UserId, o)); continue; }
+                    // Rule 1: straggler — drifted past the bot's own (dialed) Far band.
+                    if (dist > farMaxPrc) { toCancel.Add((user.UserId, o)); continue; }
 
-                    // Otherwise eligible for the Far budget once it sits at/beyond the Far band start.
-                    if (dist >= user.FarLimitMinPrc)
+                    // Otherwise eligible for the Far budget once it sits at/beyond the (dialed) Far band start.
+                    if (dist >= farMinPrc)
                         farList.Add((o, dist, o.RemainingAmount));
                 }
 

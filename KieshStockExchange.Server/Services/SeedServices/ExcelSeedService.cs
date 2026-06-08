@@ -331,6 +331,8 @@ public sealed class ExcelSeedService : IExcelSeedService
             var stopDistanceMinPrc = ReadProb("StopDistanceMinPrc");
             var stopDistanceMaxPrc = ReadProb("StopDistanceMaxPrc");
             var farBudgetPrc = ReadProb("FarBudgetPrc");
+            var tpOffsetMinPrc = ReadProb("TpOffsetMinPrc");
+            var tpOffsetMaxPrc = ReadProb("TpOffsetMaxPrc");
 
             string homeCurrency = "USD";
             if (profileTable.Columns.Contains("HomeCurrency"))
@@ -362,6 +364,7 @@ public sealed class ExcelSeedService : IExcelSeedService
                     FarLimitMinPrc = farLimitMinPrc, FarLimitMaxPrc = farLimitMaxPrc,
                     StopDistanceMinPrc = stopDistanceMinPrc, StopDistanceMaxPrc = stopDistanceMaxPrc,
                     FarBudgetPrc = farBudgetPrc,
+                    TpOffsetMinPrc = tpOffsetMinPrc, TpOffsetMaxPrc = tpOffsetMaxPrc,
                     HomeCurrency = homeCurrency,
                 };
                 if (!aiUser.IsValid())

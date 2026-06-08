@@ -253,6 +253,10 @@ class Person:
 
         self.far_budget = clamp01(random.uniform(*FAR_BUDGET_RANGE))
 
+        # §P6 per-bot take-profit band (bracket TP legs draw from [tp_offset_min, tp_offset_max]).
+        self.tp_offset_min = clamp01(random.uniform(*TP_OFFSET_MIN_RANGE))
+        self.tp_offset_max = clamp01(max(self.tp_offset_min, random.uniform(*TP_OFFSET_MAX_RANGE)))
+
     def portfolio_value(self) -> float:
         # Total seeded wealth = remaining cash + market value of initial holdings.
         return self.balance + sum(qty * STOCKS[sid]["price"]
@@ -320,6 +324,8 @@ class Person:
             round(self.stop_distance_min, 4),               # float: StopDistanceMinPrc
             round(self.stop_distance_max, 4),               # float: StopDistanceMaxPrc
             round(self.far_budget, 4),                      # float: FarBudgetPrc
+            round(self.tp_offset_min, 4),                   # float: TpOffsetMinPrc
+            round(self.tp_offset_max, 4),                   # float: TpOffsetMaxPrc
         ]
 
     def ToHoldingList(self):

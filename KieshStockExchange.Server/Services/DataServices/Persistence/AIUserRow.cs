@@ -52,6 +52,9 @@ public class AIUserRow
     [Column("StopDistanceMinPrc")] public decimal StopDistanceMinPrc { get; set; }
     [Column("StopDistanceMaxPrc")] public decimal StopDistanceMaxPrc { get; set; }
     [Column("FarBudgetPrc")] public decimal FarBudgetPrc { get; set; }
+    // §P6: per-bot take-profit band (promoted from global config).
+    [Column("TpOffsetMinPrc")] public decimal TpOffsetMinPrc { get; set; }
+    [Column("TpOffsetMaxPrc")] public decimal TpOffsetMaxPrc { get; set; }
 
     [Column("WatchlistCsv")] public string WatchlistCsv { get; set; } = string.Empty;
 
@@ -103,6 +106,8 @@ public static class AIUserMapper
             StopDistanceMinPrc = r.StopDistanceMinPrc,
             StopDistanceMaxPrc = r.StopDistanceMaxPrc,
             FarBudgetPrc = r.FarBudgetPrc,
+            TpOffsetMinPrc = r.TpOffsetMinPrc,
+            TpOffsetMaxPrc = r.TpOffsetMaxPrc,
             MaxOpenOrders = r.MaxOpenOrders,
             HomeCurrency = r.HomeCurrency,
             StrategyCode = r.StrategyCode,
@@ -149,6 +154,8 @@ public static class AIUserMapper
         StopDistanceMinPrc = a.StopDistanceMinPrc,
         StopDistanceMaxPrc = a.StopDistanceMaxPrc,
         FarBudgetPrc = a.FarBudgetPrc,
+        TpOffsetMinPrc = a.TpOffsetMinPrc,
+        TpOffsetMaxPrc = a.TpOffsetMaxPrc,
         WatchlistCsv = a.WatchlistCsv,
         MaxOpenOrders = a.MaxOpenOrders,
         HomeCurrency = a.HomeCurrency,

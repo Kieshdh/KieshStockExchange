@@ -140,6 +140,14 @@ public class AIUser : IValidatable
     private decimal _farBudgetPrc = 0.10m;
     public decimal FarBudgetPrc { get => _farBudgetPrc; set => _farBudgetPrc = RequiredPrc(value, nameof(FarBudgetPrc)); }
 
+    // §P6: per-bot take-profit band (fraction from entry). Promoted from the global Advanced:TpOffsetPrc
+    // config so bracket TP distances vary per bot. The two bracket TP legs draw from [min, max].
+    private decimal _tpOffsetMinPrc = 0.01m;
+    public decimal TpOffsetMinPrc { get => _tpOffsetMinPrc; set => _tpOffsetMinPrc = RequiredPrc(value, nameof(TpOffsetMinPrc)); }
+
+    private decimal _tpOffsetMaxPrc = 0.025m;
+    public decimal TpOffsetMaxPrc { get => _tpOffsetMaxPrc; set => _tpOffsetMaxPrc = RequiredPrc(value, nameof(TpOffsetMaxPrc)); }
+
     // §3.6 P6: per-bot, per-tick probabilities of choosing each advanced order kind (seeded + assigned
     // by strategy in Tools/Person.py). They REPLACE the global Bots:Advanced:*Prob config — the master
     // Bots:Advanced:Enabled switch still gates the whole feature. Default 0 so a bot never does advanced
@@ -270,12 +278,14 @@ public class AIUser : IValidatable
         IsValidPrc(LongBracketProb) && IsValidPrc(ShortBracketProb) &&
         IsValidPrc(MidLimitMinPrc) && IsValidPrc(MidLimitMaxPrc) &&
         IsValidPrc(FarLimitMinPrc) && IsValidPrc(FarLimitMaxPrc) &&
-        IsValidPrc(StopDistanceMinPrc) && IsValidPrc(StopDistanceMaxPrc) && IsValidPrc(FarBudgetPrc);
+        IsValidPrc(StopDistanceMinPrc) && IsValidPrc(StopDistanceMaxPrc) && IsValidPrc(FarBudgetPrc) &&
+        IsValidPrc(TpOffsetMinPrc) && IsValidPrc(TpOffsetMaxPrc);
 
     private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc &&
         // §P6 tier ladder ordering: each tier's min ≤ max, and the protective stop sits inside the Far walls.
         MidLimitMinPrc <= MidLimitMaxPrc && FarLimitMinPrc <= FarLimitMaxPrc &&
-        StopDistanceMinPrc <= StopDistanceMaxPrc && StopDistanceMaxPrc <= FarLimitMinPrc;
+        StopDistanceMinPrc <= StopDistanceMaxPrc && StopDistanceMaxPrc <= FarLimitMinPrc &&
+        TpOffsetMinPrc <= TpOffsetMaxPrc;
 
     private bool IsValidWatchlist() => Watchlist.Count > 0 && Watchlist.All(id => id > 0);
 
