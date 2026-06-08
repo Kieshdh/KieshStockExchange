@@ -1,5 +1,9 @@
 # Advanced Orders — Finalized Plan (§3.6)
 
+> ✅ **COMPLETE — shipped to `master` (merge `f7c5d6f`, 2026-06-08).** All patches P1–P6 plus the
+> Order-Type Decomposition and short brackets (P5b) landed and were soak-validated; Ultrareview fixes
+> applied (`536e739`, `af58e12`). Plan retained for history.
+
 ## Context
 
 `CLAUDE_NOTES.md` §3.6 wants long/short positions, stop-loss, and trailing-stop orders so the
@@ -20,10 +24,10 @@ build (`dotnet build` at 0 warnings), the EF migration, and the property tests r
 | **P1** Long/short (cash-collateralized) | **LANDED** — `143f33a`, `9ee845c` |
 | **P2** Stop-loss / stop-limit + watcher | **LANDED** — `15a32fa`, `0fa30af`, `059b619`, `07dc6d5` |
 | *Order-Type Decomposition* (`Side/Entry/Stop`) | **LANDED** — `737a3e4` (+ slippage-cap-on-stop `05cdb09`/`4d5ba05`/`58c200a`); see `ORDER_TYPE_DECOMPOSITION_PLAN.md` |
-| **P3** Stop manageability (chart line + modify) | **← next to implement** |
-| **P4** Bracket orders (entry + protective legs) | documented |
-| **P5** Trailing stop (runtime; schema landed) | documented |
-| **P6** Bots + chart realism | documented |
+| **P3** Stop manageability (chart line + modify) | **LANDED** |
+| **P4** Bracket orders (entry + protective legs) | **LANDED** — incl. TP-only + short brackets (P5b `73d1a76`); see `P4_BRACKET_DESIGN.md`, `P5b_SHORT_BRACKET_PLAN.md` |
+| **P5** Trailing stop (runtime; schema landed) | **LANDED** — `920d4cf`; see `P5_TRAILING_STOP_PLAN.md` |
+| **P6** Bots + chart realism | **LANDED** — market balancing + bot soak; see `MARKET_BALANCING_PLAN.md`, `P6_BOT_SOAK_PLAN.md` |
 
 P3–P6 were drafted as `P2.5 / P2.6 / P3 / P4`; they have been flattened to the sequence above. The
 decomposition is a **landed interlude** between P2 and P3 (it changed only the type *representation*) and

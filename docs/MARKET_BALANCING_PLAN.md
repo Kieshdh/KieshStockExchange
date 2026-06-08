@@ -1,8 +1,10 @@
 # Market balancing — make bot-driven prices lively but bounded
 
-Status: IN PROGRESS on `feature/p6-bot-soak`. This doc is the refined design for Ultraplan to harden,
-then implement. It captures the root-cause findings (with data), what's already validated in code,
-the planned features, and proposed improvements.
+Status: ✅ COMPLETE — shipped to `master` (merge `f7c5d6f`, 2026-06-08). Anti-cascade core + liveliness
+(value anchor + drifting fundamental, OU-ring sentiment, per-stock personality, tiered ladder + prune,
+depth-cap anti-sweep) all landed and 4h-soak validated: median |drift| ~5%, **0 escapes beyond ±100%**,
+conservation clean. P6 tightness later baked per-bot into the Excel pipeline (`f54e67a`). Plan retained
+for history + the root-cause findings. See [[project_market_balancing_value_anchor]].
 
 ---
 

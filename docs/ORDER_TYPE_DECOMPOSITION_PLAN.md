@@ -1,5 +1,10 @@
 # Order-Type Decomposition — Finalized Plan
 
+> ✅ **COMPLETE — landed `737a3e4` (slippage-cap-on-stop `05cdb09`/`4d5ba05`/`58c200a`), shipped to
+> `master` via `f7c5d6f`.** `Order.cs` carries the 3 orthogonal dimensions (`OrderSide` / `EntryType` /
+> `StopKind`); slippage is a cap on a market entry, not a type. (A further OOP class-hierarchy refactor
+> was considered separately and shelved as not worth it — that is **not** this doc.) Retained for history.
+
 ## Context
 
 Order types are currently a single flat `OrderType` string on `Order` — a 10-value whitelist:

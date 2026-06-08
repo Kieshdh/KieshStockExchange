@@ -56,6 +56,11 @@ public class AIUserRow
     [Column("TpOffsetMinPrc")] public decimal TpOffsetMinPrc { get; set; }
     [Column("TpOffsetMaxPrc")] public decimal TpOffsetMaxPrc { get; set; }
 
+    // §3.7 arbitrage-cohort params (default 0 = inert for every non-Arbitrage bot).
+    [Column("MinArbitrageRatePrc")] public decimal MinArbitrageRatePrc { get; set; }
+    [Column("MaxInventoryPerStock")] public int MaxInventoryPerStock { get; set; }
+    [Column("ConversionCadenceSeconds")] public int ConversionCadenceSeconds { get; set; }
+
     [Column("WatchlistCsv")] public string WatchlistCsv { get; set; } = string.Empty;
 
     [Column("MaxOpenOrders")] public int MaxOpenOrders { get; set; } = 20;
@@ -108,6 +113,9 @@ public static class AIUserMapper
             FarBudgetPrc = r.FarBudgetPrc,
             TpOffsetMinPrc = r.TpOffsetMinPrc,
             TpOffsetMaxPrc = r.TpOffsetMaxPrc,
+            MinArbitrageRatePrc = r.MinArbitrageRatePrc,
+            MaxInventoryPerStock = r.MaxInventoryPerStock,
+            ConversionCadenceSeconds = r.ConversionCadenceSeconds,
             MaxOpenOrders = r.MaxOpenOrders,
             HomeCurrency = r.HomeCurrency,
             StrategyCode = r.StrategyCode,
@@ -156,6 +164,9 @@ public static class AIUserMapper
         FarBudgetPrc = a.FarBudgetPrc,
         TpOffsetMinPrc = a.TpOffsetMinPrc,
         TpOffsetMaxPrc = a.TpOffsetMaxPrc,
+        MinArbitrageRatePrc = a.MinArbitrageRatePrc,
+        MaxInventoryPerStock = a.MaxInventoryPerStock,
+        ConversionCadenceSeconds = a.ConversionCadenceSeconds,
         WatchlistCsv = a.WatchlistCsv,
         MaxOpenOrders = a.MaxOpenOrders,
         HomeCurrency = a.HomeCurrency,

@@ -22,6 +22,14 @@ internal sealed class BotEconomyTelemetry
     private readonly IFxRateService _fxRates;
     private readonly ILogger<BotEconomyTelemetry> _logger;
 
+    // §3.7 value-drain guard. The arbitrage cohort + house must stay a small fraction of total
+    // market value. _houseUserId is the platform desk (no shares, cash only); when the combined
+    // fraction crosses _drainCeilingPct the throttle engages and ArbitrageDecisionService stops
+    // opening new round-trips. Read/written only on the single bot-loop thread.
+    private readonly int _houseUserId;
+    private readonly decimal _drainCeilingPct;
+    internal bool ArbThrottleEngaged { get; private set; }
+
     private Dictionary<(int StockId, CurrencyType Currency), decimal>? _sessionStartPrices;
     private readonly Queue<EconomySample> _samples = new();
     // Guarded by lock(_samples).
@@ -29,13 +37,16 @@ internal sealed class BotEconomyTelemetry
     private readonly RingBufferStore<EconomySample> _store;
 
     internal BotEconomyTelemetry(AiBotContext ctx, IAccountsCache accounts,
-        IStockService stocks, IFxRateService fxRates, ILogger<BotEconomyTelemetry> logger)
+        IStockService stocks, IFxRateService fxRates, ILogger<BotEconomyTelemetry> logger,
+        int houseUserId = 20002, decimal drainCeilingPct = 5.0m)
     {
         _ctx      = ctx      ?? throw new ArgumentNullException(nameof(ctx));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
         _fxRates  = fxRates  ?? throw new ArgumentNullException(nameof(fxRates));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _houseUserId     = houseUserId;
+        _drainCeilingPct = drainCeilingPct;
         _store    = new RingBufferStore<EconomySample>("data/telemetry/bot_economy.ndjson");
 
         var prior = _store.LoadTail(RecentSamplesMax);
@@ -66,18 +77,28 @@ internal sealed class BotEconomyTelemetry
     {
         var cashByCurrency   = new Dictionary<CurrencyType, decimal>();
         var sharesByCurrency = new Dictionary<CurrencyType, decimal>();
+        // §3.7 arbitrage-cohort sub-totals, tracked alongside the fleet walk for the drain guard.
+        var arbCashByCurrency   = new Dictionary<CurrencyType, decimal>();
+        var arbSharesByCurrency = new Dictionary<CurrencyType, decimal>();
         foreach (var c in currencies)
         {
             cashByCurrency[c] = 0m;
             sharesByCurrency[c] = 0m;
+            arbCashByCurrency[c] = 0m;
+            arbSharesByCurrency[c] = 0m;
         }
 
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
+            bool isArb = user.Strategy == AiStrategy.Arbitrage;
             foreach (var currency in currencies)
             {
                 var fund = _accounts.GetFund(user.UserId, currency);
-                if (fund != null) cashByCurrency[currency] += fund.TotalBalance;
+                if (fund != null)
+                {
+                    cashByCurrency[currency] += fund.TotalBalance;
+                    if (isArb) arbCashByCurrency[currency] += fund.TotalBalance;
+                }
             }
             foreach (var sid in _stocks.ById.Keys)
             {
@@ -85,7 +106,11 @@ internal sealed class BotEconomyTelemetry
                 if (pos == null || pos.Quantity <= 0) continue;
                 foreach (var currency in currencies)
                     if (_ctx.StockPrices.TryGetValue((sid, currency), out var price))
-                        sharesByCurrency[currency] += CurrencyHelper.Notional(price, pos.Quantity, currency);
+                    {
+                        var notional = CurrencyHelper.Notional(price, pos.Quantity, currency);
+                        sharesByCurrency[currency] += notional;
+                        if (isArb) arbSharesByCurrency[currency] += notional;
+                    }
             }
         }
 
@@ -111,13 +136,33 @@ internal sealed class BotEconomyTelemetry
 
         // Headline USD wealth via live FX mid.
         decimal totalCashUsd = 0m, totalSharesUsd = 0m;
+        decimal arbCohortWealthUsd = 0m, houseWealthUsd = 0m;
         foreach (var c in currencies)
         {
             var mid = _fxRates.GetMidRate(c, CurrencyType.USD);
             totalCashUsd   += CurrencyHelper.RoundMoney(cashByCurrency[c]   * mid, CurrencyType.USD);
             totalSharesUsd += CurrencyHelper.RoundMoney(sharesByCurrency[c] * mid, CurrencyType.USD);
+            arbCohortWealthUsd += CurrencyHelper.RoundMoney(
+                (arbCashByCurrency[c] + arbSharesByCurrency[c]) * mid, CurrencyType.USD);
+            // The house is a cash desk (no shares) and lives outside the fleet, so read it directly.
+            var houseFund = _accounts.GetFund(_houseUserId, c);
+            if (houseFund != null)
+                houseWealthUsd += CurrencyHelper.RoundMoney(houseFund.TotalBalance * mid, CurrencyType.USD);
         }
         var totalWealthUsd = totalCashUsd + totalSharesUsd;
+
+        // §3.7 drain fraction: cohort + house over total market value (fleet wealth + house). The
+        // cohort is already inside the fleet total; the house is added since it's outside it.
+        var drainDenom = totalWealthUsd + houseWealthUsd;
+        var arbHouseFractionPct = drainDenom > 0m
+            ? (arbCohortWealthUsd + houseWealthUsd) / drainDenom * 100m
+            : 0m;
+        var throttleWas = ArbThrottleEngaged;
+        ArbThrottleEngaged = _drainCeilingPct > 0m && arbHouseFractionPct > _drainCeilingPct;
+        if (ArbThrottleEngaged != throttleWas)
+            _logger.LogWarning(
+                "Arbitrage value-drain throttle {State}: cohort+house {Frac:F2}% of market (ceiling {Ceil:F2}%).",
+                ArbThrottleEngaged ? "ENGAGED" : "released", arbHouseFractionPct, _drainCeilingPct);
 
         decimal injectedSnapshot;
         EconomySample sample;
@@ -136,7 +181,10 @@ internal sealed class BotEconomyTelemetry
                 MinDriftStockId: minSid,
                 MaxDriftPct:    maxDrift,
                 MaxDriftStockId: maxSid,
-                TotalInjectedThisSession: injectedSnapshot);
+                TotalInjectedThisSession: injectedSnapshot,
+                ArbCohortWealthUsd: arbCohortWealthUsd,
+                HouseWealthUsd:     houseWealthUsd,
+                ArbHouseFractionPct: arbHouseFractionPct);
             _samples.Enqueue(sample);
             while (_samples.Count > RecentSamplesMax) _samples.Dequeue();
         }
@@ -144,13 +192,17 @@ internal sealed class BotEconomyTelemetry
 
         _logger.LogInformation(
             "BotEconomy @ {Time}: wealth {Wealth} (cash {Cash} + shares {Shares}), " +
-            "avg drift {Drift:P3} across {Tracked} stocks, injected {Injected}",
+            "avg drift {Drift:P3} across {Tracked} stocks, injected {Injected}; " +
+            "arb cohort {Arb} + house {House} = {Frac:F2}% of market",
             TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"),
             CurrencyHelper.Format(totalWealthUsd, CurrencyType.USD),
             CurrencyHelper.Format(totalCashUsd,   CurrencyType.USD),
             CurrencyHelper.Format(totalSharesUsd, CurrencyType.USD),
             avgDrift, tracked,
-            CurrencyHelper.Format(injectedSnapshot, CurrencyType.USD));
+            CurrencyHelper.Format(injectedSnapshot, CurrencyType.USD),
+            CurrencyHelper.Format(arbCohortWealthUsd, CurrencyType.USD),
+            CurrencyHelper.Format(houseWealthUsd, CurrencyType.USD),
+            arbHouseFractionPct);
     }
     #endregion
 
@@ -183,7 +235,7 @@ internal sealed class BotEconomyTelemetry
         var sb = new StringBuilder(512 + snapshot.Length * 160);
         sb.Append("TimestampUtc,TotalCashUsd,TotalSharesUsd,TotalWealthUsd,TrackedStocks,")
           .Append("AvgDriftPct,MinDriftPct,MinDriftStockId,MaxDriftPct,MaxDriftStockId,")
-          .Append("TotalInjectedThisSession");
+          .Append("TotalInjectedThisSession,ArbCohortWealthUsd,HouseWealthUsd,ArbHouseFractionPct");
         foreach (var c in seenCurrencies)
             sb.Append(",TotalCash_").Append(c).Append(",TotalShares_").Append(c);
         sb.Append('\n');
@@ -203,7 +255,10 @@ internal sealed class BotEconomyTelemetry
               .Append(r.MinDriftStockId).Append(',')
               .Append(r.MaxDriftPct.ToString(inv)).Append(',')
               .Append(r.MaxDriftStockId).Append(',')
-              .Append(r.TotalInjectedThisSession.ToString(inv));
+              .Append(r.TotalInjectedThisSession.ToString(inv)).Append(',')
+              .Append(r.ArbCohortWealthUsd.ToString(inv)).Append(',')
+              .Append(r.HouseWealthUsd.ToString(inv)).Append(',')
+              .Append(r.ArbHouseFractionPct.ToString(inv));
             foreach (var c in seenCurrencies)
             {
                 r.CashByCurrency.TryGetValue(c, out var cash);
@@ -240,4 +295,7 @@ internal sealed record EconomySample(
     int      MinDriftStockId,
     decimal  MaxDriftPct,
     int      MaxDriftStockId,
-    decimal  TotalInjectedThisSession);
+    decimal  TotalInjectedThisSession,
+    decimal  ArbCohortWealthUsd,
+    decimal  HouseWealthUsd,
+    decimal  ArbHouseFractionPct);

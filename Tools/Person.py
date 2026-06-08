@@ -103,6 +103,12 @@ class Person:
         # Person still passes C# validation (zero frequency = bot never injects).
         self.cash_injection_frequency_prc = 0.0
         self.cash_injection_amount_prc = 0.0
+        # §3.7 arbitrage-cohort params + dual-currency secondary balance. Default 0 = inert: a normal
+        # bot ignores them and seeds a single (home-currency) fund. make_arbitrage() overrides these.
+        self.min_arbitrage_rate_prc = 0.0
+        self.max_inventory_per_stock = 0
+        self.conversion_cadence_seconds = 0
+        self.balance_secondary = 0.0
 
     def _identity(self):
         self.user_id   = Person.idx
@@ -326,13 +332,46 @@ class Person:
             round(self.far_budget, 4),                      # float: FarBudgetPrc
             round(self.tp_offset_min, 4),                   # float: TpOffsetMinPrc
             round(self.tp_offset_max, 4),                   # float: TpOffsetMaxPrc
+            # §3.7 arbitrage cohort params (must match ExcelLayout.prepare_profile_sheet column order).
+            round(self.min_arbitrage_rate_prc, 6),          # float: MinArbitrageRatePrc
+            int(self.max_inventory_per_stock),              # int:   MaxInventoryPerStock
+            int(self.conversion_cadence_seconds),           # int:   ConversionCadenceSeconds
         ]
 
     def ToHoldingList(self):
         result = [self.user_id, round(self.balance, 2)]
         for stock_id in STOCKS:
             result.append(self.holdings.get(stock_id, 0))
+        # §3.7 trailing dual-currency column (0 for normal single-currency bots).
+        result.append(round(self.balance_secondary, 2))
         return result
+
+    @classmethod
+    def make_arbitrage(cls, user_id: int) -> "Person":
+        """§3.7 Build one arbitrage-cohort bot. Reuses a normal Person for all the (still-valid but
+        unused) Profile fields, then overrides identity/strategy/seed-balances + the arbitrage knobs.
+        Generated separately from the random fleet so STRATEGY_CHOICES never yields strategy 5."""
+        p = cls()                               # fills every Profile field with valid values
+        p.user_id = user_id                     # explicit id (the auto-assigned one is discarded)
+        p.strategy = 5                          # AiStrategy.Arbitrage
+        p.home_currency = "USD"
+        p.interval_seconds = int(max(1, random.randint(*ARB_DECISION_INTERVAL)))
+
+        # Self-funding: no cash injection, dual-currency cash, flat (no initial share holdings).
+        p.cash_injection_frequency_prc = 0.0
+        p.cash_injection_amount_prc = 0.0
+        p.balance = ARB_SEED_BALANCE_USD
+        p.balance_secondary = ARB_SEED_BALANCE_EUR
+        p.holdings = {}
+
+        # Watchlist = the cross-listed universe (the only stocks an arbitrage bot can couple).
+        p.watchlist_csv = ",".join(str(sid) for sid in sorted(CROSS_LISTED_STOCK_IDS))
+
+        # The three per-bot arbitrage knobs, jittered across the cohort.
+        p.min_arbitrage_rate_prc = clamp01(random.uniform(*ARB_MIN_RATE_RANGE))
+        p.max_inventory_per_stock = random.randint(*ARB_MAX_INVENTORY_RANGE)
+        p.conversion_cadence_seconds = random.randint(*ARB_CONVERSION_CADENCE)
+        return p
 
     def __repr__(self):
         return (f"Person({self.username!r}, Aggressive={self.aggressive:.2f}, balance=${self.balance:.2f})")

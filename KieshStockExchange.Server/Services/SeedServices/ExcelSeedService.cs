@@ -334,6 +334,15 @@ public sealed class ExcelSeedService : IExcelSeedService
             var tpOffsetMinPrc = ReadProb("TpOffsetMinPrc");
             var tpOffsetMaxPrc = ReadProb("TpOffsetMaxPrc");
 
+            // §3.7 arbitrage-cohort params. Same defensive read so an older workbook without these
+            // columns still loads (0 = inert: a non-arbitrage bot ignores them entirely).
+            int ReadIntCol(string col)
+                => profileTable.Columns.Contains(col)
+                    && ParsingHelper.TryToInt(row[col]?.ToString(), out var v) ? v : 0;
+            var minArbitrageRatePrc = ReadProb("MinArbitrageRatePrc");
+            var maxInventoryPerStock = ReadIntCol("MaxInventoryPerStock");
+            var conversionCadenceSeconds = ReadIntCol("ConversionCadenceSeconds");
+
             string homeCurrency = "USD";
             if (profileTable.Columns.Contains("HomeCurrency"))
             {
@@ -365,6 +374,9 @@ public sealed class ExcelSeedService : IExcelSeedService
                     StopDistanceMinPrc = stopDistanceMinPrc, StopDistanceMaxPrc = stopDistanceMaxPrc,
                     FarBudgetPrc = farBudgetPrc,
                     TpOffsetMinPrc = tpOffsetMinPrc, TpOffsetMaxPrc = tpOffsetMaxPrc,
+                    MinArbitrageRatePrc = minArbitrageRatePrc,
+                    MaxInventoryPerStock = maxInventoryPerStock,
+                    ConversionCadenceSeconds = conversionCadenceSeconds,
                     HomeCurrency = homeCurrency,
                 };
                 if (!aiUser.IsValid())
@@ -433,6 +445,26 @@ public sealed class ExcelSeedService : IExcelSeedService
                     funds.Add(fund);
                 else
                     _logger.LogWarning("Failed to register {Currency} fund for user #{UserId}.", homeCcy, userId);
+            }
+
+            // §3.7 dual-currency seed: an optional trailing "BalanceSecondary" column funds the
+            // NON-home currency (the other supported currency). Used by the platform house account
+            // and the arbitrage cohort so they start armed in both USD and EUR. Read defensively so
+            // an older workbook without the column still loads (absent / 0 ⇒ no second fund).
+            if (holdingTable.Columns.Contains("BalanceSecondary")
+                && ParsingHelper.TryToDecimal(row["BalanceSecondary"]?.ToString(), out var secondaryBalance)
+                && secondaryBalance > 0m)
+            {
+                var secondaryCcy = homeCcy == CurrencyType.USD ? CurrencyType.EUR : CurrencyType.USD;
+                var secondaryInCcy = CurrencyHelper.RoundMoney(secondaryBalance, secondaryCcy);
+                if (secondaryInCcy > 0m)
+                {
+                    var fund = new Fund { UserId = userId, TotalBalance = secondaryInCcy, CurrencyType = secondaryCcy };
+                    if (fund.IsValid())
+                        funds.Add(fund);
+                    else
+                        _logger.LogWarning("Failed to register secondary {Currency} fund for user #{UserId}.", secondaryCcy, userId);
+                }
             }
 
             for (int i = 1; i <= stockCount; i++)

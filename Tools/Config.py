@@ -108,6 +108,32 @@ FX_AR1_AMPLITUDE         = 0.005
 FX_CONVERT_SPREAD        = 0.001   # ±0.1% around mid = 0.2% spread
 FX_RATE_BAND             = 0.20    # mid clamped to base ±20%
 
+# ───────────────────── §3.7 Arbitrage cohort + platform house account ─────────────────────
+# A small fixed cohort of AiStrategy.Arbitrage (=5) bots, generated SEPARATELY from the random
+# fleet (STRATEGY_CHOICES stays 0-4 so the general draw never produces one). They keep each
+# cross-listed stock's USD/EUR books coupled, self-fund (no cash injection), seed dual-currency,
+# and pay the FX conversion spread to the house account.
+ARBITRAGE_COHORT_SIZE     = 5
+
+# Per-bot draw ranges (jittered so the cohort isn't identical). MinArbitrageRate ≥ FX_CONVERT_SPREAD
+# so an acted trade clears the round-trip spread; inventory + cadence bound the held risk.
+ARB_MIN_RATE_RANGE        = (0.0015, 0.0030)   # MinArbitrageRatePrc (≈ 1.5–3× the spread)
+ARB_MAX_INVENTORY_RANGE   = (200, 800)         # MaxInventoryPerStock (shares)
+ARB_CONVERSION_CADENCE    = (180, 420)         # ConversionCadenceSeconds (3–7 min)
+ARB_DECISION_INTERVAL     = (2, 5)             # seconds between arbitrage decisions
+# Dual-currency seed: USD leg (home) + EUR leg (secondary). Large + balanced so the cohort can
+# arbitrage both directions without starving a book; the house is seeded larger still (below).
+ARB_SEED_BALANCE_USD      = 2_000_000.0
+ARB_SEED_BALANCE_EUR      = 1_800_000.0
+
+# The platform house account: reserved UserId (server reads Platform:HouseUserId, default 20002),
+# Identity + dual-currency Holding, NO Profile (so it is never a bot / never in the fleet). Seeded
+# generously in BOTH currencies so it always has inventory to settle conversions (a depleted house
+# fails the convert rather than minting/destroying — see UserPortfolioService.ConvertInternalAsync).
+HOUSE_USER_ID_OFFSET      = 2                  # UserId = NUM_PEOPLE + 2 (admin is +1)
+HOUSE_SEED_BALANCE_USD    = 50_000_000.0
+HOUSE_SEED_BALANCE_EUR    = 45_000_000.0
+
 # ─────────────────────────── Distribution tunables ───────────────────────────
 
 # Aggressiveness (_trade_properties): skew>1 biases towards conservative bots.
@@ -405,6 +431,29 @@ def _validate() -> None:
     if not (0.0 <= LISTING_PRICE_JITTER < 0.5):
         raise ValueError(
             f"LISTING_PRICE_JITTER={LISTING_PRICE_JITTER} must be in [0, 0.5).")
+
+    # §3.7 arbitrage cohort + house invariants.
+    if ARBITRAGE_COHORT_SIZE < 0:
+        raise ValueError(f"ARBITRAGE_COHORT_SIZE={ARBITRAGE_COHORT_SIZE} must be ≥ 0")
+    if 5 in STRATEGY_CHOICES:
+        raise ValueError("STRATEGY_CHOICES must NOT include 5 (Arbitrage) — the cohort is generated separately.")
+    _ordered("ARB_MIN_RATE_RANGE[0]", ARB_MIN_RATE_RANGE[0], "ARB_MIN_RATE_RANGE[1]", ARB_MIN_RATE_RANGE[1])
+    _in_unit("ARB_MIN_RATE_RANGE", ARB_MIN_RATE_RANGE[0], ARB_MIN_RATE_RANGE[1])
+    if ARB_MIN_RATE_RANGE[0] < FX_CONVERT_SPREAD:
+        raise ValueError(
+            f"ARB_MIN_RATE_RANGE[0]={ARB_MIN_RATE_RANGE[0]} must be ≥ FX_CONVERT_SPREAD={FX_CONVERT_SPREAD} "
+            f"(else an acted trade need not clear the round-trip spread).")
+    for name, rng in [("ARB_MAX_INVENTORY_RANGE", ARB_MAX_INVENTORY_RANGE),
+                      ("ARB_CONVERSION_CADENCE", ARB_CONVERSION_CADENCE),
+                      ("ARB_DECISION_INTERVAL", ARB_DECISION_INTERVAL)]:
+        if rng[0] < 1 or rng[0] > rng[1]:
+            raise ValueError(f"{name}={rng} must satisfy 1 ≤ lo ≤ hi")
+    for name, value in [("ARB_SEED_BALANCE_USD", ARB_SEED_BALANCE_USD),
+                        ("ARB_SEED_BALANCE_EUR", ARB_SEED_BALANCE_EUR),
+                        ("HOUSE_SEED_BALANCE_USD", HOUSE_SEED_BALANCE_USD),
+                        ("HOUSE_SEED_BALANCE_EUR", HOUSE_SEED_BALANCE_EUR)]:
+        if value <= 0:
+            raise ValueError(f"{name}={value} must be > 0")
 
 
 _validate()

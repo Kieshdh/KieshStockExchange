@@ -62,7 +62,9 @@ def prepare_holding_sheet(wb: Workbook, tickers) -> Worksheet:
     Includes dynamic ticker columns.
     """
     ws = reset_or_create_sheet(wb, "Holding")
-    ws.append(["UserId", "Balance"] + list(tickers))
+    # §3.7 "BalanceSecondary" is appended AFTER the ticker columns so the server's index-based
+    # stock read (row[i+2]) is unaffected; it funds the NON-home currency (house + arbitrage cohort).
+    ws.append(["UserId", "Balance"] + list(tickers) + ["BalanceSecondary"])
     return ws
 
 
@@ -88,6 +90,8 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         "StopDistanceMinPrc", "StopDistanceMaxPrc", "FarBudgetPrc",
         # §P6: per-bot take-profit band (promoted from the global Advanced:TpOffsetPrc config).
         "TpOffsetMinPrc", "TpOffsetMaxPrc",
+        # §3.7 arbitrage cohort params (0 for every non-Arbitrage bot; the server reads by name).
+        "MinArbitrageRatePrc", "MaxInventoryPerStock", "ConversionCadenceSeconds",
     ])
     return ws
 

@@ -2,7 +2,7 @@ using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
-public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4 }
+public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4, Arbitrage = 5 }
 
 public class AIUser : IValidatable
 {
@@ -209,6 +209,23 @@ public class AIUser : IValidatable
         }
     }
 
+    // §3.7 Arbitrage cohort params (AiStrategy.Arbitrage only; default 0 = inert for every other
+    // strategy so existing bots stay valid). Seeded per-bot via Tools/Person.py → Profile sheet.
+    // Minimum arbitrage rate (per-share profit / notional, net of the FX spread) the bot will act
+    // on — kept ≥ the 0.1% ConvertSpread so an acted trade is genuinely near-riskless.
+    private decimal _minArbitrageRatePrc = 0m;
+    public decimal MinArbitrageRatePrc { get => _minArbitrageRatePrc; set => _minArbitrageRatePrc = RequiredPrc(value, nameof(MinArbitrageRatePrc)); }
+
+    // Bounded inventory cap (shares) the bot may hold in a single stock while waiting for a
+    // favorable exit ("hold and wait"). Caps the residual risk of a deferred second leg.
+    private int _maxInventoryPerStock = 0;
+    public int MaxInventoryPerStock { get => _maxInventoryPerStock; set => _maxInventoryPerStock = value < 0 ? 0 : value; }
+
+    // How often (seconds) the bot rebalances its USD/EUR cash mix via the platform FX desk to
+    // re-arm — the flow that pays the conversion spread into the house account.
+    private int _conversionCadenceSeconds = 0;
+    public int ConversionCadenceSeconds { get => _conversionCadenceSeconds; set => _conversionCadenceSeconds = value < 0 ? 0 : value; }
+
     // Set of stock IDs in the AI's watchlist
     private readonly HashSet<int> _watchlist = new();
     public IReadOnlyCollection<int> Watchlist => _watchlist;
@@ -262,6 +279,7 @@ public class AIUser : IValidatable
     public HashSet<int> StocksTouchedToday { get; } = new();
 
     public bool IsValid() => UserId > 0 && Seed > 0 && DecisionIntervalSeconds > 0 && MaxOpenOrders >= 0 &&
+        MaxInventoryPerStock >= 0 && ConversionCadenceSeconds >= 0 &&
         IsValidPercentages() && ValidateSizing() && IsValidWatchlist() && IsValidTimestamps() &&
         CurrencyHelper.IsSupported(HomeCurrency);
 
@@ -279,7 +297,8 @@ public class AIUser : IValidatable
         IsValidPrc(MidLimitMinPrc) && IsValidPrc(MidLimitMaxPrc) &&
         IsValidPrc(FarLimitMinPrc) && IsValidPrc(FarLimitMaxPrc) &&
         IsValidPrc(StopDistanceMinPrc) && IsValidPrc(StopDistanceMaxPrc) && IsValidPrc(FarBudgetPrc) &&
-        IsValidPrc(TpOffsetMinPrc) && IsValidPrc(TpOffsetMaxPrc);
+        IsValidPrc(TpOffsetMinPrc) && IsValidPrc(TpOffsetMaxPrc) &&
+        IsValidPrc(MinArbitrageRatePrc);
 
     private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc &&
         // §P6 tier ladder ordering: each tier's min ≤ max, and the protective stop sits inside the Far walls.

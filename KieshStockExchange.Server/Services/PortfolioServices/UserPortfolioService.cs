@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Collections.Immutable;
 using System;
@@ -9,6 +10,7 @@ using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.UserServices;
 using KieshStockExchange.Services.UserServices.Interfaces;
+using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 
 namespace KieshStockExchange.Services.PortfolioServices;
@@ -21,16 +23,27 @@ public class UserPortfolioService : IUserPortfolioService
     private readonly IAccountsCache _accounts;
     private readonly ILogger<UserPortfolioService> _logger;
     private readonly IAuthService _auth;
+    private readonly FxDeskTelemetry _fxDesk;
     private readonly AsyncLocal<int> _systemScopeDepth = new();
 
+    // §3.7 Platform house account: a pure PROFIT account. The bulk FROM↔TO swap settles against the
+    // external FX market at mid, so the desk holds no inventory and never depletes — only the
+    // conversion spread accrues here as house net-worth (see ConvertInternalAsync). A reserved UserId
+    // (default 20002, no AIUser profile), excluded from the fleet / injection / retention prune.
+    private readonly int _houseUserId;
+
     public UserPortfolioService(IAuthService auth, IDataBaseService db,
-        IFxRateService fxRates, IAccountsCache accounts, ILogger<UserPortfolioService> logger)
+        IFxRateService fxRates, IAccountsCache accounts, ILogger<UserPortfolioService> logger,
+        FxDeskTelemetry fxDesk, IConfiguration configuration)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _fxRates = fxRates ?? throw new ArgumentNullException(nameof(fxRates));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
+        _fxDesk = fxDesk ?? throw new ArgumentNullException(nameof(fxDesk));
+        _houseUserId = (configuration ?? throw new ArgumentNullException(nameof(configuration)))
+            .GetValue("Platform:HouseUserId", 20002);
     }
     #endregion
 
@@ -362,6 +375,14 @@ public class UserPortfolioService : IUserPortfolioService
         var outNote = trimmedNote;
         var inNote = trimmedNote;
 
+        // House profit = the spread the user pays, in TO units. The fair-value swap (amount·mid)
+        // is sourced from external FX; the user receives `converted` (= amount·bid) and the
+        // difference accrues to the house. Computed read-only here; applied inside the tx below.
+        var mid = _fxRates.GetMidRate(from, to);
+        var fairValue = CurrencyHelper.RoundMoney(amount * mid, to);
+        var houseProfit = fairValue - converted;
+        if (houseProfit < 0m) houseProfit = 0m; // guard FP/rounding edge; bid <= mid so normally >= 0
+
         var success = false;
         try
         {
@@ -385,6 +406,20 @@ public class UserPortfolioService : IUserPortfolioService
                 await _db.UpsertFund(src, ct).ConfigureAwait(false);
                 await _db.UpsertFund(dst, ct).ConfigureAwait(false);
 
+                // §3.7 House = pure profit account. The bulk FROM→TO swap settles against the
+                // (infinite) external FX market at mid — currency legitimately enters/leaves the
+                // simulation here, so per-currency totals move but total value at mid is conserved
+                // (the user's lost spread == the house's gain). The desk therefore holds no
+                // inventory and can never deplete; only the spread is credited to it, in TO units.
+                // The house never converts against itself, so skip when it is the converting party.
+                if (targetUserId != _houseUserId && houseProfit > 0m)
+                {
+                    var houseTo = await _db.GetFundByUserIdAndCurrency(_houseUserId, to, ct).ConfigureAwait(false)
+                        ?? new Fund { UserId = _houseUserId, CurrencyType = to, TotalBalance = 0 };
+                    houseTo.AddFunds(houseProfit);
+                    await _db.UpsertFund(houseTo, ct).ConfigureAwait(false);
+                }
+
                 var now = TimeHelper.NowUtc();
                 await _db.CreateFundTransaction(new FundTransaction
                 {
@@ -404,6 +439,21 @@ public class UserPortfolioService : IUserPortfolioService
                     Note = inNote,
                     CreatedAt = now
                 }, ct).ConfigureAwait(false);
+
+                // House audit: a single spread credit in the TO currency (the desk's only P/L on the
+                // convert), so platform earnings are reconstructable from FundTransactions.
+                if (targetUserId != _houseUserId && houseProfit > 0m)
+                {
+                    await _db.CreateFundTransaction(new FundTransaction
+                    {
+                        UserId = _houseUserId,
+                        CurrencyType = to,
+                        Amount = houseProfit,
+                        Kind = FundTransaction.Kinds.ConversionIn,
+                        Note = "fx-spread",
+                        CreatedAt = now
+                    }, ct).ConfigureAwait(false);
+                }
                 success = true;
             }, ct).ConfigureAwait(false);
         }
@@ -421,6 +471,14 @@ public class UserPortfolioService : IUserPortfolioService
             // subsequent order sees the converted balances without a server restart.
             await _accounts.ApplyExternalFundDeltaAsync(targetUserId, from, -amount, ct).ConfigureAwait(false);
             await _accounts.ApplyExternalFundDeltaAsync(targetUserId, to, converted, ct).ConfigureAwait(false);
+
+            // Keep the house cache in step with its single spread credit (read by value-drain telemetry).
+            if (targetUserId != _houseUserId && houseProfit > 0m)
+                await _accounts.ApplyExternalFundDeltaAsync(_houseUserId, to, houseProfit, ct).ConfigureAwait(false);
+
+            // §3.7 session FX-desk data: count, per-direction volume, spread captured, net FX spend.
+            if (targetUserId != _houseUserId)
+                _fxDesk.RecordConversion(from, to, amount, converted, houseProfit);
 
             await RefreshAsync(asUserId, ct).ConfigureAwait(false);
         }

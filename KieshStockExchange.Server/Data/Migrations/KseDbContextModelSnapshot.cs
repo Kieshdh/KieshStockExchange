@@ -42,6 +42,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<decimal>("CashInjectionFrequencyPrc")
                         .HasColumnType("numeric(20,10)");
 
+                    b.Property<int>("ConversionCadenceSeconds")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -70,6 +73,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<decimal>("MaxCashReservePrc")
                         .HasColumnType("numeric(20,10)");
 
+                    b.Property<int>("MaxInventoryPerStock")
+                        .HasColumnType("integer");
+
                     b.Property<decimal>("MaxLimitOffsetPrc")
                         .HasColumnType("numeric(20,10)");
 
@@ -83,6 +89,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<decimal>("MidLimitMinPrc")
+                        .HasColumnType("numeric(20,10)");
+
+                    b.Property<decimal>("MinArbitrageRatePrc")
                         .HasColumnType("numeric(20,10)");
 
                     b.Property<decimal>("MinCashReservePrc")

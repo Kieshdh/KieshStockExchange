@@ -1,4 +1,5 @@
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -54,6 +55,8 @@ internal sealed class BotCashInjector
         foreach (var ai in _ctx.AiUsersByAiUserId.Values)
         {
             if (!ai.IsEnabled) continue;
+            // §3.7 the arbitrage cohort is self-funding — never inject cash into it.
+            if (ai.Strategy == AiStrategy.Arbitrage) continue;
             if (ai.CashInjectionFrequencyPrc <= 0m) continue;
 
             if (_ctx.Decimal01(ai.AiUserId) >= ai.CashInjectionFrequencyPrc) continue;
