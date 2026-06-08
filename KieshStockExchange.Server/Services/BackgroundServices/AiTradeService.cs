@@ -175,6 +175,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly FundamentalService   _funds;     // §P6 slowly-drifting fundamentals
     private readonly StockProfileService  _profiles;  // §P6 per-stock personality
     private readonly BotCashInjector      _injector;
+    private readonly ArbitrageDecisionService _arbitrage; // §3.7 cohort runs OUT of the normal path
+    private readonly int                  _houseUserId;   // §3.7 platform FX-desk account (warm-loaded)
     #endregion
 
     #region Services and Constructor
@@ -227,7 +229,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions));
-        _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, fxRates, new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions));
+        _houseUserId = _configuration.GetValue("Platform:HouseUserId", 20002);
+        _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, fxRates,
+                        new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions),
+                        houseUserId:     _houseUserId,
+                        drainCeilingPct: _configuration.GetValue("Bots:Arbitrage:ValueDrainCeilingPct", 5.0m));
         // §P6 liveliness: per-stock personality + slowly-drifting fundamentals. Built before the
         // sentiment + decision services because both consume them.
         _profiles  = new StockProfileService(
@@ -248,6 +254,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         shockDecayPerTick:       _configuration.GetValue("Bots:ShockDecayPerTick", 0.999m));
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
+        // §3.7 arbitrage cohort: dedicated decision path, fully outside the sentiment/anchor/veto/
+        // injection flow. Reuses the engine market-order route + the platform FX desk.
+        _arbitrage = new ArbitrageDecisionService(entry, books, accounts, fxRates, portfolio, stocks, _economy,
+                        new SeparatorLogger<ArbitrageDecisionService>(loggerFactory, loggerOptions),
+                        conversionSkewBand: _configuration.GetValue("Bots:Arbitrage:ConversionSkewBand", 0.15m));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
                         distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m));
@@ -459,8 +470,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         // Warm the engine-wide accounts cache for every bot user up front so the first
         // batch of orders doesn't pay the cold-load cost inside the per-book lock.
-        var botUserIds = new List<int>(_ctx.AiUsersByAiUserId.Count);
+        var botUserIds = new List<int>(_ctx.AiUsersByAiUserId.Count + 1);
         foreach (var u in _ctx.AiUsersByAiUserId.Values) botUserIds.Add(u.UserId);
+        // §3.7 warm the platform house account too so convert-spread crediting and the value-drain
+        // telemetry read its USD/EUR funds from the cache without a cold DB hit.
+        botUserIds.Add(_houseUserId);
         if (botUserIds.Count > 0)
             await _accounts.EnsureLoadedAsync(botUserIds, ct).ConfigureAwait(false);
 
@@ -482,6 +496,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 // own gates; the loop holds none). Off the matching hot path; reconcile below is the gate.
                 if (advanced.Count > 0)
                     await SubmitAdvancedAsync(advanced, _engineCts?.Token ?? ct).ConfigureAwait(false);
+
+                // §3.7 arbitrage cohort: dedicated pass, after the normal batch + advanced routes and
+                // outside the matcher's locked region (each leg owns its own gates). Its market legs
+                // settle through the same engine, so ConservationProbe/ReservationAuditor cover them.
+                await _arbitrage.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
 
                 RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
                 Interlocked.Increment(ref _tickCount);
@@ -594,6 +613,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
             if (!user.IsEnabled || !_decisions.CanPlaceMoreOrder(_ctx, user)) continue;
+            // §3.7 arbitrage bots never enter the normal decision flow (sentiment / anchor / veto /
+            // advanced / injection). They run in their own pass via _arbitrage.RunAsync.
+            if (user.Strategy == AiStrategy.Arbitrage) continue;
 
             // Spontaneous burst: rare chance (~0.2%/tick) of entering a focused session.
             var burstActive = _ctx.BurstEndTimes.TryGetValue(user.AiUserId, out var burstEnd) && now < burstEnd;

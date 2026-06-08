@@ -26,6 +26,7 @@ public sealed partial class PgDBService
         ""MidLimitMinPrc"",""MidLimitMaxPrc"",""FarLimitMinPrc"",""FarLimitMaxPrc"",
         ""StopDistanceMinPrc"",""StopDistanceMaxPrc"",""FarBudgetPrc"",
         ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",
+        ""MinArbitrageRatePrc"",""MaxInventoryPerStock"",""ConversionCadenceSeconds"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy"" AS ""StrategyCode""";
 
@@ -40,6 +41,7 @@ public sealed partial class PgDBService
         ""MidLimitMinPrc"",""MidLimitMaxPrc"",""FarLimitMinPrc"",""FarLimitMaxPrc"",
         ""StopDistanceMinPrc"",""StopDistanceMaxPrc"",""FarBudgetPrc"",
         ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",
+        ""MinArbitrageRatePrc"",""MaxInventoryPerStock"",""ConversionCadenceSeconds"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy""";
 
@@ -54,6 +56,7 @@ public sealed partial class PgDBService
         @MidLimitMinPrc,@MidLimitMaxPrc,@FarLimitMinPrc,@FarLimitMaxPrc,
         @StopDistanceMinPrc,@StopDistanceMaxPrc,@FarBudgetPrc,
         @TpOffsetMinPrc,@TpOffsetMaxPrc,
+        @MinArbitrageRatePrc,@MaxInventoryPerStock,@ConversionCadenceSeconds,
         @WatchlistCsv,
         @MaxOpenOrders,@HomeCurrency,@StrategyCode";
 

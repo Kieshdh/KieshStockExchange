@@ -133,6 +133,11 @@ internal sealed class AiBotStateService
         int enabled = 0;
         foreach (var user in ctx.AiUsersByAiUserId.Values)
         {
+            // §3.7 the arbitrage cohort always runs regardless of the active-bot cap / scaler —
+            // it's a small fixed set and disabling it would break cross-listing parity. It also
+            // doesn't count against the cap so it never crowds out the random fleet's budget.
+            if (user.Strategy == AiStrategy.Arbitrage) { user.IsEnabled = true; continue; }
+
             bool active = !cap.HasValue || enabled < cap.Value;
             user.IsEnabled = active;
             if (active) enabled++;

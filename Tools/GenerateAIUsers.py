@@ -9,6 +9,8 @@ from pathlib import Path
 from Config import (
     STOCKS, CROSS_LISTED_STOCK_IDS, EUR_ONLY_STOCK_IDS,
     FX_BASE_RATES, LISTING_PRICE_JITTER,
+    ARBITRAGE_COHORT_SIZE, HOUSE_USER_ID_OFFSET,
+    HOUSE_SEED_BALANCE_USD, HOUSE_SEED_BALANCE_EUR,
 )
 from Person import Person, fake
 from ExcelLayout import *
@@ -98,10 +100,30 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
 
     # Human admin appended at the end — Identity + Holding only (no Profile = not a bot).
     # Password is the seeder's shared "hallo123"; IsAdmin promotes this one row.
+    # Holding rows now carry a trailing BalanceSecondary column (0 = single-currency).
     admin_id = num_people + 1
     sheets["Identity"].append([admin_id, "admin", "Admin User", "admin@kse.local", "1990-01-01", True])
-    sheets["Holding"].append([admin_id, 1_000_000.00] + [0 for _ in STOCKS])
+    sheets["Holding"].append([admin_id, 1_000_000.00] + [0 for _ in STOCKS] + [0])
     print(f"✅ Appended admin account (UserId {admin_id}, username 'admin').")
+
+    # §3.7 Platform house account — Identity + dual-currency Holding, NO Profile (so it is never a
+    # bot / never in the fleet). The server reads its UserId from Platform:HouseUserId (default
+    # NUM_PEOPLE + 2). Seeded large in BOTH currencies so it always has inventory to settle the FX
+    # conversion spread it accrues. USD is the home (Balance); EUR is the secondary column.
+    house_id = num_people + HOUSE_USER_ID_OFFSET
+    sheets["Identity"].append([house_id, "house", "Platform House", "house@kse.local", "1990-01-01", False])
+    sheets["Holding"].append([house_id, HOUSE_SEED_BALANCE_USD] + [0 for _ in STOCKS] + [HOUSE_SEED_BALANCE_EUR])
+    print(f"✅ Appended platform house account (UserId {house_id}, username 'house').")
+
+    # §3.7 Arbitrage cohort — Identity + Holding + Profile (strategy=5), generated separately from
+    # the random fleet. Dual-currency seed, cash-injection disabled, watchlist = cross-listed stocks.
+    cohort_start = house_id + 1
+    for i in range(ARBITRAGE_COHORT_SIZE):
+        bot = Person.make_arbitrage(cohort_start + i)
+        sheets["Identity"].append(bot.ToIdentityList())
+        sheets["Holding"].append(bot.ToHoldingList())
+        sheets["Profile"].append(bot.ToProfileList())
+    print(f"✅ Appended {ARBITRAGE_COHORT_SIZE} arbitrage bots (UserIds {cohort_start}–{cohort_start + ARBITRAGE_COHORT_SIZE - 1}).")
 
 
     # Apply dark theme and autofit columns (skipped in fast mode — purely cosmetic, the slowest step).

@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Collections.Immutable;
 using System;
@@ -23,14 +24,23 @@ public class UserPortfolioService : IUserPortfolioService
     private readonly IAuthService _auth;
     private readonly AsyncLocal<int> _systemScopeDepth = new();
 
+    // §3.7 Platform house account: the FX-desk counterparty that captures the conversion spread.
+    // A reserved UserId (default 20002, seeded with funds but no AIUser profile). Every convert
+    // routes its counterparty legs through this account so both currencies conserve per-unit and
+    // the spread accrues as house net-worth (see ConvertInternalAsync).
+    private readonly int _houseUserId;
+
     public UserPortfolioService(IAuthService auth, IDataBaseService db,
-        IFxRateService fxRates, IAccountsCache accounts, ILogger<UserPortfolioService> logger)
+        IFxRateService fxRates, IAccountsCache accounts, ILogger<UserPortfolioService> logger,
+        IConfiguration configuration)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _fxRates = fxRates ?? throw new ArgumentNullException(nameof(fxRates));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
+        _houseUserId = (configuration ?? throw new ArgumentNullException(nameof(configuration)))
+            .GetValue("Platform:HouseUserId", 20002);
     }
     #endregion
 
@@ -385,6 +395,33 @@ public class UserPortfolioService : IUserPortfolioService
                 await _db.UpsertFund(src, ct).ConfigureAwait(false);
                 await _db.UpsertFund(dst, ct).ConfigureAwait(false);
 
+                // §3.7 House counterparty: the FX desk receives the FROM currency and pays out the
+                // TO currency at the bid rate. This keeps BOTH currencies conserved per-unit (user
+                // −amount FROM / house +amount FROM; user +converted TO / house −converted TO) and
+                // leaves the spread (amount·mid·spread) as house net-worth growth — nothing minted.
+                // The house never converts against itself, so skip when it is the converting party.
+                if (targetUserId != _houseUserId)
+                {
+                    var houseFrom = await _db.GetFundByUserIdAndCurrency(_houseUserId, from, ct).ConfigureAwait(false)
+                        ?? new Fund { UserId = _houseUserId, CurrencyType = from, TotalBalance = 0 };
+                    var houseTo = await _db.GetFundByUserIdAndCurrency(_houseUserId, to, ct).ConfigureAwait(false);
+
+                    // The house must hold enough TO inventory to settle. If it doesn't, fail the
+                    // convert (rolls back) rather than drive the house negative and trip CK_Funds.
+                    if (houseTo is null || !CurrencyHelper.GreaterOrEqual(houseTo.AvailableBalance, converted, to))
+                    {
+                        _logger.LogWarning(
+                            "House account {House} lacks {Converted} {To} to settle convert (available={Avail}).",
+                            _houseUserId, converted, to, houseTo?.AvailableBalance ?? 0m);
+                        throw new InsufficientFundsException();
+                    }
+
+                    houseFrom.AddFunds(amount);
+                    houseTo.WithdrawFunds(converted);
+                    await _db.UpsertFund(houseFrom, ct).ConfigureAwait(false);
+                    await _db.UpsertFund(houseTo, ct).ConfigureAwait(false);
+                }
+
                 var now = TimeHelper.NowUtc();
                 await _db.CreateFundTransaction(new FundTransaction
                 {
@@ -404,6 +441,30 @@ public class UserPortfolioService : IUserPortfolioService
                     Note = inNote,
                     CreatedAt = now
                 }, ct).ConfigureAwait(false);
+
+                // Mirror the house side into the audit trail (the desk's view of the same transfer)
+                // so platform P/L is reconstructable from FundTransactions.
+                if (targetUserId != _houseUserId)
+                {
+                    await _db.CreateFundTransaction(new FundTransaction
+                    {
+                        UserId = _houseUserId,
+                        CurrencyType = from,
+                        Amount = amount,
+                        Kind = FundTransaction.Kinds.ConversionIn,
+                        Note = outNote,
+                        CreatedAt = now
+                    }, ct).ConfigureAwait(false);
+                    await _db.CreateFundTransaction(new FundTransaction
+                    {
+                        UserId = _houseUserId,
+                        CurrencyType = to,
+                        Amount = converted,
+                        Kind = FundTransaction.Kinds.ConversionOut,
+                        Note = inNote,
+                        CreatedAt = now
+                    }, ct).ConfigureAwait(false);
+                }
                 success = true;
             }, ct).ConfigureAwait(false);
         }
@@ -421,6 +482,13 @@ public class UserPortfolioService : IUserPortfolioService
             // subsequent order sees the converted balances without a server restart.
             await _accounts.ApplyExternalFundDeltaAsync(targetUserId, from, -amount, ct).ConfigureAwait(false);
             await _accounts.ApplyExternalFundDeltaAsync(targetUserId, to, converted, ct).ConfigureAwait(false);
+
+            // Keep the house cache in step with its DB legs (used by value-drain telemetry).
+            if (targetUserId != _houseUserId)
+            {
+                await _accounts.ApplyExternalFundDeltaAsync(_houseUserId, from, amount, ct).ConfigureAwait(false);
+                await _accounts.ApplyExternalFundDeltaAsync(_houseUserId, to, -converted, ct).ConfigureAwait(false);
+            }
 
             await RefreshAsync(asUserId, ct).ConfigureAwait(false);
         }
