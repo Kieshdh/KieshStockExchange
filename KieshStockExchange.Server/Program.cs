@@ -196,6 +196,11 @@ builder.Services.AddSingleton<IServerNotificationService, ServerNotificationServ
 // Bots run in BeginSystemScope; admin endpoints will get a real auth path later.
 builder.Services.AddSingleton<IAuthService, NoopAuthService>();
 
+// §3.7 Session FX-desk telemetry (conversion count, per-direction volume, spread captured,
+// net FX spend). Singleton so it accumulates across the whole session; UserPortfolioService
+// feeds it on each convert and the bot loop resets it on Start.
+builder.Services.AddSingleton<FxDeskTelemetry>();
+
 // UserPortfolioService moves server-side now that bots (which deposit via this
 // service) live here. The pre-Phase-2-Step-6 version is wired — it calls
 // _db.RunInTransactionAsync directly instead of the IEngineCommandClient bundles.

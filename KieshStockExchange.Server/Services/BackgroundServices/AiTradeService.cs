@@ -176,6 +176,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly StockProfileService  _profiles;  // §P6 per-stock personality
     private readonly BotCashInjector      _injector;
     private readonly ArbitrageDecisionService _arbitrage; // §3.7 cohort runs OUT of the normal path
+    private readonly bool                 _arbitrageEnabled; // §3.7 Bots:Arbitrage:Enabled kill-switch
+    private readonly FxDeskTelemetry      _fxDesk;        // §3.7 session conversion data (reset on Start)
     private readonly int                  _houseUserId;   // §3.7 platform FX-desk account (warm-loaded)
     #endregion
 
@@ -202,6 +204,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IOrderBookEngine books,
         IUserPortfolioService portfolio,
         IFxRateService fxRates,
+        FxDeskTelemetry fxDesk,
         ILogger<AiTradeService> logger,
         ILoggerFactory loggerFactory,
         IOptions<SeparatorLoggerOptions> loggerOptions,
@@ -213,6 +216,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _stocks       = stocks       ?? throw new ArgumentNullException(nameof(stocks));
         _accounts     = accounts     ?? throw new ArgumentNullException(nameof(accounts));
         _fxRates      = fxRates      ?? throw new ArgumentNullException(nameof(fxRates));
+        _fxDesk       = fxDesk       ?? throw new ArgumentNullException(nameof(fxDesk));
         _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         if (db          is null) throw new ArgumentNullException(nameof(db));
@@ -256,6 +260,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         // §3.7 arbitrage cohort: dedicated decision path, fully outside the sentiment/anchor/veto/
         // injection flow. Reuses the engine market-order route + the platform FX desk.
+        _arbitrageEnabled = _configuration.GetValue("Bots:Arbitrage:Enabled", true);
         _arbitrage = new ArbitrageDecisionService(entry, books, accounts, fxRates, portfolio, stocks, _economy,
                         new SeparatorLogger<ArbitrageDecisionService>(loggerFactory, loggerOptions),
                         conversionSkewBand: _configuration.GetValue("Bots:Arbitrage:ConversionSkewBand", 0.15m));
@@ -419,6 +424,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
             foreach (var currency in CurrenciesToTrade)
                 await _market.UnsubscribeAllAsync(currency, forUi: false).ConfigureAwait(false);
+
+            // §3.7 final session FX-desk line so a soak log captures the complete conversion tally.
+            _fxDesk.LogSummary();
         }
         finally
         {
@@ -450,6 +458,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // factors though (different semantics from the others).
         _sentiment.Reset(TimeHelper.NowUtc());
         _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
+        _fxDesk.Reset();  // §3.7: fresh per-session FX-desk conversion tallies
 
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
@@ -500,7 +509,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 // §3.7 arbitrage cohort: dedicated pass, after the normal batch + advanced routes and
                 // outside the matcher's locked region (each leg owns its own gates). Its market legs
                 // settle through the same engine, so ConservationProbe/ReservationAuditor cover them.
-                await _arbitrage.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
+                // Gated by Bots:Arbitrage:Enabled so the whole feature can be killed from config.
+                if (_arbitrageEnabled)
+                    await _arbitrage.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
 
                 RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
                 Interlocked.Increment(ref _tickCount);
