@@ -273,7 +273,10 @@ validation (SL above / TPs below for a short).
 
 ---
 
-## Batch 3 — Quiet the noisy bot logs for order testing (PLANNED, not implemented)
+## Batch 3 — Quiet the noisy bot logs for order testing (✅ IMPLEMENTED)
+
+> The five `MinimumLevel.Override` keys below are live in `appsettings.Development.json` (the "QUIET BOTS"
+> Serilog block). Toggle off by deleting that block.
 
 **Goal:** during the manual order test pass, silence the routine chatter from **scaler, Fx, sentiment,
 botstats, boteconomy** so the `MarketEngine` / settlement / ConservationProbe lines stand out — and make
@@ -334,7 +337,11 @@ provider allows `//` comments + trailing commas, so a marker comment is fine.
 
 ---
 
-## Batch 4 — Second test-pass findings (PLANNED, not implemented)
+## Batch 4 — Second test-pass findings (PARTIAL)
+
+> - **B4.1** (log human deposits/withdrawals) — ✅ landed `7579188` (`EngineController` "Funds" logger).
+> - **B4.2–B4.5** (PlaceOrderView slider/scrollbar/toggle-row polish) — UI tweaks; verify in the client.
+> - **B4.6–B4.8** — explicitly deferred ("Polish backlog — good enough for now").
 
 Grouped fixes from the 2026-06-05 screenshots. A1–A2, A4–A7, A9–A11 confirmed correct. Implement all in
 one go.

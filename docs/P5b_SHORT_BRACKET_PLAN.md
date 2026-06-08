@@ -1,8 +1,9 @@
 # P5b — Short brackets. Plan for Ultraplan to refine (reservation design FIRST).
 
-**Status:** plan only — not implemented. Branch `feature/advanced-orders-p4-brackets`. This is the most
-conservation-critical piece left in the advanced-orders arc: the **inverted, cash-side reservation model**.
-Recommend Ultraplan produce the **reservation/collateral design (§3) first**, then the mechanical mirror.
+**Status:** ✅ IMPLEMENTED + shipped to `master` (merge `f7c5d6f`). Stage 1 side-aware geometry `4b78132`,
+stage 2 coordinator cash pool/cushion/cold-load `73d1a76` (+ TP-only support); `BracketCoordinator.OnParentFillShortAsync`
+is the inverted cash-side mirror. Soak-validated (P6c cover harness `4269b05`); the accepted sibling-SL-pool
+TP-buyback funding edge is recorded in `28cbbed`. Plan retained for the reservation-model design record.
 
 ## 1. Shape (web-confirmed; matches the long bracket, mirrored)
 A short bracket opens a **cash-collateralized short** (the §3.6 P1/H model) and protects it with legs that

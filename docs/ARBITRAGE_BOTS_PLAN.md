@@ -1,7 +1,11 @@
 # Arbitrage bots + platform profit account (§3.7)
 
-Status: PLANNED — this doc is the refined design for Ultraplan to harden, then implement. It is
-self-contained (Ultraplan works from this + the repo on branch `feature/p6-bot-soak`).
+Status: ✅ IMPLEMENTED — cohort + house shipped (`639ed78`), then the house was **redesigned to a
+pure-profit account** (no inventory, no FX risk, EUR-depletion eliminated) + FX-desk session
+telemetry + `Bots:Arbitrage:Enabled` kill-switch wired (`1117e34`) on branch
+`feature/arbitrage-house-account`. Builds clean, 63/63 tests pass, soak-validated (house grows from
+0 by spread only). Pending: merge to `master`. See [[project_arbitrage_house_account]] for the full
+record (incl. the original counterparty-model FX-risk finding that drove the redesign).
 
 ---
 

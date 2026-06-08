@@ -1,5 +1,8 @@
 # P5 — Trailing stops (runtime). Plan + Ultraplan design → IMPLEMENTED.
 
+> ✅ **COMPLETE — `920d4cf`, shipped to `master` via `f7c5d6f`.** Trailing-stop-MARKET (both sides) live;
+> trailing-stop-LIMIT intentionally gated out (own follow-up). Retained for history.
+
 **Status:** trailing-stop-MARKET (both sides) IMPLEMENTED + self-tested (engine). Runtime-only — no new
 `Order.Types` constant, no migration (schema shipped in decomposition `737a3e4`; `Trail*` columns already
 round-trip). Per Ultraplan's design, the cadence is a throttled off-thread batched flush; the watermark is

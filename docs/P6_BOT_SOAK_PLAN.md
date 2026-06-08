@@ -1,6 +1,12 @@
 # P6 — Bot realism + advanced-order soak. Scoping plan for Ultraplan to refine.
 
-**Status:** plan only. Goal: drive the shipped advanced orders (P1 shorts, P2/P3 stops, P4 brackets,
+**Status:** ✅ COMPLETE — shipped to `master` (merge `f7c5d6f`). Bots place protective stops/trailing via
+the entry route (P6a `f0982c6`) and long/short brackets (P6b/c); multi-hour soaks ran with the
+`ConservationProbe`/reservation reconciler as the acceptance gate — conservation clean, short-bracket
+scale-out cushion + SL/TP fires exercised live (cover harness `4269b05`, collateral-leak fixes
+`9c02054`/`dd9e515`). Original scoping plan retained below for history.
+
+Goal (original): drive the shipped advanced orders (P1 shorts, P2/P3 stops, P4 brackets,
 P5 trailing, P5b short brackets) under **live bot flow** so the `ConservationProbe`/reservation reconciler
 is the acceptance gate at scale — and, specifically, to **live-exercise the short-bracket scale-out
 cushion + SL/TP fires** that self-trade prevention blocked from a deterministic admin-driven test.
