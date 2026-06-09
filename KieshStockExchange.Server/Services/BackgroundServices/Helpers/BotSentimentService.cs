@@ -256,8 +256,13 @@ internal sealed class BotSentimentService
 
     #region Reset
     /// <summary>
-    /// Seed every score at its steady-state spread (std σ) so a run starts at equilibrium rather
-    /// than a calm zero, and arm the tick clock from <paramref name="now"/>.
+    /// Open with a fully NEUTRAL shared sentiment — every global and per-stock ring at 0 — and arm
+    /// the tick clock from <paramref name="now"/>. Any bias at t=0 (market-wide global OR per-name)
+    /// shoves price before the opening book has the depth to absorb it, causing early extreme moves;
+    /// the fixed RngSeed also froze that bias the same (net-negative) way every run. The rings walk
+    /// up from 0 via the AR step in Tick() — the fast 20s/90s scales rebuild dispersion within a
+    /// minute — and per-BOT personal sentiment still gives immediate variety so bots don't act in
+    /// lockstep while the chart fills.
     /// </summary>
     internal void Reset(DateTime now)
     {
@@ -268,16 +273,12 @@ internal sealed class BotSentimentService
         lock (_samples) _samples.Clear();
 
         _globalSum = 0.0;
-        for (int k = 0; k < GlobalRings; k++) { _global[k] = GlobalSigma[k] * UnitNoise(); _globalSum += _global[k]; }
+        for (int k = 0; k < GlobalRings; k++) _global[k] = 0.0; // neutral global open
 
         foreach (var sid in _stocks.ById.Keys)
         {
-            var ring = new double[PerStockRings];
-            double amp = AmpMult(sid);
-            double sum = _globalSum;
-            for (int k = 0; k < PerStockRings; k++) { ring[k] = PerStockSigma[k] * amp * UnitNoise(); sum += ring[k]; }
-            _perStock[sid] = ring;
-            _combined[sid] = (decimal)sum;
+            _perStock[sid] = new double[PerStockRings]; // zeros — neutral per-name open
+            _combined[sid] = 0m;
         }
 
         _lastTickUtc = now;
