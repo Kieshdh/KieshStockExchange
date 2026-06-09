@@ -757,15 +757,22 @@ internal sealed class AiBotDecisionService
         return committed;
     }
 
-    private async Task<decimal> GetStockPriceAsync(AiBotContext ctx, int stockId,
+    // ValueTask: the common path is an in-memory cache hit (no allocation); it's called several times
+    // per decision (band veto, price, qty) across collect/arb/advanced, so a Task alloc per call adds
+    // real GC pressure across the loop. Only the cold cache-miss path actually awaits the market.
+    private ValueTask<decimal> GetStockPriceAsync(AiBotContext ctx, int stockId,
         CurrencyType currency, CancellationToken ct)
     {
-        if (!ctx.StockPrices.TryGetValue((stockId, currency), out var price) || price <= 0m)
+        if (ctx.StockPrices.TryGetValue((stockId, currency), out var price) && price > 0m)
+            return new ValueTask<decimal>(price);
+        return Cold(ctx, stockId, currency, ct);
+
+        async ValueTask<decimal> Cold(AiBotContext c, int sid, CurrencyType cur, CancellationToken token)
         {
-            price = await _market.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
-            ctx.StockPrices[(stockId, currency)] = price;
+            var p = await _market.GetLastPriceAsync(sid, cur, token).ConfigureAwait(false);
+            c.StockPrices[(sid, cur)] = p;
+            return p;
         }
-        return price;
     }
 
     // §P6 tiered ladder: roll Close / Mid / Far and return that tier's (min,max) offset band. Mid/Far
@@ -829,11 +836,10 @@ internal sealed class AiBotDecisionService
         try
         {
             var book = await _books.GetAsync(stockId, currency, ct).ConfigureAwait(false);
-            var snap = book?.Snapshot();
-            if (snap is null) return qty;
-            var levels = isBuy ? snap.Sells : snap.Buys;
-            long oppQty = 0;
-            for (int i = 0; i < levels.Count; i++) oppQty += levels[i].Quantity;
+            if (book is null) return qty;
+            // Sum the side we'd sweep into (buy order eats the sells, and vice-versa) without
+            // allocating a full Snapshot just to total one side.
+            long oppQty = book.SumQuantity(buySide: !isBuy);
             if (oppQty <= 0) return qty; // empty opposite side — nothing to sweep
             int cap = (int)Math.Floor((decimal)oppQty * _maxSweepFractionOfDepth);
             return Math.Min(qty, Math.Max(0, cap));

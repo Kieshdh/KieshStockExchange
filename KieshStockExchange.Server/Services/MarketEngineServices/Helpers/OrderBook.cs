@@ -301,6 +301,22 @@ public sealed class OrderBook
         }
     }
 
+    /// <summary>
+    /// Total resting quantity on one side, summed under the lock with NO allocation (uses the
+    /// per-level running totals). For callers that only need the aggregate — e.g. the bot
+    /// anti-sweep depth cap — this avoids the two-list <see cref="Snapshot"/> allocation per call.
+    /// </summary>
+    public long SumQuantity(bool buySide)
+    {
+        lock (_gate)
+        {
+            long total = 0;
+            var src = buySide ? _buyQtyByPrice : _sellQtyByPrice;
+            foreach (var qty in src.Values) total += qty;
+            return total;
+        }
+    }
+
     public Order? RemoveBestBuy(int? userId = null) => RemoveBest(_buyBook, userId);
     public Order? RemoveBestSell(int? userId = null) => RemoveBest(_sellBook, userId);
 

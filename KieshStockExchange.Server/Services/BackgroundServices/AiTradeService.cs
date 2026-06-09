@@ -163,6 +163,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private double _tickWorkMsEwma = 0.0;
     private long _lastTickWorkMicros = 0;
 
+    // Per-phase tick profiling (opt-in via Bots:PhaseTimingSeconds > 0). Accumulates µs per phase
+    // across the window, logs the average breakdown so "what takes the most time" is observable
+    // without an external profiler. Single-threaded loop → plain fields are safe.
+    private TimeSpan _phaseTimingInterval = TimeSpan.Zero;
+    private DateTime _nextPhaseLogTime = DateTime.MaxValue;
+    private long _phCheckUs, _phCollectUs, _phBatchUs, _phAdvUs, _phArbUs, _phReconUs;
+    private long _phPending, _phAdvCount, _phTicks;
+
     private readonly AiBotContext         _ctx;
     private readonly AiBotStateService    _state;
     private readonly AiBotDecisionService _decisions;
@@ -228,6 +236,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         _sentimentLogInterval = TimeSpan.FromSeconds(
                         Math.Max(1.0, _configuration.GetValue("Bots:SentimentLogIntervalSeconds", 60.0)));
+        _phaseTimingInterval = TimeSpan.FromSeconds(
+                        Math.Max(0.0, _configuration.GetValue("Bots:PhaseTimingSeconds", 0.0)));
         _ctx       = new AiBotContext(accounts,
                         personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true));
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
@@ -462,6 +472,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _fxDesk.Reset();  // §3.7: fresh per-session FX-desk conversion tallies
 
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
+        _nextPhaseLogTime      = _phaseTimingInterval > TimeSpan.Zero ? TimeHelper.NowUtc() + _phaseTimingInterval : DateTime.MaxValue;
+        _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = 0;
+        _phPending = _phAdvCount = _phTicks = 0;
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
         _nextSentimentLogTime  = TimeHelper.NowUtc() + _sentimentLogInterval;
@@ -497,15 +510,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var tickStart = Stopwatch.GetTimestamp();
                 var now = TimeHelper.NowUtc();
                 await CheckTimers(now, ct).ConfigureAwait(false);
+                var tCheck = Stopwatch.GetTimestamp();
 
                 var (pending, advanced) = await CollectPendingOrdersAsync(now, ct).ConfigureAwait(false);
+                var tCollect = Stopwatch.GetTimestamp();
                 if (pending.Count > 0)
                     await SubmitAndApplyBatchAsync(pending, _engineCts?.Token ?? ct).ConfigureAwait(false);
+                var tBatch = Stopwatch.GetTimestamp();
                 // §P6a: advanced (stop/trailing) decisions go through the entry/arm route, sequentially and
                 // in aiUserId order, AFTER and OUTSIDE the batch matcher's locked region (each call owns its
                 // own gates; the loop holds none). Off the matching hot path; reconcile below is the gate.
                 if (advanced.Count > 0)
                     await SubmitAdvancedAsync(advanced, _engineCts?.Token ?? ct).ConfigureAwait(false);
+                var tAdv = Stopwatch.GetTimestamp();
 
                 // §3.7 arbitrage cohort: dedicated pass, after the normal batch + advanced routes and
                 // outside the matcher's locked region (each leg owns its own gates). Its market legs
@@ -513,6 +530,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 // Gated by Bots:Arbitrage:Enabled so the whole feature can be killed from config.
                 if (_arbitrageEnabled)
                     await _arbitrage.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
+                var tArb = Stopwatch.GetTimestamp();
 
                 RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
                 Interlocked.Increment(ref _tickCount);
@@ -528,13 +546,31 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 // Reconcile at the post-batch quiescent frame: this tick's market orders are
                 // terminal, so only resting limit reservations remain and the clamp is safe.
                 // After RecordTickLatency so this maintenance pass doesn't skew the scaler EWMA.
+                long reconUs = 0;
                 if (now >= _nextReconcileTime)
                 {
                     _nextReconcileTime = now + ReconcileInterval;
                     var clamp = _configuration.GetValue("Bots:ReconcileClamp", true);
+                    var tReconStart = Stopwatch.GetTimestamp();
                     try { await _auditor.AuditAsync(clamp, ct).ConfigureAwait(false); }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
                     catch (Exception ex) { _logger.LogError(ex, "Reservation reconcile pass failed."); }
+                    reconUs = (long)Stopwatch.GetElapsedTime(tReconStart).TotalMicroseconds;
+                }
+
+                // Per-phase profiling (opt-in): accumulate this tick, log the windowed average breakdown.
+                if (_phaseTimingInterval > TimeSpan.Zero)
+                {
+                    _phCheckUs   += (long)Stopwatch.GetElapsedTime(tickStart, tCheck).TotalMicroseconds;
+                    _phCollectUs += (long)Stopwatch.GetElapsedTime(tCheck, tCollect).TotalMicroseconds;
+                    _phBatchUs   += (long)Stopwatch.GetElapsedTime(tCollect, tBatch).TotalMicroseconds;
+                    _phAdvUs     += (long)Stopwatch.GetElapsedTime(tBatch, tAdv).TotalMicroseconds;
+                    _phArbUs     += (long)Stopwatch.GetElapsedTime(tAdv, tArb).TotalMicroseconds;
+                    _phReconUs   += reconUs;
+                    _phPending   += pending.Count;
+                    _phAdvCount  += advanced.Count;
+                    _phTicks++;
+                    if (now >= _nextPhaseLogTime) { LogPhaseTiming(); _nextPhaseLogTime = now + _phaseTimingInterval; }
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -752,6 +788,24 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         var prev = _tickWorkMsEwma;
         var next = prev <= 0.0 ? ms : EwmaAlpha * ms + (1.0 - EwmaAlpha) * prev;
         Volatile.Write(ref _tickWorkMsEwma, next);
+    }
+
+    // Windowed per-phase breakdown (opt-in via Bots:PhaseTimingSeconds). Shows where tick time goes
+    // so the scaler's active-bot ceiling can be traced to the dominant phase. Reconcile is a periodic
+    // pass, so its per-tick average is diluted across the window (a spike in the window it fires).
+    private void LogPhaseTiming()
+    {
+        if (_phTicks == 0) return;
+        double n = _phTicks, k = 1000.0;
+        double tot = (_phCheckUs + _phCollectUs + _phBatchUs + _phAdvUs + _phArbUs + _phReconUs) / n / k;
+        _logger.LogInformation(
+            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + recon {Rec:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick",
+            _phTicks, ActiveBotCap?.ToString() ?? "all", tot,
+            _phCheckUs / n / k, _phCollectUs / n / k, _phBatchUs / n / k,
+            _phAdvUs / n / k, _phArbUs / n / k, _phReconUs / n / k,
+            _phPending / n, _phAdvCount / n);
+        _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = 0;
+        _phPending = _phAdvCount = _phTicks = 0;
     }
 
     private void OnQuoteUpdated(object? sender, LiveQuote quote)
