@@ -9,7 +9,7 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// <summary>
 /// Plain data container shared by AiBotStateService and AiBotDecisionService.
 /// Fund/Position state is read live from AccountsCache (the single source of truth);
-/// CurrenciesByUser / StocksByUser are lightweight metadata for per-user iteration.
+/// StocksByUser is lightweight metadata for per-user iteration.
 /// Price caches use ConcurrentDictionary because OnQuoteUpdated fires on external threads.
 /// </summary>
 internal sealed class AiBotContext
@@ -30,10 +30,9 @@ internal sealed class AiBotContext
     internal readonly Dictionary<int, AIUser>  AiUsersByUserId   = new();
     internal readonly Dictionary<int, Random>  AiUserRngs        = new();
 
-    // Metadata indexes: which currencies / stocks each user has. Rebuilt every 60s
+    // Metadata index: which stocks each user has a position in. Rebuilt every 60s
     // by RefreshAssetsAsync. Actual Fund/Position instances come from _accounts on
     // each access — no shadow copy, no drift.
-    internal readonly Dictionary<int, HashSet<CurrencyType>> CurrenciesByUser = new();
     internal readonly Dictionary<int, HashSet<int>>          StocksByUser     = new();
 
     internal readonly Dictionary<int, Dictionary<int, Order>> OpenOrders = new();
@@ -218,7 +217,6 @@ internal sealed class AiBotContext
         AiUsersByAiUserId.Clear();
         AiUsersByUserId.Clear();
         AiUserRngs.Clear();
-        CurrenciesByUser.Clear();
         StocksByUser.Clear();
         OpenOrders.Clear();
         StockPrices.Clear();

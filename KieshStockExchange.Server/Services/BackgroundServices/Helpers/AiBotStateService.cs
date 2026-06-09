@@ -75,7 +75,6 @@ internal sealed class AiBotStateService
 
     internal async Task RefreshAssetsAsync(AiBotContext ctx, CancellationToken ct)
     {
-        ctx.CurrenciesByUser.Clear();
         ctx.StocksByUser.Clear();
         ctx.OpenOrders.Clear();
 
@@ -87,21 +86,21 @@ internal sealed class AiBotStateService
         // After this returns, ctx.GetFund / GetPosition will see the live engine view.
         await _accounts.EnsureLoadedAsync(userIds, ct).ConfigureAwait(false);
 
-        // Build the metadata indexes (which currencies / stocks each user touches).
+        // Build the metadata index (which stocks each user actually HOLDS a position in).
         // We discard the Fund/Position instances themselves — AccountsCache owns those.
-        var allFunds     = await _db.GetFundsForUsersAsync(userIds, ct).ConfigureAwait(false);
+        // Funds are already warmed into AccountsCache by EnsureLoadedAsync above; the
+        // bot loop reads currency state live via ctx.GetFund, so no per-user currency
+        // index is built here.
         var allPositions = await _db.GetPositionsForUsersAsync(userIds, ct).ConfigureAwait(false);
         var allOrders    = await _db.GetOpenOrdersForUsersAsync(userIds, ct).ConfigureAwait(false);
 
-        foreach (var f in allFunds)
-        {
-            if (!ctx.CurrenciesByUser.TryGetValue(f.UserId, out var set))
-                ctx.CurrenciesByUser[f.UserId] = set = new HashSet<CurrencyType>();
-            set.Add(f.CurrencyType);
-        }
-
+        // Only index live (non-zero) positions: the seed gives every bot a row for ALL 50 stocks,
+        // so an unfiltered index degenerates to the whole universe per bot. Both readers
+        // (PortfolioValueByCurrency, LogSnapshot) already skip Quantity<=0, so filtering here is
+        // output-identical but shrinks the per-bot walk from 50 to the ~13.5 actually held.
         foreach (var p in allPositions)
         {
+            if (p.Quantity == 0) continue;
             if (!ctx.StocksByUser.TryGetValue(p.UserId, out var set))
                 ctx.StocksByUser[p.UserId] = set = new HashSet<int>();
             set.Add(p.StockId);

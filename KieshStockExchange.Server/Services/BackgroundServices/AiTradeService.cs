@@ -245,7 +245,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions),
                         phantomWarnThreshold: _configuration.GetValue("Bots:ReservationPhantomWarnThreshold", 5.0m));
         _houseUserId = _configuration.GetValue("Platform:HouseUserId", 20002);
-        _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, fxRates,
+        _economy   = new BotEconomyTelemetry(_ctx, accounts, fxRates,
                         new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions),
                         houseUserId:     _houseUserId,
                         drainCeilingPct: _configuration.GetValue("Bots:Arbitrage:ValueDrainCeilingPct", 5.0m));

@@ -18,7 +18,6 @@ internal sealed class BotEconomyTelemetry
 
     private readonly AiBotContext _ctx;
     private readonly IAccountsCache _accounts;
-    private readonly IStockService _stocks;
     private readonly IFxRateService _fxRates;
     private readonly ILogger<BotEconomyTelemetry> _logger;
 
@@ -37,12 +36,11 @@ internal sealed class BotEconomyTelemetry
     private readonly RingBufferStore<EconomySample> _store;
 
     internal BotEconomyTelemetry(AiBotContext ctx, IAccountsCache accounts,
-        IStockService stocks, IFxRateService fxRates, ILogger<BotEconomyTelemetry> logger,
+        IFxRateService fxRates, ILogger<BotEconomyTelemetry> logger,
         int houseUserId = 20002, decimal drainCeilingPct = 5.0m)
     {
         _ctx      = ctx      ?? throw new ArgumentNullException(nameof(ctx));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
-        _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
         _fxRates  = fxRates  ?? throw new ArgumentNullException(nameof(fxRates));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
         _houseUserId     = houseUserId;
@@ -100,7 +98,10 @@ internal sealed class BotEconomyTelemetry
                     if (isArb) arbCashByCurrency[currency] += fund.TotalBalance;
                 }
             }
-            foreach (var sid in _stocks.ById.Keys)
+            // Walk only the stocks this bot actually holds (avg ~13.5 of 50), mirroring
+            // AiBotContext.PortfolioValueByCurrency — not the whole universe per bot.
+            if (_ctx.StocksByUser.TryGetValue(user.UserId, out var heldStocks))
+            foreach (var sid in heldStocks)
             {
                 var pos = _accounts.GetPosition(user.UserId, sid);
                 if (pos == null || pos.Quantity <= 0) continue;

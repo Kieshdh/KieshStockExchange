@@ -538,7 +538,7 @@ internal sealed class AiBotDecisionService
         Span<double> cum = stockIds.Count <= 256 ? stackalloc double[stockIds.Count] : new double[stockIds.Count];
         for (int i = 0; i < stockIds.Count; i++)
         {
-            double w = 1.0 / Math.Pow(stockIds[i], RuntimeWeightAlpha);
+            double w = BaseWeight(stockIds[i]);
             if (_valueAnchorStrength > 0m && _valueTargetSelection)
             {
                 var f = Fundamental(stockIds[i], currency);
@@ -563,6 +563,13 @@ internal sealed class AiBotDecisionService
     // Selection boost per unit of normalized deviation when the value anchor is on: a stock 1×Scale
     // off fundamental gets (1 + ValuePickGain)× the weight on the corrective side.
     private const double ValuePickGain = 12.0;
+
+    // 1/StockId^alpha is constant per id (alpha is a compile-time const), so memoize it instead of
+    // recomputing Math.Pow for every candidate on every decision. The cached double is bit-identical
+    // to the previous inline computation, so selection (for a given RNG draw) is unchanged.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, double> _baseWeightByStockId = new();
+    private static double BaseWeight(int stockId)
+        => _baseWeightByStockId.GetOrAdd(stockId, static id => 1.0 / Math.Pow(id, RuntimeWeightAlpha));
     #endregion
 
     #region Price and Quantity Computation
