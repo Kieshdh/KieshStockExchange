@@ -4,8 +4,10 @@ Status: ✅ IMPLEMENTED — cohort + house shipped (`639ed78`), then the house w
 pure-profit account** (no inventory, no FX risk, EUR-depletion eliminated) + FX-desk session
 telemetry + `Bots:Arbitrage:Enabled` kill-switch wired (`1117e34`) on branch
 `feature/arbitrage-house-account`. Builds clean, 63/63 tests pass, soak-validated (house grows from
-0 by spread only). Pending: merge to `master`. See [[project_arbitrage_house_account]] for the full
-record (incl. the original counterparty-model FX-risk finding that drove the redesign).
+0 by spread only). **MERGED to `master` (`4eea513`) and DEPLOYED to prod (2026-06-09, fresh
+nuke+reseed — arb cohort 20003-20007 seeded + live, house 20002 zeroed at start).** See
+[[project_arbitrage_house_account]] for the full record (incl. the original counterparty-model
+FX-risk finding that drove the redesign).
 
 ---
 

@@ -6,6 +6,15 @@ depth-cap anti-sweep) all landed and 4h-soak validated: median |drift| ~5%, **0 
 conservation clean. P6 tightness later baked per-bot into the Excel pipeline (`f54e67a`). Plan retained
 for history + the root-cause findings. See [[project_market_balancing_value_anchor]].
 
+**Follow-up — session-start down-dive FIXED + DEPLOYED (`c5b8a16`, 2026-06-09).** Every session opened
+trading down market-wide: the fixed `RngSeed` froze `BotSentimentService`'s initial GLOBAL (common-mode)
+sentiment net-negative every run, and the global is shared across all stocks, so all 50 dived at open
+before the book had depth. Fix: `Reset()` now opens ALL rings (global + per-stock) at **0** (neutral);
+the OU walk rebuilds dispersion within ~a minute and per-bot personal sentiment keeps bots varied.
+Validated by `scripts/sentiment_open_sim.py` (neutral opens 0.000 vs old −0.155 at the frozen seed;
+both ~0 averaged over 2000 seeds → it was purely the frozen seed) + a soak (flat open, 0 escapes,
+conservation clean). **Still open:** the separate slow ~−6% longer-term drift (Wave-4 #19).
+
 ---
 
 ## 1. Goal & success metric
