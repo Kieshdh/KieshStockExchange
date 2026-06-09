@@ -80,8 +80,7 @@
       ['Sentiment', 'Sentiment'],
       ['Scaler', 'Scaler'],
       ['User', 'User'],
-      ['Other', 'Other'],
-      ['ReservationAuditor', 'Reservation'],
+      ['Other', 'Other'],   // also carries FX + ReservationAuditor (infrequent)
     ];
     const CAT_LABEL = Object.fromEntries(CATEGORIES);
     // Per-minute snapshot categories — the timeframe selector downsamples THESE (one line per
