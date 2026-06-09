@@ -62,7 +62,7 @@
     const connectBtn = document.getElementById('connect');
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
-    const shownEl = document.getElementById('shown');
+    const shownEl = document.createElement('span'); shownEl.id = 'shown';  // a counter appended into the timeframe bar
     let source = null;
     let retry = 1000;
 
