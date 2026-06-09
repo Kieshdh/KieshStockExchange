@@ -190,19 +190,17 @@ internal sealed class BotEconomyTelemetry
         }
         _store.Append(sample);
 
+        // Pass RAW numbers (format specifiers keep the rendered text as "$x") so the telemetry sink
+        // forwards them as a numeric Metrics map and the web viewer can range-aggregate the DATA
+        // (latest wealth, drift min/avg/max) per time bucket instead of re-parsing this string.
         _logger.LogInformation(
-            "BotEconomy @ {Time}: wealth {Wealth} (cash {Cash} + shares {Shares}), " +
-            "avg drift {Drift:P3} across {Tracked} stocks, injected {Injected}; " +
-            "arb cohort {Arb} + house {House} = {Frac:F2}% of market",
+            "BotEconomy @ {Time}: wealth ${Wealth:N2} (cash ${Cash:N2} + shares ${Shares:N2}), " +
+            "avg drift {Drift:P3} across {Tracked} stocks, injected ${Injected:N2}; " +
+            "arb cohort ${Arb:N2} + house ${House:N2} = {Frac:F2}% of market",
             TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"),
-            CurrencyHelper.Format(totalWealthUsd, CurrencyType.USD),
-            CurrencyHelper.Format(totalCashUsd,   CurrencyType.USD),
-            CurrencyHelper.Format(totalSharesUsd, CurrencyType.USD),
-            avgDrift, tracked,
-            CurrencyHelper.Format(injectedSnapshot, CurrencyType.USD),
-            CurrencyHelper.Format(arbCohortWealthUsd, CurrencyType.USD),
-            CurrencyHelper.Format(houseWealthUsd, CurrencyType.USD),
-            arbHouseFractionPct);
+            totalWealthUsd, totalCashUsd, totalSharesUsd,
+            avgDrift, tracked, injectedSnapshot,
+            arbCohortWealthUsd, houseWealthUsd, arbHouseFractionPct);
     }
     #endregion
 

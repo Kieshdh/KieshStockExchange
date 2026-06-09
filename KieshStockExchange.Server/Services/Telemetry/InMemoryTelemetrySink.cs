@@ -44,12 +44,36 @@ public sealed class InMemoryTelemetrySink : ILogEventSink
         var source = ShortName(context);
         if (!SourceToCategory.TryGetValue(source, out var category)) return;
 
+        // Forward the line's RAW numeric properties so the viewer aggregates the DATA (sums flows
+        // across a bucket, etc.) instead of re-parsing the rendered text. Non-numeric props
+        // (timestamps, SourceContext) are skipped; null when the line carries no numbers.
+        Dictionary<string, double>? metrics = null;
+        foreach (var kv in logEvent.Properties)
+            if (kv.Value is ScalarValue { Value: { } raw } && TryToDouble(raw, out var d))
+                (metrics ??= new())[kv.Key] = d;
+
         _bus.Publish(new TelemetryEvent(
             logEvent.Timestamp,
             logEvent.Level.ToString(),
             source,
             logEvent.RenderMessage(),
-            category));
+            category,
+            metrics));
+    }
+
+    private static bool TryToDouble(object v, out double d)
+    {
+        switch (v)
+        {
+            case double x:  d = x;         return true;
+            case float x:   d = x;         return true;
+            case decimal x: d = (double)x; return true;
+            case long x:    d = x;         return true;
+            case int x:     d = x;         return true;
+            case short x:   d = x;         return true;
+            case byte x:    d = x;         return true;
+            default:        d = 0;         return false;
+        }
     }
 
     private static string ShortName(string fullTypeName)

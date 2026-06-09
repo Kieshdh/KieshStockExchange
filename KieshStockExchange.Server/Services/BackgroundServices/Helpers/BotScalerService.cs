@@ -143,11 +143,14 @@ internal sealed class BotScalerService
         if (_pendingChanges.Count == 0) return;
         if (!force && (now - _lastLogAt) < LogInterval) return;
 
+        // Both shapes expose the SAME aggregatable numeric props — Cap (resulting cap), LoadPct (peak
+        // load, with LoadMin for the range), Ewma — so the telemetry sink forwards them and the web
+        // viewer can range-aggregate (cap min→max, load lo–hi) a time bucket uniformly across either line.
         if (_pendingChanges.Count == 1)
         {
             var c = _pendingChanges[0];
             _logger.LogInformation(
-                "Scaler: ActiveBotCap {Old}→{New} (load {Pct:0%} → target {Tgt:0%}, ewma {Ewma:F1}ms)",
+                "Scaler: ActiveBotCap {Old}→{Cap} (load {LoadPct:0%} → target {Tgt:0%}, ewma {Ewma:F1}ms)",
                 c.Old, c.New, c.Load, TargetLoadFraction, c.Ewma);
         }
         else
@@ -163,7 +166,7 @@ internal sealed class BotScalerService
                 lastEwma = c.Ewma;
             }
             _logger.LogInformation(
-                "Scaler: ActiveBotCap {First}→{Last} via {Count} steps in {Secs:F0}s (load {MinPct:0%}–{MaxPct:0%} → target {Tgt:0%}, ewma {Ewma:F1}ms)",
+                "Scaler: ActiveBotCap {First}→{Cap} via {Count} steps in {Secs:F0}s (load {LoadMin:0%}–{LoadPct:0%} → target {Tgt:0%}, ewma {Ewma:F1}ms)",
                 first.Old, last.New, _pendingChanges.Count,
                 (now - _lastLogAt).TotalSeconds, minLoad, maxLoad, TargetLoadFraction, lastEwma);
         }

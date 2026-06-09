@@ -7,10 +7,15 @@ namespace KieshStockExchange.Services.Telemetry;
 /// <para><see cref="Category"/> is the viewer-facing grouping (one chip per
 /// category): most map 1:1 to <see cref="Source"/>, but several sources fold
 /// into one category (Funds + MarketEngine → "User"; FX sources → "Other").</para>
+/// <para><see cref="Metrics"/> carries the line's RAW numeric values (extracted from the log
+/// event's structured properties), so the viewer can aggregate the data across a time bucket —
+/// summing flows, etc. — instead of re-parsing <see cref="Message"/>. Null when the line has no
+/// numeric properties.</para>
 /// </summary>
 public sealed record TelemetryEvent(
     DateTimeOffset Timestamp,
     string Level,
     string Source,
     string Message,
-    string Category = "Other");
+    string Category = "Other",
+    IReadOnlyDictionary<string, double>? Metrics = null);

@@ -97,12 +97,15 @@ internal sealed class BotStatsLogger
         _cancelledSnapshot = cancel;
         _volumeSnapshot    = vol;
 
+        // Pass RAW numbers as the structured properties (Vol via a format specifier so the rendered
+        // text stays "$x" while the property stays a number). The telemetry sink forwards these as a
+        // numeric Metrics map so the web viewer can aggregate the DATA across a time bucket instead of
+        // re-parsing this rendered string.
         _logger.LogInformation(
             "BotStats[60s] @ {Time}: bots {Online}/{Loaded}, trades {Total} (buy {Buy}/sell {Sell}), " +
-            "type (Limit {Limit}/SlipMarket {Slip}/TrueMarket {True}), cancelled {Cancelled}, volume {Vol}",
+            "type (Limit {Limit}/SlipMarket {Slip}/TrueMarket {True}), cancelled {Cancelled}, volume ${Vol:N2}",
             TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss"), onlineBots, loadedBots,
-            dBuy + dSell, dBuy, dSell, dLim, dSlip, dTrue, dCancel,
-            CurrencyHelper.Format(dVol, CurrencyType.USD));
+            dBuy + dSell, dBuy, dSell, dLim, dSlip, dTrue, dCancel, dVol);
     }
     #endregion
 }
