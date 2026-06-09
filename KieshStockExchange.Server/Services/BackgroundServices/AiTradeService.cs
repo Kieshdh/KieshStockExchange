@@ -232,7 +232,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true));
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
-        _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions));
+        _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions),
+                        phantomWarnThreshold: _configuration.GetValue("Bots:ReservationPhantomWarnThreshold", 5.0m));
         _houseUserId = _configuration.GetValue("Platform:HouseUserId", 20002);
         _economy   = new BotEconomyTelemetry(_ctx, accounts, stocks, fxRates,
                         new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions),

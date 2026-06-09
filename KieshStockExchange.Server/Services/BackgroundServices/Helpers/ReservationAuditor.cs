@@ -21,13 +21,19 @@ internal sealed class ReservationAuditor
     private readonly IAccountsCache _accounts;
     private readonly IReservationLedger _ledger;
     private readonly ILogger<ReservationAuditor> _logger;
+    // Only WARN when the over-reserved value exceeds this. With clamp=true the reconciler
+    // fixes drift every pass, so the routine residual is sub-unit (≈0–2.3 across the whole
+    // market) — that's self-healing rounding, not a leak, and logging it as a warning is just
+    // noise. Above the threshold means something the clamp can't absorb → surface it.
+    private readonly decimal _phantomWarnThreshold;
 
     internal ReservationAuditor(IAccountsCache accounts, IReservationLedger ledger,
-        ILogger<ReservationAuditor> logger)
+        ILogger<ReservationAuditor> logger, decimal phantomWarnThreshold = 5.0m)
     {
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _ledger   = ledger   ?? throw new ArgumentNullException(nameof(ledger));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _phantomWarnThreshold = Math.Max(0m, phantomWarnThreshold);
     }
     #endregion
 
@@ -56,7 +62,8 @@ internal sealed class ReservationAuditor
 
         if (mismatches.Count == 0)
         {
-            _logger.LogInformation("Reservation reconcile: no mismatches across cached positions/funds.");
+            // Clean pass — Debug so it doesn't heartbeat the operator log/viewer every cycle.
+            _logger.LogDebug("Reservation reconcile: no mismatches across cached positions/funds.");
             return;
         }
 
@@ -71,9 +78,20 @@ internal sealed class ReservationAuditor
             else                       { underCount++; }
         }
 
+        // Routine clamped rounding (phantomTotal under threshold) is self-healing — log at Debug
+        // so it stays out of the viewer; only escalate to WARNING when the over-reservation is
+        // large enough that the clamp didn't absorb it (a signal worth an operator's attention).
+        if (phantomTotal <= _phantomWarnThreshold)
+        {
+            _logger.LogDebug(
+                "Reservation reconcile: {Mismatch} mismatches ({Phantom} phantom, {Under} under-reserved, phantomTotal≈{Total:F2}) — within tolerance, clamped.",
+                mismatches.Count, phantomCount, underCount, phantomTotal);
+            return;
+        }
+
         _logger.LogWarning(
-            "Reservation reconcile: {Mismatch} mismatches ({Phantom} phantom, {Under} under-reserved, phantomTotal≈{Total:F2}).",
-            mismatches.Count, phantomCount, underCount, phantomTotal);
+            "Reservation reconcile: {Mismatch} mismatches ({Phantom} phantom, {Under} under-reserved, phantomTotal≈{Total:F2}) — exceeds tolerance {Tol:F2}.",
+            mismatches.Count, phantomCount, underCount, phantomTotal, _phantomWarnThreshold);
 
         var sb = new StringBuilder();
         int sample = Math.Min(_sampleSize, ordered.Count);
