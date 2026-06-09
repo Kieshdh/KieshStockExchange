@@ -45,6 +45,12 @@ internal sealed class AiBotContext
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> SmoothedPrices = new();
 
     internal readonly Dictionary<int, DateTime> BurstEndTimes  = new();
+
+    // §A1 inertia: per-bot directional STANCE (dir +1 buy / -1 sell) that persists until `until`, so a
+    // bot's order flow is one-directional over the stance window instead of re-rolling buy/sell every
+    // tick. Keyed by aiUserId, mirroring BurstEndTimes. Empty (and never touched) when the flag is off.
+    internal readonly Dictionary<int, (sbyte dir, DateTime until)> Stances = new();
+
     // Reset by CheckDailyRefresh so a tx that fills across the day boundary isn't double-counted.
     internal readonly HashSet<int>              ProcessedTxIds = new();
 
@@ -88,6 +94,29 @@ internal sealed class AiBotContext
             h = h * 31 + date.Day;
             return h & int.MaxValue;
         }
+    }
+    #endregion
+
+    #region Inertia stance (§A1)
+    /// <summary>
+    /// §A1 inertia: return the bot's persistent directional stance, rolling a fresh one when none is active
+    /// or the current one has expired. While a stance holds (<paramref name="now"/> &lt; until) this is a pure
+    /// dictionary read — NO RNG draw. On a (re)roll it consumes EXACTLY two seeded draws in a fixed order —
+    /// first the direction (from the current <paramref name="buyProb"/>), then the duration — so a flag-on run
+    /// is reproducible. Callers invoke this ONLY when the inertia flag is on, so the flag-off draw sequence is
+    /// byte-identical to before. Returns +1 (buy) or -1 (sell).
+    /// </summary>
+    internal sbyte RollOrHoldStance(int aiUserId, decimal buyProb, DateTime now, double minSec, double maxSec)
+    {
+        if (Stances.TryGetValue(aiUserId, out var st) && now < st.until)
+            return st.dir;
+
+        sbyte dir = Decimal01(aiUserId) < buyProb ? (sbyte)1 : (sbyte)-1;   // draw 1: side
+        double lo = Math.Min(minSec, maxSec);
+        double hi = Math.Max(minSec, maxSec);
+        double secs = lo + (hi - lo) * (double)Decimal01(aiUserId);         // draw 2: duration
+        Stances[aiUserId] = (dir, now + TimeSpan.FromSeconds(secs));
+        return dir;
     }
     #endregion
 
@@ -223,6 +252,7 @@ internal sealed class AiBotContext
         PreviousPrices.Clear();
         SmoothedPrices.Clear();
         BurstEndTimes.Clear();
+        Stances.Clear();
         ProcessedTxIds.Clear();
         LastRefreshDate = DateOnly.MinValue;
     }

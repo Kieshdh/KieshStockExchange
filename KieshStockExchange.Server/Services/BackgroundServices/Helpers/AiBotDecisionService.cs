@@ -27,8 +27,9 @@ internal sealed record BotAdvancedDecision(
 internal sealed class AiBotDecisionService
 {
     #region Services and Constructor
-    // Max nudge applied to buyProb by the clamped sentiment value.
-    private const decimal SentimentMaxBias = 0.20m;
+    // Max nudge applied to buyProb by the clamped sentiment value. Config-tunable (was a const) so it can be
+    // LOWERED as §A2 herding takes over the directional weight — augment, don't double-count (plan §9).
+    private readonly decimal _sentimentMaxBias;
     // Probability of forcing a market order, per unit of |sentiment| > 1.
     private const decimal OverflowGain     = 0.25m;
     // Cash kept un-spent on every buy so tiny rounding/race gaps don't trip Phase 1.6.
@@ -96,9 +97,36 @@ internal sealed class AiBotDecisionService
     private readonly decimal _bracketSlippagePct;// short-bracket SL slippage cap (percent)
     private readonly int     _advancedMaxQty;    // cap qty on advanced/bracket orders (keeps sizes modest)
 
+    // §v2 imbalance/activity/range — emergent-correlation pillars (all default off / inert).
+    private readonly BotRegimeService   _regime;   // §A2/A3/A4 shared regime
+    private readonly BotActivityService _activity; // §Pillar B activity field
+    // §A1 inertia
+    private readonly bool    _inertia;
+    private readonly double  _inertiaMinSec, _inertiaMaxSec;
+    private readonly decimal _inertiaLeak;
+    // §A2 herding
+    private readonly bool    _herding;
+    private readonly decimal _followerFraction, _herdTilt;
+    // §A3 momentum dominance (follower-scoped trend > reversion)
+    private readonly bool    _momentumDominance;
+    private readonly decimal _momentumStrength;
+    // §A4 role split (flatten noise cohort directionally)
+    private readonly bool    _roleSplit;
+    private readonly decimal _noiseDamp;
+    // §A5 fast-anchor slack (widen the intraday band veto only)
+    private readonly decimal _anchorFastSlack;
+    // §Pillar B selection
+    private readonly bool    _activityEnabled;
+    private readonly double  _activityGamma;
+    // §C1/C3 microstructure
+    private readonly bool    _rangeActivityImpact;
+    private readonly decimal _rangeMaxSlippage;
+    private readonly decimal _fatImpactProb;
+
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
         FundamentalService funds, StockProfileService profiles,
+        BotRegimeService regime, BotActivityService activity,
         ILogger<AiBotDecisionService> logger,
         bool fatTails = true, decimal tradeSizeTailShape = 0.5m,
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
@@ -113,7 +141,17 @@ internal sealed class AiBotDecisionService
         bool advancedEnabled = false,
         decimal stopOffsetMin = 0.02m, decimal stopOffsetMax = 0.05m,
         decimal tpOffsetMin = 0.03m, decimal tpOffsetMax = 0.08m,
-        decimal bracketSlippagePct = 5m, int advancedMaxQty = 50)
+        decimal bracketSlippagePct = 5m, int advancedMaxQty = 50,
+        decimal sentimentMaxBias = 0.20m,
+        bool inertia = false, double inertiaMinSec = 30.0, double inertiaMaxSec = 600.0,
+        decimal inertiaLeak = 0.10m,
+        bool herding = false, decimal followerFraction = 0.25m, decimal herdTilt = 0.10m,
+        bool momentumDominance = false, decimal momentumStrength = 0m,
+        bool roleSplit = false, decimal noiseDamp = 1.0m,
+        decimal anchorFastSlack = 0m,
+        bool activityEnabled = false, double activityGamma = 1.0,
+        bool rangeActivityImpact = false, decimal rangeMaxSlippage = 0.02m,
+        decimal fatImpactProb = 0m)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -122,6 +160,8 @@ internal sealed class AiBotDecisionService
         _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
         _funds     = funds     ?? throw new ArgumentNullException(nameof(funds));
         _profiles  = profiles  ?? throw new ArgumentNullException(nameof(profiles));
+        _regime    = regime    ?? throw new ArgumentNullException(nameof(regime));
+        _activity  = activity  ?? throw new ArgumentNullException(nameof(activity));
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
         _fatTails           = fatTails;
         _tradeSizeTailShape = tradeSizeTailShape;
@@ -148,6 +188,24 @@ internal sealed class AiBotDecisionService
         _tpOffsetMax        = tpOffsetMax;
         _bracketSlippagePct = bracketSlippagePct;
         _advancedMaxQty     = advancedMaxQty;
+        _sentimentMaxBias   = Math.Max(0m, sentimentMaxBias);
+        _inertia            = inertia;
+        _inertiaMinSec      = Math.Max(1.0, inertiaMinSec);
+        _inertiaMaxSec      = Math.Max(_inertiaMinSec, inertiaMaxSec);
+        _inertiaLeak        = Clamp01(inertiaLeak);
+        _herding            = herding;
+        _followerFraction   = Clamp01(followerFraction);
+        _herdTilt           = Math.Max(0m, herdTilt);
+        _momentumDominance  = momentumDominance;
+        _momentumStrength   = Math.Clamp(momentumStrength, 0m, 1m);
+        _roleSplit          = roleSplit;
+        _noiseDamp          = Clamp01(noiseDamp);
+        _anchorFastSlack    = Math.Max(0m, anchorFastSlack);
+        _activityEnabled    = activityEnabled;
+        _activityGamma      = Math.Max(0.0, activityGamma);
+        _rangeActivityImpact = rangeActivityImpact;
+        _rangeMaxSlippage   = Math.Max(0m, rangeMaxSlippage);
+        _fatImpactProb      = Clamp01(fatImpactProb);
     }
     #endregion
 
@@ -198,12 +256,24 @@ internal sealed class AiBotDecisionService
             if (buyBudget is null or <= 0m) return null;
         }
 
+        // §C3 fat-tailed impact: a minority of MARKET orders get a deeper sweep (slippage cap relaxed to the
+        // §C1 Range max), so spikes print even in calm periods. The single roll is taken HERE — at a fixed
+        // position after every other draw — only when the feature is on (off ⇒ no draw, byte-identical), and
+        // applied only to slippage orders. Price impact only; the structural anti-sweep DEPTH cap is untouched.
+        var slippageFrac = EffectiveSlippage(user, stockId);
+        if (_fatImpactProb > 0m)
+        {
+            bool fat = ctx.Decimal01(user.AiUserId) < _fatImpactProb;
+            if (fat && IsSlippageOrder(type))
+                slippageFrac = Math.Min(user.SlippageTolerancePrc, Math.Max(slippageFrac, _rangeMaxSlippage));
+        }
+
         // §3.6 decomposition: bots place plain (non-stop) orders — set the dimensions directly.
         return new Order
         {
             UserId = user.UserId, StockId = stockId, CurrencyType = currency,
             Quantity = quantity, Price = price,
-            SlippagePercent = IsSlippageOrder(type) ? EffectiveSlippage(user) * 100m : null,
+            SlippagePercent = IsSlippageOrder(type) ? slippageFrac * 100m : null,
             BuyBudget = buyBudget,
             Side = IsBuyOrder(type) ? OrderSide.Buy : OrderSide.Sell,
             Entry = (type is OrderType.LimitBuy or OrderType.LimitSell) ? EntryType.Limit : EntryType.Market,
@@ -411,56 +481,81 @@ internal sealed class AiBotDecisionService
         if (_mmQuoting && user.Strategy == AiStrategy.MarketMaker)
             return ChooseMarketMakerQuote(ctx, user);
 
-        // 1. Base buy probability adjusted by cash reserve position
-        var cashPrc  = ctx.FundsPercentagePortfolio(user.UserId, currency);
-        var buyProb  = user.BuyBiasPrc;
-        var maxShift = 0.40m;
+        // §v2: buyProb is built from a HOMEOSTATIC part (kept for every bot — it keeps the fleet solvent)
+        // and a DIRECTIONAL part (momentum + sentiment) that §A4 can damp for the noise cohort so the
+        // directional cohort's imbalance isn't averaged away. The §A2 herd tilt and the value-anchor tilt
+        // are separate terms (anchor is a bounding force, never damped). With every v2 flag off this sums to
+        // exactly today's expression (same terms, same order, no new RNG) → byte-identical.
+        var notMM = user.Strategy != AiStrategy.MarketMaker; // §A1–A3 exclude MM (it returned above when quoting on)
 
+        // 1. Homeostatic base: directional bias seed + cash-reserve restoring shift.
+        var cashPrc      = ctx.FundsPercentagePortfolio(user.UserId, currency);
+        var homeostatic  = user.BuyBiasPrc;
+        var maxShift     = 0.40m;
         if (cashPrc < user.MinCashReservePrc)
         {
             var distance = user.MinCashReservePrc <= 0m ? 1m
                 : (user.MinCashReservePrc - cashPrc) / user.MinCashReservePrc;
-            buyProb -= maxShift * Clamp01(distance);
+            homeostatic -= maxShift * Clamp01(distance);
         }
         else if (cashPrc > user.MaxCashReservePrc)
         {
             var distance = 1m - user.MaxCashReservePrc <= 0m ? 1m
                 : (cashPrc - user.MaxCashReservePrc) / (1m - user.MaxCashReservePrc);
-            buyProb += maxShift * Clamp01(distance);
+            homeostatic += maxShift * Clamp01(distance);
         }
 
-        // 2. Strategy-aware momentum bias (uses EWMA smoothed prices)
+        // 2. Directional: strategy momentum bias (EWMA smoothed) + watchlist sentiment tilt.
         var momentum       = ctx.ComputeWatchlistMomentum(user, currency);
         var momentumSignal = ClampSigned(momentum * 20m, 1m); // ±5% move → ±1
+        var directional    = 0m;
 
+        // §A3 momentum dominance: follower-scoped TF>MR so a regime can recruit a trend (Lux–Marchesi).
+        // Strength only WEAKENS the reversion coefficient (×(1−s)), never flips its sign. Off ⇒ both ×1.
+        decimal tfMul = 1m, mrMul = 1m;
+        if (_momentumDominance && _momentumStrength > 0m && notMM &&
+            _regime.IsFollower(user.AiUserId, _followerFraction))
+        {
+            tfMul = 1m + _momentumStrength;
+            mrMul = 1m - _momentumStrength;
+        }
         switch (user.Strategy)
         {
-            // Equal magnitude on both sides so the net effect across the
-            // 25/25 TF/MR split is zero in expectation.
+            // Equal magnitude on both sides so the net effect across the 25/25 TF/MR split is zero in
+            // expectation (until §A3 tilts it under a regime).
             case AiStrategy.TrendFollower:
-                buyProb += 0.175m * momentumSignal; // Chase the move
+                directional += 0.175m * tfMul * momentumSignal; // Chase the move
                 break;
             case AiStrategy.MeanReversion:
-                buyProb -= 0.175m * momentumSignal; // Fade the move
+                directional -= 0.175m * mrMul * momentumSignal; // Fade the move
                 break;
-            // MarketMaker, Scalper, Random: no directional bias
+            // MarketMaker, Scalper, Random: no directional momentum bias
         }
 
-        // Linear sentiment bias. Watchlist-averaged so the tilt reflects the
-        // broad mood for stocks this bot cares about, not any single name.
-        // Clamped to ±1 here — extremes drive the forced market order
-        // applied later in ComputeOrderAsync.
+        // Linear sentiment bias. Watchlist-averaged so the tilt reflects the broad mood for stocks this bot
+        // cares about. Clamped to ±1 here — extremes drive the forced market order in ComputeOrderAsync.
         var sentimentClamped = ClampSigned(AverageWatchlistSentiment(ctx, user, currency), 1m);
-        buyProb += sentimentClamped * SentimentMaxBias;
+        directional += sentimentClamped * _sentimentMaxBias;
 
-        // Value anchor: tilt toward buying stocks trading below fundamental and selling those above,
-        // proportional to the deviation. This is the restoring force that keeps price bounded.
+        // §A4 role split: flatten the noise cohort's DIRECTIONAL part (cash homeostasis untouched) so it
+        // stops diluting the directional cohort. Followers (and everyone when the flag is off) keep ×1.
+        var noiseFactor = (_roleSplit && notMM && !_regime.IsFollower(user.AiUserId, _followerFraction))
+            ? (1m - _noiseDamp) : 1m;
+
+        // §A2 herding: a sharp common regime tilt a fraction of bots commit to together (Kirman). 0 for
+        // non-followers and when the flag is off.
+        var herdTilt = (_herding && notMM) ? _regime.HerdTilt(user.AiUserId, _followerFraction, _herdTilt) : 0m;
+
+        // Value anchor: tilt toward buying stocks below fundamental / selling those above. The restoring
+        // force that keeps price bounded — a separate term, never damped by the role split.
+        var anchorTilt = 0m;
         if (_valueAnchorStrength > 0m)
         {
             var gap = ClampSigned(AverageWatchlistValueGap(ctx, user, currency) / _valueAnchorScale, 1m);
-            buyProb += gap * _valueAnchorStrength;
+            anchorTilt = gap * _valueAnchorStrength;
         }
-        buyProb = Clamp01(buyProb);
+
+        var buyProb = Clamp01(homeostatic + directional * noiseFactor + herdTilt + anchorTilt);
 
         // 3. Strategy-aware market-order probability
         var effectiveUseMarket = user.UseMarketProb;
@@ -472,6 +567,18 @@ internal sealed class AiBotDecisionService
             case AiStrategy.MarketMaker:
                 effectiveUseMarket = Math.Max(0m, effectiveUseMarket - 0.15m);
                 break;
+        }
+
+        // §A1 inertia: hold a persistent directional STANCE across ticks instead of re-rolling buy/sell
+        // every tick — this is the Cont–Bouchaud ingredient that stops tick-to-tick self-cancellation
+        // (the LLN flat-chart root cause). On a fresh/expired stance RollOrHoldStance consumes exactly two
+        // seeded draws (side, duration) in a fixed order; while a stance holds it draws nothing. Called
+        // ONLY when the flag is on, so the flag-off draw sequence is byte-identical. The isBuy draw below is
+        // still consumed (keeping isMarket + all downstream draws in position) — do not optimize it away.
+        if (_inertia && notMM)
+        {
+            var dir = ctx.RollOrHoldStance(user.AiUserId, buyProb, TimeHelper.NowUtc(), _inertiaMinSec, _inertiaMaxSec);
+            buyProb = dir > 0 ? Math.Max(buyProb, 1m - _inertiaLeak) : Math.Min(buyProb, _inertiaLeak);
         }
 
         // 4. Resolve to concrete order type. Bots never place TRUE (uncapped) market orders — every
@@ -543,6 +650,13 @@ internal sealed class AiBotDecisionService
         for (int i = 0; i < stockIds.Count; i++)
         {
             double w = BaseWeight(stockIds[i]);
+            // §Pillar B: concentrate volume on hot/trending names — weight by S^gamma. Off ⇒ S≡1 ⇒
+            // identical weights ⇒ identical pick for the same RNG draw (no decimal Pow; S ≥ Floor > 0).
+            if (_activityEnabled)
+            {
+                double s = (double)_activity.S(stockIds[i]);
+                if (s > 0) w *= Math.Pow(s, _activityGamma);
+            }
             if (_valueAnchorStrength > 0m && _valueTargetSelection)
             {
                 var f = Fundamental(stockIds[i], currency);
@@ -672,8 +786,8 @@ internal sealed class AiBotDecisionService
         decimal estimatePrice = type switch
         {
             OrderType.TrueMarketBuy or OrderType.TrueMarketSell => marketPrice,
-            OrderType.SlippageMarketBuy  => CurrencyHelper.RoundMoney(marketPrice * (1m + EffectiveSlippage(user)), currency),
-            OrderType.SlippageMarketSell => CurrencyHelper.RoundMoney(marketPrice * (1m - EffectiveSlippage(user)), currency),
+            OrderType.SlippageMarketBuy  => CurrencyHelper.RoundMoney(marketPrice * (1m + EffectiveSlippage(user, stockId)), currency),
+            OrderType.SlippageMarketSell => CurrencyHelper.RoundMoney(marketPrice * (1m - EffectiveSlippage(user, stockId)), currency),
             _                            => marketPrice // limit
         };
         if (estimatePrice <= 0m) return 0;
@@ -833,7 +947,10 @@ internal sealed class AiBotDecisionService
         if (fund <= 0m) return false;
         var mkt = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (mkt <= 0m) return false;
-        var cap = _overheatCap * _profiles.Get(stockId).OverheatCapMult;
+        // §A5 fast-anchor slack: widen the INTRADAY veto so excursions can happen, while the slow
+        // value-anchor probability tilt (_valueAnchorStrength) still pulls price back on the multi-hour
+        // scale. 0 ⇒ unchanged. Applies uniformly to the plain and advanced paths (both call this).
+        var cap = _overheatCap * _profiles.Get(stockId).OverheatCapMult * (1m + _anchorFastSlack);
         var dev = (mkt - fund) / fund;
         return isBuy ? dev > cap : dev < -cap;
     }
@@ -899,7 +1016,20 @@ internal sealed class AiBotDecisionService
     }
 
     // A market order's slippage, capped low so no single market order sweeps a thin book far.
-    private decimal EffectiveSlippage(AIUser user) => Math.Min(user.SlippageTolerancePrc, _marketSlippagePrc);
+    // §C1 activity-scaled impact: when enabled, RELAX the cap on hot names (scaled by S) up to an absolute
+    // Range ceiling so sweeps print wicks/spikes — calm names (S≤1) stay at the tight default. Activity-gated
+    // (S≡1 when the activity field is off, so C1 then no-ops). The structural anti-sweep DEPTH cap is left
+    // untouched as the hard ceiling. Off ⇒ today's value exactly.
+    private decimal EffectiveSlippage(AIUser user, int stockId)
+    {
+        var cap = _marketSlippagePrc;
+        if (_rangeActivityImpact)
+        {
+            decimal s = _activity.S(stockId);
+            cap = Math.Min(_rangeMaxSlippage, Math.Max(_marketSlippagePrc, _marketSlippagePrc * s));
+        }
+        return Math.Min(user.SlippageTolerancePrc, cap);
+    }
 
     // Per-(stock,currency) fundamental — the slowly-drifting value the FundamentalService maintains
     // (the fixed seed price when drift is disabled). The value anchor + overheat veto track this.
@@ -914,7 +1044,10 @@ internal sealed class AiBotDecisionService
         if (absRaw <= 1m) return currentType;
 
         var overflow   = absRaw - 1m;
-        var forcedProb = Math.Min(1m, overflow * OverflowGain);
+        // §Pillar B: hot names react harder — scale the overflow gain by S (≡1 when activity is off, so the
+        // forced-order probability is unchanged and no new RNG draw is introduced).
+        var gain       = _activityEnabled ? OverflowGain * _activity.S(stockId) : OverflowGain;
+        var forcedProb = Math.Min(1m, overflow * gain);
         if (ctx.Decimal01(user.AiUserId) >= forcedProb) return currentType;
 
         var style = PickExtremeReactionStyle(ctx, user);

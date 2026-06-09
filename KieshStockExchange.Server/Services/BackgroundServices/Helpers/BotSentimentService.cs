@@ -218,6 +218,14 @@ internal sealed class BotSentimentService
     /// </summary>
     internal decimal GetSentiment(int stockId)
         => _combined.TryGetValue(stockId, out var v) ? v : 0m;
+
+    /// <summary>
+    /// Magnitude of the currently-decaying news shock for a stock (0 when none), exposed so the activity
+    /// field (Pillar B) can use news arrivals as a Hawkes excitation driver. Loop-thread read, like
+    /// <see cref="GetSentiment"/>.
+    /// </summary>
+    internal double ShockMagnitude(int stockId)
+        => _shock.TryGetValue(stockId, out var v) ? Math.Abs(v) : 0.0;
     #endregion
 
     #region Logging

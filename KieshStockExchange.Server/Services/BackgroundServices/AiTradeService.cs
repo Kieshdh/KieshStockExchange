@@ -180,6 +180,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly ReservationAuditor   _auditor;
     private readonly BotEconomyTelemetry  _economy;
     private readonly BotSentimentService  _sentiment;
+    private readonly BotRegimeService     _regime;    // §A2/A3/A4 shared regime (default off)
+    private readonly BotActivityService   _activity;  // §Pillar B activity field (default off)
     private readonly FundamentalService   _funds;     // §P6 slowly-drifting fundamentals
     private readonly StockProfileService  _profiles;  // §P6 per-stock personality
     private readonly BotCashInjector      _injector;
@@ -268,6 +270,32 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         shockMaxMagnitude:       _configuration.GetValue("Bots:ShockMaxMagnitude", 1.5m),
                         shockMagnitudeExponent:  _configuration.GetValue("Bots:ShockMagnitudeExponent", 3.0),
                         shockDecayPerTick:       _configuration.GetValue("Bots:ShockDecayPerTick", 0.999m));
+        // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
+        // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
+        _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
+                        enabled: _configuration.GetValue("Bots:Imbalance:Herding", false)
+                              || _configuration.GetValue("Bots:Imbalance:MomentumDominance", false)
+                              || _configuration.GetValue("Bots:Imbalance:RoleSplit", false),
+                        regimeMeanSec: _configuration.GetValue("Bots:Imbalance:Herding:RegimeMeanSec", 960.0));
+        _activity  = new BotActivityService(stocks, _sentiment,
+                        new SeparatorLogger<BotActivityService>(loggerFactory, loggerOptions),
+                        RecentReturnForActivity,
+                        enabled:          _configuration.GetValue("Bots:Activity:Enabled", false),
+                        activityBaseline: _configuration.GetValue("Bots:Activity:Baseline", 0.6),
+                        globalTauSec:     _configuration.GetValue("Bots:Activity:GlobalTauSec", 3600.0),
+                        globalSigma:      _configuration.GetValue("Bots:Activity:GlobalSigma", 0.20),
+                        perStockTauSec:   _configuration.GetValue("Bots:Activity:PerStockTauSec", 600.0),
+                        perStockSigma:    _configuration.GetValue("Bots:Activity:PerStockSigma", 0.30),
+                        floor:            _configuration.GetValue("Bots:Activity:Floor", 0.2),
+                        sMax:             _configuration.GetValue("Bots:Activity:SMax", 6.0),
+                        wNews:            _configuration.GetValue("Bots:Activity:WNews", 0.6),
+                        wMoveUp:          _configuration.GetValue("Bots:Activity:WMoveUp", 1.0),
+                        wMoveDown:        _configuration.GetValue("Bots:Activity:WMoveDown", 2.0),
+                        wSent:            _configuration.GetValue("Bots:Activity:WSent", 0.3),
+                        theta:            _configuration.GetValue("Bots:Activity:Theta", 0.3),
+                        wSelf:            _configuration.GetValue("Bots:Activity:WSelf", 0.009),
+                        decay:            _configuration.GetValue("Bots:Activity:Decay", 0.99),
+                        bDriftAmp:        _configuration.GetValue("Bots:Activity:BDriftAmp", 0.15));
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         // §3.7 arbitrage cohort: dedicated decision path, fully outside the sentiment/anchor/veto/
@@ -280,6 +308,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
                         distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m));
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
+                        _regime, _activity,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
                         fatTails:           _configuration.GetValue("Bots:FatTails", true),
                         tradeSizeTailShape: _configuration.GetValue("Bots:TradeSizeTailShape", 0.5m),
@@ -309,7 +338,26 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         tpOffsetMin:        _configuration.GetValue("Bots:Advanced:TpOffsetPrcMin", 0.03m),
                         tpOffsetMax:        _configuration.GetValue("Bots:Advanced:TpOffsetPrcMax", 0.08m),
                         bracketSlippagePct: _configuration.GetValue("Bots:Advanced:BracketSlippagePct", 5m),
-                        advancedMaxQty:     _configuration.GetValue("Bots:Advanced:MaxQty", 50));
+                        advancedMaxQty:     _configuration.GetValue("Bots:Advanced:MaxQty", 50),
+                        // §v2 imbalance/activity/range — all default off / inert (registry in plan §7b).
+                        sentimentMaxBias:    _configuration.GetValue("Bots:SentimentMaxBias", 0.20m),
+                        inertia:             _configuration.GetValue("Bots:Imbalance:Inertia", false),
+                        inertiaMinSec:       _configuration.GetValue("Bots:Imbalance:Inertia:MinSec", 30.0),
+                        inertiaMaxSec:       _configuration.GetValue("Bots:Imbalance:Inertia:MaxSec", 600.0),
+                        inertiaLeak:         _configuration.GetValue("Bots:Imbalance:Inertia:Leak", 0.10m),
+                        herding:             _configuration.GetValue("Bots:Imbalance:Herding", false),
+                        followerFraction:    _configuration.GetValue("Bots:Imbalance:Herding:FollowerFraction", 0.25m),
+                        herdTilt:            _configuration.GetValue("Bots:Imbalance:Herding:Tilt", 0.10m),
+                        momentumDominance:   _configuration.GetValue("Bots:Imbalance:MomentumDominance", false),
+                        momentumStrength:    _configuration.GetValue("Bots:Imbalance:MomentumDominance:Strength", 0m),
+                        roleSplit:           _configuration.GetValue("Bots:Imbalance:RoleSplit", false),
+                        noiseDamp:           _configuration.GetValue("Bots:Imbalance:RoleSplit:NoiseDamp", 1.0m),
+                        anchorFastSlack:     _configuration.GetValue("Bots:Anchor:FastSlack", 0m),
+                        activityEnabled:     _configuration.GetValue("Bots:Activity:Enabled", false),
+                        activityGamma:       _configuration.GetValue("Bots:Activity:Gamma", 1.0),
+                        rangeActivityImpact: _configuration.GetValue("Bots:Range:ActivityImpact", false),
+                        rangeMaxSlippage:    _configuration.GetValue("Bots:Range:MaxSlippage", 0.02m),
+                        fatImpactProb:       _configuration.GetValue("Bots:Range:FatImpactProb", 0m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
@@ -470,6 +518,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // once disk persistence lands. Sentiment still re-rolls its starting
         // factors though (different semantics from the others).
         _sentiment.Reset(TimeHelper.NowUtc());
+        _regime.Reset(TimeHelper.NowUtc());    // §A2/A3/A4: open from a deterministic +1 regime
+        _activity.Reset(TimeHelper.NowUtc());  // §Pillar B: open neutral (field ≡ baseline/1)
         _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
         _fxDesk.Reset();  // §3.7: fresh per-session FX-desk conversion tallies
 
@@ -780,6 +830,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 ? Math.Min(1m, user.TradeProb * 1.5m)
                 : user.TradeProb;
 
+            // §Pillar B (Seam 1): scale how OFTEN this bot trades by the activity field G·B — hot watchlist
+            // → more frequent trading, quiet lull → less. Pure multiply, NO new RNG draw, so OFF (mult ≡ 1)
+            // is byte-identical and ON does not perturb the per-bot RNG order. The interval divisor is
+            // clamped so a hot watchlist can't drive a bot to trade every tick (runaway/perf guard).
+            var actMult = _activity.G * _activity.B(user.AiUserId, user.Strategy, user.Watchlist);
+            if (actMult != 1m)
+            {
+                effectiveTradeProb = Math.Clamp(effectiveTradeProb * actMult, 0m, 1m);
+                var div = Math.Clamp(actMult, 0.25m, 4m);
+                effectiveInterval = TimeSpan.FromSeconds(Math.Max(1.0, effectiveInterval.TotalSeconds / (double)div));
+            }
+
             if (now - user.LastDecisionTime < effectiveInterval) continue;
 
             user.RecordDecision(now);
@@ -865,6 +927,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 for (int f = 0; f < result.FillTransactions.Count; f++)
                     fillVol += result.FillTransactions[f].TotalAmount;
                 _stats.AddVolume(fillVol);
+                // §Pillar B self-excitation: fills on this name beget more (trade clustering). No-op when the
+                // activity field is disabled; accumulated and drained once per tick on the loop thread.
+                _activity.RecordFill(order.StockId, result.FillTransactions.Count);
             }
 
             _state.ApplyResultToCache(_ctx, result);
@@ -919,12 +984,28 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     #endregion
 
     #region Timers
+    // §Pillar B: signed recent (EWMA) fractional return for a stock in the reference currency (USD, then
+    // EUR), read from the price caches the loop already maintains. Drives the activity field's leverage
+    // term (down>up). Pure read, no RNG; 0 when no price is known. Passed as a delegate to BotActivityService.
+    private double RecentReturnForActivity(int stockId)
+    {
+        foreach (var ccy in CurrenciesToTrade)
+        {
+            if (_ctx.SmoothedPrices.TryGetValue((stockId, ccy), out var cur) && cur > 0m &&
+                _ctx.PreviousPrices.TryGetValue((stockId, ccy), out var prev) && prev > 0m)
+                return (double)((cur - prev) / prev);
+        }
+        return 0.0;
+    }
+
     private async Task CheckTimers(DateTime now, CancellationToken ct)
     {
         // FX before sentiment: nothing reads FX inside Tick today, but keeping
         // it first matches the "advance external state before consumers" rule.
         _fxRates.Tick(now);
         _sentiment.Tick(now);
+        _regime.Tick(now);    // §A2/A3/A4 regime (no-op when all consumers disabled)
+        _activity.Tick(now);  // §Pillar B activity field (no-op when disabled); reads sentiment shock above
         _funds.Tick(now);   // §P6: advance the slowly-drifting fundamentals (internally gated to its interval)
         if (now >= _nextDailyCheck)
         {
