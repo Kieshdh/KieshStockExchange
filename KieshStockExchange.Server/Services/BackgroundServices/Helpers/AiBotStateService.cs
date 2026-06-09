@@ -234,37 +234,44 @@ internal sealed class AiBotStateService
             // Skip bots that pre-date the tier columns (all-zero) — no Far band to reason about.
             if (user.FarLimitMaxPrc <= 0m) continue;
 
-            var limitOrders = userOrders.Values.Where(o => o.IsOpenLimitOrder).ToList();
-            if (limitOrders.Count == 0) continue;
-
             // Dial the Far band thresholds to match where the decision service actually places Far orders
             // (FarLimit*Prc × the tightness dial), so the straggler cull fires at the dialed Far edge.
             var farMaxPrc = user.FarLimitMaxPrc * _distanceMult;
             var farMinPrc = user.FarLimitMinPrc * _distanceMult;
 
-            // Per currency: the Far budget is a fraction of that currency's portfolio value.
-            foreach (var group in limitOrders.GroupBy(o => o.CurrencyType))
+            // One pass over the user's orders (no Where/GroupBy allocations — this runs for every bot every
+            // 30s sweep, so the per-bot LINQ churn was pure GC pressure): cancel stragglers inline and bucket
+            // the Far-budget candidates per currency. Identical victim SET to the old grouped form; the
+            // worst-first OrderByDescending below is kept (stable sort → deterministic tie-break).
+            Dictionary<CurrencyType, List<(Order order, decimal dist, decimal value)>>? farByCurrency = null;
+            foreach (var o in userOrders.Values)
             {
-                var currency = group.Key;
-                var farBudget = user.FarBudgetPrc * ctx.PortfolioValueByCurrency(user.UserId, currency);
+                if (!o.IsOpenLimitOrder) continue;
+                if (!ctx.StockPrices.TryGetValue((o.StockId, o.CurrencyType), out var m) || m <= 0m) continue;
+                var dist = o.IsBuyOrder ? (m - o.Price) / m : (o.Price - m) / m;
 
-                var farList = new List<(Order order, decimal dist, decimal value)>();
-                foreach (var o in group)
+                // Rule 1: straggler — drifted past the bot's own (dialed) Far band.
+                if (dist > farMaxPrc) { toCancel.Add((user.UserId, o)); continue; }
+
+                // Otherwise eligible for the Far budget once it sits at/beyond the (dialed) Far band start.
+                if (dist >= farMinPrc)
                 {
-                    if (!ctx.StockPrices.TryGetValue((o.StockId, o.CurrencyType), out var m) || m <= 0m) continue;
-                    var dist = o.IsBuyOrder ? (m - o.Price) / m : (o.Price - m) / m;
-
-                    // Rule 1: straggler — drifted past the bot's own (dialed) Far band.
-                    if (dist > farMaxPrc) { toCancel.Add((user.UserId, o)); continue; }
-
-                    // Otherwise eligible for the Far budget once it sits at/beyond the (dialed) Far band start.
-                    if (dist >= farMinPrc)
-                        farList.Add((o, dist, o.RemainingAmount));
+                    farByCurrency ??= new Dictionary<CurrencyType, List<(Order, decimal, decimal)>>();
+                    if (!farByCurrency.TryGetValue(o.CurrencyType, out var farList))
+                        farByCurrency[o.CurrencyType] = farList = new List<(Order, decimal, decimal)>();
+                    farList.Add((o, dist, o.RemainingAmount));
                 }
+            }
 
-                // Rule 2: Far value-budget mass-prune, worst-first down to ½ budget (hysteresis).
-                if (farBudget <= 0m || farList.Count == 0) continue;
-                var farValue = farList.Sum(x => x.value);
+            if (farByCurrency is null) continue;
+
+            // Rule 2 (per currency): Far value-budget mass-prune, worst-first down to ½ budget (hysteresis).
+            foreach (var (currency, farList) in farByCurrency)
+            {
+                var farBudget = user.FarBudgetPrc * ctx.PortfolioValueByCurrency(user.UserId, currency);
+                if (farBudget <= 0m) continue;
+                decimal farValue = 0m;
+                for (int i = 0; i < farList.Count; i++) farValue += farList[i].value;
                 if (farValue <= farBudget) continue;
                 var target = farBudget / 2m;
                 foreach (var (o, _, value) in farList.OrderByDescending(x => x.dist))

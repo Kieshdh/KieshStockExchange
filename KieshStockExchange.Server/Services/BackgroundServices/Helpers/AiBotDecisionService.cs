@@ -170,7 +170,10 @@ internal sealed class AiBotDecisionService
         CurrencyType currency, CancellationToken ct = default)
     {
         var type    = ChooseOrderType(ctx, user, currency);
-        var stockId = ChooseStockId(ctx, user, type, currency);
+        // §perf C4: snapshot every "already committed" total in ONE walk of this user's open orders, then
+        // reuse it below — the sell path used to re-walk OpenOrders once per sell candidate inside ChooseStockId.
+        var committed = ComputeCommitted(ctx, user.UserId);
+        var stockId = ChooseStockId(ctx, user, type, currency, committed);
         if (stockId <= 0) return null;
 
         // When the chosen stock's raw sentiment crosses ±1, force the order into a slippage-capped market
@@ -184,7 +187,7 @@ internal sealed class AiBotDecisionService
         if (IsSellOrder(type) && await IsOverBandAsync(ctx, stockId, currency, isBuy: false, ct).ConfigureAwait(false)) return null;
 
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
-        var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
+        var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, committed, ct).ConfigureAwait(false);
         if (quantity <= 0) return null;
 
         decimal? buyBudget = null;
@@ -499,7 +502,8 @@ internal sealed class AiBotDecisionService
         return buys <= sells ? OrderType.LimitBuy : OrderType.LimitSell;
     }
 
-    private int ChooseStockId(AiBotContext ctx, AIUser user, OrderType type, CurrencyType currency)
+    private int ChooseStockId(AiBotContext ctx, AIUser user, OrderType type, CurrencyType currency,
+        CommittedTotals committed)
     {
         var rng   = ctx.GetRandom(user.AiUserId);
         var watch = user.Watchlist?
@@ -512,9 +516,9 @@ internal sealed class AiBotDecisionService
             var candidates = new List<int>();
             foreach (var id in watch)
             {
-                var pos       = ctx.GetPosition(user.UserId, id);
-                var committed = ComputeCommittedSellShares(ctx, user.UserId, id);
-                var ctxAvail  = pos.Quantity - committed;
+                var pos          = ctx.GetPosition(user.UserId, id);
+                var committedSell = committed.SellSharesByStock.GetValueOrDefault(id);
+                var ctxAvail     = pos.Quantity - committedSell;
                 // Cross-check against the engine's AvailableQuantity to avoid
                 // generating orders that would fail Phase 1.5 on stale ctx.
                 var enginePos   = _accounts.GetPosition(user.UserId, id);
@@ -643,7 +647,7 @@ internal sealed class AiBotDecisionService
     }
 
     private async Task<int> ComputeOrderQuantityAsync(AiBotContext ctx, AIUser user, OrderType type,
-        int stockId, CurrencyType currency, CancellationToken ct)
+        int stockId, CurrencyType currency, CommittedTotals committed, CancellationToken ct)
     {
         var portfolio = ctx.PortfolioValueByCurrency(user.UserId, currency);
         if (portfolio <= 0m) return 0;
@@ -683,8 +687,8 @@ internal sealed class AiBotDecisionService
 
         if (IsBuyOrder(type))
         {
-            var committed       = ComputeCommittedBuyFunds(ctx, user.UserId, currency);
-            var ctxFreeBalance  = Math.Max(0m, fund.TotalBalance - committed);
+            var committedBuy    = committed.BuyFundsByCurrency.GetValueOrDefault(currency);
+            var ctxFreeBalance  = Math.Max(0m, fund.TotalBalance - committedBuy);
             // Plan B: clamp to the engine's AvailableBalance so the bot never generates
             // an order that's doomed at Phase 1.6 — same defence as the sell branch below.
             var engineFreeBalance = _accounts.GetFund(user.UserId, currency)?.AvailableBalance ?? 0m;
@@ -705,7 +709,7 @@ internal sealed class AiBotDecisionService
             if (enginePos is { Quantity: < 0 })
             {
                 int shortMag       = -enginePos.Quantity;
-                int committedCover = ComputeCommittedCoverShares(ctx, user.UserId, stockId);
+                int committedCover = committed.CoverSharesByStock.GetValueOrDefault(stockId);
                 int coverable      = Math.Max(0, shortMag - committedCover);
                 qty = Math.Min(qty, coverable);
             }
@@ -716,8 +720,8 @@ internal sealed class AiBotDecisionService
         }
         else
         {
-            var committed     = ComputeCommittedSellShares(ctx, user.UserId, stockId);
-            var ctxAvailable  = Math.Max(0, pos.Quantity - committed);
+            var committedSell = committed.SellSharesByStock.GetValueOrDefault(stockId);
+            var ctxAvailable  = Math.Max(0, pos.Quantity - committedSell);
             // Plan B: same clamp as ChooseStockId — engine view is authoritative. If the
             // ctx says we have N free but engine has more reserved, take engine's number.
             var engineAvailable = _accounts.GetPosition(user.UserId, stockId)?.AvailableQuantity ?? 0;
@@ -731,37 +735,38 @@ internal sealed class AiBotDecisionService
         }
     }
 
-    private static decimal ComputeCommittedBuyFunds(AiBotContext ctx, int userId, CurrencyType currency)
-    {
-        if (!ctx.OpenOrders.TryGetValue(userId, out var orders)) return 0m;
-        decimal committed = 0m;
-        foreach (var o in orders.Values)
-            if (o.IsBuyOrder && o.IsLimitOrder && o.CurrencyType == currency)
-                committed += o.RemainingAmount;
-        return committed;
-    }
+    // §perf C4: the per-decision "already committed" totals, computed in a single walk of the user's open
+    // orders instead of one walk per consumer (the sell path called the old per-stock helper once per
+    // candidate). OpenOrders is immutable within a decision, so these snapshot totals equal what the old
+    // ComputeCommittedBuyFunds / ComputeCommittedSellShares / ComputeCommittedCoverShares returned at each
+    // call site. The per-order predicates are unchanged: a buy limit contributes its RemainingAmount to the
+    // currency bucket AND its RemainingQuantity to the stock cover bucket; a sell limit contributes its
+    // RemainingQuantity to the stock sell bucket.
+    internal readonly record struct CommittedTotals(
+        IReadOnlyDictionary<CurrencyType, decimal> BuyFundsByCurrency,
+        IReadOnlyDictionary<int, int> SellSharesByStock,
+        IReadOnlyDictionary<int, int> CoverSharesByStock);
 
-    // §P6: shares of `stockId` already committed to covering a short via this user's open (resting)
-    // BUY limit orders — so concurrent cover-buys across ticks can't sum past flat. Mirror of
-    // ComputeCommittedSellShares on the buy side.
-    private static int ComputeCommittedCoverShares(AiBotContext ctx, int userId, int stockId)
+    internal static CommittedTotals ComputeCommitted(AiBotContext ctx, int userId)
     {
-        if (!ctx.OpenOrders.TryGetValue(userId, out var orders)) return 0;
-        int committed = 0;
-        foreach (var o in orders.Values)
-            if (o.IsBuyOrder && o.IsLimitOrder && o.StockId == stockId)
-                committed += o.RemainingQuantity;
-        return committed;
-    }
-
-    private static int ComputeCommittedSellShares(AiBotContext ctx, int userId, int stockId)
-    {
-        if (!ctx.OpenOrders.TryGetValue(userId, out var orders)) return 0;
-        int committed = 0;
-        foreach (var o in orders.Values)
-            if (o.IsSellOrder && o.IsLimitOrder && o.StockId == stockId)
-                committed += o.RemainingQuantity;
-        return committed;
+        var buyFunds    = new Dictionary<CurrencyType, decimal>();
+        var sellShares  = new Dictionary<int, int>();
+        var coverShares = new Dictionary<int, int>();
+        if (ctx.OpenOrders.TryGetValue(userId, out var orders))
+            foreach (var o in orders.Values)
+            {
+                if (!o.IsLimitOrder) continue;
+                if (o.IsBuyOrder)
+                {
+                    buyFunds[o.CurrencyType] = (buyFunds.TryGetValue(o.CurrencyType, out var f) ? f : 0m) + o.RemainingAmount;
+                    coverShares[o.StockId]   = (coverShares.TryGetValue(o.StockId, out var c) ? c : 0) + o.RemainingQuantity;
+                }
+                else if (o.IsSellOrder)
+                {
+                    sellShares[o.StockId]    = (sellShares.TryGetValue(o.StockId, out var s) ? s : 0) + o.RemainingQuantity;
+                }
+            }
+        return new CommittedTotals(buyFunds, sellShares, coverShares);
     }
 
     // ValueTask: the common path is an in-memory cache hit (no allocation); it's called several times
