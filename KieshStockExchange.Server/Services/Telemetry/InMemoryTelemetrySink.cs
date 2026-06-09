@@ -5,18 +5,29 @@ using Serilog.Events;
 namespace KieshStockExchange.Server.Services.Telemetry;
 
 /// <summary>
-/// Serilog sink that lifts the six operator-visible bot telemetry sources onto
-/// the <see cref="TelemetryBus"/> for live delivery. Everything else is ignored
-/// here and still flows to the console/file sinks unchanged.
+/// Serilog sink that lifts the operator-visible telemetry sources onto the
+/// <see cref="TelemetryBus"/> for live delivery, tagging each with its viewer
+/// category. Everything else is ignored here and still flows to the
+/// console/file sinks unchanged.
 /// </summary>
 public sealed class InMemoryTelemetrySink : ILogEventSink
 {
-    // Matched by short name because SourceContext is the full type name (the
-    // sources log via ILogger<TSelf>).
-    private static readonly HashSet<string> Sources = new()
+    // SourceContext short name → viewer category. Most map 1:1; the FX sources
+    // fold into "Other" (infrequent), and the two human-activity loggers
+    // ("Funds" cash moves, "MarketEngine" human order ops) fold into "User".
+    // Matched by short name because SourceContext is the full type name for
+    // ILogger<TSelf> sources, or the literal category for CreateLogger("X").
+    private static readonly Dictionary<string, string> SourceToCategory = new()
     {
-        "BotStatsLogger", "BotEconomyTelemetry", "BotSentimentService",
-        "BotScalerService", "FxRateService", "ReservationAuditor",
+        ["BotStatsLogger"]        = "BotStats",
+        ["BotEconomyTelemetry"]   = "Economy",
+        ["BotSentimentService"]   = "Sentiment",
+        ["BotScalerService"]      = "Scaler",
+        ["ReservationAuditor"]    = "ReservationAuditor",
+        ["FxRateService"]         = "Other",
+        ["FxDeskTelemetry"]       = "Other",
+        ["Funds"]                 = "User",
+        ["MarketEngine"]          = "User",
     };
 
     private readonly TelemetryBus _bus;
@@ -29,13 +40,14 @@ public sealed class InMemoryTelemetrySink : ILogEventSink
         if ((prop as ScalarValue)?.Value is not string context) return;
 
         var source = ShortName(context);
-        if (!Sources.Contains(source)) return;
+        if (!SourceToCategory.TryGetValue(source, out var category)) return;
 
         _bus.Publish(new TelemetryEvent(
             logEvent.Timestamp,
             logEvent.Level.ToString(),
             source,
-            logEvent.RenderMessage()));
+            logEvent.RenderMessage(),
+            category));
     }
 
     private static string ShortName(string fullTypeName)

@@ -8,13 +8,13 @@
     /* VS Code Dark+ palette. */
     :root { color-scheme: dark; }
     body { margin: 0; font-family: Consolas, "Cascadia Mono", monospace; background: #1e1e1e; color: #d4d4d4; }
-    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #252526; border-bottom: 1px solid #333333; position: sticky; top: 0; }
+    header { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #252526; border-bottom: 1px solid #333333; position: sticky; top: 0; z-index: 3; }
     header input { flex: 1; min-width: 0; padding: 6px 8px; background: #3c3c3c; color: #d4d4d4; border: 1px solid #333333; border-radius: 4px; font: inherit; }
     header button { padding: 6px 14px; background: #0e639c; color: #fff; border: 0; border-radius: 4px; cursor: pointer; font: inherit; }
     header button.stop { background: #a1260d; }
     #status { font-size: 12px; opacity: .75; white-space: nowrap; }
     #log { padding: 8px 14px; }
-    .row { display: grid; grid-template-columns: 88px 56px 160px 1fr; gap: 10px; padding: 2px 0; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid #2a2a2a; }
+    .row { display: grid; grid-template-columns: 88px 56px 150px 1fr; gap: 10px; padding: 2px 0; white-space: pre-wrap; word-break: break-word; border-bottom: 1px solid #2a2a2a; }
     .ts { color: #808080; }
     .msg { color: #d4d4d4; }
     /* Message value tokens — mimics Serilog's console theme over the rendered text. */
@@ -25,20 +25,26 @@
     .lvl-Information { color: #808080; }
     .lvl-Warning { color: #cca700; }
     .lvl-Error, .lvl-Fatal { color: #f44747; }
-    /* One VS Code token color per telemetry source. */
-    .src-BotStatsLogger { color: #4ec9b0; }      /* teal (type) */
-    .src-BotEconomyTelemetry { color: #dcdcaa; }  /* yellow (function) */
-    .src-BotSentimentService { color: #c586c0; }  /* purple (control) */
-    .src-BotScalerService { color: #569cd6; }     /* blue (keyword) */
-    .src-FxRateService { color: #ce9178; }        /* orange (string) */
-    .src-ReservationAuditor { color: #9cdcfe; }   /* light blue (variable) */
-    /* Per-source filter bar. Each chip inherits its source color (text + dot); a
-       disabled source is dimmed + struck through and its rows are hidden client-side. */
-    #filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 14px; background: #252526; border-bottom: 1px solid #333333; position: sticky; top: 49px; }
-    #filters .flabel { font-size: 12px; opacity: .6; margin-right: 2px; }
+    /* One VS Code token color per telemetry category. */
+    .cat-BotStats { color: #4ec9b0; }
+    .cat-Economy { color: #dcdcaa; }
+    .cat-Sentiment { color: #c586c0; }
+    .cat-Scaler { color: #569cd6; }
+    .cat-User { color: #9cdcfe; }
+    .cat-Other { color: #ce9178; }
+    .cat-ReservationAuditor { color: #f44747; }
+    /* Filter + timeframe bars. */
+    .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 14px; background: #252526; border-bottom: 1px solid #333333; position: sticky; z-index: 2; }
+    #filters { top: 49px; }
+    #timeframe { top: 86px; }
+    .bar .blabel { font-size: 12px; opacity: .6; margin-right: 4px; }
     .chip { font: inherit; font-size: 12px; padding: 2px 10px; background: #3c3c3c; border: 1px solid #3c3c3c; border-radius: 11px; cursor: pointer; }
     .chip::before { content: "\25CF"; margin-right: 5px; }
     .chip.off { opacity: .4; text-decoration: line-through; }
+    /* Timeframe buttons (radio-style: one active). */
+    .tf { font: inherit; font-size: 12px; padding: 2px 12px; background: #3c3c3c; color: #d4d4d4; border: 1px solid #3c3c3c; border-radius: 4px; cursor: pointer; }
+    .tf.active { background: #0e639c; border-color: #0e639c; color: #fff; }
+    #shown { font-size: 12px; opacity: .5; margin-left: auto; }
   </style>
 </head>
 <body>
@@ -47,7 +53,8 @@
     <button id="connect">Connect</button>
     <span id="status">idle</span>
   </header>
-  <div id="filters"><span class="flabel">Sources:</span></div>
+  <div id="filters" class="bar"><span class="blabel">Categories:</span></div>
+  <div id="timeframe" class="bar"><span class="blabel">Timeframe:</span></div>
   <div id="log"></div>
 
   <script>
@@ -55,6 +62,7 @@
     const connectBtn = document.getElementById('connect');
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
+    const shownEl = document.getElementById('shown');
     let source = null;
     let retry = 1000;
 
@@ -65,98 +73,144 @@
       catch { return 'Europe/Amsterdam'; }
     })();
 
-    // Per-source filter. The six telemetry sources the server's sink emits; the
-    // label is a short display name, the key matches evt.source (and the .src-* color).
-    const SOURCES = [
-      ['BotStatsLogger', 'BotStats'],
-      ['BotEconomyTelemetry', 'Economy'],
-      ['BotSentimentService', 'Sentiment'],
-      ['BotScalerService', 'Scaler'],
-      ['FxRateService', 'FX'],
-      ['ReservationAuditor', 'ReservationAuditor'],
+    // Viewer categories (key matches evt.category and the .cat-* color); label is the chip text.
+    const CATEGORIES = [
+      ['BotStats', 'BotStats'],
+      ['Economy', 'Economy'],
+      ['Sentiment', 'Sentiment'],
+      ['Scaler', 'Scaler'],
+      ['User', 'User'],
+      ['Other', 'Other'],
+      ['ReservationAuditor', 'Reservation'],
     ];
-    const SOURCE_LABEL = Object.fromEntries(SOURCES);  // source key -> short display name
-    const disabled = new Set();          // sources the user has toggled off
+    const CAT_LABEL = Object.fromEntries(CATEGORIES);
+    // Per-minute snapshot categories — the timeframe selector downsamples THESE (one line per
+    // bucket, the latest). Event-driven categories (User / Other / ReservationAuditor) are
+    // discrete and always pass through unbucketed so nothing is silently dropped.
+    const BUCKETABLE = new Set(['BotStats', 'Economy', 'Sentiment', 'Scaler']);
+    const TIMEFRAMES = [['1m', 60], ['5m', 300], ['15m', 900], ['1h', 3600]];
+
+    const MAX_SHOWN = 200;        // rows rendered
+    const MAX_BUFFER = 12000;     // events held client-side (server keeps 24h/category)
+
+    const enabled = new Set(CATEGORIES.map(c => c[0]));  // all on by default
+    let timeframeSec = 60;                                // 1m default
+    let events = [];                                      // chronological ascending (backfill then live)
+
+    // --- category chips (default on) ---
     const filtersEl = document.getElementById('filters');
-    for (const [src, label] of SOURCES) {
+    for (const [cat, label] of CATEGORIES) {
       const chip = document.createElement('button');
-      chip.className = 'chip src-' + src;
-      chip.dataset.src = src;
+      chip.className = 'chip cat-' + cat;
+      chip.dataset.cat = cat;
       chip.textContent = label;
-      chip.title = src;
+      chip.title = cat;
       chip.addEventListener('click', () => {
-        if (disabled.delete(src)) chip.classList.remove('off');
-        else { disabled.add(src); chip.classList.add('off'); }
-        // Re-apply to rows already on screen so the toggle is retroactive.
-        logEl.querySelectorAll('.row').forEach(r => {
-          if (r.dataset.src === src) r.style.display = disabled.has(src) ? 'none' : '';
-        });
+        if (enabled.delete(cat)) chip.classList.add('off');
+        else { enabled.add(cat); chip.classList.remove('off'); }
+        render();
       });
       filtersEl.appendChild(chip);
     }
 
+    // --- timeframe selector (radio-style) ---
+    const tfEl = document.getElementById('timeframe');
+    const tfButtons = [];
+    for (const [label, secs] of TIMEFRAMES) {
+      const b = document.createElement('button');
+      b.className = 'tf' + (secs === timeframeSec ? ' active' : '');
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        timeframeSec = secs;
+        for (const x of tfButtons) x.classList.toggle('active', x === b);
+        render();
+      });
+      tfButtons.push(b);
+      tfEl.appendChild(b);
+    }
+    shownEl.textContent = '';
+    tfEl.appendChild(shownEl);
+
     // Persist the token across reloads so a phone stays connected after a sleep.
     tokenInput.value = localStorage.getItem('kse_admin_token') || '';
-
     function setStatus(text) { statusEl.textContent = text; }
 
-    // Re-color the rendered message the way Serilog's console theme did: the
-    // structured values (numbers, money, percentages, quoted strings, ticker /
-    // currency symbols) stand out from the literal label text. Quoted strings
-    // come first so money/timestamps inside quotes aren't split.
+    // Re-color the rendered message the way Serilog's console theme did.
     const TOKEN_RE = /("[^"]*")|(-?\$[\d,]+(?:\.\d+)?)|([+-]?\d[\d,]*(?:\.\d+)?\s*%)|(\b[A-Z]{2,6}(?:\/[A-Z]{2,6})?\b)|([+-]?\d[\d,]*(?:\.\d+)?)/g;
-
-    function escapeHtml(s) {
-      return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
-    }
-
+    function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
     function highlight(message) {
       return escapeHtml(message).replace(TOKEN_RE, (m, str, money, pct, sym, num) => {
         if (str) return `<span class="tok-str">${m}</span>`;
         if (sym) return `<span class="tok-sym">${m}</span>`;
-        return `<span class="tok-num">${m}</span>`; // money / pct / num
+        return `<span class="tok-num">${m}</span>`;
       });
     }
 
-    function append(evt) {
+    function rowEl(e) {
       const row = document.createElement('div');
       row.className = 'row';
-      row.dataset.src = evt.source;
-      if (disabled.has(evt.source)) row.style.display = 'none';
-      const ts = new Date(evt.timestamp).toLocaleTimeString(undefined, { timeZone: TZ, hour12: false });
+      const ts = new Date(e.timestamp).toLocaleTimeString(undefined, { timeZone: TZ, hour12: false });
       row.innerHTML =
         `<span class="ts">${ts}</span>` +
-        `<span class="lvl-${evt.level}">${evt.level.slice(0, 3).toUpperCase()}</span>` +
-        `<span class="src src-${evt.source}"></span>` +
+        `<span class="lvl-${e.level}">${e.level.slice(0, 3).toUpperCase()}</span>` +
+        `<span class="cat-${e.category}"></span>` +
         `<span class="msg"></span>`;
-      row.querySelector('.src').textContent = SOURCE_LABEL[evt.source] || evt.source;
-      row.querySelector('.msg').innerHTML = highlight(evt.message);
-      // Newest-first: prepend at the top. The server replays its buffered history
-      // (oldest-first) on connect, so after backfill the newest sits at the top and
-      // live events push in above it.
-      logEl.insertBefore(row, logEl.firstChild);
-      // Cap the DOM at 500 rows (matches the server ring buffer); drop the oldest (bottom).
-      while (logEl.childElementCount > 500) logEl.removeChild(logEl.lastChild);
+      row.querySelector(`.cat-${e.category}`).textContent = CAT_LABEL[e.category] || e.category;
+      row.querySelector('.msg').innerHTML = highlight(e.message);
+      return row;
+    }
+
+    // Build the visible set: filter by enabled category, downsample bucketable categories to one
+    // line per timeframe-bucket (the latest), then newest-first capped at MAX_SHOWN.
+    function render() {
+      const tf = timeframeSec;
+      const kept = [];
+      const bucketIdx = new Map(); // "cat|bucket" -> index in kept (for latest-wins)
+      for (const e of events) {            // events is ascending, so later overwrites earlier
+        if (!enabled.has(e.category)) continue;
+        if (tf > 60 && BUCKETABLE.has(e.category)) {
+          const b = Math.floor(new Date(e.timestamp).getTime() / 1000 / tf);
+          const key = e.category + '|' + b;
+          const at = bucketIdx.get(key);
+          if (at !== undefined) kept[at] = e;
+          else { bucketIdx.set(key, kept.length); kept.push(e); }
+        } else {
+          kept.push(e);
+        }
+      }
+      kept.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // newest first
+      const show = kept.slice(0, MAX_SHOWN);
+      const frag = document.createDocumentFragment();
+      for (const e of show) frag.appendChild(rowEl(e));
+      logEl.replaceChildren(frag);
+      shownEl.textContent = `${show.length}/${kept.length} shown`;
+    }
+
+    // Coalesce the burst of backfill events into one render.
+    let renderQueued = false;
+    function scheduleRender() {
+      if (renderQueued) return;
+      renderQueued = true;
+      setTimeout(() => { renderQueued = false; render(); }, 80);
+    }
+
+    function ingest(e) {
+      events.push(e);
+      if (events.length > MAX_BUFFER) events.splice(0, events.length - MAX_BUFFER);
+      scheduleRender();
     }
 
     let wantConnected = false;
 
-    // Mint a single-use ticket with the JWT in the POST header (never the URL),
-    // then open the stream with only that ticket. Tickets are single-use, so a
-    // dropped stream is re-minted here rather than relying on EventSource's
-    // built-in reconnect (which would replay the already-consumed ticket).
     async function openStream() {
       const token = tokenInput.value.trim();
-      const res = await fetch('/api/admin/logs/ticket', {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + token },
-      });
+      const res = await fetch('/api/admin/logs/ticket', { method: 'POST', headers: { Authorization: 'Bearer ' + token } });
       if (!res.ok) { setStatus('auth failed (check token / admin role)'); wantConnected = false; return; }
       const { ticket } = await res.json();
 
       source = new EventSource('/api/admin/logs/stream?ticket=' + encodeURIComponent(ticket));
       source.onopen = () => { setStatus('connected'); retry = 1000; };
-      source.onmessage = e => { try { append(JSON.parse(e.data)); } catch {} };
+      source.onmessage = e => { try { ingest(JSON.parse(e.data)); } catch {} };
       source.onerror = () => {
         if (source) { source.close(); source = null; }
         if (!wantConnected) return;
@@ -171,6 +225,8 @@
       if (!token) { setStatus('enter a token'); return; }
       localStorage.setItem('kse_admin_token', token);
       disconnect();
+      events = [];               // fresh backfill on each connect
+      render();
       wantConnected = true;
       retry = 1000;
       setStatus('connecting…');

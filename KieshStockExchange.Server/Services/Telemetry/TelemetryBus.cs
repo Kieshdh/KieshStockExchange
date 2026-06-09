@@ -9,13 +9,16 @@ namespace KieshStockExchange.Server.Services.Telemetry;
 /// </summary>
 public sealed class TelemetryBus
 {
-    // Rolling history so a freshly-opened viewer can backfill what happened before it
-    // connected. Capped to bound memory; oldest events fall off.
-    private const int HistoryCapacity = 500;
+    // Per-CATEGORY rolling history so a freshly-opened viewer can backfill a full day
+    // and downsample it to any timeframe (1m/5m/15m/1h) client-side. Each category keeps
+    // the last RetentionMinutes of events; a hard per-category count cap bounds memory if
+    // a category ever bursts faster than once a minute.
+    private const int RetentionMinutes = 1440;          // 24h
+    private const int MaxPerCategory   = 5000;          // safety cap (well above 1440 1/min samples)
 
     private readonly object _lock = new();
     private readonly List<Action<TelemetryEvent>> _subscribers = new();
-    private readonly Queue<TelemetryEvent> _history = new();
+    private readonly Dictionary<string, Queue<TelemetryEvent>> _historyByCategory = new();
 
     public void Publish(TelemetryEvent evt)
     {
@@ -25,8 +28,12 @@ public sealed class TelemetryBus
         Action<TelemetryEvent>[] snapshot;
         lock (_lock)
         {
-            _history.Enqueue(evt);
-            while (_history.Count > HistoryCapacity) _history.Dequeue();
+            if (!_historyByCategory.TryGetValue(evt.Category, out var q))
+                _historyByCategory[evt.Category] = q = new Queue<TelemetryEvent>();
+            q.Enqueue(evt);
+            var cutoff = evt.Timestamp - TimeSpan.FromMinutes(RetentionMinutes);
+            while (q.Count > 0 && (q.Count > MaxPerCategory || q.Peek().Timestamp < cutoff))
+                q.Dequeue();
             snapshot = _subscribers.ToArray();
         }
         foreach (var sub in snapshot)
@@ -47,7 +54,12 @@ public sealed class TelemetryBus
     {
         lock (_lock)
         {
-            history = _history.ToArray();
+            // Flatten every category's buffer into one oldest-first backfill so the viewer
+            // can render any category at any timeframe without a per-category round-trip.
+            history = _historyByCategory.Values
+                .SelectMany(q => q)
+                .OrderBy(e => e.Timestamp)
+                .ToArray();
             _subscribers.Add(handler);
         }
         return new Subscription(this, handler);
