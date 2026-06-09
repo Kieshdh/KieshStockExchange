@@ -32,7 +32,11 @@
     .cat-Scaler { color: #569cd6; }
     .cat-User { color: #9cdcfe; }
     .cat-Other { color: #ce9178; }
+    .cat-FxRate { color: #4fc1ff; }
     .cat-ReservationAuditor { color: #f44747; }
+    /* Aggregated (timebucketed) rows get a left accent so a summed window is visually distinct. */
+    .row.agg { border-left: 2px solid #444; padding-left: 6px; }
+    .row.agg .ts { font-style: italic; }
     /* Filter + timeframe bars. */
     .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 14px; background: #252526; border-bottom: 1px solid #333333; position: sticky; z-index: 2; }
     #filters { top: 49px; }
@@ -79,14 +83,17 @@
       ['Economy', 'Economy'],
       ['Sentiment', 'Sentiment'],
       ['Scaler', 'Scaler'],
+      ['FxRate', 'FxRate'],   // FX rate walk + FX-desk session line
       ['User', 'User'],
-      ['Other', 'Other'],   // also carries FX + ReservationAuditor (infrequent)
+      ['Other', 'Other'],     // ReservationAuditor (infrequent)
     ];
     const CAT_LABEL = Object.fromEntries(CATEGORIES);
-    // Per-minute snapshot categories — the timeframe selector downsamples THESE (one line per
-    // bucket, the latest). Event-driven categories (User / Other / ReservationAuditor) are
-    // discrete and always pass through unbucketed so nothing is silently dropped.
-    const BUCKETABLE = new Set(['BotStats', 'Economy', 'Sentiment', 'Scaler']);
+    // Categories the timeframe selector collapses to one row per bucket. BotStats SUMS its per-window
+    // flow metrics into a bigger window; the others are snapshots/levels (Economy wealth, Sentiment,
+    // Scaler cap, FxRate cumulative session) so the bucket keeps the LATEST line. Event-driven
+    // categories (User, Other) are never collapsed — every discrete line shows.
+    const BUCKETABLE = new Set(['BotStats', 'Economy', 'Sentiment', 'Scaler', 'FxRate']);
+    const SUM_AGGREGATE = new Set(['BotStats']); // true summation; the rest = latest-in-bucket
     const TIMEFRAMES = [['1m', 60], ['5m', 300], ['15m', 900], ['1h', 3600]];
 
     const MAX_SHOWN = 200;        // rows rendered
@@ -145,9 +152,9 @@
       });
     }
 
-    function rowEl(e) {
+    function rowEl(e, agg) {
       const row = document.createElement('div');
-      row.className = 'row';
+      row.className = agg ? 'row agg' : 'row';
       const ts = new Date(e.timestamp).toLocaleTimeString(undefined, { timeZone: TZ, hour12: false });
       row.innerHTML =
         `<span class="ts">${ts}</span>` +
@@ -159,30 +166,65 @@
       return row;
     }
 
-    // Build the visible set: filter by enabled category, downsample bucketable categories to one
-    // line per timeframe-bucket (the latest), then newest-first capped at MAX_SHOWN.
+    // Sum BotStats' per-window FLOW metrics across a bucket into one bigger window. Levels (bots X/Y)
+    // take the latest. Parsed from the rendered line; if a field is absent it contributes 0 (graceful).
+    function aggregateBotStats(arr, bucketMin) {
+      const num = s => s == null ? 0 : parseFloat(String(s).replace(/,/g, '')) || 0;
+      const grab = (m, re) => { const x = m.match(re); return x ? x[1] : null; };
+      let trades = 0, buy = 0, sell = 0, lim = 0, slip = 0, tru = 0, canc = 0, vol = 0, online = '?', loaded = '?';
+      for (const e of arr) {
+        const m = e.message;
+        const b = m.match(/bots\s+([\d,]+)\/([\d,]+)/); if (b) { online = b[1]; loaded = b[2]; }
+        trades += num(grab(m, /trades\s+([\d,]+)/));
+        buy    += num(grab(m, /buy\s+([\d,]+)/));
+        sell   += num(grab(m, /sell\s+([\d,]+)/));
+        lim    += num(grab(m, /Limit\s+([\d,]+)/));
+        slip   += num(grab(m, /SlipMarket\s+([\d,]+)/));
+        tru    += num(grab(m, /TrueMarket\s+([\d,]+)/));
+        canc   += num(grab(m, /cancelled\s+([\d,]+)/));
+        vol    += num(grab(m, /volume\s+\$?([\d,]+(?:\.\d+)?)/));
+      }
+      const f = n => Math.round(n).toLocaleString('en-US');
+      const last = arr[arr.length - 1];
+      const msg = `BotStats[${bucketMin}m ×${arr.length}] bots ${online}/${loaded}, trades ${f(trades)} ` +
+        `(buy ${f(buy)}/sell ${f(sell)}), type (Limit ${f(lim)}/SlipMarket ${f(slip)}/TrueMarket ${f(tru)}), ` +
+        `cancelled ${f(canc)}, volume $${vol.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return { timestamp: last.timestamp, level: last.level, source: last.source, category: 'BotStats', message: msg };
+    }
+
+    // Build the visible set: filter by enabled category; for a >1m timeframe, collapse each BUCKETABLE
+    // category to one row per bucket — BotStats by SUMMING its flows, the rest by keeping the LATEST
+    // snapshot. Event-driven categories pass through. Newest-first, capped at MAX_SHOWN.
     function render() {
       const tf = timeframeSec;
-      const kept = [];
-      const bucketIdx = new Map(); // "cat|bucket" -> index in kept (for latest-wins)
-      for (const e of events) {            // events is ascending, so later overwrites earlier
+      const bucketMin = tf / 60;
+      const kept = [];                 // { evt, agg } OR { sumKey, agg:true } placeholder
+      const sumGroups = new Map();     // "cat|bucket" -> [events]   (SUM_AGGREGATE)
+      const latestIdx = new Map();     // "cat|bucket" -> index in kept (latest-wins)
+      for (const e of events) {        // events ascending, so later overwrites earlier
         if (!enabled.has(e.category)) continue;
         if (tf > 60 && BUCKETABLE.has(e.category)) {
-          const b = Math.floor(new Date(e.timestamp).getTime() / 1000 / tf);
-          const key = e.category + '|' + b;
-          const at = bucketIdx.get(key);
-          if (at !== undefined) kept[at] = e;
-          else { bucketIdx.set(key, kept.length); kept.push(e); }
+          const key = e.category + '|' + Math.floor(new Date(e.timestamp).getTime() / 1000 / tf);
+          if (SUM_AGGREGATE.has(e.category)) {
+            let arr = sumGroups.get(key);
+            if (!arr) { arr = []; sumGroups.set(key, arr); kept.push({ sumKey: key, agg: true }); }
+            arr.push(e);
+          } else {
+            const at = latestIdx.get(key);
+            if (at !== undefined) kept[at] = { evt: e, agg: true };
+            else { latestIdx.set(key, kept.length); kept.push({ evt: e, agg: true }); }
+          }
         } else {
-          kept.push(e);
+          kept.push({ evt: e, agg: false });
         }
       }
-      kept.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)); // newest first
-      const show = kept.slice(0, MAX_SHOWN);
+      const resolved = kept.map(k => k.evt ? k : { evt: aggregateBotStats(sumGroups.get(k.sumKey), bucketMin), agg: true });
+      resolved.sort((a, b) => new Date(b.evt.timestamp) - new Date(a.evt.timestamp)); // newest first
+      const show = resolved.slice(0, MAX_SHOWN);
       const frag = document.createDocumentFragment();
-      for (const e of show) frag.appendChild(rowEl(e));
+      for (const r of show) frag.appendChild(rowEl(r.evt, r.agg));
       logEl.replaceChildren(frag);
-      shownEl.textContent = `${show.length}/${kept.length} shown`;
+      shownEl.textContent = `${show.length}/${resolved.length} shown` + (tf > 60 ? ` · ${bucketMin}m buckets` : '');
     }
 
     // Coalesce the burst of backfill events into one render.

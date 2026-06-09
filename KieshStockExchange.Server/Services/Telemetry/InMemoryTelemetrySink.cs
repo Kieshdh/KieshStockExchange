@@ -23,11 +23,11 @@ public sealed class InMemoryTelemetrySink : ILogEventSink
         ["BotEconomyTelemetry"]   = "Economy",
         ["BotSentimentService"]   = "Sentiment",
         ["BotScalerService"]      = "Scaler",
-        // Infrequent / not-often-looked-at → Other (reservation warns are rare now they're
-        // warn-only; FX rate + desk ticks are low-interest).
+        // FX rate walk + FX-desk session line get their own category (aggregates in the viewer).
+        ["FxRateService"]         = "FxRate",
+        ["FxDeskTelemetry"]       = "FxRate",
+        // Infrequent / not-often-looked-at → Other (reservation warns are rare now they're warn-only).
         ["ReservationAuditor"]    = "Other",
-        ["FxRateService"]         = "Other",
-        ["FxDeskTelemetry"]       = "Other",
         ["Funds"]                 = "User",
         ["MarketEngine"]          = "User",
     };
