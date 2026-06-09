@@ -168,7 +168,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // without an external profiler. Single-threaded loop → plain fields are safe.
     private TimeSpan _phaseTimingInterval = TimeSpan.Zero;
     private DateTime _nextPhaseLogTime = DateTime.MaxValue;
-    private long _phCheckUs, _phCollectUs, _phBatchUs, _phAdvUs, _phArbUs, _phReconUs;
+    private long _phCheckUs, _phCollectUs, _phBatchUs, _phAdvUs, _phArbUs, _phReconUs, _phMaintUs;
     private long _phPending, _phAdvCount, _phTicks;
 
     private readonly AiBotContext         _ctx;
@@ -558,6 +558,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     reconUs = (long)Stopwatch.GetElapsedTime(tReconStart).TotalMicroseconds;
                 }
 
+                // Periodic maintenance at the post-batch quiescent frame, AFTER RecordTickLatency so these
+                // amortized spikes (LogSnapshot O(bots×stocks), prune, asset reload) never skew the scaler
+                // EWMA — same placement rationale as the reconcile pass above. Still on the loop thread
+                // (single-threaded, no new races).
+                var tMaintStart = Stopwatch.GetTimestamp();
+                await RunPeriodicMaintenanceAsync(now, ct).ConfigureAwait(false);
+                long maintUs = (long)Stopwatch.GetElapsedTime(tMaintStart).TotalMicroseconds;
+
                 // Per-phase profiling (opt-in): accumulate this tick, log the windowed average breakdown.
                 if (_phaseTimingInterval > TimeSpan.Zero)
                 {
@@ -567,6 +575,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     _phAdvUs     += (long)Stopwatch.GetElapsedTime(tBatch, tAdv).TotalMicroseconds;
                     _phArbUs     += (long)Stopwatch.GetElapsedTime(tAdv, tArb).TotalMicroseconds;
                     _phReconUs   += reconUs;
+                    _phMaintUs   += maintUs;
                     _phPending   += pending.Count;
                     _phAdvCount  += advanced.Count;
                     _phTicks++;
@@ -797,14 +806,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     {
         if (_phTicks == 0) return;
         double n = _phTicks, k = 1000.0;
-        double tot = (_phCheckUs + _phCollectUs + _phBatchUs + _phAdvUs + _phArbUs + _phReconUs) / n / k;
+        double tot = (_phCheckUs + _phCollectUs + _phBatchUs + _phAdvUs + _phArbUs + _phReconUs + _phMaintUs) / n / k;
         _logger.LogInformation(
-            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + recon {Rec:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick",
+            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick",
             _phTicks, ActiveBotCap?.ToString() ?? "all", tot,
             _phCheckUs / n / k, _phCollectUs / n / k, _phBatchUs / n / k,
-            _phAdvUs / n / k, _phArbUs / n / k, _phReconUs / n / k,
+            _phAdvUs / n / k, _phArbUs / n / k, _phReconUs / n / k, _phMaintUs / n / k,
             _phPending / n, _phAdvCount / n);
-        _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = 0;
+        _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = _phMaintUs = 0;
         _phPending = _phAdvCount = _phTicks = 0;
     }
 
@@ -838,6 +847,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _state.CheckDailyRefresh(_ctx);
             _nextDailyCheck = now + DailyCheckInterval;
         }
+    }
+
+    // Periodic, amortized maintenance — heavy, gated, and deliberately kept OUT of CheckTimers so it can
+    // run AFTER RecordTickLatency (see RunLoopAsync) and never feed the scaler EWMA. These walks
+    // (RefreshAssetsAsync, PruneWorstOrdersAsync, LogSnapshot O(bots×stocks)) used to spike a single tick
+    // to ~100% load and crater the active-bot cap. Still runs on the single-threaded loop thread, so the
+    // lock-free AiBotContext / AccountsCache mutation discipline is unchanged (no new races).
+    private async Task RunPeriodicMaintenanceAsync(DateTime now, CancellationToken ct)
+    {
         if (now >= _nextAssetReload)
         {
             await _state.RefreshAssetsAsync(_ctx, ct).ConfigureAwait(false);
