@@ -200,6 +200,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly IConfiguration         _configuration;
     private readonly int  _maxAdvancedPerTick;   // §P6a cap on entry-route submissions per tick
     private readonly bool _advancedEnabled;       // §P6a master switch (default off)
+    private readonly bool _batchArms;             // §A1a batch the stop/trailing arm route (default off)
 
     public AiTradeService(
         IOrderExecutionService marketOrders,
@@ -311,6 +312,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         advancedMaxQty:     _configuration.GetValue("Bots:Advanced:MaxQty", 50));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
+        _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
         _market.QuoteUpdated += OnQuoteUpdated;
@@ -596,9 +598,91 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // §P6a: submit protective stop/trailing orders through the entry/arm route — sequentially, in ascending
     // aiUserId order (part of the seed-determinism contract), each call owning its own book→fund→position
     // gates while the loop holds none. Runs after the plain batch, outside the matcher's locked region.
+    // §A1a (flag Bots:Advanced:BatchArms): the pure-arm kinds (StopMarketSell/TrailingStopSell) route
+    // through one batched entry call instead — share pre-reserve + a single bulk-insert tx — while
+    // short-opens/brackets stay per-order. The stable partition keeps ascending-aiUserId order within
+    // each half; arms never match, so arming order is externally immaterial.
     private async Task SubmitAdvancedAsync(List<(AIUser user, BotAdvancedDecision dec)> advanced, CancellationToken ct)
     {
         advanced.Sort((a, b) => a.user.AiUserId.CompareTo(b.user.AiUserId));
+
+        if (_batchArms)
+        {
+            var armSells = new List<(AIUser user, BotAdvancedDecision dec)>();
+            var rest     = new List<(AIUser user, BotAdvancedDecision dec)>();
+            foreach (var item in advanced)
+            {
+                if (item.dec.Kind is BotAdvancedKind.StopMarketSell or BotAdvancedKind.TrailingStopSell)
+                    armSells.Add(item);
+                else
+                    rest.Add(item);
+            }
+            if (armSells.Count > 0 && !await SubmitArmBatchAsync(armSells, ct).ConfigureAwait(false))
+                return; // shutdown requested mid-batch
+            await SubmitAdvancedPerOrderAsync(rest, ct).ConfigureAwait(false);
+            return;
+        }
+
+        await SubmitAdvancedPerOrderAsync(advanced, ct).ConfigureAwait(false);
+    }
+
+    // §A1a: submit the tick's protective arms in one batched entry call. Per-decision bookkeeping
+    // matches the per-order loop's exactly. Returns false when shutdown was requested mid-call.
+    private async Task<bool> SubmitArmBatchAsync(
+        List<(AIUser user, BotAdvancedDecision dec)> armSells, CancellationToken ct)
+    {
+        var requests = new List<StopArmRequest>(armSells.Count);
+        foreach (var (user, d) in armSells)
+            requests.Add(new StopArmRequest(
+                user.UserId, d.StockId, d.Quantity, d.Currency,
+                d.Kind == BotAdvancedKind.TrailingStopSell
+                    ? StopArmKind.TrailingStopSell : StopArmKind.StopMarketSell,
+                d.StopPrice, d.StopSlippagePct, d.TrailOffset, d.TrailIsPercent));
+
+        IReadOnlyList<OrderResult> results;
+        try
+        {
+            results = await _entry.ArmStopSellBatchAsync(requests, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogInformation("Bot loop stop requested mid-advanced on tick {Tick}; skipping remaining.", _tickCount);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Batched arm submit failed for {Count} decision(s) on tick {Tick}",
+                armSells.Count, _tickCount);
+            foreach (var (user, _) in armSells)
+            {
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+            }
+            return true;
+        }
+
+        for (int i = 0; i < armSells.Count; i++)
+        {
+            var (user, d) = armSells[i];
+            var result = results[i];
+            if (result.PlacedSuccessfully)
+            {
+                Interlocked.Increment(ref _tradesPlacedThisSession);
+            }
+            else
+            {
+                if (DebugMode && (!DebugUserId.HasValue || user.UserId == DebugUserId.Value))
+                    _logger.LogWarning("Advanced order AIUser {Id} stock {Stock}: {Status} — {Error}",
+                        user.AiUserId, d.StockId, result.Status, result.ErrorMessage);
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+            }
+        }
+        return true;
+    }
+
+    private async Task SubmitAdvancedPerOrderAsync(List<(AIUser user, BotAdvancedDecision dec)> advanced, CancellationToken ct)
+    {
         foreach (var (user, d) in advanced)
         {
             OrderResult result;

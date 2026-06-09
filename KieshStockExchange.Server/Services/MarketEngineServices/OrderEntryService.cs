@@ -222,8 +222,23 @@ public sealed class OrderEntryService : IOrderEntryService
         decimal stopPrice, decimal? limitPrice, decimal? buyBudget, decimal? slippagePct,
         CurrencyType currency, bool buyOrder, bool limitStop, CancellationToken ct)
     {
+        var (order, error) = await BuildStopOrderAsync(userId, stockId, quantity, stopPrice,
+            limitPrice, buyBudget, slippagePct, currency, buyOrder, limitStop, ct).ConfigureAwait(false);
+        if (error is not null || order is null) return error!;
+
+        var result = await _engine.ArmStopAsync(order, ct).ConfigureAwait(false);
+        if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
+        return result;
+    }
+
+    // §A1a: the Order-construction half of ArmStopOrderAsync — direction sanity + capped-anchor
+    // logic, no engine call — shared by the per-order arm above and the batch arm route.
+    private async Task<(Order? order, OrderResult? error)> BuildStopOrderAsync(int userId,
+        int stockId, int quantity, decimal stopPrice, decimal? limitPrice, decimal? buyBudget,
+        decimal? slippagePct, CurrencyType currency, bool buyOrder, bool limitStop, CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
-        if (stopPrice <= 0m) return OrderResultFactory.InvalidParams("Stop price must be positive.");
+        if (stopPrice <= 0m) return (null, OrderResultFactory.InvalidParams("Stop price must be positive."));
 
         // Direction sanity: a sell-stop sits at/below market, a buy-stop at/above. Skipped only
         // when no live price is available yet (the watcher would still fire on the next cross).
@@ -233,11 +248,11 @@ public sealed class OrderEntryService : IOrderEntryService
         if (market > 0m)
         {
             if (buyOrder && stopPrice < market)
-                return OrderResultFactory.InvalidParams(
-                    $"Buy-stop must be at or above the market price ({CurrencyHelper.Format(market, currency)}).");
+                return (null, OrderResultFactory.InvalidParams(
+                    $"Buy-stop must be at or above the market price ({CurrencyHelper.Format(market, currency)})."));
             if (!buyOrder && stopPrice > market)
-                return OrderResultFactory.InvalidParams(
-                    $"Sell-stop must be at or below the market price ({CurrencyHelper.Format(market, currency)}).");
+                return (null, OrderResultFactory.InvalidParams(
+                    $"Sell-stop must be at or below the market price ({CurrencyHelper.Format(market, currency)})."));
         }
 
         // A capped market sell-stop carries a slippage cap + an anchor Price (the arm-time market,
@@ -261,10 +276,7 @@ public sealed class OrderEntryService : IOrderEntryService
             Entry = limitStop ? EntryType.Limit : EntryType.Market,
             Stop = StopKind.Stop,
         };
-
-        var result = await _engine.ArmStopAsync(order, ct).ConfigureAwait(false);
-        if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
-        return result;
+        return (order, null);
     }
 
     // §3.6 P5 trailing stops (market-only). A trailing stop arms exactly like a static stop — same
@@ -282,23 +294,38 @@ public sealed class OrderEntryService : IOrderEntryService
     private async Task<OrderResult> ArmTrailingStopAsync(int userId, int stockId, int quantity,
         decimal trailOffset, bool isPercent, decimal? buyBudget, bool buyOrder, CurrencyType currency, CancellationToken ct)
     {
+        var (order, error) = await BuildTrailingStopOrderAsync(userId, stockId, quantity,
+            trailOffset, isPercent, buyBudget, buyOrder, currency, ct).ConfigureAwait(false);
+        if (error is not null || order is null) return error!;
+
+        var result = await _engine.ArmStopAsync(order, ct).ConfigureAwait(false);
+        if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
+        return result;
+    }
+
+    // §A1a: the Order-construction half of ArmTrailingStopAsync — watermark + initial-trigger
+    // seeding, no engine call — shared by the per-order arm above and the batch arm route.
+    private async Task<(Order? order, OrderResult? error)> BuildTrailingStopOrderAsync(int userId,
+        int stockId, int quantity, decimal trailOffset, bool isPercent, decimal? buyBudget,
+        bool buyOrder, CurrencyType currency, CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
-        if (trailOffset <= 0m) return OrderResultFactory.InvalidParams("Trail offset must be positive.");
+        if (trailOffset <= 0m) return (null, OrderResultFactory.InvalidParams("Trail offset must be positive."));
         if (isPercent && trailOffset > 100m)
-            return OrderResultFactory.InvalidParams("Trailing percent offset must be between 0 and 100%.");
+            return (null, OrderResultFactory.InvalidParams("Trailing percent offset must be between 0 and 100%."));
 
         // A trailing stop needs a live reference price to seed the watermark + initial trigger.
         decimal market = _data.Quotes.TryGetValue((stockId, currency), out var q) && q.LastPrice > 0m
             ? q.LastPrice
             : await _data.GetLastPriceAsync(stockId, currency, ct).ConfigureAwait(false);
         if (market <= 0m)
-            return OrderResultFactory.InvalidParams("No reference price available to arm a trailing stop.");
+            return (null, OrderResultFactory.InvalidParams("No reference price available to arm a trailing stop."));
 
         decimal watermark = market;
         decimal effStop = CurrencyHelper.RoundMoney(
             TrailMath.EffectiveStop(watermark, trailOffset, isPercent, buyOrder), currency);
         if (effStop <= 0m)
-            return OrderResultFactory.InvalidParams("Trail offset is too large for the current price.");
+            return (null, OrderResultFactory.InvalidParams("Trail offset is too large for the current price."));
 
         var order = new Order
         {
@@ -316,10 +343,53 @@ public sealed class OrderEntryService : IOrderEntryService
             Entry = EntryType.Market,
             Stop = StopKind.Trailing,
         };
+        return (order, null);
+    }
 
-        var result = await _engine.ArmStopAsync(order, ct).ConfigureAwait(false);
-        if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
-        return result;
+    // §A1a: batch-arm the bots' protective sell-stops / trailing-sells. Builds each Order with
+    // the same direction-sanity / capped-anchor / watermark logic as the per-order paths, hands
+    // the whole list to the engine's ArmStopBatchAsync (share pre-reserve + ONE bulk-insert tx),
+    // then arms the trigger watcher for every success — the batch owns watcher arming here, so
+    // every successfully inserted arm is armed and none of the rejects are.
+    public async Task<IReadOnlyList<OrderResult>> ArmStopSellBatchAsync(
+        IReadOnlyList<StopArmRequest> requests, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (requests is null || requests.Count == 0) return Array.Empty<OrderResult>();
+
+        var results = new OrderResult[requests.Count];
+        var built = new List<(int index, Order order)>(requests.Count);
+        for (int i = 0; i < requests.Count; i++)
+        {
+            var r = requests[i];
+            var (order, error) = r.Kind == StopArmKind.TrailingStopSell
+                ? await BuildTrailingStopOrderAsync(r.UserId, r.StockId, r.Quantity, r.TrailOffset,
+                    r.TrailIsPercent, buyBudget: null, buyOrder: false, r.Currency, ct).ConfigureAwait(false)
+                : await BuildStopOrderAsync(r.UserId, r.StockId, r.Quantity, r.StopPrice,
+                    limitPrice: null, buyBudget: null, slippagePct: r.StopSlippagePct, r.Currency,
+                    buyOrder: false, limitStop: false, ct).ConfigureAwait(false);
+            if (error is not null || order is null)
+            {
+                results[i] = error ?? OrderResultFactory.InvalidParams("Failed to build stop order.");
+                continue;
+            }
+            built.Add((i, order));
+        }
+        if (built.Count == 0) return results;
+
+        var orders = new List<Order>(built.Count);
+        for (int i = 0; i < built.Count; i++) orders.Add(built[i].order);
+
+        var engineResults = await _engine.ArmStopBatchAsync(orders, ct).ConfigureAwait(false);
+
+        for (int i = 0; i < built.Count; i++)
+        {
+            var (idx, order) = built[i];
+            var result = engineResults[i];
+            results[idx] = result;
+            if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
+        }
+        return results;
     }
     #endregion
 

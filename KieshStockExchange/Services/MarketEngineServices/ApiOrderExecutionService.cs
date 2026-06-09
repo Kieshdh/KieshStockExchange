@@ -55,6 +55,10 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
     public Task<OrderResult> ArmStopAsync(Order incoming, CancellationToken ct = default)
         => throw new NotSupportedException("ArmStopAsync is server-side; place a Stop* order via /api/orders/place.");
 
+    // §A1a: the batch arm is a server-internal bot-loop optimization; never called client-side.
+    public Task<IReadOnlyList<OrderResult>> ArmStopBatchAsync(IReadOnlyList<Order> orders, CancellationToken ct = default)
+        => throw new NotSupportedException("ArmStopBatchAsync is server-side (bot-loop batch arm).");
+
     public Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default)
         => throw new NotSupportedException("PromoteStopAsync is server-side (driven by StopTriggerWatcher).");
 

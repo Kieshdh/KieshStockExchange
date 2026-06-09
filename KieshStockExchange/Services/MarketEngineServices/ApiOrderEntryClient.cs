@@ -77,6 +77,24 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.Trailing, currency,
             trailOffset: trailOffset, trailIsPercent: isPercent), ct);
 
+    // §A1a: the batch arm is a server-internal bot-loop optimization; the HTTP surface falls
+    // back to one place call per request (no new endpoint).
+    public async Task<IReadOnlyList<OrderResult>> ArmStopSellBatchAsync(
+        IReadOnlyList<StopArmRequest> requests, CancellationToken ct = default)
+    {
+        var results = new OrderResult[requests.Count];
+        for (int i = 0; i < requests.Count; i++)
+        {
+            var r = requests[i];
+            results[i] = r.Kind == StopArmKind.TrailingStopSell
+                ? await PlaceTrailingStopSellOrderAsync(r.UserId, r.StockId, r.Quantity,
+                    r.TrailOffset, r.TrailIsPercent, r.Currency, ct).ConfigureAwait(false)
+                : await PlaceStopMarketSellOrderAsync(r.UserId, r.StockId, r.Quantity,
+                    r.StopPrice, r.Currency, r.StopSlippagePct, ct).ConfigureAwait(false);
+        }
+        return results;
+    }
+
     public async Task<OrderResult> ModifyOrderAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newPrice = null, CancellationToken ct = default)
     {

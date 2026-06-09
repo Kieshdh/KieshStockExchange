@@ -1463,6 +1463,178 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         return results;
     }
+
+    // §A1a: batch the stop/trailing ARM route — reserve + insert only; no book, no match, no
+    // settle-trades. Mirrors PlaceAndMatchBatchAsync's Phase 1.5 share pre-reserve + Phase 2
+    // bulk insert. There is no Phase 3 settle here, so the touched Position reservations are
+    // persisted INSIDE the insert tx (the per-order arm, OrderSettler.SettleAsync, persists
+    // sellPos inside its tx the same way).
+    //
+    // SELL stops/trailing only: the bot fleet's protective stops are the only batch caller and
+    // always sell held longs; buy-stops (fund/budget reserve) stay on the per-order ArmStopAsync.
+    // A would-be long→short flip (Quantity > AvailableQuantity) is REJECTED by the availability
+    // check below, where the per-order OrderSettler would reserve the long part and post short
+    // collateral at fill — a conservative divergence (a reject, never a leak) that protective
+    // stops can't hit.
+    //
+    // No book lock and no user gates during the pre-reserve — the identical posture to the plain
+    // batch's Phase 1.5, which reserves ungated on the single bot-loop thread.
+    public async Task<IReadOnlyList<OrderResult>> ArmStopBatchAsync(
+        IReadOnlyList<Order> orders, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (orders is null || orders.Count == 0) return Array.Empty<OrderResult>();
+
+        // Phase 1: structural validation — no DB calls.
+        var results = new OrderResult[orders.Count];
+        var validOrders = new List<(int index, Order order)>(orders.Count);
+        for (int i = 0; i < orders.Count; i++)
+        {
+            var o = orders[i];
+            var err = _validator.ValidateNew(o);
+            if (err != null) { results[i] = err; continue; }
+            if (!o.IsStopOrder)
+            {
+                results[i] = OrderResultFactory.InvalidParams("ArmStopBatchAsync requires stop orders.");
+                continue;
+            }
+            if (!o.IsSellOrder)
+            {
+                results[i] = OrderResultFactory.InvalidParams(
+                    "ArmStopBatchAsync handles sell-stops only; arm buy-stops per-order.");
+                continue;
+            }
+            o.Arm(); // Status = Pending before the bulk insert (mirrors ArmStopAsync)
+            validOrders.Add((i, o));
+        }
+        if (validOrders.Count == 0) return results;
+
+        var scope = new TradeBatchScope();
+        var touchedPositions = new Dictionary<(int UserId, int StockId), Position>();
+
+        // Phase 1.5: pre-flight + share reserve in the in-memory cache. Same checks, mutations,
+        // and ledger amount tuples as the plain batch's seller pre-flight; only the reason label
+        // differs ("ArmBatch:Reserve") so the CSV can attribute arm-batch reservations.
+        var sellerIds = new HashSet<int>();
+        for (int i = 0; i < validOrders.Count; i++) sellerIds.Add(validOrders[i].order.UserId);
+        var sellerIdList = new List<int>(sellerIds.Count);
+        foreach (var id in sellerIds) sellerIdList.Add(id);
+        await _accounts.EnsureLoadedAsync(sellerIdList, ct).ConfigureAwait(false);
+
+        HashSet<int>? rejected = null;
+        for (int i = 0; i < validOrders.Count; i++)
+        {
+            var (idx, order) = validOrders[i];
+            var pos = _accounts.GetPosition(order.UserId, order.StockId);
+            if (pos is null)
+            {
+                results[idx] = OrderResultFactory.InsufficientStocks(
+                    $"Insufficient shares for sell order (user {order.UserId}, stock {order.StockId}): no position row.");
+                rejected ??= new HashSet<int>();
+                rejected.Add(idx);
+                continue;
+            }
+            if (pos.AvailableQuantity < order.Quantity)
+            {
+                results[idx] = OrderResultFactory.InsufficientStocks(
+                    $"Insufficient shares for sell order (user {order.UserId}, stock {order.StockId}): " +
+                    $"needs {order.Quantity}, available {pos.AvailableQuantity} " +
+                    $"(Quantity={pos.Quantity}, Reserved={pos.ReservedQuantity}).");
+                rejected ??= new HashSet<int>();
+                rejected.Add(idx);
+                continue;
+            }
+
+            // Snapshot before mutating so RestoreCacheSnapshots can undo on rollback.
+            var key = (order.UserId, order.StockId);
+            if (pos.PositionId != 0 && !scope.PosSnapshots.ContainsKey(key))
+                scope.PosSnapshots[key] = (pos.Quantity, pos.ReservedQuantity);
+
+            var posResBefore = pos.ReservedQuantity;
+            try { pos.ReserveStock(order.Quantity); }
+            catch (ArgumentException)
+            {
+                results[idx] = OrderResultFactory.InsufficientStocks(
+                    $"Insufficient shares for sell order (user {order.UserId}, stock {order.StockId}): " +
+                    $"race on ReserveStock, needs {order.Quantity}, available {pos.AvailableQuantity} " +
+                    $"(Quantity={pos.Quantity}, Reserved={pos.ReservedQuantity}).");
+                rejected ??= new HashSet<int>();
+                rejected.Add(idx);
+                continue;
+            }
+            _ledger.LogPosition(order.UserId, order.StockId, order.OrderId, "ArmBatch:Reserve",
+                order.Quantity, posResBefore, pos.ReservedQuantity,
+                pos.Quantity, pos.Quantity);
+            var orderSellBefore = order.CurrentSellReservedQty;
+            order.TakeSellReservation(order.Quantity);
+            _ledger.LogOrder(order.UserId, order.OrderId, "ArmBatch:Reserve",
+                order.Quantity, order.CurrentBuyReservation, order.CurrentBuyReservation,
+                orderSellBefore, order.CurrentSellReservedQty);
+            if (pos.PositionId != 0) touchedPositions[key] = pos;
+        }
+
+        if (rejected is not null)
+        {
+            int write = 0;
+            for (int read = 0; read < validOrders.Count; read++)
+                if (!rejected.Contains(validOrders[read].index))
+                    validOrders[write++] = validOrders[read];
+            validOrders.RemoveRange(write, validOrders.Count - write);
+            if (validOrders.Count == 0)
+            {
+                _settlement.RestoreCacheSnapshots(new Dictionary<int, Order>(), scope);
+                return results;
+            }
+        }
+
+        // Keep the caller's ascending-aiUserId order so InsertAllAsync assigns OrderIds in that
+        // order (arms never match, so arming order is otherwise externally immaterial).
+        var orderList = new List<Order>(validOrders.Count);
+        for (int i = 0; i < validOrders.Count; i++) orderList.Add(validOrders[i].order);
+
+        // Phase 2: ONE short tx — bulk-insert the Pending rows and persist the touched Position
+        // reservations so DB-backed views match cache (per-order arm parity). On failure restore
+        // the Phase 1.5 cache reservations and fail every survivor.
+        try
+        {
+            await using var armTx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await _db.InsertAllAsync(orderList, ct).ConfigureAwait(false);
+                if (touchedPositions.Count > 0)
+                    await _db.UpdateAllAsync(touchedPositions.Values, ct).ConfigureAwait(false);
+                await armTx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await armTx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ArmStopBatchAsync: bulk arm insert failed");
+            _settlement.RestoreCacheSnapshots(new Dictionary<int, Order>(), scope);
+            for (int i = 0; i < validOrders.Count; i++)
+                results[validOrders[i].index] = OrderResultFactory.OperationFailed(
+                    $"Bulk arm insert failed: {ex.Message}");
+            return results;
+        }
+
+        // Post-commit: register canonical instances (OrderIds assigned by InsertAllAsync), stamp
+        // successes (empty trades — an arm never fills), and fire one coalesced cache notify.
+        var affectedUsers = new HashSet<int>(validOrders.Count);
+        for (int i = 0; i < validOrders.Count; i++)
+        {
+            var (idx, order) = validOrders[i];
+            _registry.Register(order);
+            affectedUsers.Add(order.UserId);
+            results[idx] = OrderResultFactory.Success(order, new List<Transaction>());
+        }
+        _orderCache.NotifyOrdersMutated(affectedUsers);
+
+        return results;
+    }
     #endregion
 
     #region Helpers

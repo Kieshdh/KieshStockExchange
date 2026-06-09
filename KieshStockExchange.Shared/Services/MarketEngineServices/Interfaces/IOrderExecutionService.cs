@@ -18,6 +18,14 @@ public interface IOrderExecutionService
     /// matching. The caller registers it with the trigger watcher on success.</summary>
     Task<OrderResult> ArmStopAsync(Order incoming, CancellationToken ct = default);
 
+    /// <summary>§A1a: arm many SELL stop/trailing orders in one engine pass — share pre-reserve
+    /// in the accounts cache, then ONE tx bulk-inserting the Pending rows + persisting the
+    /// touched Position reservations. No book, no match. Buy-stops are rejected (arm those
+    /// per-order via <see cref="ArmStopAsync"/>). Returns one OrderResult per submitted order
+    /// in the same order; the caller registers successes with the trigger watcher.</summary>
+    Task<IReadOnlyList<OrderResult>> ArmStopBatchAsync(
+        IReadOnlyList<Order> orders, CancellationToken ct = default);
+
     /// <summary>§3.6 P2: promote an armed stop (by id) to its active type and match it. The
     /// arm-time reservation is reused — no re-reserve, no re-insert.</summary>
     Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default);

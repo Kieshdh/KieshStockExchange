@@ -73,4 +73,10 @@ public interface IOrderEntryService
 
     Task<OrderResult> PlaceTrailingStopSellOrderAsync(int userId, int stockId, int quantity,
         decimal trailOffset, bool isPercent, CurrencyType currency, CancellationToken ct = default);
+
+    // §A1a: batch-arm protective sell-stops / trailing-sells (the bot fleet's arm route) in one
+    // engine pass — share pre-reserve + ONE bulk-insert tx. One result per request, aligned by
+    // index; every success is registered with the trigger watcher before this returns.
+    Task<IReadOnlyList<OrderResult>> ArmStopSellBatchAsync(
+        IReadOnlyList<StopArmRequest> requests, CancellationToken ct = default);
 }
