@@ -187,7 +187,11 @@ BALANCE_MIN               = 1_000_000.0
 BALANCE_MAX_FACTOR        = 10.0
 
 # Cash reserves (_portfolio): aggressive bots keep less cash.
-MAX_CASH_BASE             = 0.50
+# Seed cash% = (min_cash + max_cash) / 2 (band midpoint, see Person.py). The base is lowered from 0.50 so
+# that midpoint lands back at ~0.23 — preserving the historical seed holdings while the band stays centered
+# on the seed (the cash-homeostasis rest-point). Soak-calibration knob: tune so the portfolio-weighted
+# (Min+Max)/2 matches the measured seed cash%.
+MAX_CASH_BASE             = 0.45
 MAX_CASH_SLOPE            = -0.30
 MAX_CASH_JITTER           = 0.15
 MIN_CASH_FRACTION_LO      = 0.30    # min_cash = max_cash * U(LO, HI)

@@ -169,7 +169,10 @@ class Person:
         # selection; sizing is uniform per picked stock.
         n_stocks = random.randint(self.min_stocks, self.max_stocks)
         portfolio = random.sample(watchlist, n_stocks)
-        cash_frac = (self.min_cash * 2 + self.max_cash) / 3
+        # Seed cash% sits at the band MIDPOINT so it coincides with the runtime cash-homeostasis
+        # rest-point (the midpoint of [MinCashReservePrc, MaxCashReservePrc]). Centering the seed in the
+        # band makes the controller hit the Min/Max walls symmetrically → no systematic sell-lean / drift.
+        cash_frac = (self.min_cash + self.max_cash) / 2
         target_stock_value = self.balance * (1 - cash_frac)
 
         # EUR-home bots see every USD reference price scaled by 1 / (EUR per
