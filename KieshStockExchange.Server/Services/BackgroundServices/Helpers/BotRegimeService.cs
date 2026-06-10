@@ -106,6 +106,13 @@ internal sealed class BotRegimeService
     internal decimal HerdTilt(int aiUserId, decimal f, decimal delta)
         => IsFollower(aiUserId, f) ? RegimeSign * delta : 0m;
 
+    /// <summary>
+    /// Stable per-bot unit value in [0,1) — the same pure avalanche hash that drives cohort selection,
+    /// exposed for static callers (e.g. the Scalper Panic/Greed extreme-reaction split). Deterministic,
+    /// call-order-independent, advances no RNG.
+    /// </summary>
+    internal static decimal StableUnit(int aiUserId) => HashUnit(aiUserId);
+
     // Pure hash → [0,1). Avalanche mix (same family as StockProfileService) so adjacent ids don't correlate.
     private static decimal HashUnit(int aiUserId)
     {

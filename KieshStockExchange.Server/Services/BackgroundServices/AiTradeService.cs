@@ -357,7 +357,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         activityGamma:       _configuration.GetValue("Bots:Activity:Gamma", 1.0),
                         rangeActivityImpact: _configuration.GetValue("Bots:Range:ActivityImpact", false),
                         rangeMaxSlippage:    _configuration.GetValue("Bots:Range:MaxSlippage", 0.02m),
-                        fatImpactProb:       _configuration.GetValue("Bots:Range:FatImpactProb", 0m));
+                        fatImpactProb:       _configuration.GetValue("Bots:Range:FatImpactProb", 0m),
+                        // Down-drift fix — Greed extreme-reaction style + optional continuous cash homeostasis
+                        // (all default off / inert; flag-off reproduces today's logic byte-for-byte).
+                        greedStyle:                _configuration.GetValue("Bots:ExtremeReaction:GreedStyle", false),
+                        greedSplit:                _configuration.GetValue("Bots:ExtremeReaction:GreedSplit", 0.5m),
+                        cashHomeostasisContinuous: _configuration.GetValue("Bots:CashHomeostasis:Continuous", false),
+                        cashMaxShift:              _configuration.GetValue("Bots:CashHomeostasis:MaxShift", 0.15m),
+                        cashEdgeBuy:               _configuration.GetValue("Bots:CashHomeostasis:EdgeForceBuy", 0.95m),
+                        cashEdgeSell:              _configuration.GetValue("Bots:CashHomeostasis:EdgeForceSell", 0.05m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
