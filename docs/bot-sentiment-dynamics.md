@@ -16,6 +16,44 @@ Contrarian; Scalper neutralized by the Panic/Greed split; only TrendFollower fol
 *faded* harder than *followed* → no trend. Also: everything keys off the sentiment **level** only; the
 **rate of change** (rising vs rolling over) is unused.
 
+## 1b. Empirical findings (overnight soaks — context to design against)
+Measured on `feature/bot-market-realism-v2` over many soaks (incl. a 4h + parallel 2h A/Bs). Treat these as
+ground truth — and **use them to make the best decisions, including improving on this plan's specific
+proposals where the data points to a better approach.** This plan is a well-reasoned starting point, not a
+spec to follow blindly; the goal (sentiment-driven trends + reversals, bounded, conservation-safe) and the
+hard constraints are fixed, but the *how* is open to Ultraplan's judgment informed by this context.
+
+**Motivation / baseline** (→ §1, §7)
+- **Sentiment is anchor-dominated ~20:1.** A ±0.6 sentiment lean shifted bot buy% only ~0.2–1.2pp and price
+  ~0; the value anchor moves buy% ~22pp on a 43% price deviation. That's *why* sentiment is inert.
+- **Sentiment is balanced** (global avg −0.006, news shocks net +0.08) — the inertness is the fade/level
+  design, NOT a sentiment-direction bias.
+- The shipped config is **realistic at steady state** (body/range 0.653 = RW, wick 0.347 = RW). The new
+  trends must be added *on top* without breaking this shape.
+
+**The reversion floor is validated** (→ §5, §9.3)
+- Value anchor + cash controller (`CashHomeostasis:Continuous`, `MaxShift 0.45`) bound drift **~3×** (from
+  −6.7%/3h unfixed → medianAbs ~3%/2.5h, sub-linear, within budget) **without over-damping** (shape stayed
+  ≈ RW). Momentum can lean on this; co-tune `MomentumConviction` against `MaxShift 0.45`.
+
+**Taker-flow asymmetry** (→ §9.5)
+- Aggressive **sell volume exceeds buy by ~47%** (long-heavy fleet: buys rest as limits, sells take).
+  Momentum that buys via *limits* won't move price up — it must **take** liquidity. The aggression-balance
+  is a co-requisite of trending.
+
+**Conservation precedent** (→ constraints)
+- All decision-layer soaks held **CK=0 / CONS=0 / beyond50=0** over 230k+ trades / 4h → decision-layer
+  changes have been conservation-safe; the new design should hold the same.
+- **Warning:** heavy volume concentration (`Activity:Gamma 1.4`) produced **CK=4** → if coupling
+  `|ds|→activity` (§9.7), don't over-concentrate.
+
+**Measurement methodology** (→ §7, §10 — so the verification is sound)
+- Fresh-reseed **startup transient** dominates short soaks (low-id Calm stocks show +30–40% artifacts) →
+  measure **tail windows** past startup.
+- **Cross-process A/B diverges** under contention (unpinned control stock differed −7% vs −15%) → prefer
+  **within-run / decision-level** metrics (buy%) over cross-process price comparison.
+- Drift creeps **sub-linearly** → use **multi-hour** soaks (the 3h smoke caught what 18–35-min runs hid).
+
 ## 2. Core idea
 Two changes, together:
 1. **Use sentiment slope, not just level.** Add a smoothed `ds = d(sentiment)/dt` and let strategies react
@@ -190,7 +228,9 @@ reconciled or they'll fight it:
   the seed ratios; confirm scaler cap (perf).
 
 ## 11. For Ultraplan
-**Refine this design again, then implement it.** Specifically:
+**Refine this design again, then implement it** — use the §1b empirical findings as decision context and
+feel free to improve on the proposals below where the data suggests something better (goal + hard
+constraints fixed; the *how* is yours). Specifically:
 - Critique/lock the open choices: one vs two slope timescales; FOMO-lateness `L` curve; the exact per-strategy
   `(s,ds)` response & conviction weights; which old paths to delete vs keep-behind-flag.
 - **Handle the model-wide ripple (§9) as one coherent change** — the extreme-reaction taxonomy, old momentum/
@@ -222,3 +262,5 @@ reconciled or they'll fight it:
   interplay, Scalper-TP, activity coupling, seed ratios + `L` migration, perf re-check).
 - Impl sweep 3 (rollout): pre-work test-hook removal, inert-first flags, migration, tests, verification soak;
   added §11 For Ultraplan (refine + implement the whole ripple coherently; patch-series deliverable).
+- Empirical findings: added §1b (A–E from the overnight soaks) as decision context, framed so Ultraplan
+  uses them to make the best calls and may improve on the plan's specifics (goal + hard constraints fixed).
