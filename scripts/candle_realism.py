@@ -190,11 +190,14 @@ def magnitude_report(series, window_min, max_move_pct):
             breaches.append((net_4h, sid))
     if not nets:
         return
+    raws = sorted(x / scale for x in nets)   # un-scaled per-window moves (no 4h projection)
     nets.sort(); excursions.sort(reverse=True)
     n = len(nets)
     p = lambda q: nets[min(n - 1, int(q * n))]
-    print(f"\n=== MAGNITUDE BUDGET (per stock, scaled to 4h; target: typical <= {max_move_pct:.0f}%, ~20% rare) ===")
-    print(f"  |net move| 4h   median {p(0.5):>6.2f}%   p95 {p(0.95):>6.2f}%   max {nets[-1]:>6.2f}%   (n={n})")
+    pr = lambda q: raws[min(n - 1, int(q * n))]
+    print(f"\n=== MAGNITUDE BUDGET (per stock; target: typical <= {max_move_pct:.0f}% / 4h, ~20% rare) ===")
+    print(f"  |net move| raw  median {pr(0.5):>6.2f}%   p95 {pr(0.95):>6.2f}%   max {raws[-1]:>6.2f}%   (over {window_min:.0f}m, n={n})")
+    print(f"  |net move| 4h*  median {p(0.5):>6.2f}%   p95 {p(0.95):>6.2f}%   max {nets[-1]:>6.2f}%   (*linear projection = pessimistic upper bound)")
     print(f"  over budget     {len(breaches):>3} stock(s) > {max_move_pct:.0f}%   "
           f"({100.0*len(breaches)/n:.1f}% of names)")
     if breaches:
