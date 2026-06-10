@@ -263,13 +263,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         theta:            _configuration.GetValue("Bots:Fundamental:Theta", 0.02),
                         sigma:            _configuration.GetValue("Bots:Fundamental:Sigma", 0.004),
                         driftIntervalSec: _configuration.GetValue("Bots:Fundamental:DriftIntervalSeconds", 60.0));
+        // Sentiment-dynamics §: the master flag gates BOTH the EWMA slope (here) and the directional phase
+        // model (in AiBotDecisionService). Off ⇒ no slope compute and byte-identical decisions.
+        var sentimentDynamics = _configuration.GetValue("Bots:SentimentDynamics:Enabled", false);
         _sentiment = new BotSentimentService(stocks, _profiles, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
                         newsEvents:              _configuration.GetValue("Bots:NewsEvents", true),
                         shockMeanIntervalHours:  _configuration.GetValue("Bots:ShockMeanIntervalHours", 6.0),
                         shockMinMagnitude:       _configuration.GetValue("Bots:ShockMinMagnitude", 0.3m),
                         shockMaxMagnitude:       _configuration.GetValue("Bots:ShockMaxMagnitude", 1.5m),
                         shockMagnitudeExponent:  _configuration.GetValue("Bots:ShockMagnitudeExponent", 3.0),
-                        shockDecayPerTick:       _configuration.GetValue("Bots:ShockDecayPerTick", 0.999m));
+                        shockDecayPerTick:       _configuration.GetValue("Bots:ShockDecayPerTick", 0.999m),
+                        slopeEnabled:            sentimentDynamics,
+                        slopeTauFastSec:         _configuration.GetValue("Bots:SentimentDynamics:SlopeTauFastSec", 45.0),
+                        slopeTauSlowSec:         _configuration.GetValue("Bots:SentimentDynamics:SlopeTauSlowSec", 180.0));
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
@@ -365,7 +371,17 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         cashHomeostasisContinuous: _configuration.GetValue("Bots:CashHomeostasis:Continuous", false),
                         cashMaxShift:              _configuration.GetValue("Bots:CashHomeostasis:MaxShift", 0.15m),
                         cashEdgeBuy:               _configuration.GetValue("Bots:CashHomeostasis:EdgeForceBuy", 0.95m),
-                        cashEdgeSell:              _configuration.GetValue("Bots:CashHomeostasis:EdgeForceSell", 0.05m));
+                        cashEdgeSell:              _configuration.GetValue("Bots:CashHomeostasis:EdgeForceSell", 0.05m),
+                        // Sentiment-dynamics §: the slope-aware phase model (default off ⇒ byte-identical).
+                        sentimentDynamics:    sentimentDynamics,
+                        slopeScaleFast:       _configuration.GetValue("Bots:SentimentDynamics:SlopeScaleFast", 0.01m),
+                        slopeScaleSlow:       _configuration.GetValue("Bots:SentimentDynamics:SlopeScaleSlow", 0.005m),
+                        momentumConviction:   _configuration.GetValue("Bots:SentimentDynamics:MomentumConviction", 0.15m),
+                        scalperConviction:    _configuration.GetValue("Bots:SentimentDynamics:ScalperConviction", 0.20m),
+                        reversionConviction:  _configuration.GetValue("Bots:SentimentDynamics:ReversionConviction", 0.15m),
+                        reversalConviction:   _configuration.GetValue("Bots:SentimentDynamics:ReversalConviction", 0.10m),
+                        marketMakerLean:      _configuration.GetValue("Bots:SentimentDynamics:MarketMakerLean", 0.05m),
+                        aggressionBoost:      _configuration.GetValue("Bots:SentimentDynamics:AggressionBoost", 0.20m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);

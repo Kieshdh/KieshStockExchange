@@ -129,6 +129,16 @@ internal sealed class AiBotDecisionService
     private readonly bool    _cashHomeostasisContinuous;
     private readonly decimal _cashMaxShift, _cashEdgeBuy, _cashEdgeSell;
 
+    // Sentiment-dynamics §: the slope-aware phase model. When _sentimentDynamics is on, DirectionalBias(s,
+    // ds_fast, ds_slow, L) REPLACES the old level-only momentum + sentiment-bias terms, and ApplyExtremeReaction
+    // is skipped (no double-acting). All off by default ⇒ flag-off is byte-identical to today.
+    private readonly bool    _sentimentDynamics;
+    private readonly decimal _slopeScaleFast, _slopeScaleSlow;      // σ in tanh(ds/σ)
+    private readonly decimal _momentumConviction, _scalperConviction;
+    private readonly decimal _reversionConviction, _reversalConviction;
+    private readonly decimal _marketMakerLean;
+    private readonly decimal _aggressionBoost;                       // symmetric taker push: useMarket += boost·|bias|
+
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
         FundamentalService funds, StockProfileService profiles,
@@ -160,7 +170,12 @@ internal sealed class AiBotDecisionService
         decimal fatImpactProb = 0m,
         bool greedStyle = false, decimal greedSplit = 0.5m,
         bool cashHomeostasisContinuous = false, decimal cashMaxShift = 0.15m,
-        decimal cashEdgeBuy = 0.95m, decimal cashEdgeSell = 0.05m)
+        decimal cashEdgeBuy = 0.95m, decimal cashEdgeSell = 0.05m,
+        bool sentimentDynamics = false,
+        decimal slopeScaleFast = 0.01m, decimal slopeScaleSlow = 0.005m,
+        decimal momentumConviction = 0.15m, decimal scalperConviction = 0.20m,
+        decimal reversionConviction = 0.15m, decimal reversalConviction = 0.10m,
+        decimal marketMakerLean = 0.05m, decimal aggressionBoost = 0.20m)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -221,6 +236,15 @@ internal sealed class AiBotDecisionService
         _cashMaxShift       = Math.Max(0m, cashMaxShift);
         _cashEdgeBuy        = Clamp01(cashEdgeBuy);
         _cashEdgeSell       = Clamp01(cashEdgeSell);
+        _sentimentDynamics  = sentimentDynamics;
+        _slopeScaleFast     = slopeScaleFast <= 0m ? 0.01m  : slopeScaleFast;
+        _slopeScaleSlow     = slopeScaleSlow <= 0m ? 0.005m : slopeScaleSlow;
+        _momentumConviction = Math.Max(0m, momentumConviction);
+        _scalperConviction  = Math.Max(0m, scalperConviction);
+        _reversionConviction = Math.Max(0m, reversionConviction);
+        _reversalConviction = Math.Max(0m, reversalConviction);
+        _marketMakerLean    = Math.Max(0m, marketMakerLean);
+        _aggressionBoost    = Math.Max(0m, aggressionBoost);
     }
     #endregion
 
@@ -252,7 +276,10 @@ internal sealed class AiBotDecisionService
         // When the chosen stock's raw sentiment crosses ±1, force the order into a slippage-capped market
         // order in the bot's style-appropriate direction with probability proportional to the overflow.
         // No-op when the override would point at zero shares (sell with no position).
-        type = ApplyExtremeReaction(ctx, user, stockId, currency, type);
+        // Sentiment-dynamics §: SKIPPED when the slope-aware phase model is on — that engine already owns the
+        // directional behaviour (incl. the FOMO/Contrarian/Panic intent), so running both would double-act.
+        if (!_sentimentDynamics)
+            type = ApplyExtremeReaction(ctx, user, stockId, currency, type);
 
         // Value-band veto: don't chase price past the band — refuse to buy a stock already far above
         // fundamental or sell one far below it. Cuts the fuel that lets a minority of stocks escape.
@@ -514,32 +541,48 @@ internal sealed class AiBotDecisionService
         var momentumSignal = ClampSigned(momentum * 20m, 1m); // ±5% move → ±1
         var directional    = 0m;
 
-        // §A3 momentum dominance: follower-scoped TF>MR so a regime can recruit a trend (Lux–Marchesi).
-        // Strength only WEAKENS the reversion coefficient (×(1−s)), never flips its sign. Off ⇒ both ×1.
-        decimal tfMul = 1m, mrMul = 1m;
-        if (_momentumDominance && _momentumStrength > 0m && notMM &&
-            _regime.IsFollower(user.AiUserId, _followerFraction))
+        if (_sentimentDynamics)
         {
-            tfMul = 1m + _momentumStrength;
-            mrMul = 1m - _momentumStrength;
+            // Sentiment-dynamics §: the slope-aware phase model REPLACES the old level-only momentum + sentiment
+            // terms. Each strategy maps (level s, fast/slow slope ds, per-bot lateness L) to a signed buyProb
+            // shift — momentum follows/chases, mean-reversion fades the extreme and its reversal. Shared
+            // sentiment only (the slope is per-stock shared), watchlist-averaged. Deterministic, no RNG.
+            var s   = ClampSigned(AverageWatchlistSharedSentiment(user), 1m);
+            var dsF = AverageWatchlistSlope(user, fast: true);
+            var dsS = AverageWatchlistSlope(user, fast: false);
+            directional = DirectionalBias(user.Strategy, s, dsF, dsS, user.Lateness,
+                _momentumConviction, _scalperConviction, _reversionConviction, _reversalConviction,
+                _marketMakerLean, _slopeScaleFast, _slopeScaleSlow);
         }
-        switch (user.Strategy)
+        else
         {
-            // Equal magnitude on both sides so the net effect across the 25/25 TF/MR split is zero in
-            // expectation (until §A3 tilts it under a regime).
-            case AiStrategy.TrendFollower:
-                directional += 0.175m * tfMul * momentumSignal; // Chase the move
-                break;
-            case AiStrategy.MeanReversion:
-                directional -= 0.175m * mrMul * momentumSignal; // Fade the move
-                break;
-            // MarketMaker, Scalper, Random: no directional momentum bias
-        }
+            // §A3 momentum dominance: follower-scoped TF>MR so a regime can recruit a trend (Lux–Marchesi).
+            // Strength only WEAKENS the reversion coefficient (×(1−s)), never flips its sign. Off ⇒ both ×1.
+            decimal tfMul = 1m, mrMul = 1m;
+            if (_momentumDominance && _momentumStrength > 0m && notMM &&
+                _regime.IsFollower(user.AiUserId, _followerFraction))
+            {
+                tfMul = 1m + _momentumStrength;
+                mrMul = 1m - _momentumStrength;
+            }
+            switch (user.Strategy)
+            {
+                // Equal magnitude on both sides so the net effect across the 25/25 TF/MR split is zero in
+                // expectation (until §A3 tilts it under a regime).
+                case AiStrategy.TrendFollower:
+                    directional += 0.175m * tfMul * momentumSignal; // Chase the move
+                    break;
+                case AiStrategy.MeanReversion:
+                    directional -= 0.175m * mrMul * momentumSignal; // Fade the move
+                    break;
+                // MarketMaker, Scalper, Random: no directional momentum bias
+            }
 
-        // Linear sentiment bias. Watchlist-averaged so the tilt reflects the broad mood for stocks this bot
-        // cares about. Clamped to ±1 here — extremes drive the forced market order in ComputeOrderAsync.
-        var sentimentClamped = ClampSigned(AverageWatchlistSentiment(ctx, user, currency), 1m);
-        directional += sentimentClamped * _sentimentMaxBias;
+            // Linear sentiment bias. Watchlist-averaged so the tilt reflects the broad mood for stocks this bot
+            // cares about. Clamped to ±1 here — extremes drive the forced market order in ComputeOrderAsync.
+            var sentimentClamped = ClampSigned(AverageWatchlistSentiment(ctx, user, currency), 1m);
+            directional += sentimentClamped * _sentimentMaxBias;
+        }
 
         // §A4 role split: flatten the noise cohort's DIRECTIONAL part (cash homeostasis untouched) so it
         // stops diluting the directional cohort. Followers (and everyone when the flag is off) keep ×1.
@@ -563,14 +606,33 @@ internal sealed class AiBotDecisionService
 
         // 3. Strategy-aware market-order probability
         var effectiveUseMarket = user.UseMarketProb;
-        switch (user.Strategy)
+        if (_sentimentDynamics)
         {
-            case AiStrategy.Scalper:
-                effectiveUseMarket = Math.Min(1m, effectiveUseMarket + 0.15m * Math.Abs(momentumSignal));
-                break;
-            case AiStrategy.MarketMaker:
-                effectiveUseMarket = Math.Max(0m, effectiveUseMarket - 0.15m);
-                break;
+            // Sentiment-dynamics §: momentum must TAKE liquidity to move price (§1b: limits won't trend).
+            // Push useMarket up by the directional conviction — SYMMETRICALLY for buys and sells so a bull
+            // bias lifts the ask and a bear bias hits the bid (no taker-flow skew → no down-drift).
+            switch (user.Strategy)
+            {
+                case AiStrategy.Scalper:
+                case AiStrategy.TrendFollower:
+                    effectiveUseMarket = Math.Min(1m, effectiveUseMarket + _aggressionBoost * Math.Abs(directional));
+                    break;
+                case AiStrategy.MarketMaker:
+                    effectiveUseMarket = Math.Max(0m, effectiveUseMarket - 0.15m);
+                    break;
+            }
+        }
+        else
+        {
+            switch (user.Strategy)
+            {
+                case AiStrategy.Scalper:
+                    effectiveUseMarket = Math.Min(1m, effectiveUseMarket + 0.15m * Math.Abs(momentumSignal));
+                    break;
+                case AiStrategy.MarketMaker:
+                    effectiveUseMarket = Math.Max(0m, effectiveUseMarket - 0.15m);
+                    break;
+            }
         }
 
         // §A1 inertia: hold a persistent directional STANCE across ticks instead of re-rolling buy/sell
@@ -1000,6 +1062,73 @@ internal sealed class AiBotDecisionService
         }
         return count > 0 ? sum / count : 0m;
     }
+
+    // Sentiment-dynamics §: watchlist-averaged SHARED sentiment (no per-bot personal term), so the level `s`
+    // is consistent with the per-stock shared slope the phase model also reads.
+    private decimal AverageWatchlistSharedSentiment(AIUser user)
+    {
+        if (user.Watchlist == null || user.Watchlist.Count == 0) return 0m;
+        decimal sum = 0m;
+        int count = 0;
+        foreach (var sid in user.Watchlist) { sum += _sentiment.GetSentiment(sid); count++; }
+        return count > 0 ? sum / count : 0m;
+    }
+
+    // Sentiment-dynamics §: watchlist-averaged EWMA slope (fast or slow). 0 when the slope feature is off.
+    private decimal AverageWatchlistSlope(AIUser user, bool fast)
+    {
+        if (user.Watchlist == null || user.Watchlist.Count == 0) return 0m;
+        decimal sum = 0m;
+        int count = 0;
+        foreach (var sid in user.Watchlist) { sum += _sentiment.GetSentimentSlope(sid, fast); count++; }
+        return count > 0 ? sum / count : 0m;
+    }
+
+    /// <summary>
+    /// Sentiment-dynamics §: the per-strategy directional bias added to buyProb, a pure deterministic
+    /// function of (level s, fast/slow slope ds, per-bot lateness L). Symmetric by construction
+    /// (bias(s,ds,…) == −bias(−s,−ds,…)). Replaces the old level-only momentum + sentiment-bias terms.
+    ///   • Momentum cohort (Scalper=fast slope, TrendFollower=slow slope): blend follow-slope (early/low L)
+    ///     with chase-level (late/high L) so high-L bots buy the top and get left long as s mean-reverts.
+    ///   • MeanReversion: fade the level (−s) and fade HARDER as the extreme rolls over (the ReLU term).
+    ///   • MarketMaker: gentle lean against the level. Random: 0.
+    /// Pure &amp; RNG-free → unit-testable.
+    /// </summary>
+    internal static decimal DirectionalBias(AiStrategy strategy, decimal s, decimal dsFast, decimal dsSlow,
+        decimal lateness, decimal kMomentum, decimal kScalper, decimal kReversion, decimal kReversal,
+        decimal kMmLean, decimal scaleFast, decimal scaleSlow)
+    {
+        var L  = Clamp01(lateness);
+        var sC = ClampSigned(s, 1m);
+        switch (strategy)
+        {
+            case AiStrategy.Scalper:
+            {
+                var follow = Tanh(dsFast / scaleFast);
+                return kScalper * ((1m - L) * follow + L * sC);
+            }
+            case AiStrategy.TrendFollower:
+            {
+                var follow = Tanh(dsSlow / scaleSlow);
+                return kMomentum * ((1m - L) * follow + L * sC);
+            }
+            case AiStrategy.MeanReversion:
+            {
+                // ReLU is positive only when the level is extreme AND the slope is turning against it
+                // (s>0 & ds<0  or  s<0 & ds>0) — i.e. a topping/bottoming market the contrarian fades harder.
+                var roll = Relu(-Sign(sC) * Tanh(dsSlow / scaleSlow));
+                return -kReversion * sC - kReversal * sC * roll;
+            }
+            case AiStrategy.MarketMaker:
+                return -kMmLean * sC;
+            default:
+                return 0m; // Random, Arbitrage: no directional bias
+        }
+    }
+
+    private static decimal Tanh(decimal x) => (decimal)Math.Tanh((double)x);
+    private static decimal Relu(decimal x) => x > 0m ? x : 0m;
+    private static decimal Sign(decimal x) => x > 0m ? 1m : x < 0m ? -1m : 0m;
 
     // Average signed gap to fundamental across the watchlist: (seed − price)/seed. Positive = broadly
     // below fundamental (cheap → bias to buy); negative = above (rich → bias to sell).

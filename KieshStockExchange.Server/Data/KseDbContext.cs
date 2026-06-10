@@ -252,6 +252,8 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.FarBudgetPrc).HasColumnType(Money);
             b.Property(x => x.TpOffsetMinPrc).HasColumnType(Money);
             b.Property(x => x.TpOffsetMaxPrc).HasColumnType(Money);
+            // Sentiment-dynamics §: per-bot lateness for the slope-aware phase model.
+            b.Property(x => x.Lateness).HasColumnType(Money);
             // §3.7 arbitrage params. The two int columns map to integer by default.
             b.Property(x => x.MinArbitrageRatePrc).HasColumnType(Money);
 

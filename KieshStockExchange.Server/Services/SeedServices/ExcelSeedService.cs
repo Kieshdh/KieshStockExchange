@@ -334,6 +334,9 @@ public sealed class ExcelSeedService : IExcelSeedService
             var tpOffsetMinPrc = ReadProb("TpOffsetMinPrc");
             var tpOffsetMaxPrc = ReadProb("TpOffsetMaxPrc");
 
+            // Sentiment-dynamics §: per-bot lateness L (0 when absent from an older workbook).
+            var lateness = ReadProb("Lateness");
+
             // §3.7 arbitrage-cohort params. Same defensive read so an older workbook without these
             // columns still loads (0 = inert: a non-arbitrage bot ignores them entirely).
             int ReadIntCol(string col)
@@ -374,6 +377,7 @@ public sealed class ExcelSeedService : IExcelSeedService
                     StopDistanceMinPrc = stopDistanceMinPrc, StopDistanceMaxPrc = stopDistanceMaxPrc,
                     FarBudgetPrc = farBudgetPrc,
                     TpOffsetMinPrc = tpOffsetMinPrc, TpOffsetMaxPrc = tpOffsetMaxPrc,
+                    Lateness = lateness,
                     MinArbitrageRatePrc = minArbitrageRatePrc,
                     MaxInventoryPerStock = maxInventoryPerStock,
                     ConversionCadenceSeconds = conversionCadenceSeconds,

@@ -148,6 +148,13 @@ public class AIUser : IValidatable
     private decimal _tpOffsetMaxPrc = 0.025m;
     public decimal TpOffsetMaxPrc { get => _tpOffsetMaxPrc; set => _tpOffsetMaxPrc = RequiredPrc(value, nameof(TpOffsetMaxPrc)); }
 
+    // Sentiment-dynamics §: per-bot "lateness" L ∈ [0,1] — the only new per-bot knob for the slope-aware
+    // phase model. For the momentum cohort (TrendFollower/Scalper) it blends following the sentiment slope
+    // (early, low L) against chasing the sentiment level (late/FOMO, high L). Inert for other strategies and
+    // when Bots:SentimentDynamics:Enabled is off. Default 0 = pure trend-follow (sane un-reseeded behaviour).
+    private decimal _lateness = 0m;
+    public decimal Lateness { get => _lateness; set => _lateness = RequiredPrc(value, nameof(Lateness)); }
+
     // §3.6 P6: per-bot, per-tick probabilities of choosing each advanced order kind (seeded + assigned
     // by strategy in Tools/Person.py). They REPLACE the global Bots:Advanced:*Prob config — the master
     // Bots:Advanced:Enabled switch still gates the whole feature. Default 0 so a bot never does advanced
@@ -298,6 +305,7 @@ public class AIUser : IValidatable
         IsValidPrc(FarLimitMinPrc) && IsValidPrc(FarLimitMaxPrc) &&
         IsValidPrc(StopDistanceMinPrc) && IsValidPrc(StopDistanceMaxPrc) && IsValidPrc(FarBudgetPrc) &&
         IsValidPrc(TpOffsetMinPrc) && IsValidPrc(TpOffsetMaxPrc) &&
+        IsValidPrc(Lateness) &&
         IsValidPrc(MinArbitrageRatePrc);
 
     private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc &&

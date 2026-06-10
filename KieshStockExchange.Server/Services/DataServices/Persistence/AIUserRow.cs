@@ -56,6 +56,9 @@ public class AIUserRow
     [Column("TpOffsetMinPrc")] public decimal TpOffsetMinPrc { get; set; }
     [Column("TpOffsetMaxPrc")] public decimal TpOffsetMaxPrc { get; set; }
 
+    // Sentiment-dynamics §: per-bot lateness L ∈ [0,1] for the slope-aware phase model. Default 0.
+    [Column("Lateness")] public decimal Lateness { get; set; }
+
     // §3.7 arbitrage-cohort params (default 0 = inert for every non-Arbitrage bot).
     [Column("MinArbitrageRatePrc")] public decimal MinArbitrageRatePrc { get; set; }
     [Column("MaxInventoryPerStock")] public int MaxInventoryPerStock { get; set; }
@@ -113,6 +116,7 @@ public static class AIUserMapper
             FarBudgetPrc = r.FarBudgetPrc,
             TpOffsetMinPrc = r.TpOffsetMinPrc,
             TpOffsetMaxPrc = r.TpOffsetMaxPrc,
+            Lateness = r.Lateness,
             MinArbitrageRatePrc = r.MinArbitrageRatePrc,
             MaxInventoryPerStock = r.MaxInventoryPerStock,
             ConversionCadenceSeconds = r.ConversionCadenceSeconds,
@@ -164,6 +168,7 @@ public static class AIUserMapper
         FarBudgetPrc = a.FarBudgetPrc,
         TpOffsetMinPrc = a.TpOffsetMinPrc,
         TpOffsetMaxPrc = a.TpOffsetMaxPrc,
+        Lateness = a.Lateness,
         MinArbitrageRatePrc = a.MinArbitrageRatePrc,
         MaxInventoryPerStock = a.MaxInventoryPerStock,
         ConversionCadenceSeconds = a.ConversionCadenceSeconds,

@@ -132,8 +132,10 @@ class Person:
         base_trade_prob = TRADE_PROB_BASE + TRADE_PROB_SLOPE * self.aggressive
         self.trade_prob = clamp01(jitter(base_trade_prob, rel=TRADE_PROB_JITTER))
 
-        # Strategy: fixed for now, could vary based on aggressiveness later
-        self.strategy = random.choice(STRATEGY_CHOICES)
+        # Strategy: drawn from the NON-EVEN sentiment-dynamics ratios (STRATEGY_WEIGHTS) so the population
+        # is follow-leaning during a move and reversion-heavy at extremes (loop gain G≈1).
+        self.strategy = random.choices(
+            list(STRATEGY_WEIGHTS.keys()), weights=list(STRATEGY_WEIGHTS.values()), k=1)[0]
 
     def _portfolio(self):
         # Starting balance: log-distributed from $10,000 to ~$500,000
@@ -205,6 +207,10 @@ class Person:
 
         # Extreme-reaction randomness: skewed toward 0, capped at 0.5.
         self.extreme_randomness = 0.5 * skewed01(skew=EXTREME_RANDOMNESS_SKEW)
+
+        # Sentiment-dynamics §: per-bot lateness L ∈ [0,1]. Right-skewed → mostly EARLY momentum bots with a
+        # small high-L (FOMO) tail. Only consumed by the momentum cohort in C#; inert for other strategies.
+        self.lateness = clamp01(skewed01(skew=LATENESS_SKEW))
 
     def _trade_limits(self):
         # Slippage tolerance: more aggressive bots accept higher slippage.
@@ -335,6 +341,8 @@ class Person:
             round(self.far_budget, 4),                      # float: FarBudgetPrc
             round(self.tp_offset_min, 4),                   # float: TpOffsetMinPrc
             round(self.tp_offset_max, 4),                   # float: TpOffsetMaxPrc
+            # Sentiment-dynamics §: per-bot lateness L (must match ExcelLayout.prepare_profile_sheet order).
+            round(self.lateness, 4),                        # float: Lateness
             # §3.7 arbitrage cohort params (must match ExcelLayout.prepare_profile_sheet column order).
             round(self.min_arbitrage_rate_prc, 6),          # float: MinArbitrageRatePrc
             int(self.max_inventory_per_stock),              # int:   MaxInventoryPerStock

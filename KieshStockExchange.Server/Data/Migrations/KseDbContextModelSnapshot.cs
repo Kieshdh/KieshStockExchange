@@ -67,6 +67,9 @@ namespace KieshStockExchange.Server.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<decimal>("Lateness")
+                        .HasColumnType("numeric(20,10)");
+
                     b.Property<decimal>("LongBracketProb")
                         .HasColumnType("numeric(20,10)");
 

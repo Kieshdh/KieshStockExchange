@@ -90,6 +90,8 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         "StopDistanceMinPrc", "StopDistanceMaxPrc", "FarBudgetPrc",
         # §P6: per-bot take-profit band (promoted from the global Advanced:TpOffsetPrc config).
         "TpOffsetMinPrc", "TpOffsetMaxPrc",
+        # Sentiment-dynamics §: per-bot lateness L for the slope-aware phase model.
+        "Lateness",
         # §3.7 arbitrage cohort params (0 for every non-Arbitrage bot; the server reads by name).
         "MinArbitrageRatePrc", "MaxInventoryPerStock", "ConversionCadenceSeconds",
     ])

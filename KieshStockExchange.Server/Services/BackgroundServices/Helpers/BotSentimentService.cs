@@ -80,6 +80,16 @@ internal sealed class BotSentimentService
     private readonly double _shockMagnitudeExponent; // >1 skews events toward the small end
     private readonly double _shockDecayPerTick;
     private readonly double _shockArrivalProbPerTick; // per stock per tick
+
+    // Sentiment-dynamics §: two-timescale EWMA of the combined-sentiment slope ds = d(s)/dt. A fast slope
+    // (τ_fast) for the twitchy Scalper and a slow one (τ_slow) for the patient strategies. Computed inside
+    // Tick on the loop thread, with NO RNG; gated by _slopeEnabled so the off path is untouched and free.
+    private readonly bool   _slopeEnabled;
+    private readonly double _slopeTauFastSec;
+    private readonly double _slopeTauSlowSec;
+    private readonly Dictionary<int, double> _slopePrev = new(); // stockId → previous combined value (double)
+    private readonly Dictionary<int, double> _dsFast    = new(); // stockId → fast EWMA slope
+    private readonly Dictionary<int, double> _dsSlow    = new(); // stockId → slow EWMA slope
     #endregion
 
     #region Services and Constructor
@@ -94,7 +104,8 @@ internal sealed class BotSentimentService
         ILogger<BotSentimentService> logger,
         bool newsEvents = true, double shockMeanIntervalHours = 6.0,
         decimal shockMinMagnitude = 0.3m, decimal shockMaxMagnitude = 1.5m,
-        double shockMagnitudeExponent = 3.0, decimal shockDecayPerTick = 0.999m)
+        double shockMagnitudeExponent = 3.0, decimal shockDecayPerTick = 0.999m,
+        bool slopeEnabled = false, double slopeTauFastSec = 45.0, double slopeTauSlowSec = 180.0)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -105,6 +116,9 @@ internal sealed class BotSentimentService
         _shockMagnitudeExponent = Math.Max(1.0, shockMagnitudeExponent);
         _shockDecayPerTick = (double)shockDecayPerTick;
         _shockArrivalProbPerTick = 1.0 / (Math.Max(0.0001, shockMeanIntervalHours) * 3600.0);
+        _slopeEnabled    = slopeEnabled;
+        _slopeTauFastSec = Math.Max(MinDtSec, slopeTauFastSec);
+        _slopeTauSlowSec = Math.Max(_slopeTauFastSec, slopeTauSlowSec);
         _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
         var prior = _store.LoadTail(RecentSamplesMax);
@@ -169,9 +183,33 @@ internal sealed class BotSentimentService
             }
             if (_shock.TryGetValue(sid, out var sh)) sum += sh;
             _combined[sid] = (decimal)sum;
+
+            // Sentiment-dynamics §: two-timescale EWMA of the slope (sign = trend direction, magnitude =
+            // conviction). No RNG; loop-thread only; skipped entirely when disabled. raw uses the combined
+            // value BEFORE this tick (_slopePrev), seeded to sum on the first observation so ds opens at 0.
+            if (_slopeEnabled)
+            {
+                double sPrev = _slopePrev.TryGetValue(sid, out var pv) ? pv : sum;
+                _dsFast[sid] = EwmaSlope(_dsFast.GetValueOrDefault(sid), sum, sPrev, dt, _slopeTauFastSec);
+                _dsSlow[sid] = EwmaSlope(_dsSlow.GetValueOrDefault(sid), sum, sPrev, dt, _slopeTauSlowSec);
+                _slopePrev[sid] = sum;
+            }
         }
 
         if (now >= _nextLogUtc) { LogCombinedSentiment(now); _nextLogUtc = now + TimeSpan.FromSeconds(60); }
+    }
+
+    /// <summary>
+    /// One EWMA step of the per-stock sentiment slope. raw = (sNow − sPrev)/dt; the smoothing keeps a
+    /// fraction exp(−dt/τ) of the prior estimate (so the horizon is τ seconds, frame-rate independent) and
+    /// blends in (1 − that) of the fresh raw slope. Pure &amp; RNG-free → unit-testable.
+    /// </summary>
+    internal static double EwmaSlope(double dsPrev, double sNow, double sPrev, double dt, double tauSec)
+    {
+        if (dt <= 0.0) return dsPrev;
+        double raw  = (sNow - sPrev) / dt;
+        double keep = Math.Exp(-dt / Math.Max(MinDtSec, tauSec));
+        return keep * dsPrev + (1.0 - keep) * raw;
     }
 
     // Unit-variance draw: U(-1,1)*√3.
@@ -220,6 +258,14 @@ internal sealed class BotSentimentService
         => _combined.TryGetValue(stockId, out var v) ? v : 0m;
 
     /// <summary>
+    /// Sentiment-dynamics §: the EWMA slope ds = d(sentiment)/dt for a stock — fast timescale when
+    /// <paramref name="fast"/> is true, slow otherwise. 0 when the feature is disabled or the stock is
+    /// unseen. Loop-thread read, like <see cref="GetSentiment"/>; sign = trend direction, magnitude = conviction.
+    /// </summary>
+    internal decimal GetSentimentSlope(int stockId, bool fast)
+        => (decimal)(fast ? _dsFast : _dsSlow).GetValueOrDefault(stockId);
+
+    /// <summary>
     /// Magnitude of the currently-decaying news shock for a stock (0 when none), exposed so the activity
     /// field (Pillar B) can use news arrivals as a Hawkes excitation driver. Loop-thread read, like
     /// <see cref="GetSentiment"/>.
@@ -258,6 +304,18 @@ internal sealed class BotSentimentService
             onThisLine++;
         }
 
+        // Sentiment-dynamics §: append a slow-slope magnitude summary so SlopeScaleSlow can be calibrated
+        // (tune σ so a typical |ds| lands tanh(|ds|/σ) in ~0.3–0.8). Only when the feature is on.
+        if (_slopeEnabled && _dsSlow.Count > 0)
+        {
+            double maxAbs = 0.0, sumAbs = 0.0;
+            foreach (var v in _dsSlow.Values) { var a = Math.Abs(v); sumAbs += a; if (a > maxAbs) maxAbs = a; }
+            tpl.Append("\n  dsSlow: max|{").Append(args.Count).Append(":0.00000}|");
+            args.Add((decimal)maxAbs);
+            tpl.Append(" mean|{").Append(args.Count).Append(":0.00000}|");
+            args.Add((decimal)(sumAbs / _dsSlow.Count));
+        }
+
         _logger.LogInformation(tpl.ToString(), args.ToArray());
     }
     #endregion
@@ -278,6 +336,9 @@ internal sealed class BotSentimentService
         _perStock.Clear();
         _shock.Clear();
         _combined.Clear();
+        _slopePrev.Clear();
+        _dsFast.Clear();
+        _dsSlow.Clear();
         lock (_samples) _samples.Clear();
 
         _globalSum = 0.0;

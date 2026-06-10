@@ -156,6 +156,21 @@ TRADE_PROB_JITTER         = 0.15
 # §P6: MarketMaker (0) included so a slice of bots quote tight two-sided and keep the touch liquid.
 STRATEGY_CHOICES          = (0, 1, 2, 3, 4)
 
+# Sentiment-dynamics §: NON-EVEN strategy ratios so momentum can build a trend while reverters + the value
+# anchor reliably end it (loop gain G≈1). Net follow-leaning during a move, reversion-heavy at extremes.
+# Keys are the AiStrategy ids above; weights must sum to 1. Arbitrage (5) stays out (separate cohort).
+STRATEGY_WEIGHTS = {
+    0: 0.13,   # MarketMaker — liquidity floor
+    1: 0.35,   # TrendFollower — builds + (via high-lateness tail) tops the trend
+    2: 0.20,   # MeanReversion — ends the boom
+    3: 0.20,   # Random — entropy / liquidity
+    4: 0.12,   # Scalper — fast momentum, leads, adds turnover
+}
+
+# Sentiment-dynamics §: per-bot lateness L ∈ [0,1] draw. skewed01(skew>1) biases toward 0, so most momentum
+# bots are EARLY (follow the slope) with a ~10–15% high-L FOMO tail that chases the level and tops the trend.
+LATENESS_SKEW             = 2.2
+
 # ───────────────────── Advanced-order probabilities (per bot, per tick) ───────────────────────
 # §3.6 P6: each bot is assigned its own probability of choosing each advanced order kind, drawn
 # uniformly from a per-strategy (lo, hi) range so behaviour matches the strategy. These feed the
@@ -441,6 +456,18 @@ def _validate() -> None:
         raise ValueError(f"ARBITRAGE_COHORT_SIZE={ARBITRAGE_COHORT_SIZE} must be ≥ 0")
     if 5 in STRATEGY_CHOICES:
         raise ValueError("STRATEGY_CHOICES must NOT include 5 (Arbitrage) — the cohort is generated separately.")
+
+    # Sentiment-dynamics §: strategy weights must sum to 1, key only the non-arbitrage strategies, and the
+    # lateness skew must be positive.
+    sw_total = sum(STRATEGY_WEIGHTS.values())
+    if abs(sw_total - 1.0) > 1e-6:
+        raise ValueError(f"STRATEGY_WEIGHTS must sum to 1 (got {sw_total}).")
+    for sid in STRATEGY_WEIGHTS:
+        if sid not in (0, 1, 2, 3, 4):
+            raise ValueError(f"STRATEGY_WEIGHTS key {sid} must be a non-arbitrage strategy id (0–4).")
+    _non_negative("LATENESS_SKEW", LATENESS_SKEW)
+    if LATENESS_SKEW <= 0:
+        raise ValueError(f"LATENESS_SKEW={LATENESS_SKEW} must be > 0.")
     _ordered("ARB_MIN_RATE_RANGE[0]", ARB_MIN_RATE_RANGE[0], "ARB_MIN_RATE_RANGE[1]", ARB_MIN_RATE_RANGE[1])
     _in_unit("ARB_MIN_RATE_RANGE", ARB_MIN_RATE_RANGE[0], ARB_MIN_RATE_RANGE[1])
     if ARB_MIN_RATE_RANGE[0] < FX_CONVERT_SPREAD:
