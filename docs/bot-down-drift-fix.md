@@ -96,8 +96,13 @@ excursions A1+A2 just created.** Two adjustments:
   governs intraday breathing room.
 
 ## 3. Determinism, flags & config
-Both changes alter *default* decision behavior. To A/B them cleanly against the old logic and to attribute
-each lever during the soak, **flag-gate both** (default to the new behavior once validated):
+Both changes alter decision behavior, so — matching the repo's inert-first norm (all v2 pillars default OFF)
+— **flag-gate both and default them OFF.** Flag-off must reproduce today's behavior byte-for-byte; the new
+behavior is enabled + validated in the soak, and a *later* commit flips the defaults (and bakes the /Tools
+band-centering, §8) only once proven. **Coupling:** the `MaxCashReservePrc` band-centering changes the OLD
+edge logic too (bots would hit the max edge sooner), so it must NOT ship in the default seed while Fix B is
+off — apply it only when `CashHomeostasis:Continuous` is on (a soak-time DB `UPDATE` for now; into /Tools
+only when the default flips). Flag-gate list:
 - `Bots:CashHomeostasis:Continuous` (Fix B) — off ⇒ the old edge-only logic verbatim (true byte-for-byte
   fallback). Expose `:MaxShift` (in-band gain, ~0.15), `:EdgeForceBuy`/`:EdgeForceSell` (0.95/0.05).
 - `Bots:ExtremeReaction:GreedStyle` (Fix A) — off ⇒ no Greed style, Scalper→Panic as before; on ⇒ the
