@@ -25,7 +25,7 @@ public sealed partial class PgDBService
         ""StopProb"",""TrailingProb"",""ShortProb"",""LongBracketProb"",""ShortBracketProb"",
         ""MidLimitMinPrc"",""MidLimitMaxPrc"",""FarLimitMinPrc"",""FarLimitMaxPrc"",
         ""StopDistanceMinPrc"",""StopDistanceMaxPrc"",""FarBudgetPrc"",
-        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",
+        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",""Lateness"",
         ""MinArbitrageRatePrc"",""MaxInventoryPerStock"",""ConversionCadenceSeconds"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy"" AS ""StrategyCode""";
@@ -40,7 +40,7 @@ public sealed partial class PgDBService
         ""StopProb"",""TrailingProb"",""ShortProb"",""LongBracketProb"",""ShortBracketProb"",
         ""MidLimitMinPrc"",""MidLimitMaxPrc"",""FarLimitMinPrc"",""FarLimitMaxPrc"",
         ""StopDistanceMinPrc"",""StopDistanceMaxPrc"",""FarBudgetPrc"",
-        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",
+        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",""Lateness"",
         ""MinArbitrageRatePrc"",""MaxInventoryPerStock"",""ConversionCadenceSeconds"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy""";
@@ -55,7 +55,7 @@ public sealed partial class PgDBService
         @StopProb,@TrailingProb,@ShortProb,@LongBracketProb,@ShortBracketProb,
         @MidLimitMinPrc,@MidLimitMaxPrc,@FarLimitMinPrc,@FarLimitMaxPrc,
         @StopDistanceMinPrc,@StopDistanceMaxPrc,@FarBudgetPrc,
-        @TpOffsetMinPrc,@TpOffsetMaxPrc,
+        @TpOffsetMinPrc,@TpOffsetMaxPrc,@Lateness,
         @MinArbitrageRatePrc,@MaxInventoryPerStock,@ConversionCadenceSeconds,
         @WatchlistCsv,
         @MaxOpenOrders,@HomeCurrency,@StrategyCode";
@@ -425,6 +425,7 @@ public sealed partial class PgDBService
               ""StopDistanceMinPrc"" = @StopDistanceMinPrc, ""StopDistanceMaxPrc"" = @StopDistanceMaxPrc,
               ""FarBudgetPrc"" = @FarBudgetPrc,
               ""TpOffsetMinPrc"" = @TpOffsetMinPrc, ""TpOffsetMaxPrc"" = @TpOffsetMaxPrc,
+              ""Lateness"" = @Lateness,
               ""WatchlistCsv"" = @WatchlistCsv,
               ""MaxOpenOrders"" = @MaxOpenOrders,
               ""HomeCurrency"" = @HomeCurrency, ""Strategy"" = @StrategyCode
