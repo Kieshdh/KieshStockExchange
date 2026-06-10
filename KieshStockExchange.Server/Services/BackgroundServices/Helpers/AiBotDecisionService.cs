@@ -122,6 +122,12 @@ internal sealed class AiBotDecisionService
     private readonly bool    _rangeActivityImpact;
     private readonly decimal _rangeMaxSlippage;
     private readonly decimal _fatImpactProb;
+    // Down-drift fix: Greed extreme-reaction style (buy-both mirror of Panic) + Scalper Panic/Greed split.
+    private readonly bool    _greedStyle;
+    private readonly decimal _greedSplit;
+    // Down-drift fix: optional continuous cash homeostasis (smooth restoring toward the band midpoint).
+    private readonly bool    _cashHomeostasisContinuous;
+    private readonly decimal _cashMaxShift, _cashEdgeBuy, _cashEdgeSell;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
@@ -151,7 +157,10 @@ internal sealed class AiBotDecisionService
         decimal anchorFastSlack = 0m,
         bool activityEnabled = false, double activityGamma = 1.0,
         bool rangeActivityImpact = false, decimal rangeMaxSlippage = 0.02m,
-        decimal fatImpactProb = 0m)
+        decimal fatImpactProb = 0m,
+        bool greedStyle = false, decimal greedSplit = 0.5m,
+        bool cashHomeostasisContinuous = false, decimal cashMaxShift = 0.15m,
+        decimal cashEdgeBuy = 0.95m, decimal cashEdgeSell = 0.05m)
     {
         _market    = market    ?? throw new ArgumentNullException(nameof(market));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -206,6 +215,12 @@ internal sealed class AiBotDecisionService
         _rangeActivityImpact = rangeActivityImpact;
         _rangeMaxSlippage   = Math.Max(0m, rangeMaxSlippage);
         _fatImpactProb      = Clamp01(fatImpactProb);
+        _greedStyle         = greedStyle;
+        _greedSplit         = Clamp01(greedSplit);
+        _cashHomeostasisContinuous = cashHomeostasisContinuous;
+        _cashMaxShift       = Math.Max(0m, cashMaxShift);
+        _cashEdgeBuy        = Clamp01(cashEdgeBuy);
+        _cashEdgeSell       = Clamp01(cashEdgeSell);
     }
     #endregion
 
@@ -490,20 +505,9 @@ internal sealed class AiBotDecisionService
 
         // 1. Homeostatic base: directional bias seed + cash-reserve restoring shift.
         var cashPrc      = ctx.FundsPercentagePortfolio(user.UserId, currency);
-        var homeostatic  = user.BuyBiasPrc;
-        var maxShift     = 0.40m;
-        if (cashPrc < user.MinCashReservePrc)
-        {
-            var distance = user.MinCashReservePrc <= 0m ? 1m
-                : (user.MinCashReservePrc - cashPrc) / user.MinCashReservePrc;
-            homeostatic -= maxShift * Clamp01(distance);
-        }
-        else if (cashPrc > user.MaxCashReservePrc)
-        {
-            var distance = 1m - user.MaxCashReservePrc <= 0m ? 1m
-                : (cashPrc - user.MaxCashReservePrc) / (1m - user.MaxCashReservePrc);
-            homeostatic += maxShift * Clamp01(distance);
-        }
+        var homeostatic  = CashHomeostasis(user.BuyBiasPrc, cashPrc,
+            user.MinCashReservePrc, user.MaxCashReservePrc,
+            _cashHomeostasisContinuous, _cashMaxShift, _cashEdgeBuy, _cashEdgeSell);
 
         // 2. Directional: strategy momentum bias (EWMA smoothed) + watchlist sentiment tilt.
         var momentum       = ctx.ComputeWatchlistMomentum(user, currency);
@@ -1070,52 +1074,63 @@ internal sealed class AiBotDecisionService
         };
     }
 
-    private static ExtremeReactionStyle PickExtremeReactionStyle(AiBotContext ctx, AIUser user)
+    private ExtremeReactionStyle PickExtremeReactionStyle(AiBotContext ctx, AIUser user)
     {
-        var defaultStyle = user.Strategy switch
-        {
-            AiStrategy.TrendFollower => ExtremeReactionStyle.FOMO,
-            AiStrategy.MeanReversion => ExtremeReactionStyle.Contrarian,
-            AiStrategy.MarketMaker   => ExtremeReactionStyle.Contrarian,
-            AiStrategy.Scalper       => ExtremeReactionStyle.Panic,
-            _                        => ExtremeReactionStyle.None,
-        };
+        var defaultStyle = DefaultExtremeStyle(user.Strategy, user.AiUserId, _greedStyle, _greedSplit);
 
-        // Out-of-character branch: pick a random style uniformly among the
-        // four (one of them is None, so ~25% of out-of-character rolls land
-        // on "no extreme reaction" — same as Random-strategy bots).
+        // Out-of-character branch: pick a random style uniformly among the pool (one of them is None, so a
+        // slice of out-of-character rolls land on "no extreme reaction" — same as Random-strategy bots).
+        // With greed on the pool gains Greed (buy-both), so it mirrors Panic (sell-both) and nets to zero;
+        // with greed off the pool is the original Next(4) → the RNG stream is byte-identical.
         if (ctx.Decimal01(user.AiUserId) < user.ExtremeReactionRandomnessPrc)
         {
-            var pick = ctx.GetRandom(user.AiUserId).Next(4);
+            var pick = ctx.GetRandom(user.AiUserId).Next(_greedStyle ? 5 : 4);
             return pick switch
             {
                 0 => ExtremeReactionStyle.FOMO,
                 1 => ExtremeReactionStyle.Contrarian,
                 2 => ExtremeReactionStyle.Panic,
+                3 when _greedStyle => ExtremeReactionStyle.Greed,
                 _ => ExtremeReactionStyle.None,
             };
         }
         return defaultStyle;
     }
 
-    private static ExtremeDirection BullDirection(ExtremeReactionStyle style) => style switch
+    internal static ExtremeDirection BullDirection(ExtremeReactionStyle style) => style switch
     {
         ExtremeReactionStyle.FOMO       => ExtremeDirection.Buy,   // chase the top
         ExtremeReactionStyle.Contrarian => ExtremeDirection.Sell,  // fade the top
         ExtremeReactionStyle.Panic      => ExtremeDirection.Sell,  // take profit
+        ExtremeReactionStyle.Greed      => ExtremeDirection.Buy,   // chase the rally (buy-both mirror of Panic)
         _                               => ExtremeDirection.None,
     };
 
-    private static ExtremeDirection BearDirection(ExtremeReactionStyle style) => style switch
+    internal static ExtremeDirection BearDirection(ExtremeReactionStyle style) => style switch
     {
         ExtremeReactionStyle.FOMO       => ExtremeDirection.Sell,  // panic the bottom
         ExtremeReactionStyle.Contrarian => ExtremeDirection.Buy,   // buy the dip
         ExtremeReactionStyle.Panic      => ExtremeDirection.Sell,  // capitulate
+        ExtremeReactionStyle.Greed      => ExtremeDirection.Buy,   // buy the dip / accumulate the crash
         _                               => ExtremeDirection.None,
     };
 
-    private enum ExtremeReactionStyle { FOMO, Contrarian, Panic, None }
-    private enum ExtremeDirection { Buy, Sell, None }
+    // Strategy-default extreme-reaction style. Pure & RNG-free so it is reproducible and unit-testable.
+    // When greed is on, half the Scalpers (a stable hash split at `split`) flip Panic→Greed so the
+    // sell-both Panic lean is mirrored by a buy-both cohort; off ⇒ every Scalper is Panic (byte-identical).
+    internal static ExtremeReactionStyle DefaultExtremeStyle(
+        AiStrategy strategy, int aiUserId, bool greed, decimal split) => strategy switch
+    {
+        AiStrategy.TrendFollower => ExtremeReactionStyle.FOMO,
+        AiStrategy.MeanReversion => ExtremeReactionStyle.Contrarian,
+        AiStrategy.MarketMaker   => ExtremeReactionStyle.Contrarian,
+        AiStrategy.Scalper       => (greed && BotRegimeService.StableUnit(aiUserId) < split)
+                                        ? ExtremeReactionStyle.Greed : ExtremeReactionStyle.Panic,
+        _                        => ExtremeReactionStyle.None,
+    };
+
+    internal enum ExtremeReactionStyle { FOMO, Contrarian, Panic, Greed, None }
+    internal enum ExtremeDirection { Buy, Sell, None }
     #endregion
 
     #region OrderType Enum and Helpers
@@ -1157,6 +1172,44 @@ internal sealed class AiBotDecisionService
 
     private static decimal ClampSigned(decimal x, decimal magnitude) =>
         x < -magnitude ? -magnitude : x > magnitude ? magnitude : x;
+
+    /// <summary>
+    /// Cash-reserve restoring shift on the buy bias. With <paramref name="continuous"/> off this is the
+    /// original edge-only controller verbatim (flat inside [min,max], a 0.40 distance-normalized push at the
+    /// walls) so the RNG-free result is byte-identical. With it on, a gentle linear restoring force pulls cash
+    /// toward the band midpoint (== seed cash% after the §8 recenter, so the rest-point is the seed) and the
+    /// hard walls still force buy/sell at the edges. Pure &amp; RNG-free → unit-testable.
+    /// </summary>
+    internal static decimal CashHomeostasis(decimal buyBias, decimal cashPrc,
+        decimal minReserve, decimal maxReserve,
+        bool continuous, decimal maxShift, decimal edgeBuy, decimal edgeSell)
+    {
+        var homeostatic = buyBias;
+        if (continuous)
+        {
+            var mid  = (minReserve + maxReserve) / 2m;
+            var half = (maxReserve - minReserve) / 2m;
+            if (half > 0m)
+                homeostatic += maxShift * ClampSigned((cashPrc - mid) / half, 1m); // above mid → buy, below → sell
+            if (cashPrc >= maxReserve) homeostatic = Math.Max(homeostatic, edgeBuy);  // excess cash → force buy
+            if (cashPrc <= minReserve) homeostatic = Math.Min(homeostatic, edgeSell); // starved → force no-buy
+        }
+        else
+        {
+            const decimal oldMaxShift = 0.40m;
+            if (cashPrc < minReserve)
+            {
+                var distance = minReserve <= 0m ? 1m : (minReserve - cashPrc) / minReserve;
+                homeostatic -= oldMaxShift * Clamp01(distance);
+            }
+            else if (cashPrc > maxReserve)
+            {
+                var distance = 1m - maxReserve <= 0m ? 1m : (cashPrc - maxReserve) / (1m - maxReserve);
+                homeostatic += oldMaxShift * Clamp01(distance);
+            }
+        }
+        return homeostatic;
+    }
 
     private static decimal SnapToRoundNumber(decimal price)
     {
