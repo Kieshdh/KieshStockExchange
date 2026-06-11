@@ -184,7 +184,7 @@ features (commits 19b30f6..749c932 + b252cad fix). All steps conservation-clean 
 | 2-long | + RecentAnchor (alone) | 45m | max oscillates 24-28% (doesn't drop below cap; RecentAnchor pulls but cohort push counters) |
 | 3 | + Multiplicative | 15m | medianAbs 1.39 (vs Step 2's 1.67); marginal tightening |
 | 3-long | RecentAnchor + Multiplicative (60m) | 60m | **max pinned at +25-27% all hour, beyond50=0, avg -1.90** — the bake target |
-| 4 | Full stack (+ UsePreviousDayAverage, DayLengthHours=0.5) | 90m+ | **runaway: max +90.6 at t=70m, beyond50=2**, conservation still clean |
+| 4 | Full stack (+ UsePreviousDayAverage, DayLengthHours=0.5) | 2h | **max plateaus +91.8 by t=80m, beyond50=2 stable, avg -2.55, conservation clean** (361k trades) |
 
 ### Critical finding: UsePreviousDayAverage + cap-relative-to-target = unbounded
 With `UsePreviousDayAverage=true`, the long-anchor target = daily TWAP (rotated every DayLengthHours).
