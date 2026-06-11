@@ -180,6 +180,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly ReservationAuditor   _auditor;
     private readonly BotEconomyTelemetry  _economy;
     private readonly BotSentimentService  _sentiment;
+    private readonly BotPriceMemoryService _priceMemory; // medium-term EWMA + long-term daily-TWAP anchors
     private readonly BotRegimeService     _regime;    // §A2/A3/A4 shared regime (default off)
     private readonly BotActivityService   _activity;  // §Pillar B activity field (default off)
     private readonly FundamentalService   _funds;     // §P6 slowly-drifting fundamentals
@@ -266,6 +267,20 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // Sentiment-dynamics §: the master flag gates BOTH the EWMA slope (here) and the directional phase
         // model (in AiBotDecisionService). Off ⇒ no slope compute and byte-identical decisions.
         var sentimentDynamics = _configuration.GetValue("Bots:SentimentDynamics:Enabled", false);
+        // Price-memory anchors + hybrid pressure §: three independent flags, default OFF. The
+        // first two gate the BotPriceMemoryService Tick body via anyConsumer — when both are off,
+        // Tick short-circuits at the top and the service is observationally inert.
+        var useDailyAnchor          = _configuration.GetValue("Bots:ValueAnchor:UsePreviousDayAverage", false);
+        var recentAnchorEnabled     = _configuration.GetValue("Bots:RecentAnchor:Enabled", false);
+        var multiplicativeDirection = _configuration.GetValue("Bots:DirectionalPressure:Multiplicative", false);
+        _priceMemory = new BotPriceMemoryService(stocks,
+                        new SeparatorLogger<BotPriceMemoryService>(loggerFactory, loggerOptions),
+                        priceLookup:    key => _ctx.SmoothedPrices.TryGetValue(key, out var p) ? p : 0m,
+                        anyConsumer:    useDailyAnchor || recentAnchorEnabled,
+                        halfLifeSec:    _configuration.GetValue("Bots:RecentAnchor:HalfLifeSec", 1800.0),
+                        dayLengthHours: _configuration.GetValue("Bots:ValueAnchor:DayLengthHours", 24.0),
+                        boundary:       ParseDayBoundary(_configuration.GetValue("Bots:ValueAnchor:DayBoundaryMode", "ServiceStart")),
+                        maxDailyDrift:  _configuration.GetValue("Bots:ValueAnchor:MaxDailyDrift", 0.50m));
         _sentiment = new BotSentimentService(stocks, _profiles, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
                         newsEvents:              _configuration.GetValue("Bots:NewsEvents", true),
                         shockMeanIntervalHours:  _configuration.GetValue("Bots:ShockMeanIntervalHours", 6.0),
@@ -314,7 +329,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
                         distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m));
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
-                        _regime, _activity,
+                        _regime, _activity, _priceMemory,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
                         fatTails:           _configuration.GetValue("Bots:FatTails", true),
                         tradeSizeTailShape: _configuration.GetValue("Bots:TradeSizeTailShape", 0.5m),
@@ -381,7 +396,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         reversionConviction:  _configuration.GetValue("Bots:SentimentDynamics:ReversionConviction", 0.15m),
                         reversalConviction:   _configuration.GetValue("Bots:SentimentDynamics:ReversalConviction", 0.10m),
                         marketMakerLean:      _configuration.GetValue("Bots:SentimentDynamics:MarketMakerLean", 0.05m),
-                        aggressionBoost:      _configuration.GetValue("Bots:SentimentDynamics:AggressionBoost", 0.20m));
+                        aggressionBoost:      _configuration.GetValue("Bots:SentimentDynamics:AggressionBoost", 0.20m),
+                        // Price-memory anchors + hybrid pressure § (defaults preserve today's behaviour).
+                        useDailyAnchor:            useDailyAnchor,
+                        recentAnchorEnabled:       recentAnchorEnabled,
+                        recentAnchorStrength:      _configuration.GetValue("Bots:RecentAnchor:Strength", 0.35m),
+                        recentAnchorScale:         _configuration.GetValue("Bots:RecentAnchor:Scale", 0.04m),
+                        multiplicativeDirectional: multiplicativeDirection,
+                        diversityGain:             _configuration.GetValue("Bots:DirectionalPressure:DiversityGain", 1.5m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
@@ -545,6 +567,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _regime.Reset(TimeHelper.NowUtc());    // §A2/A3/A4: open from a deterministic +1 regime
         _activity.Reset(TimeHelper.NowUtc());  // §Pillar B: open neutral (field ≡ baseline/1)
         _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
+        _priceMemory.Reset(TimeHelper.NowUtc()); // re-seed EWMA + day window; inert until Tick if anyConsumer=false
         _fxDesk.Reset();  // §3.7: fresh per-session FX-desk conversion tallies
 
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
@@ -1031,6 +1054,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _regime.Tick(now);    // §A2/A3/A4 regime (no-op when all consumers disabled)
         _activity.Tick(now);  // §Pillar B activity field (no-op when disabled); reads sentiment shock above
         _funds.Tick(now);   // §P6: advance the slowly-drifting fundamentals (internally gated to its interval)
+        _priceMemory.Tick(now); // EWMA + day-TWAP; short-circuits at top when anyConsumer=false
         if (now >= _nextDailyCheck)
         {
             _state.CheckDailyRefresh(_ctx);
@@ -1076,6 +1100,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _nextCashInjectionTime = now + CashInjectionInterval;
         }
     }
+
+    // Price-memory anchors §: case-insensitive enum parse for the appsettings key.
+    // Unknown values fall back to ServiceStart so a typo doesn't break the run.
+    private static DayBoundaryMode ParseDayBoundary(string s)
+        => string.Equals(s, "UtcMidnight", StringComparison.OrdinalIgnoreCase)
+            ? DayBoundaryMode.UtcMidnight
+            : DayBoundaryMode.ServiceStart;
 
     #endregion
 
