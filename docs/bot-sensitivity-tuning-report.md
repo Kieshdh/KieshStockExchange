@@ -173,6 +173,46 @@ Two fixes applied to address the runaway:
 Full design + Ultraplan handoff: `docs/bot-price-memory-and-pressure-hybrid.md` and
 `docs/ultraplan-prompt-price-memory-and-pressure-hybrid.md`.
 
+## Price-memory + hybrid-pressure soak chain (2026-06-11, post Ultraplan f490272 base)
+Six-step validation of the new RecentAnchor + UsePreviousDayAverage + DirectionalPressure:Multiplicative
+features (commits 19b30f6..749c932 + b252cad fix). All steps conservation-clean (CK=0/CONS=0/ERR=0).
+
+| Step | Config | Duration | Result |
+|------|--------|----------|--------|
+| 1 | All flags off | 5m | `+27.3 max, medianAbs 0.38` — byte-identical to f15ecc2 ✓ |
+| 2 | + RecentAnchor | 15m | Stock #1 trajectory 27.1 → 26.3 → **24.9** ✓ fading from cap |
+| 2-long | + RecentAnchor (alone) | 45m | max oscillates 24-28% (doesn't drop below cap; RecentAnchor pulls but cohort push counters) |
+| 3 | + Multiplicative | 15m | medianAbs 1.39 (vs Step 2's 1.67); marginal tightening |
+| 3-long | RecentAnchor + Multiplicative (60m) | 60m | **max pinned at +25-27% all hour, beyond50=0, avg -1.90** — the bake target |
+| 4 | Full stack (+ UsePreviousDayAverage, DayLengthHours=0.5) | 90m+ | **runaway: max +90.6 at t=70m, beyond50=2**, conservation still clean |
+
+### Critical finding: UsePreviousDayAverage + cap-relative-to-target = unbounded
+With `UsePreviousDayAverage=true`, the long-anchor target = daily TWAP (rotated every DayLengthHours).
+Ultraplan's locked answer to Q4 was option (a) — gate `Fundamental()` to return the daily-average — so the
+`OverheatCap` veto now measures deviation from the *moving* target, not seed. Each rotation snapshots the
+price wherever it currently is. If a stock is near the cap when rotation fires, the NEW cap window centers
+on the elevated price, allowing another +cap of drift, repeating. Multiple rotations compound: at t=70m
+(after ~2 rotations) the leaders sat at +90%. `MaxDailyDrift=0.50` clamps the daily-average target to
+[seed×0.5, seed×1.5], so the structural floor is `seed × 1.5 × (1 + 0.30 × OverheatCapMult)` =
+~`seed × 1.5 × 1.51` ≈ **+126% theoretical Meme ceiling**, not +20%.
+
+This is **design-aligned with the user's "trends past 20% naturally" intent** but blows past the implicit
+boundedness assumption. Conservation is unaffected; this is a "the daily anchor lets price climb faster
+than wanted" behaviour, not a safety bug.
+
+### Two fix paths
+1. **Config-only (immediate, recommended for the bake)**: keep `UsePreviousDayAverage=false`. The
+   converged shipping target is **Step 3-long's config** — RecentAnchor + Multiplicative + the existing
+   OU-walk Fundamental for the long anchor. Delivers max ~25-27% (cap-bounded), beyond50=0, naturally
+   non-flat candles, conservation clean. No code change required.
+2. **Ultraplan-grade structural fix**: modify `IsOverBandAsync` so the cap measures deviation from
+   `SeedPrice` (or a clamped seed), not from `Fundamental()`. Decouples the cap from the daily-anchor
+   target. Re-enables `UsePreviousDayAverage` cleanly. ~5-line change; would also fold in the deferred
+   abs-20% clamp (a) from the earlier round.
+
+Step 3-long is the bake-ready config. Decision pending the user's call on whether to also commission
+fix (2) — without it, `UsePreviousDayAverage` should stay OFF.
+
 ## Final verdict
 The bot market is now **substantially less sensitive**:
 - Default config max +43%/15min → converged config max **+10.8% under shock-stress, +13% over 2.5h soak**.
