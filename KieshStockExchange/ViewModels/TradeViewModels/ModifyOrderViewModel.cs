@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -5,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
@@ -94,6 +96,16 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
 
     public bool HasWarning => !string.IsNullOrEmpty(WarningMessage);
 
+    // §F5: bracket-leg modify. When TargetOrder is a bracket parent with active SL/TP children,
+    // each leg appears as an editable row (price + qty + remove ✕). HasBracketLegs gates the
+    // section visibility — "no SL ⇒ no SL row; no TPs ⇒ no TP rows" — and Confirm dispatches
+    // per-leg modify/cancel via the engine's ModifyBracketLegAsync / CancelOrderAsync paths.
+    [ObservableProperty] private bool _hasBracketLegs;
+    public ObservableCollection<BracketLegRow> BracketLegs { get; } = new();
+    // Leg ids the user clicked ✕ on; applied as CancelOrderAsync calls at Confirm time. Kept
+    // separate from BracketLegs so a removed row vanishes from the list immediately.
+    private readonly HashSet<int> _legsMarkedForRemoval = new();
+
     // When the user types a new price into the modify panel, push it back into
     // IOrderEditService.PrefillPrice. The chart view subscribes to that service
     // and moves the dragged line to track the panel's value live. Round-trips
@@ -179,6 +191,9 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         QuantityString = string.Empty;
         ErrorMessage = string.Empty;
         WarningMessage = string.Empty;
+        HasBracketLegs = false;
+        BracketLegs.Clear();
+        _legsMarkedForRemoval.Clear();
     }
 
     private void Initialize(Order order, decimal? prefillPrice)
@@ -205,7 +220,49 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         QuantityString = order.Quantity.ToString();
         ErrorMessage   = string.Empty;
         UpdateWarning();
+        PopulateBracketLegs(order);
     }
+
+    // §F5: build the per-leg row list for a bracket parent. The SL row (if present) leads, then
+    // TPs in OrderId order, numbered TP1/TP2/.... Skips inactive (filled/cancelled) legs so a
+    // half-realised bracket only surfaces what's still editable.
+    private void PopulateBracketLegs(Order parent)
+    {
+        BracketLegs.Clear();
+        _legsMarkedForRemoval.Clear();
+        HasBracketLegs = false;
+
+        var legs = _cache.AllOrders
+            .Where(o => o.ParentOrderId == parent.OrderId && o.IsActive)
+            .ToList();
+        if (legs.Count == 0) return;
+
+        var sl  = legs.FirstOrDefault(o => o.Stop == StopKind.Stop);
+        var tps = legs.Where(o => o.Stop != StopKind.Stop)
+                      .OrderBy(o => o.OrderId)
+                      .ToList();
+
+        if (sl is not null)
+            BracketLegs.Add(BracketLegRow.ForLeg(sl, "SL"));
+        for (int i = 0; i < tps.Count; i++)
+            BracketLegs.Add(BracketLegRow.ForLeg(tps[i], $"TP{i + 1}"));
+
+        HasBracketLegs = BracketLegs.Count > 0;
+    }
+
+    [RelayCommand]
+    private void RemoveLeg(BracketLegRow? row)
+    {
+        if (row is null) return;
+        BracketLegs.Remove(row);
+        _legsMarkedForRemoval.Add(row.LegId);
+        if (BracketLegs.Count == 0) HasBracketLegs = false;
+    }
+
+    // True if any leg row has a price/qty diff vs its original, or any leg was marked for removal.
+    // Used by Confirm to decide whether there's work to do when the parent fields are unchanged.
+    private bool HasBracketLegChanges() =>
+        _legsMarkedForRemoval.Count > 0 || BracketLegs.Any(r => r.HasChanges());
 
     [RelayCommand]
     private async Task ConfirmAsync()
@@ -215,7 +272,15 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
 
         var (newPrice, newLimitPrice, newQty, validationError) = ValidateInputs(TargetOrder);
         if (validationError is not null) { ErrorMessage = validationError; return; }
-        if (newPrice is null && newLimitPrice is null && newQty is null)
+        // §F5: bracket-leg edits validated separately so the error points at the offending row.
+        if (HasBracketLegs)
+        {
+            var legError = ValidateBracketLegs();
+            if (legError is not null) { ErrorMessage = legError; return; }
+        }
+        bool parentDirty = newPrice is not null || newLimitPrice is not null || newQty is not null;
+        bool legsDirty   = HasBracketLegs && HasBracketLegChanges();
+        if (!parentDirty && !legsDirty)
         {
             // No change — leave edit mode silently rather than confirming a no-op.
             _editService.EndEdit();
@@ -225,18 +290,45 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         IsBusy = true;
         try
         {
-            // §3.6 P3: for an armed stop the primary field is the trigger and there may be a
-            // separate limit price; route to ModifyStopAsync. Plain orders go to ModifyOrderAsync.
-            var result = TargetOrder.IsStopOrder
-                ? await _orders.ModifyStopAsync(_auth.CurrentUserId,
-                    TargetOrder.OrderId, newQty, newStopPrice: newPrice, newLimitPrice: newLimitPrice).ConfigureAwait(false)
-                : await _orders.ModifyOrderAsync(_auth.CurrentUserId,
-                    TargetOrder.OrderId, newQty, newPrice).ConfigureAwait(false);
+            // Parent first when its own price/qty changed. Skipped when only legs are dirty so a
+            // user who just adjusts a TP doesn't trip the parent's "nothing changed" reject path.
+            OrderResult? parentResult = null;
+            if (parentDirty)
+            {
+                // §3.6 P3: for an armed stop the primary field is the trigger and there may be a
+                // separate limit price; route to ModifyStopAsync. Plain orders go to ModifyOrderAsync.
+                parentResult = TargetOrder.IsStopOrder
+                    ? await _orders.ModifyStopAsync(_auth.CurrentUserId,
+                        TargetOrder.OrderId, newQty, newStopPrice: newPrice, newLimitPrice: newLimitPrice).ConfigureAwait(false)
+                    : await _orders.ModifyOrderAsync(_auth.CurrentUserId,
+                        TargetOrder.OrderId, newQty, newPrice).ConfigureAwait(false);
+                _logger.LogInformation("Modify order #{OrderId}: {Status}",
+                    TargetOrder.OrderId, parentResult.Status);
+                await _notify.NotifyOrderResultAsync(parentResult).ConfigureAwait(false);
+            }
 
-            _logger.LogInformation("Modify order #{OrderId}: {Status}",
-                TargetOrder.OrderId, result.Status);
-
-            await _notify.NotifyOrderResultAsync(result).ConfigureAwait(false);
+            // §F5: legs after the parent so a parent qty cut doesn't fight a TP qty cut. Removals
+            // first (release reservation before any leg-modify recomputes share pools), then
+            // per-leg modify via ModifyBracketLegAsync.
+            if (legsDirty)
+            {
+                foreach (var legId in _legsMarkedForRemoval.ToList())
+                {
+                    var r = await _orders.CancelOrderAsync(_auth.CurrentUserId, legId).ConfigureAwait(false);
+                    _logger.LogInformation("Remove bracket leg #{LegId}: {Status}", legId, r.Status);
+                    await _notify.NotifyOrderResultAsync(r).ConfigureAwait(false);
+                }
+                foreach (var row in BracketLegs)
+                {
+                    if (!row.HasChanges()) continue;
+                    var newLegPrice = row.ParsedPrice() ?? row.OriginalPrice;
+                    var newLegQty   = row.ParsedQuantity() ?? row.OriginalQuantity;
+                    var r = await _orders.ModifyBracketLegAsync(_auth.CurrentUserId,
+                        row.LegId, newLegPrice, newLegQty).ConfigureAwait(false);
+                    _logger.LogInformation("Modify bracket leg #{LegId}: {Status}", row.LegId, r.Status);
+                    await _notify.NotifyOrderResultAsync(r).ConfigureAwait(false);
+                }
+            }
 
             await _cache.RefreshAsync(_auth.CurrentUserId).ConfigureAwait(false);
             // Re-pull funds + positions so the AccountPage Funds card and any
@@ -334,9 +426,93 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         return (newPrice, newLimitPrice, newQty, null);
     }
 
+    // §F5: per-row validation of the bracket-leg list. Returns the first error message (with the
+    // leg label prefixed) or null when every row parses cleanly. The engine's geometry validator
+    // re-checks ordering on Confirm — this just catches obvious format/zero mistakes early.
+    private string? ValidateBracketLegs()
+    {
+        foreach (var row in BracketLegs)
+        {
+            var pTrim = (row.PriceString ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(pTrim))
+            {
+                var p = CurrencyHelper.Parse(pTrim, row.Currency);
+                if (!p.HasValue || p.Value <= 0m)
+                    return $"{row.Label}: enter a valid positive price.";
+            }
+            var qTrim = (row.QuantityString ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(qTrim))
+            {
+                if (!int.TryParse(qTrim, out var q) || q <= 0)
+                    return $"{row.Label}: enter a valid positive quantity.";
+            }
+        }
+        return null;
+    }
+
     public void Dispose()
     {
         _editService.PropertyChanged -= OnEditServiceChanged;
         _cache.OrdersChanged -= OnCacheOrdersChanged;
+    }
+}
+
+// §F5: editable row for a single bracket leg (SL or one TP) inside ModifyOrderView. The originals
+// are captured at Initialize time so HasChanges() can detect a diff without consulting the cache,
+// and the cancel/modify dispatch in ConfirmAsync reads the parsed price+qty straight from here.
+public partial class BracketLegRow : ObservableObject
+{
+    public required int LegId { get; init; }
+    public required string Label { get; init; }       // "SL" | "TP1" | "TP2" | "TP3"
+    public required bool IsStopLoss { get; init; }
+    public required bool IsTakeProfit { get; init; }
+    public required decimal OriginalPrice { get; init; }
+    public required int OriginalQuantity { get; init; }
+    public required CurrencyType Currency { get; init; }
+
+    [ObservableProperty] private string _priceString = string.Empty;
+    [ObservableProperty] private string _quantityString = string.Empty;
+
+    public decimal? ParsedPrice()
+    {
+        var t = (PriceString ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(t)) return null;
+        var p = CurrencyHelper.Parse(t, Currency);
+        return p is decimal v && v > 0m ? v : null;
+    }
+
+    public int? ParsedQuantity()
+    {
+        var t = (QuantityString ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(t)) return null;
+        return int.TryParse(t, out var q) && q > 0 ? q : null;
+    }
+
+    public bool HasChanges()
+    {
+        var p = ParsedPrice();
+        if (p is decimal pv && pv != OriginalPrice) return true;
+        var q = ParsedQuantity();
+        if (q is int qv && qv != OriginalQuantity) return true;
+        return false;
+    }
+
+    // Build a row for a leg, capturing originals and seeding the editable strings.
+    internal static BracketLegRow ForLeg(Order leg, string label)
+    {
+        bool isSL = leg.Stop == StopKind.Stop;
+        var price = isSL ? (leg.StopPrice ?? 0m) : leg.Price;
+        return new BracketLegRow
+        {
+            LegId = leg.OrderId,
+            Label = label,
+            IsStopLoss = isSL,
+            IsTakeProfit = !isSL,
+            OriginalPrice = price,
+            OriginalQuantity = leg.Quantity,
+            Currency = leg.CurrencyType,
+            PriceString = CurrencyHelper.FormatForEdit(price, leg.CurrencyType),
+            QuantityString = leg.Quantity.ToString(),
+        };
     }
 }

@@ -79,6 +79,47 @@
                        HorizontalTextAlignment="End" />
             </VerticalStackLayout>
 
+            <!-- §F5: bracket legs — one row per existing SL or TP, gated per leg ("no SL ⇒ no SL
+                 row; no TPs ⇒ no TP rows"). Each row carries price (always) + qty (TPs only;
+                 SL takes from the held pool) + a ✕ to mark the leg for removal at Confirm time. -->
+            <VerticalStackLayout Spacing="4" IsVisible="{Binding HasBracketLegs}">
+                <Label Text="Bracket legs"
+                       Style="{StaticResource FormLabelStyle}" />
+                <CollectionView ItemsSource="{Binding BracketLegs}"
+                                SelectionMode="None">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:BracketLegRow">
+                            <Grid ColumnDefinitions="44,*,80,32"
+                                  ColumnSpacing="6"
+                                  Padding="0,2">
+                                <Label Grid.Column="0"
+                                       Text="{Binding Label}"
+                                       Style="{StaticResource FormLabelStyle}"
+                                       VerticalOptions="Center" />
+                                <Entry Grid.Column="1"
+                                       Text="{Binding PriceString, Mode=TwoWay}"
+                                       Style="{StaticResource FormEntryStyle}"
+                                       Keyboard="Numeric"
+                                       HorizontalTextAlignment="End" />
+                                <Entry Grid.Column="2"
+                                       Text="{Binding QuantityString, Mode=TwoWay}"
+                                       Style="{StaticResource FormEntryStyle}"
+                                       Keyboard="Numeric"
+                                       HorizontalTextAlignment="End"
+                                       IsVisible="{Binding IsTakeProfit}" />
+                                <Button Grid.Column="3"
+                                        Text="✕"
+                                        FontSize="14"
+                                        BackgroundColor="Transparent"
+                                        TextColor="{DynamicResource SellRed}"
+                                        Command="{Binding RemoveLegCommand, Source={RelativeSource AncestorType={x:Type vm:ModifyOrderViewModel}}, x:DataType=vm:ModifyOrderViewModel}"
+                                        CommandParameter="{Binding .}" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </VerticalStackLayout>
+
             <!-- Error message (only visible when set) -->
             <Label Text="{Binding ErrorMessage}"
                    IsVisible="{Binding HasError}"
