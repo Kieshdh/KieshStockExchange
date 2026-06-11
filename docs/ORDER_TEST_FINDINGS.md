@@ -156,6 +156,17 @@ One bullet per finding. Capture: **what's wrong** → **repro** (checklist step 
   plus chart-line rendering.
   *Layer: chart line rendering for Attached children + `ModifyOrderViewModel`/engine per-leg modify;
   re-test C8f once this lands.*
+  - **SHIPPED 2026-06-11 (commit 980cc64).** `OpenOrderLine` gains an `IsDormant` flag.
+    `ChartViewModel.SyncOpenOrderLines` emits one line per `IsAttached` leg in addition to
+    `OpenOrders`. `CandleChartDrawable.DrawOpenOrderLines` picks `IsDormant` up via
+    `baseColor.WithAlpha(0.45f)` and swaps the inline label (STOP/B/S → SL/TP) so the
+    bracket-child role reads at a glance. `ModifyOrderViewModel.PopulateBracketLegs` widened from
+    `o.IsActive` to `(o.IsActive || o.IsAttached)` so the modify panel of an unfilled parent shows
+    its SL+TPs (F5's per-leg dispatch routes each through `ModifyBracketLegAsync` — modify the
+    parent's SL without touching TPs falls out naturally). `OnCacheOrdersChanged` no longer
+    auto-ends edit on `!IsActive` alone; must also be `!IsAttached` (otherwise dragging a dormant
+    leg opens the panel and the very next refresh kicks the user out). `ConfirmAsync` routes a
+    directly-targeted bracket child through `ModifyBracketLegAsync`. C8f is now testable.
 
 ### App lifecycle / logging
 - **F8 — Log "logged out" when the MAUI app closes.** On client shutdown, emit a session logout line
