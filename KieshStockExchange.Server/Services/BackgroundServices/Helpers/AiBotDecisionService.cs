@@ -594,11 +594,13 @@ internal sealed class AiBotDecisionService
         var herdTilt = (_herding && notMM) ? _regime.HerdTilt(user.AiUserId, _followerFraction, _herdTilt) : 0m;
 
         // Value anchor: tilt toward buying stocks below fundamental / selling those above. The restoring
-        // force that keeps price bounded — a separate term, never damped by the role split.
+        // force that keeps price bounded — never damped by the role split. The gap is NOT clamped at ±Scale
+        // so the pull keeps growing past saturation: a stock far from fundamental feels a stronger anchor
+        // than one near it. The final Clamp01 on buyProb is the hard ceiling.
         var anchorTilt = 0m;
         if (_valueAnchorStrength > 0m)
         {
-            var gap = ClampSigned(AverageWatchlistValueGap(ctx, user, currency) / _valueAnchorScale, 1m);
+            var gap = AverageWatchlistValueGap(ctx, user, currency) / _valueAnchorScale;
             anchorTilt = gap * _valueAnchorStrength;
         }
 

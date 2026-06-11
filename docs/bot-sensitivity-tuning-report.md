@@ -128,6 +128,51 @@ applied to the working tree (Strength/Scale/OverheatCap on ValueAnchor; Enabled/
 ScalperConviction/AggressionBoost on SentimentDynamics; Herding off on Imbalance). Commit on
 `feature/bot-market-realism-v2`; the prior `cc6d863` (Lateness Dapper fix) is the base.
 
+## Follow-up: cap-off + damped-news watch (2026-06-11)
+Per user feedback ("remove the hard ceiling, let trends form naturally") plus news damping
+(`ShockMaxMagnitude 0.6→0.20`, `ShockMeanIntervalHours 6→12`), set `OverheatCap = 0`. 60 min watch run:
+| t(min) | avg% | medianAbs% | max% | min% | beyond50 |
+|---|---|---|---|---|---|
+| 10 | +1.9 | 0.79 | **+129** | -17.6 | 2 |
+| 30 | +5.0 | 3.36 | **+451** | -33.0 | 2 |
+| 50 | +1.6 | 7.69 | **+571** | -60.2 | 9 |
+| 60 | -12.0 | 10.3 | +266 | -72.0 | 11 |
+**Runaway.** News shocks fired only twice — the +571% spike is **pure sentiment-cohort positive
+feedback**: rising price → positive EWMA slope → momentum cohort buys more → slope stays positive → etc.
+The `OverheatCap` wasn't merely a backstop; it was the circuit breaker on a self-exciting loop. With the
+additive pressure formula, every bot saturates to "always buy" under strong directional — diversity is
+destroyed at the exact moment when contrarian counter-pressure should kick in. Conservation clean.
+
+## Follow-up: A+B watch (soft cap 0.30 + un-saturated anchor, 30 min)
+Two fixes applied to address the runaway:
+- **A**: `OverheatCap 0 → 0.30` (Meme effective ~51%, Normal 30%) — structural backstop, no longer
+  hard-capped at 20%.
+- **B**: `AiBotDecisionService.cs` — remove the `ClampSigned(gap, ±1)` so the value-anchor tilt keeps
+  growing past saturation (deeper deviation ⇒ stronger pull).
+
+| t(min) | avg% | medianAbs% | max% | min% | beyond50 |
+|---|---|---|---|---|---|
+| 5  | -0.29 | 0.48 | +27.5 | -10.6 | 0 |
+| 15 | -0.89 | 1.16 | +26.0 |  -9.9 | 0 |
+| 30 | -1.49 | 1.78 | **+26.1** | -11.6 | 0 |
+
+- **Runaway tamed**: max plateaued ~+26% (was +571%). News shock count: 1.
+- Top excursion Stock #1 (Calm class, effective cap 0.30×0.85=25.5%) pinned at +26% — cap is doing its
+  job, but **the anchor and cohort equilibrate AT the cap, not below it**. No natural reversion away from
+  the cap.
+- Conservation clean (CK=0/CONS=0/ERR=0, 48.6k trades). avg crept to -1.49 (vs -1.13 at the converged
+  config's t=30m) — small regression, likely the un-saturated anchor × asymmetric short-collateral
+  interaction; expected to abate once RecentAnchor reduces time at high deviations.
+
+**Diagnosis ⇒ A+B are necessary but not sufficient.** Two structural pieces are still missing:
+1. A **medium-term price-mean-reversion anchor** (`RecentAnchor`, EWMA ~30 min) so trends fade away from
+   the cap rather than pin at it.
+2. **Hybrid pressure formula** (anchors additive, directional/herd multiplicative) so the sell-biased
+   cohort preserves counter-pressure at extremes instead of saturating to "always buy."
+
+Full design + Ultraplan handoff: `docs/bot-price-memory-and-pressure-hybrid.md` and
+`docs/ultraplan-prompt-price-memory-and-pressure-hybrid.md`.
+
 ## Final verdict
 The bot market is now **substantially less sensitive**:
 - Default config max +43%/15min → converged config max **+10.8% under shock-stress, +13% over 2.5h soak**.
