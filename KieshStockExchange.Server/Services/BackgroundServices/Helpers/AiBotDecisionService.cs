@@ -1184,11 +1184,15 @@ internal sealed class AiBotDecisionService
     /// <item><b>multiplicative=false</b> (default) ⇒ the original additive form
     ///   <c>Clamp01(homeostatic + directional·noiseFactor + herd + anchor)</c>, byte-for-byte
     ///   identical to today's expression.</item>
-    /// <item><b>multiplicative=true</b> ⇒
-    ///   <c>Clamp01(0.5 + (homeostatic − 0.5)·(1 + (directional·noiseFactor + herd)·gain) + anchor)</c>.
-    ///   Symmetric around 0.5 (sell-side spread = buy-side spread) so the cohort stays
-    ///   heterogeneous under strong directional and contrarian counter-pressure survives at
-    ///   extremes. A neutral bot (homeostatic=0.5) gets ZERO multiplier effect — correct.</item>
+    /// <item><b>multiplicative=true</b> ⇒ magnitude/direction split.
+    ///   <c>mag = |directional·noiseFactor + herd|·gain</c> amplifies the per-bot personality
+    ///   <c>(homeostatic − 0.5)</c> by a factor <c>f = 1 + mag ≥ 1</c> (never inverts).
+    ///   Direction comes from a separate additive shift <c>(directional·noiseFactor + herd)</c>.
+    ///   Final form: <c>Clamp01(0.5 + (homeostatic − 0.5)·f + shift + anchor)</c>. Preserves cohort
+    ///   spread symmetrically under sign of directional: <c>|spread(+d)| == |spread(−d)|</c> by
+    ///   construction. Contrarian counter-pressure survives at extremes on BOTH sides; the
+    ///   sign-inversion bug of <c>f = 1 + d·gain</c> (sell-biased bot becoming bullish under strong
+    ///   sell signal) cannot occur.</item>
     /// </list>
     /// Anchors are additive in BOTH branches — structural override of personality. Pure,
     /// RNG-free, unit-testable.
@@ -1198,8 +1202,10 @@ internal sealed class AiBotDecisionService
     {
         if (multiplicative)
         {
-            var f = 1m + (directional * noiseFactor + herdTilt) * diversityGain;
-            return Clamp01(0.5m + (homeostatic - 0.5m) * f + anchorTilt);
+            var directionalShift = directional * noiseFactor + herdTilt;
+            var mag = Math.Abs(directionalShift) * diversityGain;
+            var f = 1m + mag;
+            return Clamp01(0.5m + (homeostatic - 0.5m) * f + directionalShift + anchorTilt);
         }
         return Clamp01(homeostatic + directional * noiseFactor + herdTilt + anchorTilt);
     }

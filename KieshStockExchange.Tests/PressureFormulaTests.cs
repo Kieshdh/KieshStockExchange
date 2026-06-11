@@ -43,23 +43,25 @@ public class PressureFormulaTests
     [Fact]
     public void Diversity_preserved_under_saturation()
     {
-        // Strong buy directional under additive saturates BOTH bots to 1.0 (cohort spread = 0).
-        // The multiplicative form keeps the spread alive — the structural property the design
-        // doc's design-§4 claims as "≥2× the std deviation of additive."
-        var addBuyBiased  = Add(0.6m, 0.6m, 1m, 0m, 0m);
-        var addSellBiased = Add(0.4m, 0.6m, 1m, 0m, 0m);
+        // Strong buy directional under additive saturates BOTH extreme-personality bots to 1.0
+        // (cohort spread = 0). The magnitude/direction-split multiplicative form keeps spread alive
+        // because (h - 0.5)·f = ±0.4·2.5 ≠ 0 dominates the additive shift on the sell-biased side.
+        var addBuyBiased  = Add(0.9m, 1.0m, 1m, 0m, 0m);
+        var addSellBiased = Add(0.1m, 1.0m, 1m, 0m, 0m);
         Assert.Equal(1m, addBuyBiased);
         Assert.Equal(1m, addSellBiased);
         var addSpread = Math.Abs(addBuyBiased - addSellBiased);
         Assert.Equal(0m, addSpread);
 
-        var mulBuyBiased  = Mul(0.6m, 0.6m, 1m, 0m, 0m);
-        var mulSellBiased = Mul(0.4m, 0.6m, 1m, 0m, 0m);
-        // Hand-computed: f = 1 + 0.6·1.5 = 1.9; 0.5 ± 0.1·1.9 = {0.69, 0.31}.
-        Assert.Equal(0.69m, mulBuyBiased);
-        Assert.Equal(0.31m, mulSellBiased);
+        var mulBuyBiased  = Mul(0.9m, 1.0m, 1m, 0m, 0m);
+        var mulSellBiased = Mul(0.1m, 1.0m, 1m, 0m, 0m);
+        // Hand-computed: shift = 1.0; mag = 1.0·1.5 = 1.5; f = 2.5.
+        //   h=0.9 → 0.5 + 0.4·2.5 + 1.0 = 2.5 → Clamp01 = 1.0
+        //   h=0.1 → 0.5 − 0.4·2.5 + 1.0 = 0.5
+        Assert.Equal(1.0m, mulBuyBiased);
+        Assert.Equal(0.5m, mulSellBiased);
         var mulSpread = Math.Abs(mulBuyBiased - mulSellBiased);
-        Assert.True(mulSpread > addSpread * 2m + 0.1m,
+        Assert.True(mulSpread > addSpread + 0.4m,
             $"multiplicative spread {mulSpread} should dwarf additive's {addSpread} under saturation");
     }
 
@@ -93,10 +95,11 @@ public class PressureFormulaTests
     [Fact]
     public void Neutral_bot_is_unmoved_by_multiplier()
     {
-        // The most-important invariant of the symmetric-around-0.5 multiplicative form:
-        // (homeostatic − 0.5) × f = 0 when homeostatic = 0.5, so any directional / herd /
-        // diversity-gain combination collapses to buyProb = Clamp01(0.5 + anchor). The multiplier
-        // cannot push a no-opinion bot in any direction.
+        // Magnitude/direction-split invariant: a neutral bot (homeostatic=0.5) has zero personality
+        // to amplify ((h−0.5)·f = 0), so its buyProb tracks ONLY the additive directional shift plus
+        // anchor — the multiplier's amplification factor doesn't apply to it. A neutral-bias bot
+        // SHOULD lean with strong sentiment (that's correct behaviour); what it must NOT do is get
+        // amplified by f. This pins the latter, weaker invariant.
         var dirs  = new[] { -0.8m, -0.3m, 0m, 0.3m, 0.8m };
         var herds = new[] { -0.2m, 0m, 0.2m };
         var anchs = new[] { -0.3m, -0.05m, 0m, 0.05m, 0.3m };
@@ -104,7 +107,8 @@ public class PressureFormulaTests
         foreach (var hd in herds)
         foreach (var a in anchs)
         {
-            var expected = Clamp01(0.5m + a);
+            // For h=0.5: (h-0.5)·f = 0, so buyProb = Clamp01(0.5 + (d + hd) + a).
+            var expected = Clamp01(0.5m + (d + hd) + a);
             Assert.Equal(expected, Mul(0.5m, d, 1m, hd, a));
         }
     }
