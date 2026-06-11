@@ -156,6 +156,12 @@ internal sealed class AiBotDecisionService
     // daily TWAP) so the hard ceiling never ratchets up with the anchor. Anchor PULL still uses
     // Fundamental() — only the hard veto changes target.
     private readonly bool    _capFromSeed;
+    // §patch 0001: per-tick memoization of pure-function reads (Fundamental, SeedPrice,
+    // IsOverBand, GetMidPrice, watchlist aggregators, ComputeCommitted). When on, the per-tick
+    // caches on AiBotContext are read on every call; cleared at the top of each tick by
+    // AiTradeService.CollectPendingOrdersAsync. Default true; flag-off path is byte-identical
+    // because cache miss falls through to the original computation.
+    private readonly bool    _memoizeTickValues;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
@@ -200,7 +206,10 @@ internal sealed class AiBotDecisionService
         bool recentAnchorEnabled = false,
         decimal recentAnchorStrength = 0.35m, decimal recentAnchorScale = 0.04m,
         bool multiplicativeDirectional = false, decimal diversityGain = 1.5m,
-        bool capFromSeed = false)
+        bool capFromSeed = false,
+        // §patch 0001: per-tick memoization (Fundamental/SeedPrice/IsOverBand/etc). Pure
+        // function-result cache scoped to one bot-loop tick. Default on; off is byte-identical.
+        bool memoizeTickValues = true)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -279,6 +288,7 @@ internal sealed class AiBotDecisionService
         _multiplicativeDirectional = multiplicativeDirectional;
         _diversityGain             = Math.Max(0m, diversityGain);
         _capFromSeed               = capFromSeed;
+        _memoizeTickValues         = memoizeTickValues;
     }
     #endregion
 
@@ -303,7 +313,8 @@ internal sealed class AiBotDecisionService
         var type    = ChooseOrderType(ctx, user, currency);
         // §perf C4: snapshot every "already committed" total in ONE walk of this user's open orders, then
         // reuse it below — the sell path used to re-walk OpenOrders once per sell candidate inside ChooseStockId.
-        var committed = ComputeCommitted(ctx, user.UserId);
+        // §patch 0001: routed through GetCommitted so the same tick's other consumers hit the cache.
+        var committed = GetCommitted(ctx, user.UserId);
         var stockId = ChooseStockId(ctx, user, type, currency, committed);
         if (stockId <= 0) return null;
 
@@ -410,7 +421,7 @@ internal sealed class AiBotDecisionService
         // blends market with fundamental, but the trigger is forced strictly below market so a sell-stop
         // is always valid and varied stops don't pile at one level and chain-fire.
         var offset = StopOffset(ctx, user);
-        var fund = Fundamental(stockId, currency);
+        var fund = Fundamental(stockId, currency, ctx);
         var refPrice = fund > 0m ? (price + fund) / 2m : price;
         var candidate = refPrice * (1m - offset);
         var ceiling = price * (1m - 0.002m);
@@ -486,7 +497,7 @@ internal sealed class AiBotDecisionService
         {
             // §P6: fundamental-relative SL strictly below entry, and a low slippage cap on the fire
             // (was uncapped null — the downward-cascade source). Share-reserved, so the cap is safe.
-            var fundVal  = Fundamental(stockId, currency);
+            var fundVal  = Fundamental(stockId, currency, ctx);
             var refPrice = fundVal > 0m ? (price + fundVal) / 2m : price;
             var slCand   = refPrice * (1m - slOff);
             var slCeil   = price * (1m - 0.002m);
@@ -779,7 +790,7 @@ internal sealed class AiBotDecisionService
             }
             if (_valueAnchorStrength > 0m && _valueTargetSelection)
             {
-                var f = Fundamental(stockIds[i], currency);
+                var f = Fundamental(stockIds[i], currency, ctx);
                 if (f > 0m && ctx.SmoothedPrices.TryGetValue((stockIds[i], currency), out var p) && p > 0m)
                 {
                     double gap = (double)((f - p) / f);        // >0 undervalued, <0 overvalued
@@ -981,6 +992,17 @@ internal sealed class AiBotDecisionService
         IReadOnlyDictionary<int, int> SellSharesByStock,
         IReadOnlyDictionary<int, int> CoverSharesByStock);
 
+    // §patch 0001 memoize wrapper: per-tick cached version of ComputeCommitted. Called by every
+    // ComputeOrderAsync (and prospectively by buy/sell quantity helpers); previously a single bot
+    // tick could re-walk OpenOrders many times. Cache lives on AiBotContext, cleared per tick.
+    internal CommittedTotals GetCommitted(AiBotContext ctx, int userId)
+    {
+        if (_memoizeTickValues && ctx.CommittedCache.TryGetValue(userId, out var cached)) return cached;
+        var fresh = ComputeCommitted(ctx, userId);
+        if (_memoizeTickValues) ctx.CommittedCache[userId] = fresh;
+        return fresh;
+    }
+
     internal static CommittedTotals ComputeCommitted(AiBotContext ctx, int userId)
     {
         var buyFunds    = new Dictionary<CurrencyType, decimal>();
@@ -1068,7 +1090,7 @@ internal sealed class AiBotDecisionService
         // a daily anchor that drifts up re-centers the cap window each rotation, producing a
         // multi-day compounding ratchet. Anchor PULL (in MakeBuyDecisionAsync) still uses
         // Fundamental() so it tracks the recent regime — only the hard ceiling is anchored to seed.
-        var anchor = _capFromSeed ? SeedPrice(stockId, currency) : Fundamental(stockId, currency);
+        var anchor = _capFromSeed ? SeedPrice(stockId, currency, ctx) : Fundamental(stockId, currency, ctx);
         if (anchor <= 0m) return false;
         var mkt = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (mkt <= 0m) return false;
@@ -1082,11 +1104,20 @@ internal sealed class AiBotDecisionService
 
     // §cap-from-seed helper: per-(stock, currency) seed price from the StockListings. Returns 0 when
     // the listing is missing (caller handles that as "no veto" — same as the prior fund<=0 path).
-    private decimal SeedPrice(int stockId, CurrencyType currency)
+    // §patch 0001: per-tick memoize — seed is per-(stock,ccy) constant, but the per-listing scan
+    // costs O(#listings) per bot per tick; cache hits are O(1).
+    private decimal SeedPrice(int stockId, CurrencyType currency, AiBotContext? ctx = null)
     {
+        if (_memoizeTickValues && ctx is not null)
+        {
+            var key = (stockId, currency);
+            if (ctx.SeedPriceCache.TryGetValue(key, out var cached)) return cached;
+        }
+        decimal value = 0m;
         foreach (var l in _stocks.GetListings(stockId))
-            if (l.CurrencyType == currency) return l.SeedPrice;
-        return 0m;
+            if (l.CurrencyType == currency) { value = l.SeedPrice; break; }
+        if (_memoizeTickValues && ctx is not null) ctx.SeedPriceCache[(stockId, currency)] = value;
+        return value;
     }
 
     // §P6 liquidity-aware anti-sweep: cap a bot MARKET order to a fraction of the resting opposite-side
@@ -1240,7 +1271,7 @@ internal sealed class AiBotDecisionService
         int count = 0;
         foreach (var sid in user.Watchlist)
         {
-            var f = Fundamental(sid, currency);
+            var f = Fundamental(sid, currency, ctx);
             if (f <= 0m) continue;
             if (!ctx.SmoothedPrices.TryGetValue((sid, currency), out var p) || p <= 0m) continue;
             sum += (f - p) / f;
@@ -1292,9 +1323,22 @@ internal sealed class AiBotDecisionService
     // pull, PickStock's value-target selection, and bracket SL refs all read from one source.
     // The OU walk keeps Ticking either way (deterministic-RNG-safe; output simply unused under
     // daily-anchor) so rollback is a single config flip.
-    private decimal Fundamental(int stockId, CurrencyType currency)
-        => _useDailyAnchor ? _priceMemory.GetPreviousDayAverage(stockId, currency)
-                           : _funds.Get(stockId, currency);
+    // §patch 0001: per-tick memoize when ctx is supplied. Same input → same output, so the cache
+    // is pure-function safe; cleared at the top of every tick by AiTradeService.
+    private decimal Fundamental(int stockId, CurrencyType currency, AiBotContext? ctx = null)
+    {
+        if (_memoizeTickValues && ctx is not null)
+        {
+            var key = (stockId, currency);
+            if (ctx.FundamentalCache.TryGetValue(key, out var cached)) return cached;
+            var value = _useDailyAnchor ? _priceMemory.GetPreviousDayAverage(stockId, currency)
+                                        : _funds.Get(stockId, currency);
+            ctx.FundamentalCache[key] = value;
+            return value;
+        }
+        return _useDailyAnchor ? _priceMemory.GetPreviousDayAverage(stockId, currency)
+                               : _funds.Get(stockId, currency);
+    }
 
     private OrderType ApplyExtremeReaction(AiBotContext ctx, AIUser user,
         int stockId, CurrencyType currency, OrderType currentType)

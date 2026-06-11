@@ -62,6 +62,35 @@ internal sealed class AiBotContext
     private static readonly Position EmptyPosition = new();
     #endregion
 
+    #region Per-tick memoization caches (patch 0001)
+    // Cleared at the top of each tick by AiTradeService.CollectPendingOrdersAsync via ClearTickCaches.
+    // Plain Dictionary (not ConcurrentDictionary) because they're touched only by the bot-loop
+    // thread — OnQuoteUpdated writes only to StockPrices/PreviousPrices/SmoothedPrices.
+    internal long TickId;
+    internal readonly Dictionary<(int, CurrencyType), bool>     OverBandBuyCache  = new();
+    internal readonly Dictionary<(int, CurrencyType), bool>     OverBandSellCache = new();
+    internal readonly Dictionary<(int, CurrencyType), decimal>  FundamentalCache  = new();
+    internal readonly Dictionary<(int, CurrencyType), decimal>  SeedPriceCache    = new();
+    internal readonly Dictionary<(int, CurrencyType), decimal?> MidPriceCache     = new();
+    internal readonly Dictionary<int, AiBotDecisionService.CommittedTotals> CommittedCache = new();
+    internal readonly Dictionary<(int userId, CurrencyType), decimal> WatchlistMomentumCache    = new();
+    internal readonly Dictionary<(int userId, CurrencyType), decimal> WatchlistSentimentCache   = new();
+    internal readonly Dictionary<(int userId, CurrencyType), decimal> WatchlistValueGapCache    = new();
+    internal readonly Dictionary<(int userId, CurrencyType), decimal> WatchlistRecentGapCache   = new();
+    internal readonly Dictionary<int, decimal> WatchlistSharedSentimentCache = new();
+    internal readonly Dictionary<(int userId, bool fast), decimal> WatchlistSlopeCache = new();
+
+    internal void ClearTickCaches()
+    {
+        OverBandBuyCache.Clear(); OverBandSellCache.Clear();
+        FundamentalCache.Clear(); SeedPriceCache.Clear(); MidPriceCache.Clear();
+        CommittedCache.Clear();
+        WatchlistMomentumCache.Clear(); WatchlistSentimentCache.Clear();
+        WatchlistValueGapCache.Clear(); WatchlistRecentGapCache.Clear();
+        WatchlistSharedSentimentCache.Clear(); WatchlistSlopeCache.Clear();
+    }
+    #endregion
+
     #region Accessors
     internal Fund GetFund(int userId, CurrencyType currency)
         => _accounts.GetFund(userId, currency) ?? EmptyFund;
@@ -255,6 +284,9 @@ internal sealed class AiBotContext
         Stances.Clear();
         ProcessedTxIds.Clear();
         LastRefreshDate = DateOnly.MinValue;
+        // §patch 0001: per-tick caches also cleared on full reset.
+        ClearTickCaches();
+        TickId = 0;
     }
 
     private static decimal Clamp01(decimal x) => x < 0m ? 0m : x > 1m ? 1m : x;

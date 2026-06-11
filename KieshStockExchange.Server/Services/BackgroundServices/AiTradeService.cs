@@ -849,6 +849,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private async Task<(List<(AIUser user, Order order)> Plain, List<(AIUser user, BotAdvancedDecision dec)> Advanced)>
         CollectPendingOrdersAsync(DateTime now, CancellationToken ct)
     {
+        // §patch 0001: stamp the tick id and clear per-tick memoization caches before the
+        // foreach. Cache entries from the previous tick would be stale (stock prices, OpenOrders
+        // composition, committed totals, OverBand verdicts all change tick-to-tick).
+        _ctx.TickId = Interlocked.Read(ref _tickCount);
+        _ctx.ClearTickCaches();
+
         var pending = new List<(AIUser user, Order order)>();
         var advanced = new List<(AIUser user, BotAdvancedDecision dec)>();
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
