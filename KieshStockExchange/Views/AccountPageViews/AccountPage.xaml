@@ -136,6 +136,53 @@
                         <Label Text="{Binding BaseCurrency}"
                                Style="{StaticResource MutedLabelStyle}" />
 
+                        <!-- Reserved-in-base-currency: only visible when > 0; "Reserved $0" would be noise. -->
+                        <Label Text="{Binding ReservedDisplay}"
+                               IsVisible="{Binding HasReserved}"
+                               Style="{StaticResource MutedLabelStyle}"
+                               FontSize="12" />
+
+                        <!-- Sibling currencies: the user's OTHER non-zero funds, surfaced here so a
+                             multi-currency user doesn't need to navigate to Portfolio to confirm a
+                             balance. Hidden when the user only operates in one currency. -->
+                        <VerticalStackLayout Spacing="6"
+                                             IsVisible="{Binding HasOtherCurrencyFunds}"
+                                             Margin="0,4,0,0">
+                            <BoxView HeightRequest="1"
+                                     Color="{DynamicResource Divider}"
+                                     Margin="0,0,0,2" />
+                            <Label Text="Other currencies"
+                                   Style="{StaticResource MutedLabelStyle}"
+                                   FontSize="11" />
+                            <CollectionView ItemsSource="{Binding OtherCurrencyFunds}"
+                                            SelectionMode="None">
+                                <CollectionView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:AccountFundRow">
+                                        <Grid ColumnDefinitions="Auto,*"
+                                              RowDefinitions="Auto,Auto"
+                                              ColumnSpacing="8"
+                                              Padding="0,3">
+                                            <Label Grid.Row="0" Grid.Column="0"
+                                                   Text="{Binding Currency}"
+                                                   Style="{StaticResource FormLabelStyle}"
+                                                   VerticalOptions="Center" />
+                                            <Label Grid.Row="0" Grid.Column="1"
+                                                   Text="{Binding AvailableDisplay}"
+                                                   FontAttributes="Bold"
+                                                   HorizontalOptions="End"
+                                                   VerticalOptions="Center" />
+                                            <Label Grid.Row="1" Grid.Column="1"
+                                                   Text="{Binding ReservedDisplay, StringFormat='reserved {0}'}"
+                                                   IsVisible="{Binding HasReserved}"
+                                                   Style="{StaticResource MutedLabelStyle}"
+                                                   FontSize="10"
+                                                   HorizontalOptions="End" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </CollectionView.ItemTemplate>
+                            </CollectionView>
+                        </VerticalStackLayout>
+
                         <Grid ColumnDefinitions="*,*"
                               ColumnSpacing="8"
                               Margin="0,4,0,0">
