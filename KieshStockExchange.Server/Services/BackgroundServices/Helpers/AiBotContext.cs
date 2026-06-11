@@ -89,6 +89,14 @@ internal sealed class AiBotContext
         WatchlistValueGapCache.Clear(); WatchlistRecentGapCache.Clear();
         WatchlistSharedSentimentCache.Clear(); WatchlistSlopeCache.Clear();
     }
+
+    // §patch 0003: per-(bot, tick) eligible-watchlist cache. Today every advanced builder
+    // re-iterates user.Watchlist filtered by IsListedIn — once per BuildBracketAsync /
+    // BuildShortOpenAsync / BuildProtectiveStopAsync / ChooseStockId etc. Precomputing once per
+    // tick is a strict win. Stale check uses Tick == TickId (not Clear per tick) so a bot that
+    // never has a decision-tick fired doesn't get its array clobbered uselessly.
+    internal sealed class WatchlistView { public int[] Order = Array.Empty<int>(); public long Tick; }
+    internal readonly Dictionary<int, WatchlistView> WatchlistByBot = new();
     #endregion
 
     #region Accessors
@@ -287,6 +295,8 @@ internal sealed class AiBotContext
         // §patch 0001: per-tick caches also cleared on full reset.
         ClearTickCaches();
         TickId = 0;
+        // §patch 0003: bot-keyed eligible-watchlist cache also cleared on full reset.
+        WatchlistByBot.Clear();
     }
 
     private static decimal Clamp01(decimal x) => x < 0m ? 0m : x > 1m ? 1m : x;

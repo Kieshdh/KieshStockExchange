@@ -381,7 +381,12 @@ internal sealed class AiBotDecisionService
         if (!_advancedEnabled) return null;
         // §3.6 P6: the per-kind probabilities are PER-BOT (seeded by strategy in Tools/Person.py), not global
         // config. The Bots:Advanced:Enabled master switch above still gates the whole feature.
-        decimal advProb = user.StopProb + user.TrailingProb + user.ShortProb + user.LongBracketProb + user.ShortBracketProb;
+        // §patch 0004: snapshot the five prob fields once at the top via an `in`-passed ref struct, instead
+        // of re-reading user.X five times below. Pure micro-opt — avoids potential volatile re-reads in
+        // the hot decision loop and keeps the cumulative pick obviously deterministic.
+        var probs = new AdvProbsSnapshot(user);
+        decimal advProb = probs.StopProb + probs.TrailingProb + probs.ShortProb
+                        + probs.LongBracketProb + probs.ShortBracketProb;
         if (advProb <= 0m) return null;
         decimal r = ctx.Decimal01(user.AiUserId);   // single seeded roll: gate + kind selection
         if (r >= advProb) return null;
@@ -390,21 +395,34 @@ internal sealed class AiBotDecisionService
         // stock returns null → the caller falls through to a normal plain order this tick.
         // StopProb and TrailingProb both now gate a slippage-capped STATIC protective stop — bots never
         // arm an uncapped trailing fire (the §P6 "bound ALL stop fires" guarantee, bot-side).
-        decimal c = user.StopProb;
-        if (r < c)                          return await BuildProtectiveStopAsync(ctx, user, currency, ct).ConfigureAwait(false);
-        c += user.TrailingProb; if (r < c)  return await BuildProtectiveStopAsync(ctx, user, currency, ct).ConfigureAwait(false);
-        c += user.ShortProb;    if (r < c)  return await BuildShortOpenAsync(ctx, user, currency, ct).ConfigureAwait(false);
-        c += user.LongBracketProb; if (r < c) return await BuildBracketAsync(ctx, user, currency, isShort: false, ct).ConfigureAwait(false);
+        decimal c = probs.StopProb;
+        if (r < c)                            return await BuildProtectiveStopAsync(ctx, user, currency, ct).ConfigureAwait(false);
+        c += probs.TrailingProb; if (r < c)   return await BuildProtectiveStopAsync(ctx, user, currency, ct).ConfigureAwait(false);
+        c += probs.ShortProb;    if (r < c)   return await BuildShortOpenAsync(ctx, user, currency, ct).ConfigureAwait(false);
+        c += probs.LongBracketProb; if (r < c) return await BuildBracketAsync(ctx, user, currency, isShort: false, ct).ConfigureAwait(false);
         return await BuildBracketAsync(ctx, user, currency, isShort: true, ct).ConfigureAwait(false);
+    }
+
+    // §patch 0004: ref-struct snapshot of the five advanced-order probability fields. Stack-allocated,
+    // no GC pressure. The `ref struct` constraint guarantees it never escapes the decision method.
+    private readonly ref struct AdvProbsSnapshot
+    {
+        public readonly decimal StopProb, TrailingProb, ShortProb, LongBracketProb, ShortBracketProb;
+        public AdvProbsSnapshot(AIUser u)
+        {
+            StopProb = u.StopProb; TrailingProb = u.TrailingProb; ShortProb = u.ShortProb;
+            LongBracketProb = u.LongBracketProb; ShortBracketProb = u.ShortBracketProb;
+        }
     }
 
     // P6a: protect the first watchlist long with FREE shares — a slippage-capped, fundamental-relative
     // static sell-stop (bots no longer arm uncapped trailing stops; see ComputeAdvancedDecisionAsync).
+    // §patch 0003: uses EligibleWatchlist cache.
     private async Task<BotAdvancedDecision?> BuildProtectiveStopAsync(AiBotContext ctx, AIUser user,
         CurrencyType currency, CancellationToken ct)
     {
-        var watch = user.Watchlist?.Where(id => _stocks.IsListedIn(id, currency)).ToList();
-        if (watch is null || watch.Count == 0) return null;
+        var watch = EligibleWatchlist(ctx, user, currency);
+        if (watch.Length == 0) return null;
         int stockId = 0, qty = 0;
         foreach (var id in watch)
         {
@@ -526,21 +544,41 @@ internal sealed class AiBotDecisionService
             StopSlippagePct: slippage, TakeProfits: tps);
     }
 
+    // §patch 0003: per-(bot, tick) eligible-watchlist precompute. Today every advanced builder
+    // re-iterated user.Watchlist filtered by IsListedIn — once per BuildBracketAsync /
+    // BuildShortOpenAsync / BuildProtectiveStopAsync / ChooseStockId. With wider Path 2
+    // eligibility (patch 0007) the picker has even more candidates; precomputing is the
+    // foundation that makes that affordable. Stale check via Tick == TickId, not per-tick Clear.
+    private int[] EligibleWatchlist(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        if (!ctx.WatchlistByBot.TryGetValue(user.AiUserId, out var v))
+            ctx.WatchlistByBot[user.AiUserId] = v = new AiBotContext.WatchlistView();
+        if (v.Tick == ctx.TickId) return v.Order;
+
+        var watch = user.Watchlist;
+        if (watch is null || watch.Count == 0) { v.Order = Array.Empty<int>(); v.Tick = ctx.TickId; return v.Order; }
+        var list = new List<int>(watch.Count);
+        foreach (var id in watch) if (_stocks.IsListedIn(id, currency)) list.Add(id);
+        v.Order = list.ToArray();
+        v.Tick = ctx.TickId;
+        return v.Order;
+    }
+
     // First watchlist stock the bot is FLAT on (per the engine view) — for flat-only shorts/short-brackets.
+    // §patch 0003: uses EligibleWatchlist cache.
     private int FirstFlatStock(AiBotContext ctx, AIUser user, CurrencyType currency)
     {
-        var watch = user.Watchlist?.Where(id => _stocks.IsListedIn(id, currency)).ToList();
-        if (watch is null) return 0;
+        var watch = EligibleWatchlist(ctx, user, currency);
         foreach (var id in watch)
             if ((_accounts.GetPosition(user.UserId, id)?.Quantity ?? 0) == 0) return id;
         return 0;
     }
 
     // First watchlist stock the bot is flat-or-long on (never short) — for long brackets.
+    // §patch 0003: uses EligibleWatchlist cache.
     private int FirstLongableStock(AiBotContext ctx, AIUser user, CurrencyType currency)
     {
-        var watch = user.Watchlist?.Where(id => _stocks.IsListedIn(id, currency)).ToList();
-        if (watch is null) return 0;
+        var watch = EligibleWatchlist(ctx, user, currency);
         foreach (var id in watch)
             if ((_accounts.GetPosition(user.UserId, id)?.Quantity ?? 0) >= 0) return id;
         return 0;
@@ -744,10 +782,9 @@ internal sealed class AiBotDecisionService
         CommittedTotals committed)
     {
         var rng   = ctx.GetRandom(user.AiUserId);
-        var watch = user.Watchlist?
-            .Where(id => _stocks.IsListedIn(id, currency))
-            .ToList();
-        if (watch == null || watch.Count == 0) return 0;
+        // §patch 0003: uses EligibleWatchlist cache (was inline Where().ToList() per call).
+        var watch = EligibleWatchlist(ctx, user, currency);
+        if (watch.Length == 0) return 0;
 
         if (IsSellOrder(type))
         {
