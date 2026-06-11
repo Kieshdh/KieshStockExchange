@@ -86,6 +86,15 @@ One bullet per finding. Capture: **what's wrong** → **repro** (checklist step 
   *Layer: `ModifyOrderView.xaml` + `ModifyOrderViewModel` — reuse PlaceOrderView's SL/TP rows but gate
   each on whether the edited order actually has that leg; triage per-leg modify/cancel against the
   engine. Related: F12 (modify the unfilled parent's SL without touching TPs).*
+  - **SHIPPED 2026-06-11 (commit f490272).** ModifyOrderViewModel now populates `BracketLegs` from
+    `_cache.AllOrders` filtered by ParentOrderId + IsActive (auto-skips Filled/Cancelled legs); a
+    new `BracketLegRow` carries label/price/qty/originals/parsed-diff. Confirm dispatches per-leg
+    work after the parent modify: removals first (frees reservation), then per-leg
+    `ModifyBracketLegAsync` against any price/qty diff. Cancel-of-leg via `CancelOrderAsync`.
+    ModifyOrderView.xaml adds a gated `Bracket legs` CollectionView with one row per leg, qty
+    visible on TPs only (SL takes from the held pool). Per-leg validation prefixes the offending
+    leg label; engine geometry validator (Batch F 1/3) re-checks ordering server-side. Client TFM
+    builds clean, 110/110 tests pass.
 - **F6 — Auto-close the modify panel when the edited order fills.** Can't modify a filled order; if the
   order being edited transitions to Filled, exit modify mode automatically.
   *Layer: `ModifyOrderViewModel` / `IOrderEditService` — watch the edited order's status (OrdersChanged)
