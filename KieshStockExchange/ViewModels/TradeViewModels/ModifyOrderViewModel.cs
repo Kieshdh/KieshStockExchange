@@ -62,7 +62,10 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
             var t = TargetOrder;
             if (t is null) return;
             var current = _cache.AllOrders.FirstOrDefault(o => o.OrderId == t.OrderId);
-            if (current is not null && !current.IsActive)   // Filled / Cancelled ⇒ end the edit
+            // §F12: only end the edit when the order is truly closed (Filled/Cancelled). A dormant
+            // bracket child (Attached) is neither IsActive nor closed — leave the panel open so the
+            // user can edit it via the chart-drag path.
+            if (current is not null && !current.IsActive && !current.IsAttached)
                 _editService.EndEdit();
         });
 
@@ -232,8 +235,11 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
         _legsMarkedForRemoval.Clear();
         HasBracketLegs = false;
 
+        // §F12: include IsAttached (dormant pre-parent-fill) legs alongside IsActive (Open/Armed)
+        // legs. The cache partitions IsActive into OpenOrders so dormant legs live in AllOrders;
+        // a bracket parent that hasn't filled yet has its SL+TPs all Attached.
         var legs = _cache.AllOrders
-            .Where(o => o.ParentOrderId == parent.OrderId && o.IsActive)
+            .Where(o => o.ParentOrderId == parent.OrderId && (o.IsActive || o.IsAttached))
             .ToList();
         if (legs.Count == 0) return;
 
@@ -295,13 +301,26 @@ public partial class ModifyOrderViewModel : BaseViewModel, IDisposable
             OrderResult? parentResult = null;
             if (parentDirty)
             {
-                // §3.6 P3: for an armed stop the primary field is the trigger and there may be a
-                // separate limit price; route to ModifyStopAsync. Plain orders go to ModifyOrderAsync.
-                parentResult = TargetOrder.IsStopOrder
-                    ? await _orders.ModifyStopAsync(_auth.CurrentUserId,
-                        TargetOrder.OrderId, newQty, newStopPrice: newPrice, newLimitPrice: newLimitPrice).ConfigureAwait(false)
-                    : await _orders.ModifyOrderAsync(_auth.CurrentUserId,
-                        TargetOrder.OrderId, newQty, newPrice).ConfigureAwait(false);
+                // §F12: editing a bracket child directly (chart drag on a TP/SL line) routes through
+                // ModifyBracketLegAsync — it dispatches dormant (Attached, edit-in-place) vs live
+                // (Armed SL / Open TP, the existing modify paths) internally. §3.6 P3: an armed
+                // stop's primary field is the trigger + optional separate limit price → ModifyStopAsync.
+                // Plain orders go to ModifyOrderAsync.
+                if (TargetOrder.IsBracketChild)
+                {
+                    parentResult = await _orders.ModifyBracketLegAsync(_auth.CurrentUserId,
+                        TargetOrder.OrderId, newPrice ?? (TargetOrder.IsStopOrder
+                            ? (TargetOrder.StopPrice ?? TargetOrder.Price) : TargetOrder.Price),
+                        newQty ?? TargetOrder.Quantity).ConfigureAwait(false);
+                }
+                else
+                {
+                    parentResult = TargetOrder.IsStopOrder
+                        ? await _orders.ModifyStopAsync(_auth.CurrentUserId,
+                            TargetOrder.OrderId, newQty, newStopPrice: newPrice, newLimitPrice: newLimitPrice).ConfigureAwait(false)
+                        : await _orders.ModifyOrderAsync(_auth.CurrentUserId,
+                            TargetOrder.OrderId, newQty, newPrice).ConfigureAwait(false);
+                }
                 _logger.LogInformation("Modify order #{OrderId}: {Status}",
                     TargetOrder.OrderId, parentResult.Status);
                 await _notify.NotifyOrderResultAsync(parentResult).ConfigureAwait(false);

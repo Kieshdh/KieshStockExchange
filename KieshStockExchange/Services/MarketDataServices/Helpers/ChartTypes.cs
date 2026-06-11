@@ -55,8 +55,11 @@ public readonly record struct PriceMarker(Guid Id, decimal Price);
 // right-gutter tag so the user can see the size at a glance. §3.6 P3: an armed stop
 // is drawn at its StopPrice with a distinct dash + STOP/STOP-LIM pill — IsStop marks
 // it, IsStopLimit distinguishes the pill label (a stop-limit also carries a limit price).
+// §F12: IsDormant flags a bracket child whose parent hasn't filled yet (Order.IsAttached).
+// Rendered dimmer to convey "not live yet" while still being draggable/editable.
 public readonly record struct OpenOrderLine(
-    int OrderId, decimal Price, bool IsBuy, int Quantity, bool IsStop = false, bool IsStopLimit = false);
+    int OrderId, decimal Price, bool IsBuy, int Quantity, bool IsStop = false, bool IsStopLimit = false,
+    bool IsDormant = false);
 
 // One of the user's executed fills, rendered on the chart as a small triangle at
 // (AtTime, Price). IsBuy drives the shape + colour: a buy is an up-pointing green

@@ -292,7 +292,10 @@ public sealed class CandleChartDrawable : IDrawable
 
             // §3.6 P3: a stop trigger line is amber with a tighter dash so it stands apart
             // from the green/red resting-limit lines; limits keep the {4,4} dash + side colour.
-            var color = line.IsStop ? OpenOrderStopColor : (line.IsBuy ? OpenOrderBuyColor : OpenOrderSellColor);
+            // §F12: a dormant bracket child draws in the same colour but at 45 % alpha to convey
+            // "not live yet" — the parent hasn't filled, so the leg hasn't armed/rested either.
+            var baseColor = line.IsStop ? OpenOrderStopColor : (line.IsBuy ? OpenOrderBuyColor : OpenOrderSellColor);
+            var color = line.IsDormant ? baseColor.WithAlpha(0.45f) : baseColor;
             canvas.StrokeColor = color;
             canvas.StrokeSize = dragging ? 2f : 1f;
             canvas.StrokeDashPattern = line.IsStop ? new float[] { 2f, 3f } : new float[] { 4f, 4f };
@@ -311,10 +314,11 @@ public sealed class CandleChartDrawable : IDrawable
 
             // Inline label hugged to the right edge of the plot, on top of the dashed
             // line. Small pill so it stays readable against candles. §3.6 P3: a stop reads
-            // STOP/STOP-LIM + qty; a resting limit reads B/S + qty.
+            // STOP/STOP-LIM + qty; a resting limit reads B/S + qty. §F12: dormant legs label
+            // as TP/SL so the user knows they're bracket children, not standalone resting orders.
             var labelText = line.IsStop
-                ? $"{(line.IsStopLimit ? "STOP-LIM" : "STOP")} {line.Quantity}"
-                : $"{(line.IsBuy ? "B" : "S")} {line.Quantity}";
+                ? $"{(line.IsStopLimit ? "STOP-LIM" : (line.IsDormant ? "SL" : "STOP"))} {line.Quantity}"
+                : (line.IsDormant ? $"TP {line.Quantity}" : $"{(line.IsBuy ? "B" : "S")} {line.Quantity}");
             float labelW = Math.Max(28f, labelText.Length * 7f);
             var labelRect = new RectF(plot.Right - labelW - 4f, y - 8, labelW, 16);
             canvas.FillColor = color;

@@ -257,22 +257,32 @@ public partial class ChartViewModel : StockAwareViewModel
 
         var stockId = Selected.StockId!.Value;
         var currency = Selected.Currency;
+        // §F12: also iterate dormant bracket children (IsAttached) so the SL + TPs of an unfilled
+        // parent show as chart lines — visible/editable before the parent fills. The cache partitions
+        // IsActive into OpenOrders, so dormant legs live in AllOrders \ OpenOrders.
         foreach (var o in _orderCache.OpenOrders)
+            EmitOrderLine(o, isDormant: false, stockId, currency);
+        foreach (var o in _orderCache.AllOrders)
+            if (o.IsAttached) EmitOrderLine(o, isDormant: true, stockId, currency);
+    }
+
+    private void EmitOrderLine(Order o, bool isDormant, int stockId, CurrencyType currency)
+    {
+        if (o.StockId != stockId || o.CurrencyType != currency) return;
+        if (o.UserId != _auth.CurrentUserId) return;
+        // §3.6 P3: an armed stop draws at its StopPrice as a distinct dashed line so the
+        // user sees (and can drag) the trigger. A plain market order has no resting price.
+        if (o.IsStopOrder)
         {
-            if (o.StockId != stockId || o.CurrencyType != currency) continue;
-            if (o.UserId != _auth.CurrentUserId) continue;
-            // §3.6 P3: an armed stop draws at its StopPrice as a distinct dashed line so the
-            // user sees (and can drag) the trigger. A plain market order has no resting price.
-            if (o.IsStopOrder)
-            {
-                if (o.StopPrice is decimal sp && sp > 0m)
-                    OpenOrderLines.Add(new OpenOrderLine(
-                        o.OrderId, sp, o.IsBuyOrder, o.Quantity, IsStop: true, IsStopLimit: o.IsStopLimitOrder));
-                continue;
-            }
-            if (o.IsMarketOrder) continue;
-            OpenOrderLines.Add(new OpenOrderLine(o.OrderId, o.Price, o.IsBuyOrder, o.Quantity));
+            if (o.StopPrice is decimal sp && sp > 0m)
+                OpenOrderLines.Add(new OpenOrderLine(
+                    o.OrderId, sp, o.IsBuyOrder, o.Quantity, IsStop: true,
+                    IsStopLimit: o.IsStopLimitOrder, IsDormant: isDormant));
+            return;
         }
+        if (o.IsMarketOrder) return;
+        OpenOrderLines.Add(new OpenOrderLine(
+            o.OrderId, o.Price, o.IsBuyOrder, o.Quantity, IsDormant: isDormant));
     }
 
     /// <summary>
