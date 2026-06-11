@@ -328,8 +328,8 @@ internal sealed class AiBotDecisionService
 
         // Value-band veto: don't chase price past the band — refuse to buy a stock already far above
         // fundamental or sell one far below it. Cuts the fuel that lets a minority of stocks escape.
-        if (IsBuyOrder(type) && await IsOverBandAsync(ctx, stockId, currency, isBuy: true, ct).ConfigureAwait(false)) return null;
-        if (IsSellOrder(type) && await IsOverBandAsync(ctx, stockId, currency, isBuy: false, ct).ConfigureAwait(false)) return null;
+        if (IsBuyOrder(type) && IsOverBand(ctx, stockId, currency, isBuy: true)) return null;
+        if (IsSellOrder(type) && IsOverBand(ctx, stockId, currency, isBuy: false)) return null;
 
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
         var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, committed, ct).ConfigureAwait(false);
@@ -442,11 +442,11 @@ internal sealed class AiBotDecisionService
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
         // §P6: don't pile a fresh short into a stock already far below fundamental (downward runaway fuel).
-        if (await IsOverBandAsync(ctx, stockId, currency, isBuy: false, ct).ConfigureAwait(false)) return null;
+        if (IsOverBand(ctx, stockId, currency, isBuy: false)) return null;
         int qty = AdvancedExposureQty(ctx, user, currency, price);
         if (qty <= 0) return null;
         // §P6 anti-sweep: the market-sell entry can't take more than a fraction of the resting bids.
-        qty = await ApplyDepthCapAsync(qty, isBuy: false, stockId, currency, ct).ConfigureAwait(false);
+        qty = ApplyDepthCap(qty, isBuy: false, stockId, currency);
         if (qty <= 0) return null;
         return new BotAdvancedDecision(BotAdvancedKind.ShortOpen, stockId, qty, currency);
     }
@@ -465,7 +465,7 @@ internal sealed class AiBotDecisionService
         // §P6: brackets respect the same value-band veto as plain orders — don't open a long into a stock
         // already far above fundamental (its market entry is the fuel that fed the runaway), nor a short
         // into one already far below.
-        if (await IsOverBandAsync(ctx, stockId, currency, isBuy: !isShort, ct).ConfigureAwait(false)) return null;
+        if (IsOverBand(ctx, stockId, currency, isBuy: !isShort)) return null;
 
         // SL distance (per-bot, de-clustered, bounded inside Far walls) + two TP distances (sorted so
         // TP1 is nearer market than TP2).
@@ -509,7 +509,7 @@ internal sealed class AiBotDecisionService
         qty = Math.Min(qty, _advancedMaxQty);
         // §P6 anti-sweep: the market entry leg can't take more than a fraction of the resting opposite
         // side (long entry buys asks, short entry sells bids) — the same structural cap as plain orders.
-        qty = await ApplyDepthCapAsync(qty, isBuy: !isShort, stockId, currency, ct).ConfigureAwait(false);
+        qty = ApplyDepthCap(qty, isBuy: !isShort, stockId, currency);
         if (qty < 2) return null;   // need ≥2 for a 2-leg scale-out
         if (!isShort) buyBudget = CurrencyHelper.RoundMoney(price * qty, currency);
 
@@ -960,7 +960,7 @@ internal sealed class AiBotDecisionService
             }
             // §P6 anti-sweep: a market buy can't take more than a fraction of resting asks.
             if (IsSlippageOrder(type))
-                qty = await ApplyDepthCapAsync(qty, isBuy: true, stockId, currency, ct).ConfigureAwait(false);
+                qty = ApplyDepthCap(qty, isBuy: true, stockId, currency);
             return qty;
         }
         else
@@ -975,7 +975,7 @@ internal sealed class AiBotDecisionService
             var sellQty         = Math.Min(desiredQty, availableQty);
             // §P6 anti-sweep: a market sell can't take more than a fraction of resting bids.
             if (IsSlippageOrder(type))
-                sellQty = await ApplyDepthCapAsync(sellQty, isBuy: false, stockId, currency, ct).ConfigureAwait(false);
+                sellQty = ApplyDepthCap(sellQty, isBuy: false, stockId, currency);
             return sellQty;
         }
     }
@@ -1081,25 +1081,37 @@ internal sealed class AiBotDecisionService
     // price past the personality-scaled overheat band — buying a stock already far above fundamental, or
     // selling/shorting one already far below. Brackets and shorts route through this too, so the advanced
     // path can't bypass the anchor and feed a runaway.
-    private async Task<bool> IsOverBandAsync(AiBotContext ctx, int stockId, CurrencyType currency,
-        bool isBuy, CancellationToken ct)
+    // §patch 0002: rewritten sync (was async Task<bool>) — every caller has ctx.StockPrices available
+    // for the market read, so no actual I/O happens on the hot path. Drops the per-call Task alloc.
+    // Memoized per-tick via ctx.OverBand{Buy,Sell}Cache (patch 0001 cache fields).
+    private bool IsOverBand(AiBotContext ctx, int stockId, CurrencyType currency, bool isBuy)
     {
         if (_overheatCap <= 0m) return false;
+        var cache = isBuy ? ctx.OverBandBuyCache : ctx.OverBandSellCache;
+        if (_memoizeTickValues && cache.TryGetValue((stockId, currency), out var cached)) return cached;
+
         // §cap-from-seed: when on, the hard veto measures deviation from seed instead of Fundamental.
         // Decouples the absolute ceiling from any moving target (OU walk or daily TWAP) — without it,
         // a daily anchor that drifts up re-centers the cap window each rotation, producing a
         // multi-day compounding ratchet. Anchor PULL (in MakeBuyDecisionAsync) still uses
         // Fundamental() so it tracks the recent regime — only the hard ceiling is anchored to seed.
         var anchor = _capFromSeed ? SeedPrice(stockId, currency, ctx) : Fundamental(stockId, currency, ctx);
-        if (anchor <= 0m) return false;
-        var mkt = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
-        if (mkt <= 0m) return false;
+        if (anchor <= 0m) { if (_memoizeTickValues) cache[(stockId, currency)] = false; return false; }
+
+        // §patch 0002: read the price from ctx.StockPrices directly (sync hit-path). On miss, the next
+        // tick will populate it; this tick falls back to no-veto, matching the defensive `anchor <= 0`
+        // path. No ConfigureAwait alloc, no async state machine.
+        if (!ctx.StockPrices.TryGetValue((stockId, currency), out var mkt) || mkt <= 0m)
+        { if (_memoizeTickValues) cache[(stockId, currency)] = false; return false; }
+
         // §A5 fast-anchor slack: widen the INTRADAY veto so excursions can happen, while the slow
         // value-anchor probability tilt (_valueAnchorStrength) still pulls price back on the multi-hour
         // scale. 0 ⇒ unchanged. Applies uniformly to the plain and advanced paths (both call this).
         var cap = _overheatCap * _profiles.Get(stockId).OverheatCapMult * (1m + _anchorFastSlack);
         var dev = (mkt - anchor) / anchor;
-        return isBuy ? dev > cap : dev < -cap;
+        var result = isBuy ? dev > cap : dev < -cap;
+        if (_memoizeTickValues) cache[(stockId, currency)] = result;
+        return result;
     }
 
     // §cap-from-seed helper: per-(stock, currency) seed price from the StockListings. Returns 0 when
@@ -1123,28 +1135,18 @@ internal sealed class AiBotDecisionService
     // §P6 liquidity-aware anti-sweep: cap a bot MARKET order to a fraction of the resting opposite-side
     // depth so no single order can sweep more than that share of the book, regardless of slippage. Pure
     // size reduction — conservation-neutral. Limits are unaffected (they rest, they don't sweep).
-    private async Task<int> ApplyDepthCapAsync(int qty, bool isBuy, int stockId, CurrencyType currency,
-        CancellationToken ct)
+    // §patch 0002: rewritten sync via IOrderBookEngine.TryGetLoaded. On miss (book not loaded yet)
+    // we fall back to no-cap behaviour — same defensive shape as the prior `book is null` path. No
+    // try/catch needed: TryGetLoaded is total; SumQuantity is lock-guarded inside OrderBook and
+    // doesn't throw on the hot path.
+    private int ApplyDepthCap(int qty, bool isBuy, int stockId, CurrencyType currency)
     {
         if (qty <= 0 || _maxSweepFractionOfDepth <= 0m) return qty;
-        try
-        {
-            var book = await _books.GetAsync(stockId, currency, ct).ConfigureAwait(false);
-            if (book is null) return qty;
-            // Sum the side we'd sweep into (buy order eats the sells, and vice-versa) without
-            // allocating a full Snapshot just to total one side.
-            long oppQty = book.SumQuantity(buySide: !isBuy);
-            if (oppQty <= 0) return qty; // empty opposite side — nothing to sweep
-            int cap = (int)Math.Floor((decimal)oppQty * _maxSweepFractionOfDepth);
-            return Math.Min(qty, Math.Max(0, cap));
-        }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Depth-cap fetch failed for stock {Stock}/{Currency}; leaving qty uncapped.",
-                stockId, currency);
-            return qty;
-        }
+        if (!_books.TryGetLoaded(stockId, currency, out var book)) return qty;
+        long oppQty = book.SumQuantity(buySide: !isBuy);
+        if (oppQty <= 0) return qty; // empty opposite side — nothing to sweep
+        int cap = (int)Math.Floor((decimal)oppQty * _maxSweepFractionOfDepth);
+        return Math.Min(qty, Math.Max(0, cap));
     }
     #endregion
 

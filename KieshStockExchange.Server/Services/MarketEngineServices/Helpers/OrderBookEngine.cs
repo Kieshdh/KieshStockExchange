@@ -17,6 +17,14 @@ public interface IOrderBookEngine
     /// <summary>Returns the live mutable book for engine-internal callers. Loads on first access.</summary>
     Task<OrderBook> GetAsync(int stockId, CurrencyType currency, CancellationToken ct);
 
+    /// <summary>
+    /// §patch 0002 sync hit-path probe: returns false if the (stock, ccy) hasn't been loaded yet.
+    /// Bot decision-side callers use this to avoid the Task allocation of GetAsync on the per-bot
+    /// per-tick hot path. Falls back to no-cap / no-veto behaviour on miss — safe because the next
+    /// tick will populate the book once GetAsync resolves elsewhere.
+    /// </summary>
+    bool TryGetLoaded(int stockId, CurrencyType currency, out OrderBook book);
+
     Task WithBookLockAsync(int stockId, CurrencyType currency, CancellationToken ct, Func<OrderBook, Task> body);
 
     /// <summary>Read-only depth snapshot for HTTP/SignalR clients.</summary>
@@ -108,6 +116,18 @@ public sealed class OrderBookEngine : IOrderBookEngine
     {
         await EnsureLoadedAsync(stockId, currency, ct).ConfigureAwait(false);
         return GetOrCreate(stockId, currency);
+    }
+
+    /// <summary>
+    /// §patch 0002 sync probe — see interface comment. Avoids the Task allocation on the bot-loop
+    /// per-tick hot path. Total: returns false rather than throwing or awaiting on miss.
+    /// </summary>
+    public bool TryGetLoaded(int stockId, CurrencyType currency, out OrderBook book)
+    {
+        if (_loaded.TryGetValue((stockId, currency), out var ready) && ready
+            && _books.TryGetValue((stockId, currency), out book!)) return true;
+        book = null!;
+        return false;
     }
 
     /// <summary> Execute a function with exclusive access to the order book for a specific stock and currency </summary>
