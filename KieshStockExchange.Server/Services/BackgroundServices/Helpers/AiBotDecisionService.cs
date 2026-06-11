@@ -139,10 +139,24 @@ internal sealed class AiBotDecisionService
     private readonly decimal _marketMakerLean;
     private readonly decimal _aggressionBoost;                       // symmetric taker push: useMarket += boost·|bias|
 
+    // Price-memory anchors §: medium-term EWMA + long-term daily-TWAP per (stock,currency). The
+    // medium tier is the missing negative-feedback against fast moves; the long tier replaces the
+    // OU walk as the value-anchor target when UseDailyAnchor=true (Fundamental() gates onto it).
+    private readonly BotPriceMemoryService _priceMemory;
+    private readonly bool    _useDailyAnchor;
+    private readonly bool    _recentAnchorEnabled;
+    private readonly decimal _recentAnchorStrength;
+    private readonly decimal _recentAnchorScale;
+    // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
+    // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
+    private readonly bool    _multiplicativeDirectional;
+    private readonly decimal _diversityGain;
+
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
         FundamentalService funds, StockProfileService profiles,
         BotRegimeService regime, BotActivityService activity,
+        BotPriceMemoryService priceMemory,
         ILogger<AiBotDecisionService> logger,
         bool fatTails = true, decimal tradeSizeTailShape = 0.5m,
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
@@ -175,18 +189,24 @@ internal sealed class AiBotDecisionService
         decimal slopeScaleFast = 0.01m, decimal slopeScaleSlow = 0.005m,
         decimal momentumConviction = 0.15m, decimal scalperConviction = 0.20m,
         decimal reversionConviction = 0.15m, decimal reversalConviction = 0.10m,
-        decimal marketMakerLean = 0.05m, decimal aggressionBoost = 0.20m)
+        decimal marketMakerLean = 0.05m, decimal aggressionBoost = 0.20m,
+        // Price-memory anchors + hybrid pressure §: defaults preserve today's behaviour exactly.
+        bool useDailyAnchor = false,
+        bool recentAnchorEnabled = false,
+        decimal recentAnchorStrength = 0.35m, decimal recentAnchorScale = 0.04m,
+        bool multiplicativeDirectional = false, decimal diversityGain = 1.5m)
     {
-        _market    = market    ?? throw new ArgumentNullException(nameof(market));
-        _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
-        _books     = books     ?? throw new ArgumentNullException(nameof(books));
-        _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
-        _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
-        _funds     = funds     ?? throw new ArgumentNullException(nameof(funds));
-        _profiles  = profiles  ?? throw new ArgumentNullException(nameof(profiles));
-        _regime    = regime    ?? throw new ArgumentNullException(nameof(regime));
-        _activity  = activity  ?? throw new ArgumentNullException(nameof(activity));
-        _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
+        _market      = market      ?? throw new ArgumentNullException(nameof(market));
+        _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
+        _books       = books       ?? throw new ArgumentNullException(nameof(books));
+        _stocks      = stocks      ?? throw new ArgumentNullException(nameof(stocks));
+        _sentiment   = sentiment   ?? throw new ArgumentNullException(nameof(sentiment));
+        _funds       = funds       ?? throw new ArgumentNullException(nameof(funds));
+        _profiles    = profiles    ?? throw new ArgumentNullException(nameof(profiles));
+        _regime      = regime      ?? throw new ArgumentNullException(nameof(regime));
+        _activity    = activity    ?? throw new ArgumentNullException(nameof(activity));
+        _priceMemory = priceMemory ?? throw new ArgumentNullException(nameof(priceMemory));
+        _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
         _fatTails           = fatTails;
         _tradeSizeTailShape = tradeSizeTailShape;
         _blockTradeProb     = blockTradeProb;
@@ -245,6 +265,13 @@ internal sealed class AiBotDecisionService
         _reversalConviction = Math.Max(0m, reversalConviction);
         _marketMakerLean    = Math.Max(0m, marketMakerLean);
         _aggressionBoost    = Math.Max(0m, aggressionBoost);
+        // Price-memory anchors + hybrid pressure §
+        _useDailyAnchor            = useDailyAnchor;
+        _recentAnchorEnabled       = recentAnchorEnabled;
+        _recentAnchorStrength      = Math.Max(0m, recentAnchorStrength);
+        _recentAnchorScale         = recentAnchorScale <= 0m ? 0.04m : recentAnchorScale;
+        _multiplicativeDirectional = multiplicativeDirectional;
+        _diversityGain             = Math.Max(0m, diversityGain);
     }
     #endregion
 
@@ -593,10 +620,11 @@ internal sealed class AiBotDecisionService
         // non-followers and when the flag is off.
         var herdTilt = (_herding && notMM) ? _regime.HerdTilt(user.AiUserId, _followerFraction, _herdTilt) : 0m;
 
-        // Value anchor: tilt toward buying stocks below fundamental / selling those above. The restoring
-        // force that keeps price bounded — never damped by the role split. The gap is NOT clamped at ±Scale
-        // so the pull keeps growing past saturation: a stock far from fundamental feels a stronger anchor
-        // than one near it. The final Clamp01 on buyProb is the hard ceiling.
+        // LONG-TERM value anchor: tilt toward Fundamental() — the OU walk by default, or the
+        // hard-clamped previous-day TWAP from BotPriceMemoryService when UseDailyAnchor=true. The
+        // restoring force that keeps price bounded — never damped by the role split. The gap is
+        // NOT clamped at ±Scale so the pull keeps growing past saturation (deeper deviation ⇒
+        // stronger pull). The final Clamp01 on buyProb is the hard ceiling.
         var anchorTilt = 0m;
         if (_valueAnchorStrength > 0m)
         {
@@ -604,7 +632,24 @@ internal sealed class AiBotDecisionService
             anchorTilt = gap * _valueAnchorStrength;
         }
 
-        var buyProb = Clamp01(homeostatic + directional * noiseFactor + herdTilt + anchorTilt);
+        // MEDIUM-TERM mean-reversion: pull back toward the per-stock recent EWMA so a stock that
+        // rips faster than its own short-window average feels a negative-feedback tilt away from
+        // any cap rather than pinning at it. Always reads _priceMemory.GetRecentEwma — the
+        // medium-term anchor target is independent of the long-anchor switch. Default OFF ⇒
+        // contributes 0 and BotPriceMemoryService.Tick is also inert (anyConsumer=false).
+        if (_recentAnchorEnabled && _recentAnchorStrength > 0m)
+        {
+            var rgap = AverageWatchlistRecentGap(ctx, user, currency) / _recentAnchorScale;
+            anchorTilt += rgap * _recentAnchorStrength;
+        }
+
+        // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
+        // around 0.5 (preserves diversity at extremes so sell-biased bots stay sell-biased under
+        // strong buy directional — the natural counter-pressure the additive form crushes by
+        // saturation). Anchors stay additive — structural override of personality. When off,
+        // BuyProbHybrid collapses literal-byte-for-byte to today's additive line 607.
+        var buyProb = BuyProbHybrid(homeostatic, directional, noiseFactor, herdTilt, anchorTilt,
+            _multiplicativeDirectional, _diversityGain);
 
         // 3. Strategy-aware market-order probability
         var effectiveUseMarket = user.UseMarketProb;
@@ -1132,6 +1177,33 @@ internal sealed class AiBotDecisionService
     private static decimal Relu(decimal x) => x > 0m ? x : 0m;
     private static decimal Sign(decimal x) => x > 0m ? 1m : x < 0m ? -1m : 0m;
 
+    /// <summary>
+    /// Hybrid pressure formula §: composes the homeostatic personality baseline with directional /
+    /// herd / anchor terms into a final buyProb ∈ [0,1].
+    /// <list type="bullet">
+    /// <item><b>multiplicative=false</b> (default) ⇒ the original additive form
+    ///   <c>Clamp01(homeostatic + directional·noiseFactor + herd + anchor)</c>, byte-for-byte
+    ///   identical to today's expression.</item>
+    /// <item><b>multiplicative=true</b> ⇒
+    ///   <c>Clamp01(0.5 + (homeostatic − 0.5)·(1 + (directional·noiseFactor + herd)·gain) + anchor)</c>.
+    ///   Symmetric around 0.5 (sell-side spread = buy-side spread) so the cohort stays
+    ///   heterogeneous under strong directional and contrarian counter-pressure survives at
+    ///   extremes. A neutral bot (homeostatic=0.5) gets ZERO multiplier effect — correct.</item>
+    /// </list>
+    /// Anchors are additive in BOTH branches — structural override of personality. Pure,
+    /// RNG-free, unit-testable.
+    /// </summary>
+    internal static decimal BuyProbHybrid(decimal homeostatic, decimal directional, decimal noiseFactor,
+        decimal herdTilt, decimal anchorTilt, bool multiplicative, decimal diversityGain)
+    {
+        if (multiplicative)
+        {
+            var f = 1m + (directional * noiseFactor + herdTilt) * diversityGain;
+            return Clamp01(0.5m + (homeostatic - 0.5m) * f + anchorTilt);
+        }
+        return Clamp01(homeostatic + directional * noiseFactor + herdTilt + anchorTilt);
+    }
+
     // Average signed gap to fundamental across the watchlist: (seed − price)/seed. Positive = broadly
     // below fundamental (cheap → bias to buy); negative = above (rich → bias to sell).
     private decimal AverageWatchlistValueGap(AiBotContext ctx, AIUser user, CurrencyType currency)
@@ -1145,6 +1217,26 @@ internal sealed class AiBotDecisionService
             if (f <= 0m) continue;
             if (!ctx.SmoothedPrices.TryGetValue((sid, currency), out var p) || p <= 0m) continue;
             sum += (f - p) / f;
+            count++;
+        }
+        return count > 0 ? sum / count : 0m;
+    }
+
+    // Price-memory anchors §: signed gap to the per-stock RECENT-EWMA price, watchlist-averaged.
+    // (recent − price)/recent. Positive ⇒ market below its recent average (bias to buy back);
+    // negative ⇒ stretched above (bias to sell). Always reads _priceMemory.GetRecentEwma —
+    // independent of the daily-anchor switch (the two anchors have distinct targets by design).
+    private decimal AverageWatchlistRecentGap(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        if (user.Watchlist == null || user.Watchlist.Count == 0) return 0m;
+        decimal sum = 0m;
+        int count = 0;
+        foreach (var sid in user.Watchlist)
+        {
+            var r = _priceMemory.GetRecentEwma(sid, currency);
+            if (r <= 0m) continue;
+            if (!ctx.SmoothedPrices.TryGetValue((sid, currency), out var p) || p <= 0m) continue;
+            sum += (r - p) / r;
             count++;
         }
         return count > 0 ? sum / count : 0m;
@@ -1166,10 +1258,16 @@ internal sealed class AiBotDecisionService
         return Math.Min(user.SlippageTolerancePrc, cap);
     }
 
-    // Per-(stock,currency) fundamental — the slowly-drifting value the FundamentalService maintains
-    // (the fixed seed price when drift is disabled). The value anchor + overheat veto track this.
+    // Per-(stock,currency) fundamental — the long-term value-anchor target. By default the
+    // FundamentalService OU walk (fixed seed when OU is disabled). When UseDailyAnchor=true,
+    // routes through BotPriceMemoryService.GetPreviousDayAverage instead — the previous day's
+    // TWAP, hard-clamped to seed × [1±MaxDailyDrift], so the OverheatCap veto, the value-anchor
+    // pull, PickStock's value-target selection, and bracket SL refs all read from one source.
+    // The OU walk keeps Ticking either way (deterministic-RNG-safe; output simply unused under
+    // daily-anchor) so rollback is a single config flip.
     private decimal Fundamental(int stockId, CurrencyType currency)
-        => _funds.Get(stockId, currency);
+        => _useDailyAnchor ? _priceMemory.GetPreviousDayAverage(stockId, currency)
+                           : _funds.Get(stockId, currency);
 
     private OrderType ApplyExtremeReaction(AiBotContext ctx, AIUser user,
         int stockId, CurrencyType currency, OrderType currentType)
