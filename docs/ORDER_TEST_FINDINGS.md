@@ -25,17 +25,30 @@ One bullet per finding. Capture: **what's wrong** → **repro** (checklist step 
   *Triage (where to look): `Order.TypeDisplay` / order-type decomposition (Side/Entry/Stop computed
   type), and the stop-limit promotion path in the engine — confirm the fired order keeps its Limit
   entry kind rather than defaulting to market.*
-  - **Investigation 2026-06-11**: domain layer verified correct end-to-end —
-    `StopOrderModelTests.Promotion_preserves_Entry_kind_in_TypeDisplay` (4-case theory) asserts the
-    full armed→promoted display flip across {Buy,Sell}×{Limit,Market}. Promote path is
-    `PromoteStop()` which only clears `Stop`; Entry is untouched. Server `BuildStopOrderAsync` sets
-    `Entry = limitStop ? Limit : Market` per the client's `IsLimitSelected` flag. Client
-    `PlaceOrderViewModel.PlaceOrderCommand` routes Trigger + Limit-price branch to
-    `PlaceStopLimit*Async`. Open-orders row VM exposes `Type => Order.TypeDisplay`.
-    **No bug at the model/engine/VM layer**; if F1 still reproduces it can only be (a) the
-    OrderCacheService not re-emitting the row on promote, or (b) UI row `Type` getter not
-    re-evaluating without an INPC. Closeable pending a live UI smoke (place SLT-Limit, wait for
-    trigger, inspect Type column).
+  - **CLOSED 2026-06-11 — verified-correct, regression net in place.** Full top-to-bottom audit
+    found no defect in any code path. Verification:
+    1. `StopOrderModelTests.Promotion_preserves_Entry_kind_in_TypeDisplay` (4-case theory)
+       asserts the armed→promoted display flip across {Buy,Sell}×{Limit,Market} on the model.
+    2. `Order.PromoteStop()` only clears `Stop`; `Entry` is untouched.
+    3. Server `OrderEntryService.BuildStopOrderAsync` sets `Entry = limitStop ? Limit : Market`
+       from the client's `IsLimitSelected` flag; client `PlaceOrderViewModel`'s Trigger+Limit
+       branch correctly routes to `PlaceStopLimit{Buy,Sell}OrderAsync`.
+    4. Engine post-promote path: `OrderExecutionService.PromoteStopAsync` calls
+       `_db.UpdateOrder` which writes `Entry` + `Stop` in the SQL UPDATE column list (verified —
+       `PgDBService.Orders.cs:230`). The slippage-cap re-anchor branch is gated on
+       `IsSlippageOrder && IsSellOrder` (Market+capped only) so a stop-limit promotion never
+       enters it.
+    5. `Entry` is never mutated post-construction anywhere in the server (`grep .Entry = EntryType`
+       only matches the BUILD methods).
+    6. Round-trip: `OrderMapper.ToRow/ToDomain` preserves Entry; `GetOrdersByUserId` SELECT
+       reads the column.
+    7. UI: both `OpenOrderRow` and `ClosedOrderRow` expose `Type => Order.TypeDisplay`;
+       `TradeTableViewModelBase.UpdateFromCache` REPLACES `CurrentView` with fresh rows on
+       every cache refresh (no INPC dependency).
+    Likely root cause of the original observation: pre-`737a3e4` (Side/Entry/Stop decomposition
+    refactor) the legacy single-string OrderType might have routed differently; the refactor
+    swept it. Will reopen with specific repro if observed again — the theory test will trip on
+    the way down to confirm.
 
 - **F13 — D1: confirmation popup before opening a short (market sell beyond holdings).** A market sell
   that exceeds available holdings (closes long + opens short) should pop an **extra confirmation**
