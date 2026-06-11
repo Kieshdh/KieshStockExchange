@@ -280,7 +280,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         halfLifeSec:    _configuration.GetValue("Bots:RecentAnchor:HalfLifeSec", 1800.0),
                         dayLengthHours: _configuration.GetValue("Bots:ValueAnchor:DayLengthHours", 24.0),
                         boundary:       ParseDayBoundary(_configuration.GetValue("Bots:ValueAnchor:DayBoundaryMode", "ServiceStart")),
-                        maxDailyDrift:  _configuration.GetValue("Bots:ValueAnchor:MaxDailyDrift", 0.50m));
+                        maxDailyDrift:  _configuration.GetValue("Bots:ValueAnchor:MaxDailyDrift", 0.50m),
+                        windowDays:     _configuration.GetValue("Bots:ValueAnchor:WindowDays", 1));
         _sentiment = new BotSentimentService(stocks, _profiles, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
                         newsEvents:              _configuration.GetValue("Bots:NewsEvents", true),
                         shockMeanIntervalHours:  _configuration.GetValue("Bots:ShockMeanIntervalHours", 6.0),
@@ -403,7 +404,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         recentAnchorStrength:      _configuration.GetValue("Bots:RecentAnchor:Strength", 0.35m),
                         recentAnchorScale:         _configuration.GetValue("Bots:RecentAnchor:Scale", 0.04m),
                         multiplicativeDirectional: multiplicativeDirection,
-                        diversityGain:             _configuration.GetValue("Bots:DirectionalPressure:DiversityGain", 1.5m));
+                        diversityGain:             _configuration.GetValue("Bots:DirectionalPressure:DiversityGain", 1.5m),
+                        // §cap-from-seed: hard veto measures vs seed instead of Fundamental() when on.
+                        capFromSeed:               _configuration.GetValue("Bots:ValueAnchor:CapFromSeed", false));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);

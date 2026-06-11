@@ -77,6 +77,60 @@ public class PriceMemoryTests
         Assert.Equal(100m, BotPriceMemoryService.ClampToBand( 77m, seed: 100m, maxDrift: 0m));
     }
 
+    // §weighted-week: linearly-tapered weighted average of the recent N daily TWAPs.
+    // Most recent slot weight = WindowDays; oldest slot weight = 1; missing oldest slots route
+    // their weight to seed. The whole-cap point of the change is that a single runaway day moves
+    // the long anchor by only WindowDays/(WindowDays(WindowDays+1)/2) = 2/(WindowDays+1) of the
+    // runaway — not 1.0 like the prior single-snapshot design.
+
+    [Fact]
+    public void WeightedAverage_window_1_is_the_most_recent_entry()
+    {
+        // WindowDays=1 collapses to the prior "previous-day = last TWAP" semantics. With a single
+        // entry the weighted average is just that entry; back-compat pinned.
+        Assert.Equal(110m, BotPriceMemoryService.WeightedAverage(new[] { 110m }, windowDays: 1, seed: 100m));
+        // Even with multiple entries supplied, WindowDays=1 only counts the most recent.
+        Assert.Equal(120m, BotPriceMemoryService.WeightedAverage(new[] { 100m, 110m, 120m }, windowDays: 1, seed: 100m));
+    }
+
+    [Fact]
+    public void WeightedAverage_single_day_runaway_moves_anchor_by_two_over_N_plus_one()
+    {
+        // With WindowDays=7 and one runaway day TWAP=125 (the rest seed=100), the anchor sits at
+        // (7·125 + (6+5+4+3+2+1)·100) / 28 = (875 + 2100) / 28 = 2975/28 ≈ 106.25. That's 25% of
+        // the runaway: 2/(7+1) = 1/4. The "1/4 of runaway" intuition the design doc quoted.
+        var anchor = BotPriceMemoryService.WeightedAverage(new[] { 125m }, windowDays: 7, seed: 100m);
+        Assert.InRange(anchor, 106.24m, 106.26m);
+    }
+
+    [Fact]
+    public void WeightedAverage_full_window_sustained_runaway_converges_to_runaway()
+    {
+        // Seven days of the same runaway TWAP → the anchor equals that TWAP. (Σ weight·125)/(Σ
+        // weight) = 125. The user's "compounding can happen over a long period" — possible, but
+        // requires many sustained days, not one rotation.
+        var arr = new[] { 125m, 125m, 125m, 125m, 125m, 125m, 125m };
+        Assert.Equal(125m, BotPriceMemoryService.WeightedAverage(arr, windowDays: 7, seed: 100m));
+    }
+
+    [Fact]
+    public void WeightedAverage_warmup_routes_missing_weight_to_seed()
+    {
+        // K=2 entries with WindowDays=7. Slots 0 (newest, w=7) and 1 (w=6) carry the 2 entries;
+        // slots 2..6 (w=5,4,3,2,1 = 15) route to seed. Total weight 28.
+        // (7·130 + 6·120 + 15·100) / 28 = (910 + 720 + 1500) / 28 = 3130/28 ≈ 111.79.
+        var anchor = BotPriceMemoryService.WeightedAverage(new[] { 120m, 130m }, windowDays: 7, seed: 100m);
+        Assert.InRange(anchor, 111.78m, 111.80m);
+    }
+
+    [Fact]
+    public void WeightedAverage_empty_history_returns_seed()
+    {
+        // Day 0 of the session — nothing in the buffer yet. Anchor falls back to seed; byte-identical
+        // to the prior pre-rotation behaviour.
+        Assert.Equal(100m, BotPriceMemoryService.WeightedAverage(Array.Empty<decimal>(), windowDays: 7, seed: 100m));
+    }
+
     [Fact]
     public void Tick_inert_when_anyConsumer_false()
     {

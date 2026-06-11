@@ -38,6 +38,7 @@ internal sealed class BotPriceMemoryService
     private readonly double  _dayLengthSec;
     private readonly DayBoundaryMode _boundary;
     private readonly decimal _maxDailyDrift;
+    private readonly int     _windowDays;
 
     // Per-(stock,currency) state. Plain Dictionary<> — single loop-thread mutator, same pattern
     // as FundamentalService._current / BotSentimentService._combined.
@@ -45,7 +46,10 @@ internal sealed class BotPriceMemoryService
     private readonly Dictionary<(int, CurrencyType), decimal> _recent = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _daySumPriceDt = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _daySumDt = new();
-    private readonly Dictionary<(int, CurrencyType), decimal> _dayPrev = new();
+    // §weighted-week: rolling history of the last WindowDays daily TWAPs. Queue head = oldest,
+    // tail = most recent. Trimmed on rotation. When WindowDays=1 this collapses to the previous
+    // single-day-snapshot behaviour (one entry, weight 1, byte-identical to the prior design).
+    private readonly Dictionary<(int, CurrencyType), Queue<decimal>> _dayHistory = new();
 
     private bool _havePrev;
     private DateTime _lastTickUtc = DateTime.MaxValue; // MaxValue = inert until Reset
@@ -56,18 +60,21 @@ internal sealed class BotPriceMemoryService
         bool anyConsumer = false,
         double halfLifeSec = 1800.0, double dayLengthHours = 24.0,
         DayBoundaryMode boundary = DayBoundaryMode.ServiceStart,
-        decimal maxDailyDrift = 0.50m)
+        decimal maxDailyDrift = 0.50m,
+        int windowDays = 1)
     {
         _stocks      = stocks      ?? throw new ArgumentNullException(nameof(stocks));
         _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
         _priceLookup = priceLookup ?? throw new ArgumentNullException(nameof(priceLookup));
         _anyConsumer  = anyConsumer;
         // Defensive sanity: halflife and dayLength must be > MinDtSec or the EWMA / rotation math
-        // explodes; maxDrift < 1.0 so the lower band stays > 0.
+        // explodes; maxDrift < 1.0 so the lower band stays > 0; windowDays >= 1 so the weighted
+        // average always has at least one slot.
         _halfLifeSec  = Math.Max(MinDtSec, halfLifeSec);
         _dayLengthSec = Math.Max(MinDtSec, dayLengthHours * 3600.0);
         _maxDailyDrift = Math.Clamp(maxDailyDrift, 0m, 0.99m);
         _boundary     = boundary;
+        _windowDays   = Math.Max(1, windowDays);
     }
 
     /// <summary>
@@ -82,7 +89,7 @@ internal sealed class BotPriceMemoryService
         _recent.Clear();
         _daySumPriceDt.Clear();
         _daySumDt.Clear();
-        _dayPrev.Clear();
+        _dayHistory.Clear();
         _havePrev = false;
 
         foreach (var sid in _stocks.ById.Keys)
@@ -143,9 +150,17 @@ internal sealed class BotPriceMemoryService
         {
             var t = _daySumDt.TryGetValue(key, out var sumDt) ? sumDt : 0m;
             if (t > 0m && _daySumPriceDt.TryGetValue(key, out var sumPDt))
-                _dayPrev[key] = sumPDt / t;
-            // else: no observation this window → leave _dayPrev untouched (last good value, or
-            // seed-fallback if there was never one).
+            {
+                // §weighted-week: push this window's TWAP onto the rolling history. Tail = most
+                // recent, head = oldest. Trim from the head when the queue exceeds WindowDays so
+                // the weighted average only sees the configured window.
+                var twap = sumPDt / t;
+                if (!_dayHistory.TryGetValue(key, out var q)) { q = new Queue<decimal>(_windowDays); _dayHistory[key] = q; }
+                q.Enqueue(twap);
+                while (q.Count > _windowDays) q.Dequeue();
+            }
+            // else: no observation this window → don't push (would skew the average toward stale
+            // values). Same intent as the prior "leave last good" behaviour.
             _daySumPriceDt[key] = 0m;
             _daySumDt[key] = 0m;
         }
@@ -167,16 +182,20 @@ internal sealed class BotPriceMemoryService
     }
 
     /// <summary>
-    /// The previous day's TWAP, hard-clamped to <c>seed × [1 − MaxDailyDrift, 1 + MaxDailyDrift]</c>
-    /// at READ time so the underlying mean still tracks reality for telemetry but the value
-    /// consumed by the anchor is always bounded. Falls back to seed during warmup (before the
-    /// first rotation) and for unseen keys — making day-0 byte-identical to a fixed-seed anchor.
+    /// §weighted-week: the linearly-tapered weighted average of the last <c>WindowDays</c> daily
+    /// TWAPs, hard-clamped to <c>seed × [1 − MaxDailyDrift, 1 + MaxDailyDrift]</c>. The most-recent
+    /// day weighs <c>WindowDays</c>, the second-most-recent <c>WindowDays-1</c>, …, the oldest one;
+    /// any "missing" oldest slots (warmup, less than WindowDays of history) route their weight to
+    /// seed so the day-0 behaviour stays byte-identical to a fixed-seed anchor. WindowDays=1
+    /// reproduces the prior single-snapshot behaviour exactly. The clamp still applies — belt and
+    /// suspenders against pathological pile-ups across the window.
     /// </summary>
     internal decimal GetPreviousDayAverage(int stockId, CurrencyType currency)
     {
         var key = (stockId, currency);
         if (!_seed.TryGetValue(key, out var seed) || seed <= 0m) return 0m;
-        if (!_havePrev || !_dayPrev.TryGetValue(key, out var raw)) return seed;
+        if (!_havePrev || !_dayHistory.TryGetValue(key, out var history) || history.Count == 0) return seed;
+        var raw = WeightedAverage(history, _windowDays, seed);
         return ClampToBand(raw, seed, _maxDailyDrift);
     }
 
@@ -192,6 +211,33 @@ internal sealed class BotPriceMemoryService
         double hl = Math.Max(MinDtSec, halfLifeSec);
         double alpha = 1.0 - Math.Pow(2.0, -dt / hl);
         return prevEwma + (decimal)alpha * (price - prevEwma);
+    }
+
+    /// <summary>
+    /// §weighted-week: linearly-tapered weighted average of <paramref name="history"/> over a
+    /// notional window of <paramref name="windowDays"/> slots, with the most-recent entry weighing
+    /// <c>windowDays</c> and slot <c>i</c> weighing <c>windowDays − i</c>. The history may be
+    /// shorter than the window (warmup); the "missing" oldest slots route their weight to
+    /// <paramref name="seed"/>, so day-0 with no history returns <paramref name="seed"/> exactly
+    /// and day-1 with one entry blends in only <c>windowDays / Σ</c> of it. Pure &amp; RNG-free.
+    /// </summary>
+    internal static decimal WeightedAverage(IEnumerable<decimal> history, int windowDays, decimal seed)
+    {
+        if (windowDays < 1) windowDays = 1;
+        // Snapshot once: Queue<T> doesn't index, and we walk it back-to-front to map "most recent"
+        // → highest weight without depending on the concrete collection type at the call site.
+        var arr = history as decimal[] ?? System.Linq.Enumerable.ToArray(history);
+        int k = Math.Min(arr.Length, windowDays);
+        int totalWeight = windowDays * (windowDays + 1) / 2;
+        decimal weightedSum = 0m;
+        // arr[Length-1] is the most recent → weight windowDays. arr[Length-1-i] → weight windowDays-i.
+        for (int i = 0; i < k; i++)
+            weightedSum += (windowDays - i) * arr[arr.Length - 1 - i];
+        // Missing oldest slots k..windowDays-1 route their weight to seed.
+        int seedWeight = 0;
+        for (int i = k; i < windowDays; i++) seedWeight += windowDays - i;
+        weightedSum += seedWeight * seed;
+        return weightedSum / totalWeight;
     }
 
     /// <summary>
