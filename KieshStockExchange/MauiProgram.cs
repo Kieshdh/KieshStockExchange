@@ -86,12 +86,18 @@ public static class MauiProgram
         // Step 3b — JWT token plumbing. TokenStore caches in memory + persists
         // via SecureStorage; AuthHeaderHandler stamps Authorization: Bearer on
         // every KSE.Server HTTP call when a token is present.
+        // §B1 (BUG_SWEEP): UnauthorizedRedirectHandler watches for 401 on protected
+        // calls and bounces the user back to LoginPage with state cleared. Added
+        // inner of AuthHeaderHandler so the auth header is already stamped before
+        // the network call (and so we see the response 401 to act on).
         builder.Services.AddSingleton<TokenStore>();
         builder.Services.AddTransient<AuthHeaderHandler>();
+        builder.Services.AddTransient<UnauthorizedRedirectHandler>();
 
         builder.Services
             .AddHttpClient("KSE.Server", c => c.BaseAddress = new Uri(serverBaseUrl))
-            .AddHttpMessageHandler<AuthHeaderHandler>();
+            .AddHttpMessageHandler<AuthHeaderHandler>()
+            .AddHttpMessageHandler<UnauthorizedRedirectHandler>();
 
         // Phase 3 finish — single shared SignalR connection to /hubs/market.
         // Every live-state proxy (market data, candles, portfolio, order cache
