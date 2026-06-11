@@ -145,4 +145,33 @@ public class StopOrderModelTests
         Assert.Equal(90m, clone.StopPrice);
         Assert.Equal(Order.Types.StopMarketSell, clone.OrderType);
     }
+
+    // F1 (ORDER_TEST_FINDINGS): "limit-trigger shows 'market' instead of 'limit' after promotion."
+    // Pins the display layer — what the open-orders / history table actually shows in the Type
+    // column — across all four arm/promote permutations so a future regression would land here
+    // before the manual repro could even be set up.
+    [Theory]
+    [InlineData(OrderSide.Buy,  EntryType.Limit,  "STOP-LIM", "LIMIT")]
+    [InlineData(OrderSide.Sell, EntryType.Limit,  "STOP-LIM", "LIMIT")]
+    [InlineData(OrderSide.Buy,  EntryType.Market, "STOP",     "MKT")]
+    [InlineData(OrderSide.Sell, EntryType.Market, "STOP",     "MKT")]
+    public void Promotion_preserves_Entry_kind_in_TypeDisplay(OrderSide side, EntryType entry,
+        string armedDisplay, string promotedDisplay)
+    {
+        var o = new Order
+        {
+            UserId = 1, StockId = 1, Quantity = 5,
+            // A limit carries Price (its limit), a market carries 0 + (buy: budget; sell: nothing).
+            Price      = entry == EntryType.Limit ? 105m : 0m,
+            BuyBudget  = entry == EntryType.Market && side == OrderSide.Buy ? 550m : null,
+            StopPrice  = side == OrderSide.Buy ? 104m : 90m,
+            Side = side, Entry = entry, Stop = StopKind.Stop, Status = Order.Statuses.Pending,
+        };
+        Assert.True(o.IsValid());
+        Assert.Equal(armedDisplay, o.TypeDisplay);
+
+        o.PromoteStop();
+        Assert.True(o.IsOpen);
+        Assert.Equal(promotedDisplay, o.TypeDisplay);
+    }
 }

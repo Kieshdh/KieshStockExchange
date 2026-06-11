@@ -25,6 +25,17 @@ One bullet per finding. Capture: **what's wrong** → **repro** (checklist step 
   *Triage (where to look): `Order.TypeDisplay` / order-type decomposition (Side/Entry/Stop computed
   type), and the stop-limit promotion path in the engine — confirm the fired order keeps its Limit
   entry kind rather than defaulting to market.*
+  - **Investigation 2026-06-11**: domain layer verified correct end-to-end —
+    `StopOrderModelTests.Promotion_preserves_Entry_kind_in_TypeDisplay` (4-case theory) asserts the
+    full armed→promoted display flip across {Buy,Sell}×{Limit,Market}. Promote path is
+    `PromoteStop()` which only clears `Stop`; Entry is untouched. Server `BuildStopOrderAsync` sets
+    `Entry = limitStop ? Limit : Market` per the client's `IsLimitSelected` flag. Client
+    `PlaceOrderViewModel.PlaceOrderCommand` routes Trigger + Limit-price branch to
+    `PlaceStopLimit*Async`. Open-orders row VM exposes `Type => Order.TypeDisplay`.
+    **No bug at the model/engine/VM layer**; if F1 still reproduces it can only be (a) the
+    OrderCacheService not re-emitting the row on promote, or (b) UI row `Type` getter not
+    re-evaluating without an INPC. Closeable pending a live UI smoke (place SLT-Limit, wait for
+    trigger, inspect Type column).
 
 - **F13 — D1: confirmation popup before opening a short (market sell beyond holdings).** A market sell
   that exceeds available holdings (closes long + opens short) should pop an **extra confirmation**
