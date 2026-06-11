@@ -23,7 +23,7 @@ Status legend: ✅ fixed · 🟢 audited-clean · 🟡 partially checked / open 
 
 | # | Bug class | Where to look | Status |
 |---|---|---|---|
-| B1 | JWT expiry mid-session → reconnect with stale token → silent 401 loop | `MarketHubClient` token provider, `TokenStore` | 🟡 **(sweep 2)** known **deferred-feature** gap — no refresh token (Phase-6 per AuthController), no 401→re-login interceptor. After 168h, protected calls 401 + reconnect fails, but it now degrades gracefully (no crash, via the OnAppearing guards + null-returning fetches); user just isn't auto-prompted to re-login. **Fix = feature** (add a 401 `DelegatingHandler` → navigate to Login), not a bug-sweep change. |
+| B1 | JWT expiry mid-session → reconnect with stale token → silent 401 loop | `MarketHubClient` token provider, `TokenStore` | ✅ **(2026-06-11, commit 0854a31)** `UnauthorizedRedirectHandler` added inner of `AuthHeaderHandler` on the KSE.Server pipeline. Any 401 on a non-auth endpoint clears the session via `IAuthService.LogoutAsync` and `Shell.GoToAsync("///LoginPage")` — same convention as AppShell/AccountViewModel. Re-entrancy CAS-guarded so the logout-side notify call can't loop. Wrong-password 401s on `/api/auth/*` still flow through normally for `LoginViewModel` to render inline. (Refresh-token feature itself is still Phase-6 territory — the user is now auto-prompted to re-login instead of staring at empty cards.) |
 | B2 | Server broadcast fan-out blocking the engine tick | `MarketHubBroadcaster`, `TelemetryBroadcaster` | 🟢 both fire-and-forget with `ContinueWith` fault logging |
 
 ## C. Server concurrency / async
