@@ -151,6 +151,11 @@ internal sealed class AiBotDecisionService
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
     private readonly decimal _diversityGain;
+    // §cap-from-seed: when on, IsOverBandAsync measures deviation from the per-(stock,currency)
+    // seed instead of Fundamental(). Decouples the absolute cap from any moving target (OU walk or
+    // daily TWAP) so the hard ceiling never ratchets up with the anchor. Anchor PULL still uses
+    // Fundamental() — only the hard veto changes target.
+    private readonly bool    _capFromSeed;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
@@ -194,7 +199,8 @@ internal sealed class AiBotDecisionService
         bool useDailyAnchor = false,
         bool recentAnchorEnabled = false,
         decimal recentAnchorStrength = 0.35m, decimal recentAnchorScale = 0.04m,
-        bool multiplicativeDirectional = false, decimal diversityGain = 1.5m)
+        bool multiplicativeDirectional = false, decimal diversityGain = 1.5m,
+        bool capFromSeed = false)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -272,6 +278,7 @@ internal sealed class AiBotDecisionService
         _recentAnchorScale         = recentAnchorScale <= 0m ? 0.04m : recentAnchorScale;
         _multiplicativeDirectional = multiplicativeDirectional;
         _diversityGain             = Math.Max(0m, diversityGain);
+        _capFromSeed               = capFromSeed;
     }
     #endregion
 
@@ -1056,16 +1063,30 @@ internal sealed class AiBotDecisionService
         bool isBuy, CancellationToken ct)
     {
         if (_overheatCap <= 0m) return false;
-        var fund = Fundamental(stockId, currency);
-        if (fund <= 0m) return false;
+        // §cap-from-seed: when on, the hard veto measures deviation from seed instead of Fundamental.
+        // Decouples the absolute ceiling from any moving target (OU walk or daily TWAP) — without it,
+        // a daily anchor that drifts up re-centers the cap window each rotation, producing a
+        // multi-day compounding ratchet. Anchor PULL (in MakeBuyDecisionAsync) still uses
+        // Fundamental() so it tracks the recent regime — only the hard ceiling is anchored to seed.
+        var anchor = _capFromSeed ? SeedPrice(stockId, currency) : Fundamental(stockId, currency);
+        if (anchor <= 0m) return false;
         var mkt = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (mkt <= 0m) return false;
         // §A5 fast-anchor slack: widen the INTRADAY veto so excursions can happen, while the slow
         // value-anchor probability tilt (_valueAnchorStrength) still pulls price back on the multi-hour
         // scale. 0 ⇒ unchanged. Applies uniformly to the plain and advanced paths (both call this).
         var cap = _overheatCap * _profiles.Get(stockId).OverheatCapMult * (1m + _anchorFastSlack);
-        var dev = (mkt - fund) / fund;
+        var dev = (mkt - anchor) / anchor;
         return isBuy ? dev > cap : dev < -cap;
+    }
+
+    // §cap-from-seed helper: per-(stock, currency) seed price from the StockListings. Returns 0 when
+    // the listing is missing (caller handles that as "no veto" — same as the prior fund<=0 path).
+    private decimal SeedPrice(int stockId, CurrencyType currency)
+    {
+        foreach (var l in _stocks.GetListings(stockId))
+            if (l.CurrencyType == currency) return l.SeedPrice;
+        return 0m;
     }
 
     // §P6 liquidity-aware anti-sweep: cap a bot MARKET order to a fraction of the resting opposite-side
