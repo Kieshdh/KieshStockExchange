@@ -192,6 +192,12 @@ internal sealed class AiBotDecisionService
     // Default OFF ⇒ today's cumulative prob-roll selection unchanged.
     private readonly bool    _inventoryBias;
     private readonly decimal _inventoryBiasThresholdPrc;
+    // Round 2 Q1 follow-up: asymmetric pull on the short→long direction. The round-2 soak found
+    // that E1 over-pulls long-heavy bots into ShortBracket but lacks symmetric short-bot pull
+    // (substrate asymmetry: far fewer short positions exist). Higher values → easier to trigger
+    // the heavy-short bias (effective threshold divided by mult). Default 1.0 = symmetric =
+    // byte-identical to round 2.
+    private readonly decimal _inventoryBiasShortMult;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
@@ -248,7 +254,11 @@ internal sealed class AiBotDecisionService
         bool bracketFlip = false,
         // Round 2 §0011 (E1): inventory-aware kind biasing.
         bool inventoryBias = false,
-        decimal inventoryBiasThresholdPrc = 0.05m)
+        decimal inventoryBiasThresholdPrc = 0.05m,
+        // Round 2 Q1 follow-up: asymmetric short-side multiplier. Default 1.0 = byte-identical
+        // to round 2. Set higher (suggest 2.5) to make heavy-short detection easier to trigger,
+        // increasing the symmetric short→LongBracket pull that round-2 found too weak.
+        decimal inventoryBiasShortMult = 1m)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -332,6 +342,7 @@ internal sealed class AiBotDecisionService
         _bracketFlip               = bracketFlip;
         _inventoryBias             = inventoryBias;
         _inventoryBiasThresholdPrc = Math.Max(0m, inventoryBiasThresholdPrc);
+        _inventoryBiasShortMult    = Math.Max(1m, inventoryBiasShortMult);
     }
     #endregion
 
@@ -492,8 +503,12 @@ internal sealed class AiBotDecisionService
             if (pos.Quantity > 0) { if (notional > maxLongNotional) maxLongNotional = notional; }
             else                  { if (notional > maxShortNotional) maxShortNotional = notional; }
         }
+        // Round 2 Q1: short-side threshold divided by _inventoryBiasShortMult so short-heavy
+        // detection triggers more easily, compensating for the substrate asymmetry that left
+        // the round-2 bear tail asymmetric. _inventoryBiasShortMult defaults to 1.0 (symmetric)
+        // ⇒ byte-identical to round 2.
         if (maxLongNotional  > _inventoryBiasThresholdPrc * portfolio) return +1;
-        if (maxShortNotional > _inventoryBiasThresholdPrc * portfolio) return -1;
+        if (maxShortNotional > _inventoryBiasThresholdPrc * portfolio / _inventoryBiasShortMult) return -1;
         return 0;
     }
 

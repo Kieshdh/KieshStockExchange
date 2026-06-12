@@ -418,7 +418,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         bracketFlip:               _configuration.GetValue("Bots:Advanced:BracketFlip", false),
                         // Round 2 §0011 (E1): inventory-aware kind biasing.
                         inventoryBias:             _configuration.GetValue("Bots:Advanced:InventoryBias", false),
-                        inventoryBiasThresholdPrc: _configuration.GetValue("Bots:Advanced:InventoryBiasThresholdPrc", 0.05m));
+                        inventoryBiasThresholdPrc: _configuration.GetValue("Bots:Advanced:InventoryBiasThresholdPrc", 0.05m),
+                        // Round 2 Q1 follow-up: short-side multiplier for asymmetric bear-tail compensation.
+                        inventoryBiasShortMult:    _configuration.GetValue("Bots:Advanced:InventoryBiasShortMult", 1m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
