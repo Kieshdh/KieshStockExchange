@@ -331,6 +331,13 @@ public sealed class AccountsCache : IAccountsCache
                 // Coordinator persisted sl.Quantity = held + AmountFilled, so RemainingQuantity == held.
                 int held = sl.RemainingQuantity;
                 if (held <= 0) continue;
+                // Round 2 §0009 (Path 2): cold-hydrate over-reserves vs the live FlipQuantity rule.
+                // The parent Order isn't loaded here (this path operates on the children list only),
+                // so we conservatively pool against `held` — the BracketCoordinator's first event
+                // after recovery (OnChildFillShortAsync or OnStopFiringShortAsync) will resize the
+                // pool to min(held, parent.FlipQuantity) and release the cushion. This stays
+                // bracket-local + invariant-safe; the only cost is a temporary over-reservation
+                // until the next bracket event resizes.
                 decimal pool = ShortBracketMath.Pool(
                     ShortBracketMath.SlWorst(sl.IsStopLimitOrder, sl.Price, sl.StopPrice ?? 0m, sl.SlippagePercent ?? 0m),
                     held);

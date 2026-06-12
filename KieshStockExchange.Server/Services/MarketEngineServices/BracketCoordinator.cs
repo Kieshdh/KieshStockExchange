@@ -708,7 +708,13 @@ public sealed class BracketCoordinator : IBracketCoordinator
 
             if (sl is not null)
             {
-                decimal pool = ShortBracketMath.Pool(SlWorst(sl), held);
+                // Round 2 §0009 (Path 2): size the pool to min(held, FlipQuantity) when FlipQuantity > 0.
+                // The round-trip portion (held - flipQty when both > 0) is self-funding — the parent's
+                // sell proceeds fund the buy-limit TPs and the SL doesn't need to back it. Plain shorts
+                // and pre-Path-2 brackets carry FlipQuantity = 0 → fall through to the original
+                // pool = SlWorst × held (P6 model B), so flag-off behaviour is byte-identical.
+                int poolSized = parent.FlipQuantity > 0 ? Math.Min(held, parent.FlipQuantity) : held;
+                decimal pool = ShortBracketMath.Pool(SlWorst(sl), poolSized);
                 decimal delta = pool - sl.CurrentBuyReservation;   // grow toward the worst-case pool
                 if (delta > 0m && CurrencyHelper.LessThan(fund.AvailableBalance, delta, parent.CurrencyType))
                 {
@@ -856,7 +862,12 @@ public sealed class BracketCoordinator : IBracketCoordinator
                     // that pool shrinkage — the release must stay bracket-local, since this user's other shorts'
                     // collateral and other orders' reservations share one Fund.ReservedBalance and must not be
                     // swept up as "cushion". The TP's buyback + pro-rata collateral release were settled already.
-                    decimal desiredPool = ShortBracketMath.Pool(SlWorst(sl), held);
+                    //
+                    // Round 2 §0009 (Path 2): pool is sized to min(held, FlipQuantity) when FlipQuantity > 0;
+                    // same rule as OnParentFillShortAsync. The cushion-release path is unchanged — poolDrop
+                    // is still (current - desired) — and the bracket-local invariant (P6c) holds.
+                    int desiredHeld = parent.FlipQuantity > 0 ? Math.Min(held, parent.FlipQuantity) : held;
+                    decimal desiredPool = ShortBracketMath.Pool(SlWorst(sl), desiredHeld);
                     decimal poolDrop = sl.CurrentBuyReservation - desiredPool;
                     if (poolDrop > 0m)
                     {
@@ -947,7 +958,14 @@ public sealed class BracketCoordinator : IBracketCoordinator
                 // Size the SL cash pool to the live held (release any over-reserved cushion); the SL then
                 // promotes and buys `held` back, and the settler's buy-savings path releases the final
                 // worst-case-vs-actual cushion on the fill.
-                decimal desiredPool = ShortBracketMath.Pool(SlWorst(sl), held);
+                //
+                // Round 2 §0009 (Path 2): on SL fire, the SL must cover the FLIP portion's worst-case
+                // buyback only (the round-trip portion is held inventory the SL would never sell). The
+                // SL.Quantity below is sized off `held` for the resulting market buy — that's correct,
+                // because the SL fires for whatever the live held actually is at fire time. The pool
+                // sizing rule only changes the pre-fire cushion accounting.
+                int firingHeld = parent.FlipQuantity > 0 ? Math.Min(held, parent.FlipQuantity) : held;
+                decimal desiredPool = ShortBracketMath.Pool(SlWorst(sl), firingHeld);
                 decimal poolDrop = sl.CurrentBuyReservation - desiredPool;
                 if (poolDrop > 0m)
                 {
