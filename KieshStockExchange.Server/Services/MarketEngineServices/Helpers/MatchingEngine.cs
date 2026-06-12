@@ -102,6 +102,22 @@ public sealed class MatchingEngine : IMatchingEngine
             // Taker is not in the book; maker fill routes through book to keep level totals in sync
             taker.Fill(qty);
             var wasRemoved = book.ApplyMakerFill(bestOpposite, qty, scope);
+
+            // R4 §0009 Stage 1: per-fill side + maker price residual vs taker's effective limit
+            // (basis points). Behaviour-neutral when Bots:MatchSymmetryProbe is off.
+            if (MatchSymmetryProbe.Enabled)
+            {
+                var limit = taker.EffectiveTakerLimit;
+                if (limit.HasValue && limit.Value > 0m)
+                {
+                    var residualBps = ((bestOpposite.Price - limit.Value) / limit.Value) * 10_000m;
+                    MatchSymmetryProbe.Record(
+                        surface: "matcher",
+                        side: taker.IsBuyOrder ? "buy" : "sell",
+                        context: "fill_vs_limit",
+                        value: residualBps);
+                }
+            }
             if (wasRemoved && DebugMode
                 && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
                 _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);

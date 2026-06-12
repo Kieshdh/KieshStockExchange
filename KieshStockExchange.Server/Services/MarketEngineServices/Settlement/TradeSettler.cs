@@ -476,6 +476,10 @@ internal sealed class TradeSettler
                 _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:ShortOpen",
                     -t.Quantity, sellerPos.ReservedQuantity, sellerPos.ReservedQuantity,
                     sQtyBefore, sellerPos.Quantity);
+
+                // R4 §0009 Stage 1: per-fill branch + trade price. Behaviour-neutral when off.
+                if (MatchSymmetryProbe.Enabled)
+                    MatchSymmetryProbe.Record("settler", "sell", "short_open", t.Price);
             }
             else if (isFlipFill)
             {
@@ -577,6 +581,11 @@ internal sealed class TradeSettler
                             sQtyBefore, sellerPos.Quantity);
                     }
                 }
+
+                // R4 §0009 Stage 1: flip branch (mixed long-close + new short). Trade price
+                // is the same for both parts so a single row covers the fill.
+                if (MatchSymmetryProbe.Enabled)
+                    MatchSymmetryProbe.Record("settler", "sell", "flip", t.Price);
             }
             else
             {
@@ -620,6 +629,11 @@ internal sealed class TradeSettler
                         consumeQty, sellOrder.CurrentBuyReservation, sellOrder.CurrentBuyReservation,
                         orderBefore, sellOrder.CurrentSellReservedQty);
                 }
+
+                // R4 §0009 Stage 1: plain long-close branch — pairs with short_open / flip
+                // entries above so the script can compute per-side trade-price residuals.
+                if (MatchSymmetryProbe.Enabled)
+                    MatchSymmetryProbe.Record("settler", "sell", "long_close", t.Price);
             }
         }
 
