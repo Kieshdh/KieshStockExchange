@@ -442,8 +442,59 @@ internal sealed class AiBotDecisionService
         if (r < c)                            return await BuildProtectiveStopAsync(ctx, user, currency, ct).ConfigureAwait(false);
         c += probs.TrailingProb; if (r < c)   return await BuildProtectiveStopAsync(ctx, user, currency, ct).ConfigureAwait(false);
         c += probs.ShortProb;    if (r < c)   return await BuildShortOpenAsync(ctx, user, currency, ct).ConfigureAwait(false);
-        c += probs.LongBracketProb; if (r < c) return await BuildBracketAsync(ctx, user, currency, isShort: false, ct).ConfigureAwait(false);
-        return await BuildBracketAsync(ctx, user, currency, isShort: true, ct).ConfigureAwait(false);
+
+        // Round 2 §0011 (E1): inventory-aware kind biasing. The cumulative ordering above puts
+        // LongBracket before ShortBracket; when _inventoryBias is on AND the bot is heavy-long
+        // (or heavy-short) we INVERT the kind selection between the two bracket buckets so the
+        // population flows toward position-mean-reversion. Single roll reused — no new RNG draw,
+        // so flag-off path is RNG-byte-identical.
+        decimal cAfterShort = c;
+        c += probs.LongBracketProb;
+        if (r < c)
+        {
+            bool isShort = false;
+            if (_inventoryBias && _inventoryBiasThresholdPrc > 0m)
+            {
+                var bias = ComputeInventoryBias(ctx, user, currency);
+                if (bias > 0) isShort = true;          // heavy long → flip to ShortBracket
+                // heavy short and r is in the LongBracket bucket → keep LongBracket (the natural mean-reversion direction)
+            }
+            return await BuildBracketAsync(ctx, user, currency, isShort: isShort, ct).ConfigureAwait(false);
+        }
+        // r in the ShortBracket bucket — same inversion logic for the symmetric half.
+        bool isShortKind = true;
+        if (_inventoryBias && _inventoryBiasThresholdPrc > 0m)
+        {
+            var bias = ComputeInventoryBias(ctx, user, currency);
+            if (bias < 0) isShortKind = false;        // heavy short → flip to LongBracket
+        }
+        return await BuildBracketAsync(ctx, user, currency, isShort: isShortKind, ct).ConfigureAwait(false);
+    }
+
+    // Round 2 §0011 (E1): inventory bias direction.
+    //   > 0 → heavy long (prefer ShortBracket to round-trip out of the over-long position)
+    //   < 0 → heavy short (prefer LongBracket to round-trip-cover the over-short position)
+    //   = 0 → roughly flat (no preference; cumulative roll picks)
+    // "Heavy" threshold: max |stock notional| / portfolio value > InventoryBiasThresholdPrc.
+    // Uses the per-tick EligibleWatchlist cache and ctx position reads (no DB calls).
+    private int ComputeInventoryBias(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        var portfolio = ctx.PortfolioValueByCurrency(user.UserId, currency);
+        if (portfolio <= 0m) return 0;
+        var watch = EligibleWatchlist(ctx, user, currency);
+        decimal maxLongNotional = 0m, maxShortNotional = 0m;
+        for (int i = 0; i < watch.Length; i++)
+        {
+            var pos = _accounts.GetPosition(user.UserId, watch[i]);
+            if (pos is null || pos.Quantity == 0) continue;
+            if (!ctx.SmoothedPrices.TryGetValue((watch[i], currency), out var price) || price <= 0m) continue;
+            var notional = CurrencyHelper.Notional(price, Math.Abs(pos.Quantity), currency);
+            if (pos.Quantity > 0) { if (notional > maxLongNotional) maxLongNotional = notional; }
+            else                  { if (notional > maxShortNotional) maxShortNotional = notional; }
+        }
+        if (maxLongNotional  > _inventoryBiasThresholdPrc * portfolio) return +1;
+        if (maxShortNotional > _inventoryBiasThresholdPrc * portfolio) return -1;
+        return 0;
     }
 
     // §patch 0004: ref-struct snapshot of the five advanced-order probability fields. Stack-allocated,
