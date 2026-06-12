@@ -665,11 +665,47 @@ internal sealed class TradeSettler
         if (loadedFunds.Count > 0)
             await _db.UpdateAllAsync(loadedFunds, ct).ConfigureAwait(false);
         if (loadedPositions.Count > 0)
+        {
+            // Round 2 Q7 follow-up: walk to-be-written Positions and verify each one's triple
+            // satisfies the DB `CK_Positions_Quantity_Invariants` constraint. Logs an ERROR with
+            // the offending Position (and all relevant order context) BEFORE the DB write so the
+            // SQL constraint violation log line has a precise companion. If this fires, the
+            // in-memory mutation order left an invariant violation (Q7 hypothesis A/B/C in
+            // bracket-flip-r3-ultraplan-prompt.md). If the DB rejects but this DOESN'T fire,
+            // the SQL parameter binding is producing a different row than the in-memory state —
+            // a different bug class entirely. Cheap O(n) per settle batch; n is typically tiny.
+            CheckPositionInvariantsBeforeWrite(loadedPositions);
             await _db.UpdateAllAsync(loadedPositions, ct).ConfigureAwait(false);
+        }
         if (newPositionsThisCall.Count > 0)
+        {
+            CheckPositionInvariantsBeforeWrite(newPositionsThisCall);
             await _db.InsertAllAsync(newPositionsThisCall, ct).ConfigureAwait(false);
+        }
 
         return (null, rejected);
+    }
+
+    // Round 2 Q7 diagnostic — see callsite at the end of SettleNoTxAsync.
+    private void CheckPositionInvariantsBeforeWrite(IReadOnlyList<Position> positions)
+    {
+        for (int i = 0; i < positions.Count; i++)
+        {
+            var p = positions[i];
+            bool valid =
+                p.ReservedQuantity >= 0
+                && p.ReservedQuantity <= Math.Max(p.Quantity, 0)
+                && p.ShortCollateral >= 0m
+                && (p.Quantity >= 0 || p.ReservedQuantity == 0)
+                && (p.Quantity < 0 || p.ShortCollateral == 0m);
+            if (!valid)
+            {
+                _logger.LogError(
+                    "Q7 pre-write CK violation: Position #{Pid} user={U} stock={S} Q={Q} R={R} SC={SC} SCcy={SCcy}",
+                    p.PositionId, p.UserId, p.StockId, p.Quantity, p.ReservedQuantity,
+                    p.ShortCollateral, p.ShortCollateralCurrencyCode);
+            }
+        }
     }
 
     /// <summary> Restore cache from scope snapshots. Idempotent. </summary>
