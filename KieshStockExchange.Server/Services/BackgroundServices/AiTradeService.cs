@@ -7,6 +7,7 @@ using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
+using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Configuration;
@@ -204,6 +205,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly int  _maxAdvancedPerTick;   // §P6a cap on entry-route submissions per tick
     private readonly bool _advancedEnabled;       // §P6a master switch (default off)
     private readonly bool _batchArms;             // §A1a batch the stop/trailing arm route (default off)
+    private readonly bool _bracketBatch;          // Round 2 §0005 batch the bracket + market-short routes (default off)
 
     public AiTradeService(
         IOrderExecutionService marketOrders,
@@ -412,6 +414,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
+        _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
         _market.QuoteUpdated += OnQuoteUpdated;
@@ -708,24 +711,150 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     {
         advanced.Sort((a, b) => a.user.AiUserId.CompareTo(b.user.AiUserId));
 
-        if (_batchArms)
+        if (_batchArms || _bracketBatch)
         {
             var armSells = new List<(AIUser user, BotAdvancedDecision dec)>();
+            var brackets = new List<(AIUser user, BotAdvancedDecision dec)>();
+            var shorts   = new List<(AIUser user, BotAdvancedDecision dec)>();
             var rest     = new List<(AIUser user, BotAdvancedDecision dec)>();
             foreach (var item in advanced)
             {
-                if (item.dec.Kind is BotAdvancedKind.StopMarketSell or BotAdvancedKind.TrailingStopSell)
-                    armSells.Add(item);
-                else
-                    rest.Add(item);
+                switch (item.dec.Kind)
+                {
+                    case BotAdvancedKind.StopMarketSell:
+                    case BotAdvancedKind.TrailingStopSell:
+                        if (_batchArms) armSells.Add(item); else rest.Add(item);
+                        break;
+                    case BotAdvancedKind.LongBracket:
+                    case BotAdvancedKind.ShortBracket:
+                        if (_bracketBatch) brackets.Add(item); else rest.Add(item);
+                        break;
+                    case BotAdvancedKind.ShortOpen:
+                        if (_bracketBatch) shorts.Add(item); else rest.Add(item);
+                        break;
+                    default:
+                        rest.Add(item);
+                        break;
+                }
             }
             if (armSells.Count > 0 && !await SubmitArmBatchAsync(armSells, ct).ConfigureAwait(false))
                 return; // shutdown requested mid-batch
+            if (brackets.Count > 0 && !await SubmitBracketBatchAsync(brackets, ct).ConfigureAwait(false))
+                return;
+            if (shorts.Count > 0 && !await SubmitMarketShortBatchAsync(shorts, ct).ConfigureAwait(false))
+                return;
             await SubmitAdvancedPerOrderAsync(rest, ct).ConfigureAwait(false);
             return;
         }
 
         await SubmitAdvancedPerOrderAsync(advanced, ct).ConfigureAwait(false);
+    }
+
+    // Round 2 §0005: submit the tick's bracket cohort through OrderEntryService.PlaceBracketBatchAsync.
+    // Per-decision bookkeeping (RecordError, _tradesPlacedThisSession) matches the per-order path.
+    private async Task<bool> SubmitBracketBatchAsync(
+        List<(AIUser user, BotAdvancedDecision dec)> brackets, CancellationToken ct)
+    {
+        var requests = new List<BracketBatchRequest>(brackets.Count);
+        foreach (var (user, d) in brackets)
+        {
+            bool isShort = d.Kind == BotAdvancedKind.ShortBracket;
+            requests.Add(new BracketBatchRequest(
+                user.UserId, d.StockId, d.Quantity, EntryType.Market, d.Currency,
+                Price: null,
+                BuyBudget: isShort ? null : d.BuyBudget,
+                StopPrice: d.StopPrice == 0m ? null : d.StopPrice,
+                StopLimitPrice: null,
+                StopSlippagePct: d.StopSlippagePct,
+                TakeProfits: BuildTpLegs(d.TakeProfits),
+                Side: isShort ? OrderSide.Sell : OrderSide.Buy));
+        }
+
+        IReadOnlyList<OrderResult> results;
+        try
+        {
+            results = await _entry.PlaceBracketBatchAsync(requests, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogInformation("Bot loop stop requested mid-advanced on tick {Tick}; skipping remaining.", _tickCount);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Batched bracket submit failed for {Count} decision(s) on tick {Tick}",
+                brackets.Count, _tickCount);
+            foreach (var (user, _) in brackets)
+            {
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+            }
+            return true;
+        }
+
+        for (int i = 0; i < brackets.Count; i++)
+            ApplyAdvancedResult(brackets[i].user, brackets[i].dec, results[i]);
+        return true;
+    }
+
+    private async Task<bool> SubmitMarketShortBatchAsync(
+        List<(AIUser user, BotAdvancedDecision dec)> shorts, CancellationToken ct)
+    {
+        var requests = new List<MarketShortBatchRequest>(shorts.Count);
+        foreach (var (user, d) in shorts)
+            requests.Add(new MarketShortBatchRequest(user.UserId, d.StockId, d.Quantity, d.Currency));
+
+        IReadOnlyList<OrderResult> results;
+        try
+        {
+            results = await _entry.PlaceMarketShortBatchAsync(requests, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Batched market-short submit failed for {Count} decision(s) on tick {Tick}",
+                shorts.Count, _tickCount);
+            foreach (var (user, _) in shorts)
+            {
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+            }
+            return true;
+        }
+
+        for (int i = 0; i < shorts.Count; i++)
+            ApplyAdvancedResult(shorts[i].user, shorts[i].dec, results[i]);
+        return true;
+    }
+
+    // Round 2 §0005: shared per-decision result handling — same shape as SubmitArmBatchAsync's
+    // post-loop block, factored out so both the bracket and short batch paths use it.
+    private void ApplyAdvancedResult(AIUser user, BotAdvancedDecision dec, OrderResult result)
+    {
+        if (result.PlacedSuccessfully)
+        {
+            Interlocked.Increment(ref _tradesPlacedThisSession);
+        }
+        else
+        {
+            if (DebugMode && (!DebugUserId.HasValue || user.UserId == DebugUserId.Value))
+                _logger.LogWarning("Advanced order AIUser {Id} stock {Stock}: {Status} — {Error}",
+                    user.AiUserId, dec.StockId, result.Status, result.ErrorMessage);
+            user.RecordError();
+            Interlocked.Increment(ref _failuresThisSession);
+        }
+    }
+
+    private static List<BracketLeg> BuildTpLegs(IReadOnlyList<(decimal Price, int Quantity)>? takeProfits)
+    {
+        if (takeProfits is null || takeProfits.Count == 0) return new List<BracketLeg>(0);
+        var legs = new List<BracketLeg>(takeProfits.Count);
+        for (int i = 0; i < takeProfits.Count; i++)
+            legs.Add(new BracketLeg(takeProfits[i].Price, takeProfits[i].Quantity));
+        return legs;
     }
 
     // §A1a: submit the tick's protective arms in one batched entry call. Per-decision bookkeeping

@@ -79,4 +79,15 @@ public interface IOrderEntryService
     // index; every success is registered with the trigger watcher before this returns.
     Task<IReadOnlyList<OrderResult>> ArmStopSellBatchAsync(
         IReadOnlyList<StopArmRequest> requests, CancellationToken ct = default);
+
+    /// <summary>Round 2 §0005: batch-place the bot fleet's per-tick bracket cohort. Pre-validates
+    /// each request and hands the built parent/SL/TP triples to the engine batch route. One
+    /// result per request, aligned by index. Gated by Bots:Advanced:BracketBatch in the caller.</summary>
+    Task<IReadOnlyList<OrderResult>> PlaceBracketBatchAsync(
+        IReadOnlyList<CommandDtos.BracketBatchRequest> requests, CancellationToken ct = default);
+
+    /// <summary>Round 2 §0005: batch-place the bot fleet's flat-only market short cohort. Same
+    /// per-request semantics as PlaceTrueMarketSellOrderAsync. Gated by Bots:Advanced:BracketBatch.</summary>
+    Task<IReadOnlyList<OrderResult>> PlaceMarketShortBatchAsync(
+        IReadOnlyList<CommandDtos.MarketShortBatchRequest> requests, CancellationToken ct = default);
 }

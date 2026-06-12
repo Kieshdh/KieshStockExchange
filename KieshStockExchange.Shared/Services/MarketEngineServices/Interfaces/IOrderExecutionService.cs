@@ -26,6 +26,23 @@ public interface IOrderExecutionService
     Task<IReadOnlyList<OrderResult>> ArmStopBatchAsync(
         IReadOnlyList<Order> orders, CancellationToken ct = default);
 
+    /// <summary>Round 2 §0005: batched bracket placement — the bot fleet's per-tick bracket
+    /// cohort. Collapses N×CreateOrder (parents) + N×CreateOrder (per-leg) round-trips into ONE
+    /// bulk parent insert + ONE bulk child insert, then runs the per-parent match+settle pass
+    /// sequentially in ascending parent-id order (preserves causal ordering). Each triple is the
+    /// already-validated (parent, optional SL, TPs) bundle produced by OrderEntryService.
+    /// Returns one OrderResult per triple in submission order.</summary>
+    Task<IReadOnlyList<OrderResult>> PlaceBracketBatchAsync(
+        IReadOnlyList<(Order Parent, Order? Sl, IReadOnlyList<Order> Tps)> triples,
+        CancellationToken ct = default);
+
+    /// <summary>Round 2 §0005: batched flat-only market-short open. Collapses the cohort's
+    /// CreateOrder round-trips; per-order collateral reserve + match still runs sequentially
+    /// because each short opens a position row that subsequent orders may read. Identical
+    /// per-result semantics to <see cref="PlaceAndMatchAsync"/> on a single market sell.</summary>
+    Task<IReadOnlyList<OrderResult>> PlaceMarketShortBatchAsync(
+        IReadOnlyList<Order> orders, CancellationToken ct = default);
+
     /// <summary>§3.6 P2: promote an armed stop (by id) to its active type and match it. The
     /// arm-time reservation is reused — no re-reserve, no re-insert.</summary>
     Task<OrderResult> PromoteStopAsync(int orderId, CancellationToken ct = default);

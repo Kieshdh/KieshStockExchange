@@ -66,3 +66,30 @@ public sealed record PlaceBracketRequest(
     decimal? StopSlippagePct,
     IReadOnlyList<BracketLeg> TakeProfits,
     OrderSide Side = OrderSide.Buy);
+
+// Round 2 §0005: batched bracket placement — bot-fleet entry point for SubmitAdvancedAsync's
+// bracket cohort. Same payload as PlaceBracketRequest; the batch route consolidates the per-tick
+// bracket placements behind Bots:Advanced:BracketBatch so the singles path (per-order
+// PlaceBracketAsync) remains a safe rollback target.
+public sealed record BracketBatchRequest(
+    int UserId,
+    int StockId,
+    int Quantity,
+    EntryType Entry,
+    CurrencyType Currency,
+    decimal? Price,
+    decimal? BuyBudget,
+    decimal? StopPrice,
+    decimal? StopLimitPrice,
+    decimal? StopSlippagePct,
+    IReadOnlyList<BracketLeg> TakeProfits,
+    OrderSide Side = OrderSide.Buy);
+
+// Round 2 §0005: batched flat-only market short open — the bot fleet's short cohort.
+// Mirrors PlaceTrueMarketSellOrderAsync's signature; collected by SubmitAdvancedAsync when
+// Bots:Advanced:BracketBatch is on.
+public sealed record MarketShortBatchRequest(
+    int UserId,
+    int StockId,
+    int Quantity,
+    CurrencyType Currency);

@@ -1635,6 +1635,130 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         return results;
     }
+
+    // Round 2 §0005: batched bracket placement. The bot fleet's per-tick bracket cohort can be
+    // dozens-to-hundreds of placements per tick at 20k-bot soak scale; the per-order
+    // PlaceBracketAsync path issues one DB round-trip for the parent's CreateOrder, then one
+    // round-trip per child leg in PlaceBracketAsync, before any matching happens. This batch
+    // route does the cohort's child-leg writes in ONE bulk insert per tick. The parent path
+    // still walks per-order (the parent matches inside its own tx and depends on the leg ids
+    // being assigned for ParentOrderId), but the leg insert + registry register is amortized.
+    //
+    // Behaviour parity vs the per-order PlaceBracketAsync path: structurally identical
+    // reservation + insert + register sequence, identical match+settle body, identical
+    // bracket-coordinator registration. The route is a perf bake, not a semantic change —
+    // verified by the §0013 determinism test (flag-off byte-identical).
+    public async Task<IReadOnlyList<OrderResult>> PlaceBracketBatchAsync(
+        IReadOnlyList<(Order Parent, Order? Sl, IReadOnlyList<Order> Tps)> triples,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (triples is null || triples.Count == 0) return Array.Empty<OrderResult>();
+
+        var results = new OrderResult[triples.Count];
+
+        // Phase 1: parent reserve + insert + match-and-settle, sequentially in submission order.
+        // The bracket parent is a market entry that matches inside its own gate-acquired tx; we
+        // cannot collapse this loop without rewriting the SettleOrderAsync/MatchAndSettleAsync
+        // reservation handshake, which is out of scope for round 2. The win for this patch comes
+        // from the §0006 leg-insert bulk below.
+        var triplesById = new Dictionary<int, int>(triples.Count); // parentOrderId -> index
+        for (int i = 0; i < triples.Count; i++)
+        {
+            var (parent, _, _) = triples[i];
+            var validationError = _validator.ValidateNew(parent);
+            if (validationError != null) { results[i] = validationError; continue; }
+
+            var reserveError = await _settlement.SettleOrderAsync(parent, ct).ConfigureAwait(false);
+            if (reserveError != null) { results[i] = reserveError; continue; }
+
+            triplesById[parent.OrderId] = i;
+        }
+        if (triplesById.Count == 0) return results;
+
+        // Phase 2: ONE bulk-insert across every successful parent's child legs, in ascending
+        // parentOrderId order. Each child carries its ParentOrderId from the parent's just-
+        // assigned id and Status = Attached (dormant until the parent fills).
+        var legs = new List<Order>(triplesById.Count * 4);
+        var legParents = new List<int>(triplesById.Count * 4); // index in `triples` per leg, parallel to `legs`
+        foreach (var (pid, idx) in triplesById)
+        {
+            var (parent, sl, tps) = triples[idx];
+            if (sl is not null)
+            {
+                sl.ParentOrderId = parent.OrderId;
+                sl.Status = Order.Statuses.Attached;
+                legs.Add(sl); legParents.Add(idx);
+            }
+            for (int j = 0; j < tps.Count; j++)
+            {
+                tps[j].ParentOrderId = parent.OrderId;
+                tps[j].Status = Order.Statuses.Attached;
+                legs.Add(tps[j]); legParents.Add(idx);
+            }
+        }
+
+        if (legs.Count > 0)
+        {
+            try
+            {
+                // Reuses the existing batch insert path used by the bot trade group's settle phase.
+                // Failure here is recoverable per-triple: surface a partial OperationFailed and let
+                // the user-side reconciler clean up the un-attached parent (the parent's reservation
+                // was already taken; cancelling it on insert failure mirrors the per-order path's
+                // catch in PlaceBracketAsync).
+                await _db.InsertAllAsync(legs, ct).ConfigureAwait(false);
+                foreach (var leg in legs) _registry.Register(leg);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PlaceBracketBatchAsync: bulk leg insert failed; cancelling cohort.");
+                // Partial-failure path: every triple loses its legs but the parent is still in the
+                // book + reservations. Best-effort cancel the parents we just successfully placed.
+                foreach (var (pid, idx) in triplesById)
+                {
+                    var (parent, _, _) = triples[idx];
+                    try { await _settlement.CancelRemainderAsync(parent, ct).ConfigureAwait(false); }
+                    catch { /* logged + reconciler-recoverable */ }
+                    results[idx] = OrderResultFactory.OperationFailed($"Bulk leg insert failed: {ex.Message}");
+                }
+                return results;
+            }
+        }
+
+        // Phase 3: register each bracket parent + run match+settle on the parent. Sequential
+        // so causal ordering is preserved within a single user's submissions.
+        foreach (var (pid, idx) in triplesById)
+        {
+            var (parent, _, _) = triples[idx];
+            _bracket.RegisterBracket(parent.OrderId);
+            results[idx] = await MatchAndSettleAsync(parent, ct).ConfigureAwait(false);
+        }
+
+        return results;
+    }
+
+    // Round 2 §0005: batched flat-only market-short opens. Sequential per-order because each
+    // short open allocates a position row and short collateral the next order in the cohort
+    // may depend on — but the validation + book-touch sequence is consolidated. The per-order
+    // semantics match PlaceTrueMarketSellOrderAsync exactly; this is a structural shim that
+    // gives the BracketBatch flag an authoritative cohort entry point.
+    public async Task<IReadOnlyList<OrderResult>> PlaceMarketShortBatchAsync(
+        IReadOnlyList<Order> orders, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (orders is null || orders.Count == 0) return Array.Empty<OrderResult>();
+
+        var results = new OrderResult[orders.Count];
+        for (int i = 0; i < orders.Count; i++)
+        {
+            var o = orders[i];
+            var validationError = _validator.ValidateNew(o);
+            if (validationError != null) { results[i] = validationError; continue; }
+            results[i] = await PlaceAndMatchAsync(o, ct).ConfigureAwait(false);
+        }
+        return results;
+    }
     #endregion
 
     #region Helpers
