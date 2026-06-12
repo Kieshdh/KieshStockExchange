@@ -81,6 +81,9 @@ internal sealed class AiBotDecisionService
     private readonly decimal _valueAnchorScale;
     private readonly bool    _valueTargetSelection; // concentrate the anchor via stock selection (destabilizing at high gain)
     private readonly decimal _overheatCap;          // refuse to buy above / sell below fundamental by more than this (0 = off)
+    // Defensive ceiling on the effective per-stock cap (after OverheatCapMult and AnchorFastSlack).
+    // 0 = no clamp. Guarantees the absolute-deviation promise regardless of personality multipliers.
+    private readonly decimal _absoluteCapMax;
     private readonly decimal _marketSlippagePrc;    // low cap on every market order's slippage so none sweeps far
 
     // §P6 balancing: tiered-limit selection probabilities (Far = remainder), low slippage cap applied to
@@ -208,6 +211,7 @@ internal sealed class AiBotDecisionService
         decimal distanceMult = 1m,
         decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
+        decimal absoluteCapMax = 0m,
         decimal marketSlippagePrc = 0.003m,
         decimal tierCloseProb = 0.6m, decimal tierMidProb = 0.3m,
         decimal stopSlippagePct = 0.3m, decimal maxSweepFractionOfDepth = 0.25m,
@@ -278,6 +282,7 @@ internal sealed class AiBotDecisionService
         _valueAnchorScale    = valueAnchorScale <= 0m ? 0.15m : valueAnchorScale;
         _valueTargetSelection = valueTargetSelection;
         _overheatCap        = Math.Max(0m, overheatCap);
+        _absoluteCapMax     = Math.Max(0m, absoluteCapMax);
         _marketSlippagePrc  = marketSlippagePrc <= 0m ? 0.003m : marketSlippagePrc;
         _tierCloseProb      = Clamp01(tierCloseProb);
         _tierMidProb        = Clamp01(tierMidProb);
@@ -1319,6 +1324,8 @@ internal sealed class AiBotDecisionService
         // value-anchor probability tilt (_valueAnchorStrength) still pulls price back on the multi-hour
         // scale. 0 ⇒ unchanged. Applies uniformly to the plain and advanced paths (both call this).
         var cap = _overheatCap * _profiles.Get(stockId).OverheatCapMult * (1m + _anchorFastSlack);
+        // Defensive ceiling: guarantees the absolute-deviation promise even when personality mult + slack stack high.
+        if (_absoluteCapMax > 0m && cap > _absoluteCapMax) cap = _absoluteCapMax;
         var dev = (mkt - anchor) / anchor;
         var result = isBuy ? dev > cap : dev < -cap;
         if (_memoizeTickValues) cache[(stockId, currency)] = result;
