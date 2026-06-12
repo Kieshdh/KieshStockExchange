@@ -162,6 +162,14 @@ internal sealed class AiBotDecisionService
     // AiTradeService.CollectPendingOrdersAsync. Default true; flag-off path is byte-identical
     // because cache miss falls through to the original computation.
     private readonly bool    _memoizeTickValues;
+    // §patch 0007 minimal (Path 1): when on, ShortBracket is eligible on flat-OR-long inventory
+    // (today: flat-only). The entry quantity is clamped to existing inventory so no position
+    // flip occurs — bot sells from inventory, SL buys back on rally, TPs buy back at lower prices
+    // (round-trip on existing inventory). No collateral pool, no mixed-portion settlement, no
+    // engine surface changes — pure decision-layer eligibility extension. The full Path 2 (with
+    // flip and mixed-portion) is the next round once this proves the §10.3b drift hypothesis.
+    // Default OFF ⇒ today's behaviour byte-identical.
+    private readonly bool    _bracketRoundTrip;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
@@ -209,7 +217,10 @@ internal sealed class AiBotDecisionService
         bool capFromSeed = false,
         // §patch 0001: per-tick memoization (Fundamental/SeedPrice/IsOverBand/etc). Pure
         // function-result cache scoped to one bot-loop tick. Default on; off is byte-identical.
-        bool memoizeTickValues = true)
+        bool memoizeTickValues = true,
+        // §patch 0007 minimal (Path 1): ShortBracket eligible on flat-or-long. Default OFF;
+        // when off, behaviour is byte-identical to today (FirstFlatStock filter intact).
+        bool bracketRoundTrip = false)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -289,6 +300,7 @@ internal sealed class AiBotDecisionService
         _diversityGain             = Math.Max(0m, diversityGain);
         _capFromSeed               = capFromSeed;
         _memoizeTickValues         = memoizeTickValues;
+        _bracketRoundTrip          = bracketRoundTrip;
     }
     #endregion
 
@@ -475,7 +487,15 @@ internal sealed class AiBotDecisionService
     private async Task<BotAdvancedDecision?> BuildBracketAsync(AiBotContext ctx, AIUser user,
         CurrencyType currency, bool isShort, CancellationToken ct)
     {
-        int stockId = isShort ? FirstFlatStock(ctx, user, currency) : FirstLongableStock(ctx, user, currency);
+        // §patch 0007 minimal (Path 1): when _bracketRoundTrip is on, ShortBracket is eligible on
+        // flat-OR-long inventory (the round-trip case). When off, today's flat-only behaviour.
+        // LongBracket eligibility is unchanged this round (semantics of SL/TP on a covered short
+        // need separate design; deferred per notes Q1).
+        int stockId = isShort
+            ? (_bracketRoundTrip
+                ? FirstFlatOrLongStock(ctx, user, currency)
+                : FirstFlatStock(ctx, user, currency))
+            : FirstLongableStock(ctx, user, currency);
         if (stockId <= 0) return null;
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
@@ -528,6 +548,15 @@ internal sealed class AiBotDecisionService
         // §P6 anti-sweep: the market entry leg can't take more than a fraction of the resting opposite
         // side (long entry buys asks, short entry sells bids) — the same structural cap as plain orders.
         qty = ApplyDepthCap(qty, isBuy: !isShort, stockId, currency);
+        // §patch 0007 minimal (Path 1): when ShortBracket is round-tripping existing inventory,
+        // clamp the entry to the held qty so the position never flips short. The SL cash pool was
+        // already sized against `avail` (line 512), so leaving qty smaller is conservative — the
+        // pool covers the smaller worst-case buyback. No engine surface changes needed.
+        if (isShort && _bracketRoundTrip)
+        {
+            var heldQty = _accounts.GetPosition(user.UserId, stockId)?.Quantity ?? 0;
+            if (heldQty > 0) qty = Math.Min(qty, heldQty);
+        }
         if (qty < 2) return null;   // need ≥2 for a 2-leg scale-out
         if (!isShort) buyBudget = CurrencyHelper.RoundMoney(price * qty, currency);
 
@@ -577,6 +606,19 @@ internal sealed class AiBotDecisionService
     // First watchlist stock the bot is flat-or-long on (never short) — for long brackets.
     // §patch 0003: uses EligibleWatchlist cache.
     private int FirstLongableStock(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        var watch = EligibleWatchlist(ctx, user, currency);
+        foreach (var id in watch)
+            if ((_accounts.GetPosition(user.UserId, id)?.Quantity ?? 0) >= 0) return id;
+        return 0;
+    }
+
+    // §patch 0007 minimal: first watchlist stock the bot is flat-OR-long on. Same predicate as
+    // FirstLongableStock but used by the Path-1 round-trip ShortBracket selection so the qty-
+    // clamp below prevents flips. Semantically identical to FirstLongableStock; kept as a separate
+    // named helper for readability — the call site documents intent. (When the full Path 2 lands
+    // these helpers can collapse to a single picker with explicit predicates per call.)
+    private int FirstFlatOrLongStock(AiBotContext ctx, AIUser user, CurrencyType currency)
     {
         var watch = EligibleWatchlist(ctx, user, currency);
         foreach (var id in watch)

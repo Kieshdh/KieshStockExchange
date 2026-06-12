@@ -406,7 +406,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         multiplicativeDirectional: multiplicativeDirection,
                         diversityGain:             _configuration.GetValue("Bots:DirectionalPressure:DiversityGain", 1.5m),
                         // §cap-from-seed: hard veto measures vs seed instead of Fundamental() when on.
-                        capFromSeed:               _configuration.GetValue("Bots:ValueAnchor:CapFromSeed", false));
+                        capFromSeed:               _configuration.GetValue("Bots:ValueAnchor:CapFromSeed", false),
+                        // §patch 0007 minimal (Path 1): ShortBracket eligible on flat-or-long.
+                        bracketRoundTrip:          _configuration.GetValue("Bots:Advanced:BracketRoundTrip", false));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
