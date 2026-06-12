@@ -639,6 +639,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     await _arbitrage.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
                 var tArb = Stopwatch.GetTimestamp();
 
+                // Round 2 §0006c: drain the end-of-tick coordinator queue when
+                // Bots:Advanced:BatchCoordinator is on. No-op when off — the per-event On*Async
+                // already ran synchronously inline. Failure is logged + recovered per-event so
+                // a single bad bracket doesn't stop the tick.
+                try { await _bracket.DrainAsync(_engineCts?.Token ?? ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) when ((_engineCts?.Token ?? ct).IsCancellationRequested) { }
+                catch (Exception ex) { _logger.LogError(ex, "Bracket coordinator drain failed on tick {Tick}", _tickCount); }
+
                 RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
                 Interlocked.Increment(ref _tickCount);
                 RecordActivitySample();

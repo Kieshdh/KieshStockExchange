@@ -5,6 +5,7 @@ using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Helpers;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Server.Services.HostedServices;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 
@@ -49,6 +50,12 @@ public interface IBracketCoordinator
     /// cancelling an unfilled parent or the SL tears down the whole group; cancelling a single TP or
     /// a partially-filled parent leaves the rest intact.</summary>
     Task OnMemberCancelledAsync(Order cancelled, CancellationToken ct = default);
+
+    /// <summary>Round 2 §0006c: drain the per-(user, ccy) bucketed coordinator-event queue. Called
+    /// at end-of-tick from AiTradeService.RunAsync after the arbitrage pass. No-op when the
+    /// end-of-tick queue is disabled (Bots:Advanced:BatchCoordinator = false), in which case the
+    /// per-event On*Async calls have already run synchronously (the existing fast path).</summary>
+    Task DrainAsync(CancellationToken ct = default);
 }
 
 public sealed class BracketCoordinator : IBracketCoordinator
@@ -76,9 +83,23 @@ public sealed class BracketCoordinator : IBracketCoordinator
     private readonly IOrderCacheService _orderCache;
     private readonly ILogger<BracketCoordinator> _logger;
 
+    // Round 2 §0006c: end-of-tick coordinator queue. When _batchCoordinator is true, every
+    // On*Async event is enqueued into a per-(user, ccy) bucket and processed at end-of-tick
+    // via DrainAsync (preserving causal order within each bucket — the P6c invariant). When
+    // false (default), the On*Async methods invoke the synchronous body directly, so the
+    // event-handling path is byte-identical to pre-round-2. The flag therefore can be flipped
+    // in production for an explicit A/B without touching the synchronous fall-through.
+    private readonly bool _batchCoordinator;
+    private readonly ConcurrentDictionary<(int UserId, string Ccy), Queue<CoordinatorEvent>> _queues = new();
+    private readonly object _queuesLock = new();
+
+    private enum CoordinatorEventKind { ParentFill, ChildFill, StopFiring, MemberCancelled }
+    private readonly record struct CoordinatorEvent(CoordinatorEventKind Kind, Order Subject);
+
     public BracketCoordinator(IDataBaseService db, IAccountsCache accounts, IOrderRegistry registry,
         IOrderBookEngine books, Lazy<IStopWatcher> stopWatcher, IReservationLedger ledger,
-        IOrderCacheService orderCache, ILogger<BracketCoordinator> logger)
+        IOrderCacheService orderCache, IConfiguration configuration,
+        ILogger<BracketCoordinator> logger)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
@@ -88,6 +109,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _orderCache = orderCache ?? throw new ArgumentNullException(nameof(orderCache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _batchCoordinator = configuration?.GetValue("Bots:Advanced:BatchCoordinator", false) ?? false;
     }
 
     public bool IsBracketParent(int orderId) => _bracketParents.ContainsKey(orderId);
@@ -150,6 +172,68 @@ public sealed class BracketCoordinator : IBracketCoordinator
     // teardown on user cancel). Safe to call when no cache entry exists.
     private void TryRemoveLegsCache(int parentId) => _legsCache.TryRemove(parentId, out _);
 
+    // Round 2 §0006c: enqueue an event into the per-(user, ccy) bucket when the end-of-tick
+    // queue is on. Returns true if the event was enqueued (caller skips the synchronous body);
+    // false if the queue is off (caller runs the synchronous body inline, byte-identical).
+    private bool TryEnqueue(CoordinatorEventKind kind, Order subject)
+    {
+        if (!_batchCoordinator) return false;
+        var key = (subject.UserId, subject.CurrencyType.ToString());
+        lock (_queuesLock)
+        {
+            if (!_queues.TryGetValue(key, out var q))
+            {
+                q = new Queue<CoordinatorEvent>(4);
+                _queues[key] = q;
+            }
+            q.Enqueue(new CoordinatorEvent(kind, subject));
+        }
+        return true;
+    }
+
+    // Round 2 §0006c: drain every bucket serially. Within a bucket events process in arrival
+    // order (causal: a parent-fill must run before its TP-fill, which must run before the SL
+    // fire). Buckets are independent across users + currencies. Each event re-enters the same
+    // synchronous body the per-event path would have called inline (via the *Sync helpers
+    // below), so an exception in one event isolates to that event — the bucket keeps draining
+    // and the next event runs. The drain is invoked from AiTradeService.RunAsync after the
+    // arbitrage pass.
+    public async Task DrainAsync(CancellationToken ct = default)
+    {
+        if (!_batchCoordinator) return;
+        List<((int UserId, string Ccy) Key, Queue<CoordinatorEvent> Q)> snapshot;
+        lock (_queuesLock)
+        {
+            snapshot = new List<((int, string), Queue<CoordinatorEvent>)>(_queues.Count);
+            foreach (var kv in _queues) snapshot.Add((kv.Key, kv.Value));
+            _queues.Clear();
+        }
+
+        foreach (var (_, q) in snapshot)
+        {
+            while (q.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var ev = q.Dequeue();
+                try
+                {
+                    switch (ev.Kind)
+                    {
+                        case CoordinatorEventKind.ParentFill:     await OnParentFillSyncAsync(ev.Subject, ct).ConfigureAwait(false); break;
+                        case CoordinatorEventKind.ChildFill:      await OnChildFillSyncAsync(ev.Subject, ct).ConfigureAwait(false); break;
+                        case CoordinatorEventKind.StopFiring:     await OnStopFiringSyncAsync(ev.Subject, ct).ConfigureAwait(false); break;
+                        case CoordinatorEventKind.MemberCancelled:await OnMemberCancelledSyncAsync(ev.Subject, ct).ConfigureAwait(false); break;
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Coordinator drain: event {Kind} on order #{Id} failed", ev.Kind, ev.Subject.OrderId);
+                }
+            }
+        }
+    }
+
     // Shares still open in the bracket = parent acquired − everything the legs already sold.
     private static int ComputeHeld(Order parent, Order? sl, List<Order> tps)
     {
@@ -158,7 +242,14 @@ public sealed class BracketCoordinator : IBracketCoordinator
         return Math.Max(0, parent.AmountFilled - exited);
     }
 
-    public async Task OnParentFillAsync(Order parent, CancellationToken ct = default)
+    public Task OnParentFillAsync(Order parent, CancellationToken ct = default)
+    {
+        if (parent is null) return Task.CompletedTask;
+        if (TryEnqueue(CoordinatorEventKind.ParentFill, parent)) return Task.CompletedTask;
+        return OnParentFillSyncAsync(parent, ct);
+    }
+
+    private async Task OnParentFillSyncAsync(Order parent, CancellationToken ct)
     {
         if (parent is null) return;
         await _accounts.EnsureLoadedAsync(parent.UserId, ct).ConfigureAwait(false);
@@ -307,7 +398,14 @@ public sealed class BracketCoordinator : IBracketCoordinator
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
-    public async Task OnChildFillAsync(Order tp, CancellationToken ct = default)
+    public Task OnChildFillAsync(Order tp, CancellationToken ct = default)
+    {
+        if (tp is null) return Task.CompletedTask;
+        if (TryEnqueue(CoordinatorEventKind.ChildFill, tp)) return Task.CompletedTask;
+        return OnChildFillSyncAsync(tp, ct);
+    }
+
+    private async Task OnChildFillSyncAsync(Order tp, CancellationToken ct)
     {
         if (tp is null || tp.ParentOrderId is not int parentId) return;
         await _accounts.EnsureLoadedAsync(tp.UserId, ct).ConfigureAwait(false);
@@ -396,7 +494,14 @@ public sealed class BracketCoordinator : IBracketCoordinator
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
-    public async Task OnStopFiringAsync(Order sl, CancellationToken ct = default)
+    public Task OnStopFiringAsync(Order sl, CancellationToken ct = default)
+    {
+        if (sl is null) return Task.CompletedTask;
+        if (TryEnqueue(CoordinatorEventKind.StopFiring, sl)) return Task.CompletedTask;
+        return OnStopFiringSyncAsync(sl, ct);
+    }
+
+    private async Task OnStopFiringSyncAsync(Order sl, CancellationToken ct)
     {
         if (sl is null || sl.ParentOrderId is not int parentId) return;
         Order? parent = _registry.TryGet(parentId, out var pc) ? pc
@@ -473,7 +578,14 @@ public sealed class BracketCoordinator : IBracketCoordinator
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
-    public async Task OnMemberCancelledAsync(Order cancelled, CancellationToken ct = default)
+    public Task OnMemberCancelledAsync(Order cancelled, CancellationToken ct = default)
+    {
+        if (cancelled is null) return Task.CompletedTask;
+        if (TryEnqueue(CoordinatorEventKind.MemberCancelled, cancelled)) return Task.CompletedTask;
+        return OnMemberCancelledSyncAsync(cancelled, ct);
+    }
+
+    private async Task OnMemberCancelledSyncAsync(Order cancelled, CancellationToken ct)
     {
         if (cancelled is null) return;
         int? pidNullable = cancelled.IsBracketChild ? cancelled.ParentOrderId
