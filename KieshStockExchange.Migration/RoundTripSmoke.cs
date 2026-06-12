@@ -141,11 +141,13 @@ internal static class RoundTripSmoke
             SlippageTolerancePrc = 0.02m, MinLimitOffsetPrc = 0.001m, MaxLimitOffsetPrc = 0.01m,
             AggressivenessPrc = 0.5m, ExtremeReactionRandomnessPrc = 0.1m,
             CashInjectionFrequencyPrc = 0.15m, CashInjectionAmountPrc = 0.004m,
-            WatchlistCsv = "1,2,3", MinOpenPositions = 1, MaxOpenPositions = 5,
-            MaxDailyTrades = 10, MaxOpenOrders = 3, HomeCurrency = "USD",
+            WatchlistCsv = "1,2,3", MaxOpenOrders = 3, HomeCurrency = "USD",
             StrategyCode = (int)AiStrategy.Random,
         };
 
+        // Note: MinOpenPositions / MaxOpenPositions / MaxDailyTrades columns were dropped from
+        // AIUserRow during a schema simplification (DropDeadAiUserColumns migration). The smoke
+        // test was missed at that time — references removed to match the current model.
         row.AiUserId = await conn.ExecuteScalarAsync<int>("""
             INSERT INTO "AIUsers" (
               "UserId","Seed","DecisionIntervalSeconds","CreatedAt","UpdatedAt",
@@ -154,8 +156,7 @@ internal static class RoundTripSmoke
               "MinCashReservePrc","MaxCashReservePrc","SlippageTolerancePrc",
               "MinLimitOffsetPrc","MaxLimitOffsetPrc","AggressivenessPrc",
               "ExtremeReactionRandomnessPrc","CashInjectionFrequencyPrc","CashInjectionAmountPrc",
-              "WatchlistCsv","MinOpenPositions","MaxOpenPositions","MaxDailyTrades",
-              "MaxOpenOrders","HomeCurrency","Strategy"
+              "WatchlistCsv","MaxOpenOrders","HomeCurrency","Strategy"
             ) VALUES (
               @UserId,@Seed,@DecisionIntervalSeconds,@CreatedAt,@UpdatedAt,
               @TradeProb,@UseMarketProb,@UseSlippageMarketProb,@BuyBiasPrc,
@@ -163,8 +164,7 @@ internal static class RoundTripSmoke
               @MinCashReservePrc,@MaxCashReservePrc,@SlippageTolerancePrc,
               @MinLimitOffsetPrc,@MaxLimitOffsetPrc,@AggressivenessPrc,
               @ExtremeReactionRandomnessPrc,@CashInjectionFrequencyPrc,@CashInjectionAmountPrc,
-              @WatchlistCsv,@MinOpenPositions,@MaxOpenPositions,@MaxDailyTrades,
-              @MaxOpenOrders,@HomeCurrency,@StrategyCode
+              @WatchlistCsv,@MaxOpenOrders,@HomeCurrency,@StrategyCode
             ) RETURNING "AiUserId"
         """, row);
 

@@ -68,6 +68,15 @@ public sealed class ApiOrderExecutionService : IOrderExecutionService
         IReadOnlyList<Order> takeProfits, CancellationToken ct = default)
         => throw new NotSupportedException("PlaceBracketAsync is server-side; use IOrderEntryService.PlaceBracketAsync.");
 
+    // Round 2 §0005: bot-fleet batch routes — server-side (bot-loop) only.
+    public Task<IReadOnlyList<OrderResult>> PlaceBracketBatchAsync(
+        IReadOnlyList<(Order Parent, Order? Sl, IReadOnlyList<Order> Tps)> triples, CancellationToken ct = default)
+        => throw new NotSupportedException("PlaceBracketBatchAsync is server-side (bot-loop §0005 batch route).");
+
+    public Task<IReadOnlyList<OrderResult>> PlaceMarketShortBatchAsync(
+        IReadOnlyList<Order> orders, CancellationToken ct = default)
+        => throw new NotSupportedException("PlaceMarketShortBatchAsync is server-side (bot-loop §0005 batch route).");
+
     // §3.6 P3: a stop modify goes through the user-facing IOrderEntryService.ModifyStopAsync →
     // /api/orders/{id}/modify-stop, not this execution surface. Mirrors ArmStop/PromoteStop.
     public Task<OrderResult> ModifyStopAsync(int orderId, int? newQuantity = null,

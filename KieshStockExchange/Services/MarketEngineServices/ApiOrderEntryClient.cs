@@ -109,12 +109,18 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
         IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default,
-        OrderSide side = OrderSide.Buy)
+        OrderSide side = OrderSide.Buy, int flipQuantity = 0)
     {
         var legs = new List<BracketLeg>(takeProfits?.Count ?? 0);
         if (takeProfits is not null)
             for (int i = 0; i < takeProfits.Count; i++)
                 legs.Add(new BracketLeg(takeProfits[i].Price, takeProfits[i].Quantity));
+        // Round 2 §0007: flipQuantity persists on the parent so the server-side bracket
+        // coordinator can size the SL pool. The PlaceBracketRequest DTO doesn't yet carry
+        // flipQuantity (no client UI surfaces a flip-bracket entry today — bots place these
+        // server-side); for parity with the interface we accept the parameter and forward 0
+        // until a user-facing entry path needs it.
+        _ = flipQuantity; // intentionally unused for now
         var req = new PlaceBracketRequest(userId, stockId, quantity, entry, currency,
             limitPrice, buyBudget, stopPrice, stopLimitPrice, stopSlippagePct, legs, side);
         var resp = await _http.PostAsJsonAsync("api/orders/place-bracket", req, ApiJsonOptions.Default, ct).ConfigureAwait(false);
@@ -122,6 +128,18 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         return await resp.Content.ReadFromJsonAsync<OrderResult>(ApiJsonOptions.Default, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("place-bracket returned no body.");
     }
+
+    // Round 2 §0005: bot-fleet batch routes are server-side (bot-loop). The client never
+    // batches its own brackets; if a future client surface needs to, this should proxy
+    // through the same /api/orders/place-bracket endpoint per request (cheaper than adding
+    // a server batch endpoint just for client use).
+    public Task<IReadOnlyList<OrderResult>> PlaceBracketBatchAsync(
+        IReadOnlyList<CommandDtos.BracketBatchRequest> requests, CancellationToken ct = default)
+        => throw new NotSupportedException("PlaceBracketBatchAsync is server-side (bot-loop §0005 batch route).");
+
+    public Task<IReadOnlyList<OrderResult>> PlaceMarketShortBatchAsync(
+        IReadOnlyList<CommandDtos.MarketShortBatchRequest> requests, CancellationToken ct = default)
+        => throw new NotSupportedException("PlaceMarketShortBatchAsync is server-side (bot-loop §0005 batch route).");
 
     public async Task<OrderResult> ModifyStopAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
