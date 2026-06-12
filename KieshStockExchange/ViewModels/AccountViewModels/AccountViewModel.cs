@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 // IWatchlistService is resolved at logout (and only there) via _services, so we
@@ -19,6 +20,8 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
 {
     private readonly IUserSessionService _session;
     private readonly IUserPortfolioService _portfolio;
+    private readonly ITransactionService _transactions;
+    private readonly IStockService _stocks;
     private readonly IAuthService _auth;
     private readonly IProfileService _profile;
     private readonly IServiceProvider _services;
@@ -44,28 +47,55 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
     public ObservableCollection<AccountFundRow> OtherCurrencyFunds { get; } = new();
     [ObservableProperty] private bool _hasOtherCurrencyFunds;
 
+    // Activity stats: read-only summary of the user's historical trading. Volume + realised P&L
+    // are per-currency because currencies don't sum meaningfully. Realised P&L is computed
+    // client-side via weighted-average cost basis per (StockId, CurrencyType). When any ledger
+    // ever went negative (shorts opened before any matching long), PnLIsApproximate flips on.
+    [ObservableProperty] private int _tradesPlaced;
+    [ObservableProperty] private int _stocksTraded;
+    [ObservableProperty] private bool _hasActivity;
+    [ObservableProperty] private bool _hasVolume;
+    [ObservableProperty] private bool _hasPnL;
+    [ObservableProperty] private bool _pnLIsApproximate;
+    [ObservableProperty] private string _bestStockDisplay = string.Empty;
+    [ObservableProperty] private string _worstStockDisplay = string.Empty;
+    [ObservableProperty] private bool _hasBestStock;
+    [ObservableProperty] private bool _hasWorstStock;
+    public ObservableCollection<AccountVolumeRow> VolumeByCurrency { get; } = new();
+    public ObservableCollection<AccountPnLRow> PnLByCurrency { get; } = new();
+
     public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } = CurrencyHelper.SupportedCurrencies;
 
     public AccountViewModel(
         IUserSessionService session,
         IUserPortfolioService portfolio,
+        ITransactionService transactions,
+        IStockService stocks,
         IAuthService auth,
         IProfileService profile,
         IServiceProvider services,
         TopNavBarViewModel topNavBarVm)
     {
         Title = "Account";
-        _session    = session     ?? throw new ArgumentNullException(nameof(session));
-        _portfolio  = portfolio   ?? throw new ArgumentNullException(nameof(portfolio));
-        _auth       = auth        ?? throw new ArgumentNullException(nameof(auth));
-        _profile    = profile     ?? throw new ArgumentNullException(nameof(profile));
-        _services   = services    ?? throw new ArgumentNullException(nameof(services));
-        TopNavBarVm = topNavBarVm ?? throw new ArgumentNullException(nameof(topNavBarVm));
+        _session      = session      ?? throw new ArgumentNullException(nameof(session));
+        _portfolio    = portfolio    ?? throw new ArgumentNullException(nameof(portfolio));
+        _transactions = transactions ?? throw new ArgumentNullException(nameof(transactions));
+        _stocks       = stocks       ?? throw new ArgumentNullException(nameof(stocks));
+        _auth         = auth         ?? throw new ArgumentNullException(nameof(auth));
+        _profile      = profile      ?? throw new ArgumentNullException(nameof(profile));
+        _services     = services     ?? throw new ArgumentNullException(nameof(services));
+        TopNavBarVm   = topNavBarVm  ?? throw new ArgumentNullException(nameof(topNavBarVm));
 
-        _session.SnapshotChanged   += OnSessionChanged;
-        _portfolio.SnapshotChanged += OnPortfolioChanged;
+        _session.SnapshotChanged          += OnSessionChanged;
+        _portfolio.SnapshotChanged        += OnPortfolioChanged;
+        _transactions.TransactionsChanged += OnTransactionsChanged;
+        _stocks.CatalogChanged            += OnStocksChanged;
 
         RefreshAll();
+        // Kick async remote refreshes so the Activity card reflects the latest tape on first nav
+        // even if the user hasn't visited the trade-history or portfolio views this session.
+        _ = _transactions.RefreshAsync(null);
+        _ = _stocks.EnsureLoadedAsync();
     }
 
     public void Refresh() => RefreshAll();
@@ -78,10 +108,19 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
     private void OnPortfolioChanged(object? sender, EventArgs e) =>
         MainThread.BeginInvokeOnMainThread(RefreshFunds);
 
+    private void OnTransactionsChanged(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(RefreshActivity);
+
+    // Stock catalog late-arrival: when the symbol lookup becomes available after first paint,
+    // recompute so Best/Worst can swap from "#id" placeholders to real symbols.
+    private void OnStocksChanged(object? sender, EventArgs e) =>
+        MainThread.BeginInvokeOnMainThread(RefreshActivity);
+
     private void RefreshAll()
     {
         RefreshSession();
         RefreshFunds();
+        RefreshActivity();
     }
 
     private void RefreshSession()
@@ -129,6 +168,128 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
         HasOtherCurrencyFunds = OtherCurrencyFunds.Count > 0;
     }
 
+    private void RefreshActivity()
+    {
+        // AllTransactions is already user-scoped by TransactionService.RefreshAsync (server-side
+        // filter by buyer/seller id), so we don't need to re-filter here.
+        var txns = _transactions.AllTransactions;
+        TradesPlaced = txns.Count;
+        StocksTraded = txns.Select(t => t.StockId).Distinct().Count();
+
+        VolumeByCurrency.Clear();
+        foreach (var row in txns
+            .GroupBy(t => t.CurrencyType)
+            .Select(g => new AccountVolumeRow
+            {
+                CurrencyType = g.Key,
+                Amount = g.Sum(t => t.TotalAmount),
+            })
+            .OrderByDescending(r => r.Amount))
+        {
+            VolumeByCurrency.Add(row);
+        }
+        HasVolume = VolumeByCurrency.Count > 0;
+
+        RefreshPnL(txns);
+        HasActivity = TradesPlaced > 0;
+    }
+
+    // Weighted-average cost basis per (stock, currency). Walks the tape oldest-first; buys blend
+    // avg cost into the open lot, sells realise (sellPrice - avgCost) * qty. Naive on shorts:
+    // if inventory ever goes negative, the running avg-cost loses its long-position meaning, so
+    // the resulting P&L is best-effort. PnLIsApproximate flips on so the UI can warn.
+    private void RefreshPnL(IReadOnlyList<Transaction> txns)
+    {
+        PnLByCurrency.Clear();
+        BestStockDisplay = string.Empty;
+        WorstStockDisplay = string.Empty;
+        HasBestStock = HasWorstStock = false;
+        PnLIsApproximate = false;
+
+        var userId = _auth.CurrentUser?.UserId ?? 0;
+        if (userId <= 0 || txns.Count == 0)
+        {
+            HasPnL = false;
+            return;
+        }
+
+        var lots = new Dictionary<(int sid, CurrencyType ccy), (int qty, decimal avgCost)>();
+        var pnlByCcy = new Dictionary<CurrencyType, decimal>();
+        var pnlByStock = new Dictionary<(int sid, CurrencyType ccy), decimal>();
+        bool anyShortLeg = false;
+
+        // AllTransactions is newest-first; walk oldest-first so the cost basis evolves correctly.
+        foreach (var t in txns.OrderBy(t => t.Timestamp))
+        {
+            var key = (t.StockId, t.CurrencyType);
+            lots.TryGetValue(key, out var lot);
+            bool isBuy = t.BuyerId == userId;
+
+            if (isBuy)
+            {
+                // Crossing back through zero from a short rebases the avg cost to the new trade
+                // price — the prior basis was a sell-side proceeds figure, not a buy cost.
+                if (lot.qty <= 0)
+                {
+                    if (lot.qty < 0) anyShortLeg = true;
+                    lots[key] = (lot.qty + t.Quantity, t.Price);
+                }
+                else
+                {
+                    var newQty = lot.qty + t.Quantity;
+                    var newAvg = (lot.avgCost * lot.qty + t.Price * t.Quantity) / newQty;
+                    lots[key] = (newQty, newAvg);
+                }
+            }
+            else // sell
+            {
+                var realised = (t.Price - lot.avgCost) * t.Quantity;
+                pnlByCcy.TryGetValue(t.CurrencyType, out var cExisting);
+                pnlByCcy[t.CurrencyType] = cExisting + realised;
+                pnlByStock.TryGetValue(key, out var sExisting);
+                pnlByStock[key] = sExisting + realised;
+
+                var newQty = lot.qty - t.Quantity;
+                if (newQty < 0) anyShortLeg = true;
+                lots[key] = (newQty, lot.avgCost);
+            }
+        }
+
+        foreach (var (ccy, amt) in pnlByCcy.OrderByDescending(kv => kv.Value))
+        {
+            if (amt == 0m) continue;
+            PnLByCurrency.Add(new AccountPnLRow { CurrencyType = ccy, Amount = amt });
+        }
+        HasPnL = PnLByCurrency.Count > 0;
+        PnLIsApproximate = anyShortLeg && HasPnL;
+
+        if (pnlByStock.Count > 0)
+        {
+            var best = pnlByStock.OrderByDescending(kv => kv.Value).First();
+            var worst = pnlByStock.OrderBy(kv => kv.Value).First();
+            if (best.Value > 0m)
+            {
+                BestStockDisplay = FormatStockPnL(best.Key.sid, best.Key.ccy, best.Value);
+                HasBestStock = true;
+            }
+            if (worst.Value < 0m)
+            {
+                WorstStockDisplay = FormatStockPnL(worst.Key.sid, worst.Key.ccy, worst.Value);
+                HasWorstStock = true;
+            }
+        }
+    }
+
+    // Symbol may not have arrived yet from StockService — fall back to "#id" so the row still
+    // renders something useful. OnStocksChanged will trigger a recompute when the catalog loads.
+    private string FormatStockPnL(int stockId, CurrencyType ccy, decimal amount)
+    {
+        var symbol = _stocks.ById.TryGetValue(stockId, out var s) && !string.IsNullOrEmpty(s.Symbol)
+            ? s.Symbol
+            : $"#{stockId}";
+        return $"{symbol}  {CurrencyHelper.Format(amount, ccy)}";
+    }
+
     partial void OnSelectedBaseCurrencyChanged(CurrencyType value)
     {
         if (_suppressCurrencyUpdate) return;
@@ -173,8 +334,10 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        _session.SnapshotChanged   -= OnSessionChanged;
-        _portfolio.SnapshotChanged -= OnPortfolioChanged;
+        _session.SnapshotChanged          -= OnSessionChanged;
+        _portfolio.SnapshotChanged        -= OnPortfolioChanged;
+        _transactions.TransactionsChanged -= OnTransactionsChanged;
+        _stocks.CatalogChanged            -= OnStocksChanged;
         TopNavBarVm.Dispose();
         _disposed = true;
         GC.SuppressFinalize(this);
@@ -191,4 +354,27 @@ public sealed class AccountFundRow
     public string AvailableDisplay => Fund.AvailableBalanceDisplay;
     public string ReservedDisplay => Fund.ReservedBalanceDisplay;
     public bool HasReserved => Fund.ReservedBalance > 0m;
+}
+
+// Row for the per-currency Volume sub-list on the Activity card. Currencies don't sum
+// meaningfully, so volume is grouped by CurrencyType and rendered as one row per currency.
+public sealed class AccountVolumeRow
+{
+    public required CurrencyType CurrencyType { get; init; }
+    public required decimal Amount { get; init; }
+    public string Currency => CurrencyType.ToString();
+    public string AmountDisplay => CurrencyHelper.Format(Amount, CurrencyType);
+}
+
+// Row for the per-currency Realised P&L sub-list. Sign is exposed as discrete bools so the XAML
+// can colour positive/negative without a converter, mirroring the data-trigger pattern used
+// elsewhere in the trade tables.
+public sealed class AccountPnLRow
+{
+    public required CurrencyType CurrencyType { get; init; }
+    public required decimal Amount { get; init; }
+    public string Currency => CurrencyType.ToString();
+    public string AmountDisplay => CurrencyHelper.Format(Amount, CurrencyType);
+    public bool IsPositive => Amount > 0m;
+    public bool IsNegative => Amount < 0m;
 }
