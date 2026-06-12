@@ -55,6 +55,16 @@ public sealed class BracketCoordinator : IBracketCoordinator
 {
     private readonly ConcurrentDictionary<int, byte> _bracketParents = new();
 
+    // Round 2 §0006: per-parent leg cache. Pre-round-2 every On*Async call invokes LoadLegsAsync,
+    // which round-trips _db.GetBracketChildrenAsync(parentId). At soak rates that's ≥ one extra
+    // DB call per bracket event per parent — and there are 8+ such call sites across the long
+    // and short paths. The cache is populated on first LoadLegsAsync miss (lazy — RegisterBracket
+    // doesn't carry the legs), invalidated on every per-event tx commit (legs were mutated in
+    // place so the cached canonical references are still valid for the NEXT event reading them),
+    // and dropped when the parent is retired via _bracketParents.TryRemove. Cold cache falls
+    // through to the existing DB read, so cold-load + flag-off behaviour is byte-identical.
+    private readonly ConcurrentDictionary<int, (Order? Sl, List<Order> Tps)> _legsCache = new();
+
     private readonly IDataBaseService _db;
     private readonly IAccountsCache _accounts;
     private readonly IOrderRegistry _registry;
@@ -104,8 +114,17 @@ public sealed class BracketCoordinator : IBracketCoordinator
 
     // Canonical children for a parent: the SL (stop) + the TP limits, resolved through the registry
     // so we mutate the live instances the engine/reconciler share.
+    //
+    // Round 2 §0006: cache the resolved (sl, tps) tuple on the first invocation. Subsequent
+    // events on the same parent (parent fill → TP fill → SL fire → cancel, in any order) skip
+    // the DB read. The cache holds CANONICAL references — when a per-event tx mutates a leg's
+    // Status/Quantity/Reservation, the cached tuple's items reflect the mutation automatically
+    // because they're the same object instances the registry hands out. We invalidate only on
+    // bracket retire (TryRemoveLegsCache, called from each _bracketParents.TryRemove site).
     private async Task<(Order? Sl, List<Order> Tps)> LoadLegsAsync(int parentId, CancellationToken ct)
     {
+        if (_legsCache.TryGetValue(parentId, out var cached)) return cached;
+
         var raw = await _db.GetBracketChildrenAsync(parentId, ct).ConfigureAwait(false);
         Order? sl = null;
         var tps = new List<Order>(3);
@@ -121,8 +140,15 @@ public sealed class BracketCoordinator : IBracketCoordinator
         }
         // Fill-up order: a long bracket's sell TPs fill nearest-market-first (lowest price first).
         tps.Sort((a, b) => a.Price.CompareTo(b.Price));
-        return (sl, tps);
+        var entry = (sl, tps);
+        _legsCache[parentId] = entry;
+        return entry;
     }
+
+    // Round 2 §0006: drop the cache entry when the bracket retires. Called at every
+    // _bracketParents.TryRemove site (parent fully covered, SL fired and cancelled TPs, group
+    // teardown on user cancel). Safe to call when no cache entry exists.
+    private void TryRemoveLegsCache(int parentId) => _legsCache.TryRemove(parentId, out _);
 
     // Shares still open in the bracket = parent acquired − everything the legs already sold.
     private static int ComputeHeld(Order parent, Order? sl, List<Order> tps)
@@ -326,7 +352,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
                         book.RemoveById(sl.OrderId);
                         sl.Status = Order.Statuses.Cancelled;
                         sl.UpdatedAt = TimeHelper.NowUtc();
-                        _bracketParents.TryRemove(parentId, out _);
+                        _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
                     }
                     else
                     {
@@ -340,7 +366,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
                     // Take-profit-only bracket: the TP fill already released its own reservation via
                     // the normal sell-limit path; nothing to resize. Retire the bracket once the
                     // covered shares are fully exited.
-                    _bracketParents.TryRemove(parentId, out _);
+                    _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
                 }
 
                 // Cancel-the-remainder: a protective leg fired while a LIMIT parent still rests →
@@ -443,7 +469,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
             }
         }).ConfigureAwait(false);
 
-        _bracketParents.TryRemove(parentId, out _);
+        _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
@@ -456,7 +482,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
 
         Order? parent = _registry.TryGet(parentId, out var pc) ? pc
                        : await _db.GetOrderById(parentId, ct).ConfigureAwait(false);
-        if (parent is null) { _bracketParents.TryRemove(parentId, out _); return; }
+        if (parent is null) { _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId); return; }
         if (parent.IsSellOrder) { await OnMemberCancelledShortAsync(cancelled, parent, parentId, ct).ConfigureAwait(false); return; }
 
         // Group teardown only when the user cancels an UNFILLED parent (discard dormant legs) or the SL
@@ -467,7 +493,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
                      || (cancelled.IsBracketChild && cancelled.IsStopOrder && parent.AmountFilled > 0);
         if (!teardown)
         {
-            if (cancelled.OrderId == parentId) _bracketParents.TryRemove(parentId, out _);
+            if (cancelled.OrderId == parentId) _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
             return;
         }
 
@@ -532,7 +558,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
             }
         }).ConfigureAwait(false);
 
-        _bracketParents.TryRemove(parentId, out _);
+        _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
@@ -741,7 +767,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
                         book.RemoveById(sl.OrderId);
                         sl.Status = Order.Statuses.Cancelled;
                         sl.UpdatedAt = TimeHelper.NowUtc();
-                        _bracketParents.TryRemove(parentId, out _);
+                        _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
                     }
                     else
                     {
@@ -754,7 +780,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
                 else if (held <= 0)
                 {
                     // TP-only: the TP's own reservation + any savings were settled on its fill; just retire.
-                    _bracketParents.TryRemove(parentId, out _);
+                    _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
                 }
 
                 // Cancel-the-remainder of a still-resting limit short parent (protective leg fired while the
@@ -863,7 +889,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
             }
         }).ConfigureAwait(false);
 
-        _bracketParents.TryRemove(parentId, out _);
+        _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
@@ -875,7 +901,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
                      || (cancelled.IsBracketChild && cancelled.IsStopOrder && parent.AmountFilled > 0);
         if (!teardown)
         {
-            if (cancelled.OrderId == parentId) _bracketParents.TryRemove(parentId, out _);
+            if (cancelled.OrderId == parentId) _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
             return;
         }
 
@@ -940,7 +966,7 @@ public sealed class BracketCoordinator : IBracketCoordinator
             }
         }).ConfigureAwait(false);
 
-        _bracketParents.TryRemove(parentId, out _);
+        _bracketParents.TryRemove(parentId, out _); TryRemoveLegsCache(parentId);
         _orderCache.NotifyOrdersMutated(new[] { parent.UserId });
     }
 
