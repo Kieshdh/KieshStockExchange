@@ -19,7 +19,12 @@ internal sealed record BotAdvancedDecision(
     BotAdvancedKind Kind, int StockId, int Quantity, CurrencyType Currency,
     decimal StopPrice = 0m, decimal TrailOffset = 0m, bool TrailIsPercent = false,
     decimal? BuyBudget = null, decimal? StopSlippagePct = null,
-    IReadOnlyList<(decimal Price, int Quantity)>? TakeProfits = null);
+    IReadOnlyList<(decimal Price, int Quantity)>? TakeProfits = null,
+    // Round 2 §0007: flip portion of a Path-2 bracket entry. 0 for round-trip-only,
+    // a Path-1-minimal short bracket, plain orders, and any other advanced kind. The
+    // entry-side wiring sets parent.FlipQuantity from this value just before PlaceBracketAsync
+    // so the BracketCoordinator (§0008) can size the SL pool correctly.
+    int FlipQuantity = 0);
 
 /// <summary>
 /// Stateless order computation — given a context and a user, produces an Order or null.
@@ -170,6 +175,23 @@ internal sealed class AiBotDecisionService
     // flip and mixed-portion) is the next round once this proves the §10.3b drift hypothesis.
     // Default OFF ⇒ today's behaviour byte-identical.
     private readonly bool    _bracketRoundTrip;
+    // Round 2 §0007 (Path 2): full bracket-flip eligibility. When on, ShortBracket AND LongBracket
+    // are eligible on any position sign; if the entry quantity exceeds the held inventory (with
+    // sign), the entry FLIPS the position in one trade. inventoryPortion = min(Q, |held|) is the
+    // round-trip portion; flipPortion = Q − inventoryPortion is the new-direction portion. The
+    // FlipQuantity field is persisted on the parent so the BracketCoordinator (round 2 §0008)
+    // can size the SL pool to flipPortion only — the round-trip portion is self-funding.
+    //
+    // Strict superset of _bracketRoundTrip: when _bracketFlip is on, the Path-1 minimal qty-clamp
+    // is dropped (the bracket allows flipQty > 0); when off, _bracketRoundTrip's Path-1 behaviour
+    // (or original flat-only) is preserved. Both flags default OFF for the round-2 series.
+    private readonly bool    _bracketFlip;
+    // Round 2 §0011 (E1): inventory-aware kind biasing. When on, the bracket-cohort kind selection
+    // is biased toward position-mean-reversion: heavy long → ShortBracket; heavy short → LongBracket.
+    // _inventoryBiasThresholdPrc defines "heavy" as |Quantity| * lastPrice > threshold * portfolio.
+    // Default OFF ⇒ today's cumulative prob-roll selection unchanged.
+    private readonly bool    _inventoryBias;
+    private readonly decimal _inventoryBiasThresholdPrc;
 
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
@@ -220,7 +242,13 @@ internal sealed class AiBotDecisionService
         bool memoizeTickValues = true,
         // §patch 0007 minimal (Path 1): ShortBracket eligible on flat-or-long. Default OFF;
         // when off, behaviour is byte-identical to today (FirstFlatStock filter intact).
-        bool bracketRoundTrip = false)
+        bool bracketRoundTrip = false,
+        // Round 2 §0007 (Path 2): bracket-flip eligibility — both kinds on any sign + persisted
+        // FlipQuantity for pool sizing. Strict superset of bracketRoundTrip.
+        bool bracketFlip = false,
+        // Round 2 §0011 (E1): inventory-aware kind biasing.
+        bool inventoryBias = false,
+        decimal inventoryBiasThresholdPrc = 0.05m)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -301,6 +329,9 @@ internal sealed class AiBotDecisionService
         _capFromSeed               = capFromSeed;
         _memoizeTickValues         = memoizeTickValues;
         _bracketRoundTrip          = bracketRoundTrip;
+        _bracketFlip               = bracketFlip;
+        _inventoryBias             = inventoryBias;
+        _inventoryBiasThresholdPrc = Math.Max(0m, inventoryBiasThresholdPrc);
     }
     #endregion
 
@@ -487,15 +518,27 @@ internal sealed class AiBotDecisionService
     private async Task<BotAdvancedDecision?> BuildBracketAsync(AiBotContext ctx, AIUser user,
         CurrencyType currency, bool isShort, CancellationToken ct)
     {
-        // §patch 0007 minimal (Path 1): when _bracketRoundTrip is on, ShortBracket is eligible on
-        // flat-OR-long inventory (the round-trip case). When off, today's flat-only behaviour.
-        // LongBracket eligibility is unchanged this round (semantics of SL/TP on a covered short
-        // need separate design; deferred per notes Q1).
+        // Round 2 §0007 (Path 2): with _bracketFlip on, BOTH kinds are eligible on any position
+        // sign. When the entry qty exceeds the held inventory (with sign), the entry flips the
+        // position in one trade — flipPortion = entryQty − inventoryPortion is persisted on the
+        // parent so the BracketCoordinator (§0008) sizes the SL pool to flipPortion only.
+        //
+        // _bracketFlip is a strict superset of _bracketRoundTrip: when on, Path-1 minimal's
+        // qty-clamp is dropped (we allow flip qty > 0). When off, the Path-1 minimal behaviour
+        // (or original flat-only) is preserved. Both flags default OFF for byte-identical flag-off.
+        //
+        // §patch 0007 minimal (Path 1): when _bracketRoundTrip is on but _bracketFlip is off,
+        // ShortBracket is eligible on flat-OR-long but qty-clamped (no flip). LongBracket
+        // eligibility is unchanged on Path 1 minimal.
         int stockId = isShort
-            ? (_bracketRoundTrip
-                ? FirstFlatOrLongStock(ctx, user, currency)
-                : FirstFlatStock(ctx, user, currency))
-            : FirstLongableStock(ctx, user, currency);
+            ? (_bracketFlip
+                ? FirstAnyStock(ctx, user, currency)
+                : (_bracketRoundTrip
+                    ? FirstFlatOrLongStock(ctx, user, currency)
+                    : FirstFlatStock(ctx, user, currency)))
+            : (_bracketFlip
+                ? FirstAnyStock(ctx, user, currency)
+                : FirstLongableStock(ctx, user, currency));
         if (stockId <= 0) return null;
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
@@ -548,17 +591,36 @@ internal sealed class AiBotDecisionService
         // §P6 anti-sweep: the market entry leg can't take more than a fraction of the resting opposite
         // side (long entry buys asks, short entry sells bids) — the same structural cap as plain orders.
         qty = ApplyDepthCap(qty, isBuy: !isShort, stockId, currency);
-        // §patch 0007 minimal (Path 1): when ShortBracket is round-tripping existing inventory,
-        // clamp the entry to the held qty so the position never flips short. The SL cash pool was
-        // already sized against `avail` (line 512), so leaving qty smaller is conservative — the
-        // pool covers the smaller worst-case buyback. No engine surface changes needed.
-        if (isShort && _bracketRoundTrip)
+
+        // Round 2 §0007 (Path 2): flip vs round-trip split. The held inventory's sign determines
+        // whether this entry is rounding-trip (held has the SAME sign-orientation: long held for
+        // a sell-entry, short held for a buy-entry) or pure new direction.
+        var heldQty = _accounts.GetPosition(user.UserId, stockId)?.Quantity ?? 0;
+        int flipQty = 0;
+        if (_bracketFlip)
         {
-            var heldQty = _accounts.GetPosition(user.UserId, stockId)?.Quantity ?? 0;
-            if (heldQty > 0) qty = Math.Min(qty, heldQty);
+            // entry side: short bracket sells, long bracket buys.
+            // round-trip applies when held sign opposes entry side direction (sell on +X long, buy on −X short).
+            int inventoryPortion = 0;
+            if (isShort && heldQty > 0)            inventoryPortion = Math.Min(qty, heldQty);
+            else if (!isShort && heldQty < 0)      inventoryPortion = Math.Min(qty, -heldQty);
+            // anything past inventoryPortion is the flip portion (opens a new position).
+            flipQty = Math.Max(0, qty - inventoryPortion);
+        }
+        else if (isShort && _bracketRoundTrip && heldQty > 0)
+        {
+            // Path-1 minimal: clamp to held to prevent any flip. flipQty stays 0; inventoryPortion = qty.
+            qty = Math.Min(qty, heldQty);
         }
         if (qty < 2) return null;   // need ≥2 for a 2-leg scale-out
-        if (!isShort) buyBudget = CurrencyHelper.RoundMoney(price * qty, currency);
+        if (!isShort)
+        {
+            // Round 2 §0007: for a long-bracket-on-short, the cover portion (min(qty, |held|))
+            // releases reserved collateral instead of spending fresh cash — only the flip portion
+            // actually claims new cash. We still budget the full qty for the entry leg (the
+            // engine settlement's cover-release wires this), so the buyBudget is conservative.
+            buyBudget = CurrencyHelper.RoundMoney(price * qty, currency);
+        }
 
         var tp1Qty = qty / 2; var tp2Qty = qty - tp1Qty;
         var tps = isShort
@@ -570,7 +632,18 @@ internal sealed class AiBotDecisionService
         return new BotAdvancedDecision(
             isShort ? BotAdvancedKind.ShortBracket : BotAdvancedKind.LongBracket,
             stockId, qty, currency, StopPrice: stopPrice, BuyBudget: buyBudget,
-            StopSlippagePct: slippage, TakeProfits: tps);
+            StopSlippagePct: slippage, TakeProfits: tps,
+            FlipQuantity: flipQty);
+    }
+
+    // Round 2 §0007: bracket eligible on any position sign — the Path-2 picker. Identical to
+    // EligibleWatchlist's per-tick view; no per-position predicate is applied here because Path 2
+    // wants the bracket to potentially flip. The first stock the bot can fund a bracket on is
+    // accepted (the funding check happens inside BuildBracketAsync).
+    private int FirstAnyStock(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        var watch = EligibleWatchlist(ctx, user, currency);
+        return watch.Length > 0 ? watch[0] : 0;
     }
 
     // §patch 0003: per-(bot, tick) eligible-watchlist precompute. Today every advanced builder
@@ -1029,6 +1102,12 @@ internal sealed class AiBotDecisionService
             // §P6: never buy PAST flat on a stock the bot is short — the buy-side mirror of risk #7
             // (a short→long flip), which P6 forbids. Clamp to the uncovered short (engine-authoritative, like
             // the sell branch); a cover can flatten but never overshoot into a long. Fully covered → qty 0.
+            //
+            // Round 2 §0007 (Path 2): this clamp is for PLAIN orders only. Bracket-entry qty is
+            // computed in BuildBracketAsync, which carves an explicit flip exception when
+            // _bracketFlip is on (the inventoryPortion / flipPortion split). Plain orders KEEP this
+            // clamp — the cover-clamp invariant is preserved across round 2 per the hard-constraint
+            // contract in the round-1 bracket-flip plan §5.
             var enginePos = _accounts.GetPosition(user.UserId, stockId);
             if (enginePos is { Quantity: < 0 })
             {

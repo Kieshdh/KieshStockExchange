@@ -44,11 +44,13 @@ public interface IOrderEntryService
     // stopLimitPrice set ⇒ the SL is a stop-limit; null ⇒ a stop-market (stopSlippagePct optionally
     // caps it). Each take-profit is (price, quantity); Σ TP qty ≤ quantity, TP prices strictly
     // ascending above entry, SL below.
+    // Round 2 §0007: flipQuantity (optional, default 0) — for Path-2 bracket entries that flip
+    // the position. Persisted on the parent so the coordinator can size the SL pool to flipQty.
     Task<OrderResult> PlaceBracketAsync(int userId, int stockId, int quantity, EntryType entry,
         CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
         IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default,
-        OrderSide side = OrderSide.Buy);
+        OrderSide side = OrderSide.Buy, int flipQuantity = 0);
 
     // §3.6 P2 stop orders — armed off-book, promoted when the price crosses stopPrice.
     Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,

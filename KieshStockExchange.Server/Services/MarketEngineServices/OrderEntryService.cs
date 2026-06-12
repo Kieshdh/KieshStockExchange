@@ -399,7 +399,7 @@ public sealed class OrderEntryService : IOrderEntryService
         CurrencyType currency, decimal? limitPrice, decimal? buyBudget, decimal? stopPrice,
         decimal? stopLimitPrice, decimal? stopSlippagePct,
         IReadOnlyList<(decimal Price, int Quantity)> takeProfits, CancellationToken ct = default,
-        OrderSide side = OrderSide.Buy)
+        OrderSide side = OrderSide.Buy, int flipQuantity = 0)
     {
         ct.ThrowIfCancellationRequested();
         if (quantity <= 0) return OrderResultFactory.InvalidParams("Quantity must be positive.");
@@ -453,6 +453,9 @@ public sealed class OrderEntryService : IOrderEntryService
             Side = side, Entry = entry, Stop = StopKind.None,
             Price = entry == EntryType.Limit ? CurrencyHelper.RoundMoney(limitPrice!.Value, currency) : 0m,
             BuyBudget = (!isShort && entry == EntryType.Market) ? CurrencyHelper.RoundMoney(buyBudget!.Value, currency) : null,
+            // Round 2 §0007 (Path 2): persist the flip portion. 0 for a round-trip-only entry or
+            // any pre-Path-2 caller (default value of the parameter).
+            FlipQuantity = Math.Max(0, Math.Min(flipQuantity, quantity)),
         };
 
         // Build the protective stop-loss (opposite side), if any. Stop-limit when a limit price is given;
@@ -599,6 +602,8 @@ public sealed class OrderEntryService : IOrderEntryService
             Side = r.Side, Entry = r.Entry, Stop = StopKind.None,
             Price = r.Entry == EntryType.Limit ? CurrencyHelper.RoundMoney(r.Price!.Value, r.Currency) : 0m,
             BuyBudget = (!isShort && r.Entry == EntryType.Market) ? CurrencyHelper.RoundMoney(r.BuyBudget!.Value, r.Currency) : null,
+            // Round 2 §0007 (Path 2): persist the flip portion from the batch request.
+            FlipQuantity = Math.Max(0, Math.Min(r.FlipQuantity, r.Quantity)),
         };
 
         Order? sl = null;

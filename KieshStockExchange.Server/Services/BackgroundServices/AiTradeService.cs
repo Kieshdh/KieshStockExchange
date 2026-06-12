@@ -410,7 +410,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // §cap-from-seed: hard veto measures vs seed instead of Fundamental() when on.
                         capFromSeed:               _configuration.GetValue("Bots:ValueAnchor:CapFromSeed", false),
                         // §patch 0007 minimal (Path 1): ShortBracket eligible on flat-or-long.
-                        bracketRoundTrip:          _configuration.GetValue("Bots:Advanced:BracketRoundTrip", false));
+                        bracketRoundTrip:          _configuration.GetValue("Bots:Advanced:BracketRoundTrip", false),
+                        // Round 2 §0007 (Path 2): bracket-flip eligibility — strict superset of Path 1.
+                        bracketFlip:               _configuration.GetValue("Bots:Advanced:BracketFlip", false),
+                        // Round 2 §0011 (E1): inventory-aware kind biasing.
+                        inventoryBias:             _configuration.GetValue("Bots:Advanced:InventoryBias", false),
+                        inventoryBiasThresholdPrc: _configuration.GetValue("Bots:Advanced:InventoryBiasThresholdPrc", 0.05m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
@@ -775,7 +780,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 StopLimitPrice: null,
                 StopSlippagePct: d.StopSlippagePct,
                 TakeProfits: BuildTpLegs(d.TakeProfits),
-                Side: isShort ? OrderSide.Sell : OrderSide.Buy));
+                Side: isShort ? OrderSide.Sell : OrderSide.Buy,
+                FlipQuantity: d.FlipQuantity));
         }
 
         IReadOnlyList<OrderResult> results;
@@ -945,14 +951,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                             user.UserId, d.StockId, d.Quantity, EntryType.Market, d.Currency,
                             limitPrice: null, buyBudget: d.BuyBudget, stopPrice: d.StopPrice,
                             stopLimitPrice: null, stopSlippagePct: d.StopSlippagePct, takeProfits: d.TakeProfits!,
-                            ct, OrderSide.Buy).ConfigureAwait(false),
+                            ct, OrderSide.Buy, flipQuantity: d.FlipQuantity).ConfigureAwait(false),
                     // §P6c short bracket (flat market sell + slippage-capped buy-stop SL above + buy-limit TPs below).
                     BotAdvancedKind.ShortBracket =>
                         await _entry.PlaceBracketAsync(
                             user.UserId, d.StockId, d.Quantity, EntryType.Market, d.Currency,
                             limitPrice: null, buyBudget: null, stopPrice: d.StopPrice,
                             stopLimitPrice: null, stopSlippagePct: d.StopSlippagePct, takeProfits: d.TakeProfits!,
-                            ct, OrderSide.Sell).ConfigureAwait(false),
+                            ct, OrderSide.Sell, flipQuantity: d.FlipQuantity).ConfigureAwait(false),
                     _ => new OrderResult { Status = OrderStatus.OperationFailed, ErrorMessage = "unknown advanced kind" },
                 };
             }

@@ -83,7 +83,9 @@ public sealed record BracketBatchRequest(
     decimal? StopLimitPrice,
     decimal? StopSlippagePct,
     IReadOnlyList<BracketLeg> TakeProfits,
-    OrderSide Side = OrderSide.Buy);
+    OrderSide Side = OrderSide.Buy,
+    // Round 2 §0007 (Path 2): flip portion of the entry. 0 for round-trip-only and Path-1 minimal.
+    int FlipQuantity = 0);
 
 // Round 2 §0005: batched flat-only market short open — the bot fleet's short cohort.
 // Mirrors PlaceTrueMarketSellOrderAsync's signature; collected by SubmitAdvancedAsync when
