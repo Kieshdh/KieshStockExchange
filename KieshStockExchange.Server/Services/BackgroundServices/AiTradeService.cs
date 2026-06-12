@@ -350,7 +350,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         valueAnchorScale:    _configuration.GetValue("Bots:ValueAnchor:Scale", 0.15m),
                         valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
                         overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),
-                        absoluteCapMax:      _configuration.GetValue("Bots:ValueAnchor:AbsoluteCapMax", 0.20m),
+                        absoluteCapMax:      _configuration.GetValue("Bots:ValueAnchor:AbsoluteCapMax", 0m),
                         marketSlippagePrc:   _configuration.GetValue("Bots:MarketSlippagePrc", 0.003m),
                         // §P6 balancing: tier-selection probs, stop-fire slippage cap, anti-sweep depth fraction.
                         tierCloseProb:       _configuration.GetValue("Bots:Tiers:CloseProb", 0.6m),
