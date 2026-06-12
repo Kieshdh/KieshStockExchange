@@ -515,32 +515,58 @@ internal sealed class TradeSettler
 
                 if (shortPart > 0)
                 {
-                    var collateral = ReservationMath.ShortCollateralForFill(shortPart, t.Price, ccy);
-                    // §F14: resting-short straddle — consume the order's place-time hold (already in
-                    // ReservedBalance); a market flip reserves now. SnapshotOrderIfNew already ran for the
-                    // long part above, but call again (idempotent — snapshots once per OrderId).
-                    if (sellOrder!.CurrentShortCollateral >= collateral)
+                    // Round 2 Q7 fix: defer the collateral commit until AFTER ApplyDelta and check
+                    // the LIVE Position.Quantity. The pre-batch sellerStartQty (captured at line 427)
+                    // can be stale by the time this flip path runs — intra-batch buys on the same
+                    // (user, stock) Position can have lifted the live Quantity above zero, so the
+                    // "shortPart" doesn't actually push the position negative. In that case the
+                    // collateral logic must be SKIPPED entirely: the trade is effectively a normal
+                    // long-close sell. Diagnostic 03936ec captured exactly this scenario (Order
+                    // 18708 ShortBracket FlipQty=1, post-ApplyDelta Q=+24, collateral=406.02
+                    // tripping CK_Positions_Quantity_Invariants).
+                    var sQtyBefore = sellerPos.Quantity;
+                    sellerPos.ApplyDelta(-shortPart);
+
+                    if (sellerPos.Quantity >= 0)
                     {
-                        SnapshotOrderIfNew(sellOrder);
-                        sellOrder.ConsumeShortCollateral(collateral);
+                        // Intra-batch buys lifted live Q before this flip path ran. No short
+                        // actually opened — skip the collateral reservation. The sellOrder's
+                        // CurrentSellReservedQty was already consumed by the longPart branch
+                        // above; the shortPart "consumed" reservation is no-op because the order
+                        // had no remaining sell reservation to consume (longPart took it all).
+                        _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId,
+                            "ApplyPass:Flip:NoopShortPart", -shortPart,
+                            sellerPos.ReservedQuantity, sellerPos.ReservedQuantity,
+                            sQtyBefore, sellerPos.Quantity);
                     }
                     else
                     {
-                        var cResB = sellerFund.ReservedBalance;
-                        var cTotB = sellerFund.TotalBalance;
-                        sellerFund.ReserveFunds(collateral);
-                        sellerFund.UpdatedAt = TimeHelper.NowUtc();
-                        _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
-                            "ApplyPass:Flip:ShortOpen:ReserveCollateral", collateral,
-                            cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
-                    }
+                        // Real short open — reserve collateral against the new negative inventory.
+                        var collateral = ReservationMath.ShortCollateralForFill(shortPart, t.Price, ccy);
+                        // §F14: resting-short straddle — consume the order's place-time hold (already in
+                        // ReservedBalance); a market flip reserves now. SnapshotOrderIfNew already ran for the
+                        // long part above, but call again (idempotent — snapshots once per OrderId).
+                        if (sellOrder!.CurrentShortCollateral >= collateral)
+                        {
+                            SnapshotOrderIfNew(sellOrder);
+                            sellOrder.ConsumeShortCollateral(collateral);
+                        }
+                        else
+                        {
+                            var cResB = sellerFund.ReservedBalance;
+                            var cTotB = sellerFund.TotalBalance;
+                            sellerFund.ReserveFunds(collateral);
+                            sellerFund.UpdatedAt = TimeHelper.NowUtc();
+                            _ledger.LogFund(t.SellerId, ccy, t.SellOrderId,
+                                "ApplyPass:Flip:ShortOpen:ReserveCollateral", collateral,
+                                cResB, sellerFund.ReservedBalance, cTotB, sellerFund.TotalBalance);
+                        }
 
-                    var sQtyBefore = sellerPos.Quantity;
-                    sellerPos.ApplyDelta(-shortPart);
-                    sellerPos.TakeShortCollateral(collateral, ccy);
-                    _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:Flip:ShortOpen",
-                        -shortPart, sellerPos.ReservedQuantity, sellerPos.ReservedQuantity,
-                        sQtyBefore, sellerPos.Quantity);
+                        sellerPos.TakeShortCollateral(collateral, ccy);
+                        _ledger.LogPosition(t.SellerId, t.StockId, t.SellOrderId, "ApplyPass:Flip:ShortOpen",
+                            -shortPart, sellerPos.ReservedQuantity, sellerPos.ReservedQuantity,
+                            sQtyBefore, sellerPos.Quantity);
+                    }
                 }
             }
             else
