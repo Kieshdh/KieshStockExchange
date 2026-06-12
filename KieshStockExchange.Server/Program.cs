@@ -44,6 +44,10 @@ Batteries_V2.Init();
 
 var builder = WebApplication.CreateBuilder(args);
 
+// R4 §0009 Stage 1: enable the symmetry probe from config (Bots:MatchSymmetryProbe,
+// default false). Behaviour-neutral when off; appsettings.json can flip it on.
+KieshStockExchange.Services.MarketEngineServices.MatchSymmetryProbe.Configure(builder.Configuration);
+
 // 7a-3 — Serilog reads its sinks from the "Serilog" config section: console in
 // dev, a rolling daily file (logs/server-.log, 7-day retention) everywhere, and
 // a Warning-only JSON file in Production (see appsettings.Production.json).

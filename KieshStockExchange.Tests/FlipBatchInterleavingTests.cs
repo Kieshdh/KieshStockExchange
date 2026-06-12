@@ -173,6 +173,14 @@ public class FlipBatchInterleavingTests
         var sellOrder = ShortBracketSell(qty: 10, reservedQty: 5, flipQty: 5);
         var buyOrder = BuyerCounterparty(qty: 10, price: 10m);
 
+        // EnsureLoadedAsync zeros Fund.ReservedBalance / Position.ReservedQuantity then
+        // backfills from the OrderRegistry. In this test we create orders AFTER loading
+        // and don't go through the cache's Reserve* path, so restore the expected
+        // reservations manually to match what the per-order TakeBuyReservation /
+        // TakeSellReservation calls just did (those only set the per-order fields).
+        w.SellerPos.ReservedQuantity = sellOrder.CurrentSellReservedQty;
+        w.BuyerFund.ReservedBalance = buyOrder.CurrentBuyReservation;
+
         var tx = new Transaction
         {
             StockId = StockId, CurrencyType = Ccy, Quantity = 10, Price = 10m,
@@ -214,6 +222,14 @@ public class FlipBatchInterleavingTests
         var sellOrder = ShortBracketSell(qty: 10, reservedQty: 5, flipQty: 5);
         var buyOrder = BuyerCounterparty(qty: 10, price: 10m);
 
+        // EnsureLoadedAsync zeros Fund.ReservedBalance / Position.ReservedQuantity then
+        // backfills from the OrderRegistry. In this test we create orders AFTER loading
+        // and don't go through the cache's Reserve* path, so restore the expected
+        // reservations manually to match what the per-order TakeBuyReservation /
+        // TakeSellReservation calls just did (those only set the per-order fields).
+        w.SellerPos.ReservedQuantity = sellOrder.CurrentSellReservedQty;
+        w.BuyerFund.ReservedBalance = buyOrder.CurrentBuyReservation;
+
         var tx = new Transaction
         {
             StockId = StockId, CurrencyType = Ccy, Quantity = 10, Price = 10m,
@@ -248,6 +264,14 @@ public class FlipBatchInterleavingTests
 
         var sellOrder = ShortBracketSell(qty: 10, reservedQty: 5, flipQty: 5);
         var buyOrder = BuyerCounterparty(qty: 10, price: 10m);
+
+        // EnsureLoadedAsync zeros Fund.ReservedBalance / Position.ReservedQuantity then
+        // backfills from the OrderRegistry. In this test we create orders AFTER loading
+        // and don't go through the cache's Reserve* path, so restore the expected
+        // reservations manually to match what the per-order TakeBuyReservation /
+        // TakeSellReservation calls just did (those only set the per-order fields).
+        w.SellerPos.ReservedQuantity = sellOrder.CurrentSellReservedQty;
+        w.BuyerFund.ReservedBalance = buyOrder.CurrentBuyReservation;
         // Seed a non-Open pre-mutation Status on the buyOrder to make the snapshot
         // meaningful: when RestoreSnapshots runs, the buyOrder's Status must end at
         // its captured value (Open here, since Order constructs at Open).
@@ -273,8 +297,12 @@ public class FlipBatchInterleavingTests
             new[] { tx }, ordersById, scope, default);
         Assert.Null(err);
 
-        // Drive a flip into a real short to mutate Status (sellOrder will fully fill at qty=10).
-        Assert.Equal(Order.Statuses.Filled, sellOrder.Status);
+        // Simulate the matcher having mutated Status to Filled (normally happens via
+        // Order.Fill before the settler runs). SettleTradesNoTxAsync itself does not
+        // mutate Status — the §0001 capture + restore contract is about the matcher's
+        // mutation surviving a settle rejection.
+        sellOrder.Status = Order.Statuses.Filled;
+        buyOrder.Status = Order.Statuses.Filled;
 
         // Replay via the public API the same way SettleTradesAsync's catch path would.
         w.Settlement.RestoreCacheSnapshots(ordersById, scope);
