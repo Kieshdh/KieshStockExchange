@@ -55,6 +55,10 @@ public sealed class MatchingEngine : IMatchingEngine
 
         var remainingBudget = taker.IsTrueMarketBuyOrder ? taker.BuyBudget : 0m;
 
+        // R4 §0009 Stage 2: per-walk level counter for the depth-context probe row.
+        // Incremented after each fill so a multi-fill taker shows the price-level depth walked.
+        int levelIdx = 0;
+
         while (taker.IsOpen && taker.RemainingQuantity > 0)
         {
             ct.ThrowIfCancellationRequested();
@@ -118,6 +122,21 @@ public sealed class MatchingEngine : IMatchingEngine
                         value: residualBps);
                 }
             }
+
+            // R4 §0009 Stage 2: depth-context probe. Captures the opposite-side wall thickness
+            // at fill time (what the taker is hitting) plus the level index walked. Tests the
+            // "thick wall, deep walk" vs "thin wall, near-touch fill" hypothesis. Only fires
+            // when BOTH Bots:MatchSymmetryProbe AND Bots:MatchSymmetryProbeDepthContext are on.
+            if (MatchSymmetryProbe.DepthContextEnabled)
+            {
+                var oppositeDepth = book.SumQuantity(buySide: !taker.IsBuyOrder);
+                MatchSymmetryProbe.RecordDepth(
+                    side: taker.IsBuyOrder ? "buy" : "sell",
+                    takerSideRestingDepth: oppositeDepth,
+                    makerLevelIndex: levelIdx);
+            }
+            levelIdx++;
+
             if (wasRemoved && DebugMode
                 && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
                 _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);

@@ -79,6 +79,10 @@ internal sealed class AiBotContext
     internal readonly Dictionary<(int userId, CurrencyType), decimal> WatchlistRecentGapCache   = new();
     internal readonly Dictionary<int, decimal> WatchlistSharedSentimentCache = new();
     internal readonly Dictionary<(int userId, bool fast), decimal> WatchlistSlopeCache = new();
+    // R4 §0009 Stage 2: per-(bot, currency) max long/short notional from the watchlist.
+    // Memoizes ComputeInventoryBias's walk + feeds the BotDecisionProbe's invNotional column.
+    internal readonly Dictionary<(int userId, CurrencyType), (decimal longNotional, decimal shortNotional)>
+        WatchlistInventoryNotionalCache = new();
 
     internal void ClearTickCaches()
     {
@@ -88,6 +92,7 @@ internal sealed class AiBotContext
         WatchlistMomentumCache.Clear(); WatchlistSentimentCache.Clear();
         WatchlistValueGapCache.Clear(); WatchlistRecentGapCache.Clear();
         WatchlistSharedSentimentCache.Clear(); WatchlistSlopeCache.Clear();
+        WatchlistInventoryNotionalCache.Clear();
     }
 
     // §patch 0003: per-(bot, tick) eligible-watchlist cache. Today every advanced builder

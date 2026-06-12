@@ -48,6 +48,10 @@ var builder = WebApplication.CreateBuilder(args);
 // default false). Behaviour-neutral when off; appsettings.json can flip it on.
 KieshStockExchange.Services.MarketEngineServices.MatchSymmetryProbe.Configure(builder.Configuration);
 
+// R4 §0009 Stage 2: bot-decision probe (Bots:BotDecisionProbe, default false).
+// Attributes the matcher-level sell-skew to the specific upstream surface.
+KieshStockExchange.Services.BackgroundServices.Helpers.BotDecisionProbe.Configure(builder.Configuration);
+
 // 7a-3 — Serilog reads its sinks from the "Serilog" config section: console in
 // dev, a rolling daily file (logs/server-.log, 7-day retention) everywhere, and
 // a Warning-only JSON file in Production (see appsettings.Production.json).

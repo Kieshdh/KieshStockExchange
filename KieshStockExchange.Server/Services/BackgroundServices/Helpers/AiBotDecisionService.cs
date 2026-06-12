@@ -462,22 +462,38 @@ internal sealed class AiBotDecisionService
         if (r < c)
         {
             bool isShort = false;
+            int bias = 0;
             if (_inventoryBias && _inventoryBiasThresholdPrc > 0m)
             {
-                var bias = ComputeInventoryBias(ctx, user, currency);
+                bias = ComputeInventoryBias(ctx, user, currency);
                 if (bias > 0) isShort = true;          // heavy long → flip to ShortBracket
                 // heavy short and r is in the LongBracket bucket → keep LongBracket (the natural mean-reversion direction)
             }
-            return await BuildBracketAsync(ctx, user, currency, isShort: isShort, ct).ConfigureAwait(false);
+            // R4 §0009 Stage 2: probe the inversion decision (kindPre=0 LongBracket bucket).
+            BotDecisionProbe.RecordAdvancedIntent(user.AiUserId, (int)user.Strategy,
+                kindPre: 0, bias: bias, kindPost: isShort ? 1 : 0);
+            var dec = await BuildBracketAsync(ctx, user, currency, isShort: isShort, ct).ConfigureAwait(false);
+            BotDecisionProbe.RecordAdvancedResult(user.AiUserId, (int)user.Strategy,
+                kindPost: isShort ? 1 : 0, qty: dec?.Quantity ?? 0,
+                flipQty: dec?.FlipQuantity ?? 0, success: dec is not null);
+            return dec;
         }
         // r in the ShortBracket bucket — same inversion logic for the symmetric half.
         bool isShortKind = true;
+        int biasShort = 0;
         if (_inventoryBias && _inventoryBiasThresholdPrc > 0m)
         {
-            var bias = ComputeInventoryBias(ctx, user, currency);
-            if (bias < 0) isShortKind = false;        // heavy short → flip to LongBracket
+            biasShort = ComputeInventoryBias(ctx, user, currency);
+            if (biasShort < 0) isShortKind = false;   // heavy short → flip to LongBracket
         }
-        return await BuildBracketAsync(ctx, user, currency, isShort: isShortKind, ct).ConfigureAwait(false);
+        // R4 §0009 Stage 2: probe the inversion decision (kindPre=1 ShortBracket bucket).
+        BotDecisionProbe.RecordAdvancedIntent(user.AiUserId, (int)user.Strategy,
+            kindPre: 1, bias: biasShort, kindPost: isShortKind ? 1 : 0);
+        var decShort = await BuildBracketAsync(ctx, user, currency, isShort: isShortKind, ct).ConfigureAwait(false);
+        BotDecisionProbe.RecordAdvancedResult(user.AiUserId, (int)user.Strategy,
+            kindPost: isShortKind ? 1 : 0, qty: decShort?.Quantity ?? 0,
+            flipQty: decShort?.FlipQuantity ?? 0, success: decShort is not null);
+        return decShort;
     }
 
     // Round 2 §0011 (E1): inventory bias direction.
@@ -490,6 +506,27 @@ internal sealed class AiBotDecisionService
     {
         var portfolio = ctx.PortfolioValueByCurrency(user.UserId, currency);
         if (portfolio <= 0m) return 0;
+        var (maxLongNotional, maxShortNotional) = WatchlistInventoryNotional(ctx, user, currency);
+        // Round 2 Q1: short-side threshold divided by _inventoryBiasShortMult so short-heavy
+        // detection triggers more easily, compensating for the substrate asymmetry that left
+        // the round-2 bear tail asymmetric. _inventoryBiasShortMult defaults to 1.0 (symmetric)
+        // ⇒ byte-identical to round 2.
+        if (maxLongNotional  > _inventoryBiasThresholdPrc * portfolio) return +1;
+        if (maxShortNotional > _inventoryBiasThresholdPrc * portfolio / _inventoryBiasShortMult) return -1;
+        return 0;
+    }
+
+    // R4 §0009 Stage 2: max long / max short notional across the bot's eligible watchlist,
+    // memoized per-(bot, currency, tick). Refactor of the walk previously inlined in
+    // ComputeInventoryBias — both the bias logic and the BotDecisionProbe (which reads the
+    // signed difference long − short) hit the same cache so flag-on probe cost is one dict
+    // read, not a second watchlist walk.
+    private (decimal longNotional, decimal shortNotional) WatchlistInventoryNotional(
+        AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        var key = (user.UserId, currency);
+        if (ctx.WatchlistInventoryNotionalCache.TryGetValue(key, out var cached)) return cached;
+
         var watch = EligibleWatchlist(ctx, user, currency);
         decimal maxLongNotional = 0m, maxShortNotional = 0m;
         for (int i = 0; i < watch.Length; i++)
@@ -501,13 +538,9 @@ internal sealed class AiBotDecisionService
             if (pos.Quantity > 0) { if (notional > maxLongNotional) maxLongNotional = notional; }
             else                  { if (notional > maxShortNotional) maxShortNotional = notional; }
         }
-        // Round 2 Q1: short-side threshold divided by _inventoryBiasShortMult so short-heavy
-        // detection triggers more easily, compensating for the substrate asymmetry that left
-        // the round-2 bear tail asymmetric. _inventoryBiasShortMult defaults to 1.0 (symmetric)
-        // ⇒ byte-identical to round 2.
-        if (maxLongNotional  > _inventoryBiasThresholdPrc * portfolio) return +1;
-        if (maxShortNotional > _inventoryBiasThresholdPrc * portfolio / _inventoryBiasShortMult) return -1;
-        return 0;
+        var result = (maxLongNotional, maxShortNotional);
+        ctx.WatchlistInventoryNotionalCache[key] = result;
+        return result;
     }
 
     // §patch 0004: ref-struct snapshot of the five advanced-order probability fields. Stack-allocated,
@@ -929,6 +962,21 @@ internal sealed class AiBotDecisionService
         var isBuy    = ctx.Decimal01(user.AiUserId) < buyProb;
         var isMarket = ctx.Decimal01(user.AiUserId) < effectiveUseMarket;
 
+        // R4 §0009 Stage 2: plain-path decision probe. directional * noiseFactor is the masked
+        // form that actually contributes to buyProb. Signed inventory notional (long - short)
+        // is read from the per-tick cache that ComputeInventoryBias also uses, so the probe
+        // never adds a second watchlist walk.
+        if (BotDecisionProbe.Enabled)
+        {
+            var (lng, sht) = WatchlistInventoryNotional(ctx, user, currency);
+            BotDecisionProbe.RecordPlain(
+                botId: user.AiUserId, strategy: (int)user.Strategy,
+                cashPrc: cashPrc, invNotionalSigned: lng - sht,
+                homeostatic: homeostatic, directionalEffective: directional * noiseFactor,
+                anchor: anchorTilt, herd: herdTilt,
+                buyProb: buyProb, isBuy: isBuy, isMarket: isMarket);
+        }
+
         return isBuy
             ? isMarket ? OrderType.SlippageMarketBuy : OrderType.LimitBuy
             : isMarket ? OrderType.SlippageMarketSell : OrderType.LimitSell;
@@ -948,7 +996,11 @@ internal sealed class AiBotDecisionService
                 if (o.IsBuyOrder) buys++; else sells++;
             }
         }
-        return buys <= sells ? OrderType.LimitBuy : OrderType.LimitSell;
+        var choseBuy = buys <= sells;
+        // R4 §0009 Stage 2: MM quote-side probe. Tests the sell-skip-when-no-inventory
+        // hypothesis — a net buy-quote-heavy MM cohort confirms surface (d).
+        BotDecisionProbe.RecordMm(user.AiUserId, buys, sells, choseBuy);
+        return choseBuy ? OrderType.LimitBuy : OrderType.LimitSell;
     }
 
     private int ChooseStockId(AiBotContext ctx, AIUser user, OrderType type, CurrencyType currency,
