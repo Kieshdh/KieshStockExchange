@@ -167,24 +167,20 @@ internal sealed class AiBotDecisionService
     // AiTradeService.CollectPendingOrdersAsync. Default true; flag-off path is byte-identical
     // because cache miss falls through to the original computation.
     private readonly bool    _memoizeTickValues;
-    // §patch 0007 minimal (Path 1): when on, ShortBracket is eligible on flat-OR-long inventory
-    // (today: flat-only). The entry quantity is clamped to existing inventory so no position
-    // flip occurs — bot sells from inventory, SL buys back on rally, TPs buy back at lower prices
-    // (round-trip on existing inventory). No collateral pool, no mixed-portion settlement, no
-    // engine surface changes — pure decision-layer eligibility extension. The full Path 2 (with
-    // flip and mixed-portion) is the next round once this proves the §10.3b drift hypothesis.
-    // Default OFF ⇒ today's behaviour byte-identical.
-    private readonly bool    _bracketRoundTrip;
-    // Round 2 §0007 (Path 2): full bracket-flip eligibility. When on, ShortBracket AND LongBracket
-    // are eligible on any position sign; if the entry quantity exceeds the held inventory (with
-    // sign), the entry FLIPS the position in one trade. inventoryPortion = min(Q, |held|) is the
-    // round-trip portion; flipPortion = Q − inventoryPortion is the new-direction portion. The
-    // FlipQuantity field is persisted on the parent so the BracketCoordinator (round 2 §0008)
-    // can size the SL pool to flipPortion only — the round-trip portion is self-funding.
+    // Round 2 §0007 (Path 2) — retained as the sole bracket-eligibility flag in R3 §0006.
+    // When on, ShortBracket AND LongBracket are eligible on any position sign; if the entry
+    // quantity exceeds the held inventory (with sign), the entry FLIPS the position in one
+    // trade. inventoryPortion = min(Q, |held|) is the round-trip portion; flipPortion =
+    // Q − inventoryPortion is the new-direction portion. The FlipQuantity field is persisted
+    // on the parent so the BracketCoordinator (round 2 §0008) sizes the SL pool to flipPortion
+    // only — the round-trip portion is self-funding.
     //
-    // Strict superset of _bracketRoundTrip: when _bracketFlip is on, the Path-1 minimal qty-clamp
-    // is dropped (the bracket allows flipQty > 0); when off, _bracketRoundTrip's Path-1 behaviour
-    // (or original flat-only) is preserved. Both flags default OFF for the round-2 series.
+    // The legacy Path-1-minimal `_bracketRoundTrip` flag was retired in R3 §0006 — it was a
+    // strict subset of this flag (ShortBracket eligible on flat-or-long, qty-clamped to held)
+    // and the round-2 soak baked _bracketFlip = true in production, making the subset
+    // unreachable in any shipped configuration. Operators that set the legacy
+    // Bots:Advanced:BracketRoundTrip key get a one-shot LogWarning at startup (see
+    // AiTradeService ctor).
     private readonly bool    _bracketFlip;
     // Round 2 §0011 (E1): inventory-aware kind biasing. When on, the bracket-cohort kind selection
     // is biased toward position-mean-reversion: heavy long → ShortBracket; heavy short → LongBracket.
@@ -246,11 +242,9 @@ internal sealed class AiBotDecisionService
         // §patch 0001: per-tick memoization (Fundamental/SeedPrice/IsOverBand/etc). Pure
         // function-result cache scoped to one bot-loop tick. Default on; off is byte-identical.
         bool memoizeTickValues = true,
-        // §patch 0007 minimal (Path 1): ShortBracket eligible on flat-or-long. Default OFF;
-        // when off, behaviour is byte-identical to today (FirstFlatStock filter intact).
-        bool bracketRoundTrip = false,
         // Round 2 §0007 (Path 2): bracket-flip eligibility — both kinds on any sign + persisted
-        // FlipQuantity for pool sizing. Strict superset of bracketRoundTrip.
+        // FlipQuantity for pool sizing. The R2 Path-1-minimal `bracketRoundTrip` flag was retired
+        // in R3 §0006 (strict subset, unreachable with bracketFlip baked on).
         bool bracketFlip = false,
         // Round 2 §0011 (E1): inventory-aware kind biasing.
         bool inventoryBias = false,
@@ -338,7 +332,6 @@ internal sealed class AiBotDecisionService
         _diversityGain             = Math.Max(0m, diversityGain);
         _capFromSeed               = capFromSeed;
         _memoizeTickValues         = memoizeTickValues;
-        _bracketRoundTrip          = bracketRoundTrip;
         _bracketFlip               = bracketFlip;
         _inventoryBias             = inventoryBias;
         _inventoryBiasThresholdPrc = Math.Max(0m, inventoryBiasThresholdPrc);
@@ -589,19 +582,14 @@ internal sealed class AiBotDecisionService
         // position in one trade — flipPortion = entryQty − inventoryPortion is persisted on the
         // parent so the BracketCoordinator (§0008) sizes the SL pool to flipPortion only.
         //
-        // _bracketFlip is a strict superset of _bracketRoundTrip: when on, Path-1 minimal's
-        // qty-clamp is dropped (we allow flip qty > 0). When off, the Path-1 minimal behaviour
-        // (or original flat-only) is preserved. Both flags default OFF for byte-identical flag-off.
-        //
-        // §patch 0007 minimal (Path 1): when _bracketRoundTrip is on but _bracketFlip is off,
-        // ShortBracket is eligible on flat-OR-long but qty-clamped (no flip). LongBracket
-        // eligibility is unchanged on Path 1 minimal.
+        // _bracketFlip default OFF for byte-identical flag-off. R3 §0006 retired the
+        // intermediate _bracketRoundTrip flag — the Path-1 minimal "flat-or-long, qty-clamped"
+        // branch was a strict subset of Path 2's flat-flip and unreachable in any shipped config
+        // since round 2 baked _bracketFlip = true. The decision now collapses to flip-or-flat-only.
         int stockId = isShort
             ? (_bracketFlip
                 ? FirstAnyStock(ctx, user, currency)
-                : (_bracketRoundTrip
-                    ? FirstFlatOrLongStock(ctx, user, currency)
-                    : FirstFlatStock(ctx, user, currency)))
+                : FirstFlatStock(ctx, user, currency))
             : (_bracketFlip
                 ? FirstAnyStock(ctx, user, currency)
                 : FirstLongableStock(ctx, user, currency));
@@ -686,11 +674,10 @@ internal sealed class AiBotDecisionService
                 }
             }
         }
-        else if (isShort && _bracketRoundTrip && heldQty > 0)
-        {
-            // Path-1 minimal: clamp to held to prevent any flip. flipQty stays 0; inventoryPortion = qty.
-            qty = Math.Min(qty, heldQty);
-        }
+        // R3 §0006: the legacy Path-1-minimal `_bracketRoundTrip` qty-clamp branch was
+        // removed here. When _bracketFlip is OFF the upstream picker (FirstFlatStock /
+        // FirstLongableStock) already constrains us to clean inventory, so no flip is
+        // possible and no clamp is needed.
         if (qty < 2) return null;   // need ≥2 for a 2-leg scale-out
         if (!isShort)
         {
@@ -758,19 +745,6 @@ internal sealed class AiBotDecisionService
     // First watchlist stock the bot is flat-or-long on (never short) — for long brackets.
     // §patch 0003: uses EligibleWatchlist cache.
     private int FirstLongableStock(AiBotContext ctx, AIUser user, CurrencyType currency)
-    {
-        var watch = EligibleWatchlist(ctx, user, currency);
-        foreach (var id in watch)
-            if ((_accounts.GetPosition(user.UserId, id)?.Quantity ?? 0) >= 0) return id;
-        return 0;
-    }
-
-    // §patch 0007 minimal: first watchlist stock the bot is flat-OR-long on. Same predicate as
-    // FirstLongableStock but used by the Path-1 round-trip ShortBracket selection so the qty-
-    // clamp below prevents flips. Semantically identical to FirstLongableStock; kept as a separate
-    // named helper for readability — the call site documents intent. (When the full Path 2 lands
-    // these helpers can collapse to a single picker with explicit predicates per call.)
-    private int FirstFlatOrLongStock(AiBotContext ctx, AIUser user, CurrencyType currency)
     {
         var watch = EligibleWatchlist(ctx, user, currency);
         foreach (var id in watch)

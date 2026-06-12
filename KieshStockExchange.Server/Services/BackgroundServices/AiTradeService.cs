@@ -412,9 +412,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         diversityGain:             _configuration.GetValue("Bots:DirectionalPressure:DiversityGain", 1.5m),
                         // §cap-from-seed: hard veto measures vs seed instead of Fundamental() when on.
                         capFromSeed:               _configuration.GetValue("Bots:ValueAnchor:CapFromSeed", false),
-                        // §patch 0007 minimal (Path 1): ShortBracket eligible on flat-or-long.
-                        bracketRoundTrip:          _configuration.GetValue("Bots:Advanced:BracketRoundTrip", false),
-                        // Round 2 §0007 (Path 2): bracket-flip eligibility — strict superset of Path 1.
+                        // Round 2 §0007 (Path 2): bracket-flip eligibility. R3 §0006 retired the
+                        // intermediate Path-1 `bracketRoundTrip` flag (legacy-config warning below).
                         bracketFlip:               _configuration.GetValue("Bots:Advanced:BracketFlip", false),
                         // Round 2 §0011 (E1): inventory-aware kind biasing.
                         inventoryBias:             _configuration.GetValue("Bots:Advanced:InventoryBias", false),
@@ -425,6 +424,20 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
+
+        // R3 §0006: legacy-config warning. The Bots:Advanced:BracketRoundTrip key was a
+        // Path-1-minimal flag (qty-clamped ShortBracket on flat-or-long), strict subset of
+        // BracketFlip — round-2 baked BracketFlip = true in production so this path is
+        // unreachable in any shipped configuration. Operators that explicitly set the legacy
+        // key get a one-shot warning so they remove it instead of silently getting different
+        // behaviour.
+        if (_configuration.GetSection("Bots:Advanced:BracketRoundTrip").Exists())
+        {
+            _logger.LogWarning(
+                "Bots:Advanced:BracketRoundTrip is set but the flag is retired in R3 §0006. " +
+                "The Path-1 minimal qty-clamp has been removed; BracketFlip is the only flag. " +
+                "Remove the setting from appsettings to silence this warning.");
+        }
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
 
         _market.QuoteUpdated += OnQuoteUpdated;
