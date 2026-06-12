@@ -92,6 +92,9 @@ def prepare_profile_sheet(wb: Workbook) -> Worksheet:
         "TpOffsetMinPrc", "TpOffsetMaxPrc",
         # Sentiment-dynamics §: per-bot lateness L for the slope-aware phase model.
         "Lateness",
+        # Round 2 §0012 (extension E5): per-bot preference for round-trip vs flip when both are
+        # sizeable bracket entries. 0 = always flip; 1 = always round-trip; 0.5 = neutral.
+        "RoundtripBiasPrc",
         # §3.7 arbitrage cohort params (0 for every non-Arbitrage bot; the server reads by name).
         "MinArbitrageRatePrc", "MaxInventoryPerStock", "ConversionCadenceSeconds",
     ])

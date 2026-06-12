@@ -59,6 +59,9 @@ public class AIUserRow
     // Sentiment-dynamics §: per-bot lateness L ∈ [0,1] for the slope-aware phase model. Default 0.
     [Column("Lateness")] public decimal Lateness { get; set; }
 
+    // Round 2 §0012 (E5): round-trip vs flip preference. Default 0.5 (neutral).
+    [Column("RoundtripBiasPrc")] public decimal RoundtripBiasPrc { get; set; } = 0.5m;
+
     // §3.7 arbitrage-cohort params (default 0 = inert for every non-Arbitrage bot).
     [Column("MinArbitrageRatePrc")] public decimal MinArbitrageRatePrc { get; set; }
     [Column("MaxInventoryPerStock")] public int MaxInventoryPerStock { get; set; }
@@ -117,6 +120,7 @@ public static class AIUserMapper
             TpOffsetMinPrc = r.TpOffsetMinPrc,
             TpOffsetMaxPrc = r.TpOffsetMaxPrc,
             Lateness = r.Lateness,
+            RoundtripBiasPrc = r.RoundtripBiasPrc,
             MinArbitrageRatePrc = r.MinArbitrageRatePrc,
             MaxInventoryPerStock = r.MaxInventoryPerStock,
             ConversionCadenceSeconds = r.ConversionCadenceSeconds,
@@ -169,6 +173,7 @@ public static class AIUserMapper
         TpOffsetMinPrc = a.TpOffsetMinPrc,
         TpOffsetMaxPrc = a.TpOffsetMaxPrc,
         Lateness = a.Lateness,
+        RoundtripBiasPrc = a.RoundtripBiasPrc,
         MinArbitrageRatePrc = a.MinArbitrageRatePrc,
         MaxInventoryPerStock = a.MaxInventoryPerStock,
         ConversionCadenceSeconds = a.ConversionCadenceSeconds,

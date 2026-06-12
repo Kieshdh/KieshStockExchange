@@ -212,6 +212,12 @@ class Person:
         # small high-L (FOMO) tail. Only consumed by the momentum cohort in C#; inert for other strategies.
         self.lateness = clamp01(skewed01(skew=LATENESS_SKEW))
 
+        # Round 2 §0012 (extension E5): per-bot round-trip vs flip preference. Per-strategy point
+        # value (from Config.ROUNDTRIP_BIAS_PER_STRATEGY) jittered by ROUNDTRIP_BIAS_JITTER. Inert
+        # when Bots:Advanced:BracketFlip is off (server reads it only inside the _bracketFlip path).
+        center = ROUNDTRIP_BIAS_PER_STRATEGY.get(self.strategy, 0.5)
+        self.roundtrip_bias = clamp01(jitter(center, rel=ROUNDTRIP_BIAS_JITTER))
+
     def _trade_limits(self):
         # Slippage tolerance: more aggressive bots accept higher slippage.
         base_slip_tol = SLIP_TOL_BASE + SLIP_TOL_SLOPE * self.aggressive
@@ -343,6 +349,8 @@ class Person:
             round(self.tp_offset_max, 4),                   # float: TpOffsetMaxPrc
             # Sentiment-dynamics §: per-bot lateness L (must match ExcelLayout.prepare_profile_sheet order).
             round(self.lateness, 4),                        # float: Lateness
+            # Round 2 §0012 (extension E5): round-trip vs flip preference.
+            round(self.roundtrip_bias, 4),                  # float: RoundtripBiasPrc
             # §3.7 arbitrage cohort params (must match ExcelLayout.prepare_profile_sheet column order).
             round(self.min_arbitrage_rate_prc, 6),          # float: MinArbitrageRatePrc
             int(self.max_inventory_per_stock),              # int:   MaxInventoryPerStock

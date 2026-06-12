@@ -109,6 +109,12 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<decimal>("PerPositionMaxPrc")
                         .HasColumnType("numeric(20,10)");
 
+                    // Round 2 §0012 (E5): RoundtripBiasPrc — per-bot round-trip vs flip preference.
+                    b.Property<decimal>("RoundtripBiasPrc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("numeric(20,10)")
+                        .HasDefaultValue(0.5m);
+
                     b.Property<int>("Seed")
                         .HasColumnType("integer");
 

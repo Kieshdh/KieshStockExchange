@@ -657,6 +657,19 @@ internal sealed class AiBotDecisionService
             else if (!isShort && heldQty < 0)      inventoryPortion = Math.Min(qty, -heldQty);
             // anything past inventoryPortion is the flip portion (opens a new position).
             flipQty = Math.Max(0, qty - inventoryPortion);
+
+            // Round 2 §0012 (extension E5): when BOTH a round-trip and a flip qty fit the bot's
+            // budget AND inventoryPortion > 0, bias the qty by RoundtripBiasPrc — a high bias
+            // bot clamps to inventoryPortion (no flip); a low bias bot keeps the full qty (the
+            // flip portion stays). Single seeded RNG draw — no new RNG state introduced.
+            if (inventoryPortion > 0 && flipQty > 0)
+            {
+                if (ctx.Decimal01(user.AiUserId) < user.RoundtripBiasPrc)
+                {
+                    qty = inventoryPortion;
+                    flipQty = 0;
+                }
+            }
         }
         else if (isShort && _bracketRoundTrip && heldQty > 0)
         {

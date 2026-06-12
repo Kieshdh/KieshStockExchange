@@ -299,6 +299,20 @@ TP_OFFSET_MAX_RANGE       = (0.018, 0.026)   # TpOffsetMaxPrc
 # Total resting Far-order value the tier-aware prune allows, as a fraction of portfolio.
 FAR_BUDGET_RANGE          = (0.05, 0.15)     # FarBudgetPrc
 
+# Round 2 §0012 (extension E5): per-bot preference for round-trip vs flip on a Path-2 bracket
+# entry. 1.0 = always size to ≤ |inventory| (always round-trip); 0.0 = always size past
+# inventory (always flip); 0.5 = neutral. Per-strategy point values from the round-1 plan
+# §3 E5 with light jitter (small bot-to-bot variation around the strategy's central tendency).
+# Keys: 0 MarketMaker, 1 TrendFollower, 2 MeanReversion, 3 Random, 4 Scalper.
+ROUNDTRIP_BIAS_PER_STRATEGY = {
+    0: 0.5,   # MarketMaker — symmetric
+    1: 0.2,   # TrendFollower — prefers flip (trend bets)
+    2: 0.8,   # MeanReversion — prefers round-trip (reversion thesis)
+    3: 0.5,   # Random
+    4: 0.7,   # Scalper — quick round-trips, occasional flip
+}
+ROUNDTRIP_BIAS_JITTER     = 0.10   # ± uniform on each draw
+
 # Per-position max (_trade_limits): floored against 1/max_stocks downstream.
 PER_POS_BASE              = 0.08
 PER_POS_SLOPE             = 0.22

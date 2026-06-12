@@ -15,6 +15,10 @@ public sealed partial class PgDBService
     private const string MessageCols = @"""MessageId"",""UserId"",""Kind"",""Title"",""Content"",""CreatedAt"",""ReadAt""";
 
     // AIUsers column list aliases the "Strategy" column back to StrategyCode for Dapper hydration.
+    // Round 2 §0012: "RoundtripBiasPrc" added after Lateness in all four AIUser Dapper constants
+    // (read SELECT, insert COLS + VALS, update SET below). The Lateness lesson (cc6d863): every
+    // hand-written Dapper SQL site must land the column or the field silently drops at the DB
+    // boundary. Touchpoints: AIUserCols, AIUserInsertCols, AIUserInsertVals, UpdateAIUser SET.
     private const string AIUserCols = @"
         ""AiUserId"",""UserId"",""Seed"",""DecisionIntervalSeconds"",""CreatedAt"",""UpdatedAt"",
         ""TradeProb"",""UseMarketProb"",""UseSlippageMarketProb"",""BuyBiasPrc"",
@@ -25,7 +29,7 @@ public sealed partial class PgDBService
         ""StopProb"",""TrailingProb"",""ShortProb"",""LongBracketProb"",""ShortBracketProb"",
         ""MidLimitMinPrc"",""MidLimitMaxPrc"",""FarLimitMinPrc"",""FarLimitMaxPrc"",
         ""StopDistanceMinPrc"",""StopDistanceMaxPrc"",""FarBudgetPrc"",
-        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",""Lateness"",
+        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",""Lateness"",""RoundtripBiasPrc"",
         ""MinArbitrageRatePrc"",""MaxInventoryPerStock"",""ConversionCadenceSeconds"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy"" AS ""StrategyCode""";
@@ -40,7 +44,7 @@ public sealed partial class PgDBService
         ""StopProb"",""TrailingProb"",""ShortProb"",""LongBracketProb"",""ShortBracketProb"",
         ""MidLimitMinPrc"",""MidLimitMaxPrc"",""FarLimitMinPrc"",""FarLimitMaxPrc"",
         ""StopDistanceMinPrc"",""StopDistanceMaxPrc"",""FarBudgetPrc"",
-        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",""Lateness"",
+        ""TpOffsetMinPrc"",""TpOffsetMaxPrc"",""Lateness"",""RoundtripBiasPrc"",
         ""MinArbitrageRatePrc"",""MaxInventoryPerStock"",""ConversionCadenceSeconds"",
         ""WatchlistCsv"",
         ""MaxOpenOrders"",""HomeCurrency"",""Strategy""";
@@ -55,7 +59,7 @@ public sealed partial class PgDBService
         @StopProb,@TrailingProb,@ShortProb,@LongBracketProb,@ShortBracketProb,
         @MidLimitMinPrc,@MidLimitMaxPrc,@FarLimitMinPrc,@FarLimitMaxPrc,
         @StopDistanceMinPrc,@StopDistanceMaxPrc,@FarBudgetPrc,
-        @TpOffsetMinPrc,@TpOffsetMaxPrc,@Lateness,
+        @TpOffsetMinPrc,@TpOffsetMaxPrc,@Lateness,@RoundtripBiasPrc,
         @MinArbitrageRatePrc,@MaxInventoryPerStock,@ConversionCadenceSeconds,
         @WatchlistCsv,
         @MaxOpenOrders,@HomeCurrency,@StrategyCode";
@@ -426,6 +430,7 @@ public sealed partial class PgDBService
               ""FarBudgetPrc"" = @FarBudgetPrc,
               ""TpOffsetMinPrc"" = @TpOffsetMinPrc, ""TpOffsetMaxPrc"" = @TpOffsetMaxPrc,
               ""Lateness"" = @Lateness,
+              ""RoundtripBiasPrc"" = @RoundtripBiasPrc,
               ""WatchlistCsv"" = @WatchlistCsv,
               ""MaxOpenOrders"" = @MaxOpenOrders,
               ""HomeCurrency"" = @HomeCurrency, ""Strategy"" = @StrategyCode

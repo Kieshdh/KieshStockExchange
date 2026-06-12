@@ -155,6 +155,14 @@ public class AIUser : IValidatable
     private decimal _lateness = 0m;
     public decimal Lateness { get => _lateness; set => _lateness = RequiredPrc(value, nameof(Lateness)); }
 
+    // Round 2 §0012 (E5): per-bot preference for round-trip vs flip when both are sizeable. 1.0 =
+    // always size entry to ≤ |inventory| (always round-trip); 0.0 = always flip; 0.5 = roughly
+    // 50/50. Default 0.5 = neutral. Read by BuildBracketAsync when Bots:Advanced:BracketFlip is
+    // on; inert otherwise. Per-strategy seed values come from Tools/Config.py
+    // (MarketMaker 0.5, TrendFollower 0.2, MeanReversion 0.8, Random 0.5, Scalper 0.7).
+    private decimal _roundtripBiasPrc = 0.5m;
+    public decimal RoundtripBiasPrc { get => _roundtripBiasPrc; set => _roundtripBiasPrc = RequiredPrc(value, nameof(RoundtripBiasPrc)); }
+
     // §3.6 P6: per-bot, per-tick probabilities of choosing each advanced order kind (seeded + assigned
     // by strategy in Tools/Person.py). They REPLACE the global Bots:Advanced:*Prob config — the master
     // Bots:Advanced:Enabled switch still gates the whole feature. Default 0 so a bot never does advanced
@@ -306,6 +314,7 @@ public class AIUser : IValidatable
         IsValidPrc(StopDistanceMinPrc) && IsValidPrc(StopDistanceMaxPrc) && IsValidPrc(FarBudgetPrc) &&
         IsValidPrc(TpOffsetMinPrc) && IsValidPrc(TpOffsetMaxPrc) &&
         IsValidPrc(Lateness) &&
+        IsValidPrc(RoundtripBiasPrc) &&
         IsValidPrc(MinArbitrageRatePrc);
 
     private bool ValidateSizing() => MinTradeAmountPrc <= MaxTradeAmountPrc && MaxTradeAmountPrc <= PerPositionMaxPrc && MinCashReservePrc <= MaxCashReservePrc &&
