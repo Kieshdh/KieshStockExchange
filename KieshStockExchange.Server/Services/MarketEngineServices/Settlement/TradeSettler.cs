@@ -477,8 +477,25 @@ internal sealed class TradeSettler
                 // part bounded to THIS order. Consume the long part FIRST so ReservedQuantity
                 // reaches 0 before ApplyDelta pushes Quantity negative (a short can't hold a share
                 // reservation — Position.ApplyDelta guards this).
+                //
+                // Round 2 §0008 (Path 2): a bracket parent's FlipQuantity is the round-2 way of
+                // saying "the design expects (qty - FlipQuantity) of this to round-trip and
+                // FlipQuantity to flip into a new short". longPart+shortPart should equal qty;
+                // anything else is a bug at the decision/sizing layer.
                 int longPart = Math.Min(t.Quantity, sellOrder!.CurrentSellReservedQty);
                 int shortPart = t.Quantity - longPart;
+                System.Diagnostics.Debug.Assert(longPart + shortPart == t.Quantity,
+                    "TradeSettler.isFlipFill: longPart+shortPart must equal trade qty.");
+                if (sellOrder.FlipQuantity > 0 && SettlementDebug.Mode)
+                {
+                    // When Path 2 emitted this order, FlipQuantity > 0 telegraphs the expected
+                    // shortPart magnitude (over the full multi-fill lifetime of the order).
+                    // Debug-only sanity log; not gated for correctness — the existing path is
+                    // structurally correct via CurrentSellReservedQty alone.
+                    _logger.LogDebug(
+                        "Flip settle (Path 2): order #{Id} qty {Q} (this fill) longPart={Lp} shortPart={Sp} declared FlipQty={Fq}",
+                        sellOrder.OrderId, t.Quantity, longPart, shortPart, sellOrder.FlipQuantity);
+                }
 
                 if (longPart > 0)
                 {
