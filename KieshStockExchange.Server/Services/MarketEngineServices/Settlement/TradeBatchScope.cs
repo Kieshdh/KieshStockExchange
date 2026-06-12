@@ -41,20 +41,28 @@ public sealed class TradeBatchScope
     public Dictionary<(int UserId, int StockId), Position> PendingNewPositions { get; } = new();
 
     /// <summary>
-    /// R3 §0001 (Q7 follow-up): pre-mutation <see cref="Order.Status"/> snapshot for orders
-    /// touched by the matcher / settler. Captured on first touch and replayed on rollback so
-    /// the in-memory order Status stays in lock-step with the DB after a settle rejection —
-    /// closing the same order↔position desync mode the §P6 precedent at
-    /// <c>TradeSettler:354-360</c> warned about.
+    /// R3 §0001 (Q7 follow-up) / R4 §0001 (matcher-side completion): pre-mutation
+    /// <see cref="Order.Status"/> snapshot for orders touched by the matcher / settler.
+    /// Captured on first touch and replayed on rollback so the in-memory order Status stays
+    /// in lock-step with the DB after a settle rejection — closing the same order↔position
+    /// desync mode the §P6 precedent at <c>TradeSettler:354-360</c> warned about.
     ///
-    /// **WHERE TO POPULATE** (local Claude action): the matcher in
-    /// <c>OrderExecutionService.cs</c> mutates Status to <see cref="Order.Statuses.Filled"/> /
-    /// <see cref="Order.Statuses.PartiallyFilled"/> in the maker/taker apply paths near
-    /// <c>:2010, 2028, 2040</c> and in <c>RestoreOrderToBook</c> at <c>:1949</c>. Add a
-    /// <c>scope.OrderStatusSnapshots.TryAdd(o.OrderId, o.Status)</c> guard at the same point
-    /// the matcher captures order-state for rollback (the existing reservation-snapshot
-    /// pathway). The pre-write rejector in <see cref="TradeSettler"/> reads from this dict in
-    /// <c>RestoreSnapshots</c> to roll the in-memory Status back to its pre-batch value.
+    /// <para>**Populated by** (R4 §0001, Option A): the matcher captures pre-match Status
+    /// immediately before <see cref="Order.Fill(int)"/> mutates it. The two
+    /// <c>Order.Fill</c> entry points are:</para>
+    /// <list type="bullet">
+    ///   <item><c>MatchingEngine.Match</c> for the taker (taker.Fill at MatchingEngine.cs:88).</item>
+    ///   <item><c>OrderBook.ApplyMakerFill</c> for each maker (maker.Fill at OrderBook.cs:171).</item>
+    /// </list>
+    /// <para>Both methods take an optional <c>TradeBatchScope? scope</c> param and do a
+    /// <c>scope?.OrderStatusSnapshots.TryAdd(orderId, status)</c> guard. The
+    /// <c>OrderExecutionService.cs:969</c> batch group dispatch threads <c>groupScope</c>;
+    /// single-taker call sites (<c>:155</c>, <c>:469</c>) pass null and rely on
+    /// <c>RollbackMatch</c>'s Status=Open hardcode (correct because book makers are always
+    /// Open by construction — <see cref="OrderBook.BulkLoad"/> filters on cold-load).</para>
+    /// <para>The defence-in-depth first-sight TryAdd at <see cref="TradeSettler"/>
+    /// <c>SnapshotOrderIfNew</c> remains idempotent: matcher-side capture wins because it
+    /// runs first.</para>
     /// </summary>
     public Dictionary<int, string> OrderStatusSnapshots { get; } = new();
 }

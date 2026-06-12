@@ -6,7 +6,13 @@ namespace KieshStockExchange.Services.MarketEngineServices;
 
 public interface IMatchingEngine
 {
-    MatchResult Match(Order taker, OrderBook book, CancellationToken ct);
+    // R4 §0001 (Option A): optional batch scope. When provided, the matcher captures the
+    // pre-mutation Status of every order it touches into scope.OrderStatusSnapshots so a
+    // settle rollback can restore Status alongside Fund/Position/Reservation snapshots.
+    // Default-null preserves single-taker call sites that recover via RollbackMatch's
+    // hardcoded Status=Open path (correct because book makers are always Open by
+    // construction; see OrderBook.BulkLoad filter).
+    MatchResult Match(Order taker, OrderBook book, CancellationToken ct, TradeBatchScope? scope = null);
 }
 
 /// <summary> Returned by Match: the fills plus everything needed to undo them if settlement fails. </summary>
@@ -32,11 +38,20 @@ public sealed class MatchingEngine : IMatchingEngine
     #endregion
 
     #region Order matching and helpers
-    public MatchResult Match(Order taker, OrderBook book, CancellationToken ct)
+    public MatchResult Match(Order taker, OrderBook book, CancellationToken ct, TradeBatchScope? scope = null)
     {
         var fills = new List<Transaction>(16);
         var makerSnapshots = new List<MakerSnapshot>(16);
         var takerOriginalFilled = taker.AmountFilled;
+
+        // R4 §0001: capture the taker's pre-match Status once, on entry. Order.Fill mutates
+        // Status to Filled (Order.cs:404) when the last fill completes the quantity; without
+        // this snapshot a settle rollback would leave the in-memory Status at Filled even
+        // after RestoreCacheSnapshots ran (RollbackMatch's hardcoded Status=Open then wins,
+        // but only because all takers happen to enter Open today — the snapshot is the
+        // structural guard against the §P6 desync mode TradeSettler:354-360 warned about).
+        // TryAdd is idempotent so loops over multiple fills don't overwrite the first capture.
+        scope?.OrderStatusSnapshots.TryAdd(taker.OrderId, taker.Status);
 
         var remainingBudget = taker.IsTrueMarketBuyOrder ? taker.BuyBudget : 0m;
 
@@ -86,7 +101,7 @@ public sealed class MatchingEngine : IMatchingEngine
 
             // Taker is not in the book; maker fill routes through book to keep level totals in sync
             taker.Fill(qty);
-            var wasRemoved = book.ApplyMakerFill(bestOpposite, qty);
+            var wasRemoved = book.ApplyMakerFill(bestOpposite, qty, scope);
             if (wasRemoved && DebugMode
                 && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
                 _logger.LogInformation("Order #{OrderId} fully filled and removed from book.", bestOpposite.OrderId);

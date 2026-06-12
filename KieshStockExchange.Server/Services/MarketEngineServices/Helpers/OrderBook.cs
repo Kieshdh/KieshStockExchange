@@ -158,14 +158,26 @@ public sealed class OrderBook
     /// Caller must already hold the per-book SemaphoreSlim from <c>OrderBookEngine.WithBookLockAsync</c>.
     /// This is the only path through which the matching loop should mutate maker fill state,
     /// so the level totals stay consistent.
+    /// <para>
+    /// R4 §0001: when <paramref name="scope"/> is non-null, the maker's pre-mutation Status is
+    /// captured into <c>scope.OrderStatusSnapshots</c> (idempotent via TryAdd) before
+    /// <see cref="Order.Fill(int)"/> mutates it. The settler's RestoreSnapshots replays this
+    /// snapshot on rollback. Default-null preserves callers that recover via
+    /// RollbackMakerFill's hardcoded Status=Open path.
+    /// </para>
     /// </remarks>
-    public bool ApplyMakerFill(Order maker, int qty)
+    public bool ApplyMakerFill(Order maker, int qty, TradeBatchScope? scope = null)
     {
         bool removed = false;
         lock (_gate)
         {
             // Debit the level total first (maker is still in the book at this point).
             DebitLevelQty(maker.IsBuyOrder, maker.Price, qty);
+
+            // R4 §0001: snapshot the maker's pre-fill Status before Order.Fill flips it to
+            // Filled when this fill exhausts RemainingQuantity. First-sight wins — TryAdd
+            // keeps the original pre-batch value across multiple fills against the same maker.
+            scope?.OrderStatusSnapshots.TryAdd(maker.OrderId, maker.Status);
 
             // Now mutate the maker's fill state.
             maker.Fill(qty);

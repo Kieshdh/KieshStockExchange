@@ -137,13 +137,13 @@ internal sealed class TradeSettler
         // OrderId on first sight — subsequent fills on the same order keep the original
         // pre-batch value.
         //
-        // R3 §0001: the Status snapshot is layered alongside via the same first-sight guard
-        // (scope.OrderStatusSnapshots). Note this captures the AFTER-MATCH status (the matcher
-        // mutated it before we got here). The matcher must populate the dict at PRE-match
-        // time for the rollback to restore the pre-match value — see TradeBatchScope's XML
-        // doc for the hook. The settle-side capture below is a partial defense (catches the
-        // case where the apply-pass throws before any matcher Status mutation, e.g. a brand-new
-        // Pending order that fails reservation here).
+        // R4 §0001: the matcher (MatchingEngine.Match + OrderBook.ApplyMakerFill) captures
+        // pre-match Status into scope.OrderStatusSnapshots before Order.Fill mutates it,
+        // so the dict is already authoritative by the time the settler sees these orders.
+        // The TryAdd below is defence-in-depth: it catches the brand-new-Pending-fails-
+        // at-settler edge where the matcher didn't see the order (e.g., a reservation-only
+        // failure with no fills emitted). First-sight semantics: matcher-side capture wins
+        // because it runs before any settler write.
         void SnapshotOrderIfNew(Order? o)
         {
             if (o is null) return;

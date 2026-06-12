@@ -966,7 +966,11 @@ public sealed class OrderExecutionService : IOrderExecutionService
             for (int i = 0; i < groupItems.Count; i++)
             {
                 var (idx, order) = groupItems[i];
-                var match = _matching.Match(order, book, ct);
+                // R4 §0001: thread groupScope so MatchingEngine + OrderBook.ApplyMakerFill
+                // capture pre-match Status into scope.OrderStatusSnapshots. RestoreSnapshots
+                // (TradeSettler:854) replays this on rollback, after RollbackMatch's
+                // hardcoded Status=Open writes — so the snapshot is authoritative.
+                var match = _matching.Match(order, book, ct, groupScope);
                 outcome.Records.Add(new MatchRecord(idx, order, match, false));
                 groupFills.AddRange(match.Fills);
 
