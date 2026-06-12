@@ -161,6 +161,20 @@ public class Order : IValidatable
     // or any standalone order. Set once when the child is created alongside the parent.
     public int? ParentOrderId { get; set; }
 
+    // Round 2 §0007 (Path 2): how many shares of a bracket parent's quantity constitute the
+    // flip portion — the part that opens a new position rather than rounding-trip existing
+    // inventory. The inventory-close portion is implicit: Quantity − FlipQuantity. A plain
+    // order, a flat-only short bracket, or a Path-1-minimal ShortBracket carries 0. The
+    // BracketCoordinator reads this at OnParentFillAsync to size the SL pool to FlipQuantity
+    // only — the cover/round-trip portion is self-funding (sell proceeds fund buy-limit TPs;
+    // cover outlay releases collateral that funds sell-limit TPs) and needs no pool.
+    private int _flipQuantity = 0;
+    public int FlipQuantity
+    {
+        get => _flipQuantity;
+        set => _flipQuantity = value < 0 ? 0 : value;
+    }
+
     // Backward-compatible read-only projection of the three dimensions to the legacy 10-value
     // string vocabulary, for logs/telemetry/notifications that still read a single type string.
     // The enums are authoritative; this is derived, never set.
@@ -462,6 +476,7 @@ public class Order : IValidatable
             TrailIsPercent = this.TrailIsPercent,
             TrailWatermark = this.TrailWatermark,
             ParentOrderId = this.ParentOrderId,
+            FlipQuantity = this.FlipQuantity,
             Status = this.Status,
             AmountFilled = this.AmountFilled,
             CreatedAt = this.CreatedAt,

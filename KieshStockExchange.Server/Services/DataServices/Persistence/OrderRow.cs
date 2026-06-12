@@ -35,6 +35,10 @@ public class OrderRow
     // §3.6 P4: a bracket child points at its parent entry order (null for parents/standalone).
     [Column("ParentOrderId")] public int? ParentOrderId { get; set; }
 
+    // Round 2 §0007 (Path 2): flip portion of a bracket parent's quantity. See Order.FlipQuantity
+    // for semantics; 0 for any plain order and any pre-Path-2 bracket parent.
+    [Column("FlipQuantity")] public int FlipQuantity { get; set; }
+
     [Column("Currency")] public string Currency { get; set; } = nameof(CurrencyType.USD);
 
     // §3.6 decomposition: the type is three orthogonal string columns (the flat OrderType column
@@ -79,6 +83,7 @@ public static class OrderMapper
         TrailIsPercent = r.TrailIsPercent,
         TrailWatermark = r.TrailWatermark,
         ParentOrderId = r.ParentOrderId,
+        FlipQuantity = r.FlipQuantity,
         Currency = r.Currency,
         Side = ParseSide(r.Side),
         Entry = ParseEntry(r.Entry),
@@ -104,6 +109,7 @@ public static class OrderMapper
         TrailIsPercent = o.TrailIsPercent,
         TrailWatermark = o.TrailWatermark,
         ParentOrderId = o.ParentOrderId,
+        FlipQuantity = o.FlipQuantity,
         Currency = o.Currency,
         Side = o.Side.ToString(),
         Entry = o.Entry.ToString(),

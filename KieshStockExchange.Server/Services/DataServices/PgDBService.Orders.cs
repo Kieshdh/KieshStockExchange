@@ -8,9 +8,15 @@ namespace KieshStockExchange.Services.DataServices;
 
 public sealed partial class PgDBService
 {
+    // Round 2 §0007: "FlipQuantity" added after ParentOrderId — the Path-2 bracket-flip portion
+    // (0 for every other order). The Lateness lesson: keep this column in lock-step with the
+    // five other Dapper sites below (CreateOrder INSERT cols + VALUES, UpdateOrder SET,
+    // InsertOrdersBatchAsync, UpdateOrdersBatchAsync) — a drop in any one silently strips
+    // FlipQuantity from disk and bracket-coordinator pool sizing reverts to legacy "held"
+    // semantics on the next cold-load.
     private const string OrderCols = @"
         ""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
-        ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
+        ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",""FlipQuantity"",
         ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"",""ActivatedAt""";
 
     private const string TransactionCols = @"
@@ -205,10 +211,10 @@ public sealed partial class PgDBService
         var row = OrderMapper.ToRow(order);
         row.OrderId = await c.ExecuteScalarAsync<int>(@"
             INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
-                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
+                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",""FlipQuantity"",
                                    ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
             VALUES (@UserId,@StockId,@Quantity,@Price,@SlippagePercent,@BuyBudget,@StopPrice,
-                    @TrailOffset,@TrailIsPercent,@TrailWatermark,@ParentOrderId,
+                    @TrailOffset,@TrailIsPercent,@TrailWatermark,@ParentOrderId,@FlipQuantity,
                     @Currency,@Side,@Entry,@Stop,@Status,@AmountFilled,@CreatedAt,@UpdatedAt)
             RETURNING ""OrderId""", row);
         order.OrderId = row.OrderId;
@@ -226,7 +232,7 @@ public sealed partial class PgDBService
               ""UserId"" = @UserId, ""StockId"" = @StockId, ""Quantity"" = @Quantity, ""Price"" = @Price,
               ""SlippagePercent"" = @SlippagePercent, ""BuyBudget"" = @BuyBudget, ""StopPrice"" = @StopPrice,
               ""TrailOffset"" = @TrailOffset, ""TrailIsPercent"" = @TrailIsPercent, ""TrailWatermark"" = @TrailWatermark,
-              ""ParentOrderId"" = @ParentOrderId,
+              ""ParentOrderId"" = @ParentOrderId, ""FlipQuantity"" = @FlipQuantity,
               ""Currency"" = @Currency, ""Side"" = @Side, ""Entry"" = @Entry, ""Stop"" = @Stop,
               ""Status"" = @Status, ""AmountFilled"" = @AmountFilled,
               ""CreatedAt"" = @CreatedAt, ""UpdatedAt"" = @UpdatedAt, ""ActivatedAt"" = @ActivatedAt
@@ -446,7 +452,7 @@ public sealed partial class PgDBService
 
         var sql = new StringBuilder(@"
             INSERT INTO ""Orders"" (""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",
-                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",
+                                   ""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""ParentOrderId"",""FlipQuantity"",
                                    ""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"")
             VALUES ", capacity: 256 + orders.Count * 96);
         var p = new DynamicParameters();
@@ -464,6 +470,7 @@ public sealed partial class PgDBService
                .Append(",@TrailIsPercent_").Append(i)
                .Append(",@TrailWatermark_").Append(i)
                .Append(",@ParentOrderId_").Append(i)
+               .Append(",@FlipQuantity_").Append(i)
                .Append(",@Currency_").Append(i)
                .Append(",@Side_").Append(i)
                .Append(",@Entry_").Append(i)
@@ -486,6 +493,7 @@ public sealed partial class PgDBService
             p.Add($"TrailIsPercent_{i}",  r.TrailIsPercent);
             p.Add($"TrailWatermark_{i}",  r.TrailWatermark);
             p.Add($"ParentOrderId_{i}",   r.ParentOrderId);
+            p.Add($"FlipQuantity_{i}",    r.FlipQuantity);
             p.Add($"Currency_{i}",        r.Currency);
             p.Add($"Side_{i}",            r.Side);
             p.Add($"Entry_{i}",           r.Entry);
@@ -515,6 +523,7 @@ public sealed partial class PgDBService
               ""Price"" = data.""Price"", ""SlippagePercent"" = data.""SlippagePercent"", ""BuyBudget"" = data.""BuyBudget"",
               ""StopPrice"" = data.""StopPrice"", ""TrailOffset"" = data.""TrailOffset"",
               ""TrailIsPercent"" = data.""TrailIsPercent"", ""TrailWatermark"" = data.""TrailWatermark"",
+              ""FlipQuantity"" = data.""FlipQuantity"",
               ""Currency"" = data.""Currency"", ""Side"" = data.""Side"", ""Entry"" = data.""Entry"", ""Stop"" = data.""Stop"",
               ""Status"" = data.""Status"", ""AmountFilled"" = data.""AmountFilled"", ""CreatedAt"" = data.""CreatedAt"",
               ""UpdatedAt"" = data.""UpdatedAt""
@@ -525,7 +534,7 @@ public sealed partial class PgDBService
             if (i > 0) sql.Append(',');
             // First row carries explicit casts; Postgres infers subsequent rows.
             if (i == 0)
-                sql.Append("(@OrderId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@Price_0::numeric,@SlippagePercent_0::numeric,@BuyBudget_0::numeric,@StopPrice_0::numeric,@TrailOffset_0::numeric,@TrailIsPercent_0::boolean,@TrailWatermark_0::numeric,@Currency_0::text,@Side_0::text,@Entry_0::text,@Stop_0::text,@Status_0::text,@AmountFilled_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
+                sql.Append("(@OrderId_0::int,@UserId_0::int,@StockId_0::int,@Quantity_0::int,@Price_0::numeric,@SlippagePercent_0::numeric,@BuyBudget_0::numeric,@StopPrice_0::numeric,@TrailOffset_0::numeric,@TrailIsPercent_0::boolean,@TrailWatermark_0::numeric,@FlipQuantity_0::int,@Currency_0::text,@Side_0::text,@Entry_0::text,@Stop_0::text,@Status_0::text,@AmountFilled_0::int,@CreatedAt_0::timestamptz,@UpdatedAt_0::timestamptz)");
             else
                 sql.Append("(@OrderId_").Append(i)
                    .Append(",@UserId_").Append(i)
@@ -538,6 +547,7 @@ public sealed partial class PgDBService
                    .Append(",@TrailOffset_").Append(i)
                    .Append(",@TrailIsPercent_").Append(i)
                    .Append(",@TrailWatermark_").Append(i)
+                   .Append(",@FlipQuantity_").Append(i)
                    .Append(",@Currency_").Append(i)
                    .Append(",@Side_").Append(i)
                    .Append(",@Entry_").Append(i)
@@ -560,6 +570,7 @@ public sealed partial class PgDBService
             p.Add($"TrailOffset_{i}",     r.TrailOffset);
             p.Add($"TrailIsPercent_{i}",  r.TrailIsPercent);
             p.Add($"TrailWatermark_{i}",  r.TrailWatermark);
+            p.Add($"FlipQuantity_{i}",    r.FlipQuantity);
             p.Add($"Currency_{i}",        r.Currency);
             p.Add($"Side_{i}",            r.Side);
             p.Add($"Entry_{i}",           r.Entry);
@@ -569,7 +580,7 @@ public sealed partial class PgDBService
             p.Add($"CreatedAt_{i}",       r.CreatedAt);
             p.Add($"UpdatedAt_{i}",       r.UpdatedAt);
         }
-        sql.Append(@") AS data(""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"") WHERE ""Orders"".""OrderId"" = data.""OrderId""");
+        sql.Append(@") AS data(""OrderId"",""UserId"",""StockId"",""Quantity"",""Price"",""SlippagePercent"",""BuyBudget"",""StopPrice"",""TrailOffset"",""TrailIsPercent"",""TrailWatermark"",""FlipQuantity"",""Currency"",""Side"",""Entry"",""Stop"",""Status"",""AmountFilled"",""CreatedAt"",""UpdatedAt"") WHERE ""Orders"".""OrderId"" = data.""OrderId""");
 
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(sql.ToString(), p);
