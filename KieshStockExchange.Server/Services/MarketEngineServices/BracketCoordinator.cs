@@ -256,6 +256,23 @@ public sealed class BracketCoordinator : IBracketCoordinator
         if (parent.IsSellOrder) { await OnParentFillShortAsync(parent, ct).ConfigureAwait(false); return; }
         if (!parent.IsBuyOrder) return; // long brackets beyond here
 
+        // Round 2 §0010 (Path 2 option a): a LongBracket whose entry COVERS an existing short
+        // and DOESN'T flip into long (parent.FlipQuantity == 0) is a position-closing event —
+        // the SL/TP protective legs no longer have a position to protect. Tear the bracket
+        // down at the moment the cover completes. We detect "cover complete" as the post-fill
+        // position being non-negative AND no flip portion declared. The teardown reuses the
+        // OnMemberCancelled cancel-the-rest path so leg cleanup + reservation release are the
+        // proven branches.
+        var liveQty = _accounts.GetPosition(parent.UserId, parent.StockId)?.Quantity ?? 0;
+        if (parent.FlipQuantity == 0 && liveQty >= 0)
+        {
+            // Use the existing teardown via OnMemberCancelledSyncAsync — pretend the parent
+            // member was just cancelled, which collapses the SL + TPs under the same gate + tx
+            // as a user-initiated bracket cancel. Idempotent: a no-op if the legs already cleared.
+            await OnMemberCancelledSyncAsync(parent, ct).ConfigureAwait(false);
+            return;
+        }
+
         var (sl, tps) = await LoadLegsAsync(parent.OrderId, ct).ConfigureAwait(false);
         int held = ComputeHeld(parent, sl, tps);
         if (held <= 0) return;
