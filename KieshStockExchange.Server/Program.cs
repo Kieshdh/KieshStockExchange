@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Server.Data;
+using Microsoft.EntityFrameworkCore;
 using KieshStockExchange.Server.HealthChecks;
 using KieshStockExchange.Server.Services.SeedServices;
 using KieshStockExchange.Server.Services.SeedServices.Interfaces;
@@ -332,6 +333,37 @@ TaskScheduler.UnobservedTaskException += (_, e) =>
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
     globalLog.LogCritical(e.ExceptionObject as Exception,
         "Unhandled domain exception (terminating={Terminating}).", e.IsTerminating);
+
+// R3 Q5 (patch 0007) — EF tool-independent migration fallback. The runtime uses Dapper
+// (PgDBService), not EF; migrations are normally applied via `dotnet ef database update`.
+// When that tool isn't available on a host (broken local install, container without the
+// EF tool, CI runner) the schema lags behind the code and every bot order trips
+// `PgDBService.cs:226`'s "Postgres schema dropped" message. Applying pending migrations at
+// startup via the existing design-time factory removes the tool dependency.
+//
+// Assumption: single-instance deployment. For a multi-instance roll-out, `Database.Migrate()`
+// races across replicas — the standard guards (distributed lock, dedicated migration job)
+// are out of scope for R3. The `Db:AutoMigrate=false` escape hatch lets operators stage
+// migrations manually for that case. Runs BEFORE the seed block so a fresh DB has the
+// schema in place before any INSERT is attempted.
+if (builder.Configuration.GetValue("Db:AutoMigrate", true))
+{
+    var migrateLog = app.Services.GetRequiredService<ILogger<Program>>();
+    try
+    {
+        using var ctx = new KseDbContextFactory().CreateDbContext(args);
+        ctx.Database.Migrate();
+        migrateLog.LogInformation("Db:AutoMigrate applied any pending EF Core migrations on startup.");
+    }
+    catch (Exception ex)
+    {
+        // Don't take the host down on migration failure — log loud and continue. A bad
+        // migration in prod must surface via the health-check stream rather than silently
+        // failing to boot. Operators can disable AutoMigrate to take the path out of the loop.
+        migrateLog.LogCritical(ex, "Db:AutoMigrate failed; continuing without applying migrations. " +
+            "Run `dotnet ef database update` manually or set Db:AutoMigrate=false to silence.");
+    }
+}
 
 // Seed-ordering fix — a fresh DB must be seeded BEFORE the warm-up below reads
 // it. The stock cold-load and candle ring priming snapshot the DB into in-memory
