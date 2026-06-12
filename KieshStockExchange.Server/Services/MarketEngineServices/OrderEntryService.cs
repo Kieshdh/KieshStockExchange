@@ -631,8 +631,11 @@ public sealed class OrderEntryService : IOrderEntryService
                 Price = CurrencyHelper.RoundMoney(takeProfits[i].Price, r.Currency),
             });
 
+        // Round 2 compile-fix: BracketGeometryValidator expects tuple list; project from BracketLeg.
+        var tpTuples = new List<(decimal Price, int Quantity)>(takeProfits.Count);
+        for (int i = 0; i < takeProfits.Count; i++) tpTuples.Add((takeProfits[i].Price, takeProfits[i].Quantity));
         var geometryErr = BracketGeometryValidator.Validate(
-            entryRef, hasStop ? r.StopPrice : null, takeProfits, r.Quantity, r.Currency, isShort);
+            entryRef, hasStop ? r.StopPrice : null, tpTuples, r.Quantity, r.Currency, isShort);
         if (geometryErr != null) return (geometryErr, null, null, null);
 
         var parentErr = _validator.ValidateNew(parent);

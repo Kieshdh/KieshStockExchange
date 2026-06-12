@@ -200,6 +200,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly IStockService          _stocks;
     private readonly IAccountsCache         _accounts;
     private readonly IFxRateService         _fxRates;
+    private readonly IBracketCoordinator    _bracket;   // Round 2 §0006c: end-of-tick queue drain
     private readonly ILogger<AiTradeService> _logger;
     private readonly IConfiguration         _configuration;
     private readonly int  _maxAdvancedPerTick;   // §P6a cap on entry-route submissions per tick
@@ -219,6 +220,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IUserPortfolioService portfolio,
         IFxRateService fxRates,
         FxDeskTelemetry fxDesk,
+        IBracketCoordinator bracket,
         ILogger<AiTradeService> logger,
         ILoggerFactory loggerFactory,
         IOptions<SeparatorLoggerOptions> loggerOptions,
@@ -231,6 +233,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _accounts     = accounts     ?? throw new ArgumentNullException(nameof(accounts));
         _fxRates      = fxRates      ?? throw new ArgumentNullException(nameof(fxRates));
         _fxDesk       = fxDesk       ?? throw new ArgumentNullException(nameof(fxDesk));
+        _bracket      = bracket      ?? throw new ArgumentNullException(nameof(bracket));
         _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         if (db          is null) throw new ArgumentNullException(nameof(db));
