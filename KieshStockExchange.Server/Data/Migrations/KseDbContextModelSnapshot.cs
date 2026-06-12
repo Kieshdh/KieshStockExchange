@@ -373,6 +373,12 @@ namespace KieshStockExchange.Server.Data.Migrations
                     b.Property<int?>("ParentOrderId")
                         .HasColumnType("integer");
 
+                    // Round 2 §0007: bracket-flip portion (0 for plain orders and pre-Path-2 brackets).
+                    b.Property<int>("FlipQuantity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<decimal>("Price")
                         .HasColumnType("numeric(20,10)");
 
