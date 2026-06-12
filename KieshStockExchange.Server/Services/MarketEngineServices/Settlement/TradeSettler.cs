@@ -136,11 +136,20 @@ internal sealed class TradeSettler
         // so a rollback restores the field along with Fund/Position. We snapshot once per
         // OrderId on first sight — subsequent fills on the same order keep the original
         // pre-batch value.
+        //
+        // R3 §0001: the Status snapshot is layered alongside via the same first-sight guard
+        // (scope.OrderStatusSnapshots). Note this captures the AFTER-MATCH status (the matcher
+        // mutated it before we got here). The matcher must populate the dict at PRE-match
+        // time for the rollback to restore the pre-match value — see TradeBatchScope's XML
+        // doc for the hook. The settle-side capture below is a partial defense (catches the
+        // case where the apply-pass throws before any matcher Status mutation, e.g. a brand-new
+        // Pending order that fails reservation here).
         void SnapshotOrderIfNew(Order? o)
         {
             if (o is null) return;
             if (!orderResSnapshots.ContainsKey(o.OrderId))
                 orderResSnapshots[o.OrderId] = (o.CurrentBuyReservation, o.CurrentSellReservedQty, o.CurrentShortCollateral);
+            scope.OrderStatusSnapshots.TryAdd(o.OrderId, o.Status);
         }
 
         var userSet = new HashSet<int>();
@@ -692,28 +701,53 @@ internal sealed class TradeSettler
             await _db.UpdateAllAsync(loadedFunds, ct).ConfigureAwait(false);
         if (loadedPositions.Count > 0)
         {
-            // Round 2 Q7 follow-up: walk to-be-written Positions and verify each one's triple
-            // satisfies the DB `CK_Positions_Quantity_Invariants` constraint. Logs an ERROR with
-            // the offending Position (and all relevant order context) BEFORE the DB write so the
-            // SQL constraint violation log line has a precise companion. If this fires, the
-            // in-memory mutation order left an invariant violation (Q7 hypothesis A/B/C in
-            // bracket-flip-r3-ultraplan-prompt.md). If the DB rejects but this DOESN'T fire,
-            // the SQL parameter binding is producing a different row than the in-memory state —
-            // a different bug class entirely. Cheap O(n) per settle batch; n is typically tiny.
-            CheckPositionInvariantsBeforeWrite(loadedPositions);
+            // R3 §0001 (Q7 structural defense). Walk to-be-written Positions and verify each
+            // one's triple satisfies the DB `CK_Positions_Quantity_Invariants` constraint. Was
+            // a diagnostic in round 2 (log-and-continue, let the DB constraint reject); now
+            // detect-and-reject BEFORE the DB write so the failure surface is a clean engine
+            // OperationFailed instead of a DbException. The forensic ERROR log still names the
+            // offending Position triple + order context.
+            //
+            // Happy-path byte-identical to round 2: no Position violates → no detection → same
+            // flow. Unhappy-path failure mode shifts from CK-rejection-with-cascading-effects
+            // to engine-side rejection that travels the well-tested rollback path with full
+            // snapshot restoration (Funds + Positions + Order reservations + Order Status).
+            var offender = FindInvariantViolation(loadedPositions, ordersById);
+            if (offender is not null)
+            {
+                return (OrderResultFactory.OperationFailed(
+                    $"Q7 pre-write CK violation: Position #{offender.PositionId} " +
+                    $"user={offender.UserId} stock={offender.StockId} " +
+                    $"Q={offender.Quantity} R={offender.ReservedQuantity} " +
+                    $"SC={offender.ShortCollateral} SCcy={offender.ShortCollateralCurrencyCode}"),
+                    Array.Empty<RejectedFill>());
+            }
             await _db.UpdateAllAsync(loadedPositions, ct).ConfigureAwait(false);
         }
         if (newPositionsThisCall.Count > 0)
         {
-            CheckPositionInvariantsBeforeWrite(newPositionsThisCall);
+            var offender = FindInvariantViolation(newPositionsThisCall, ordersById);
+            if (offender is not null)
+            {
+                return (OrderResultFactory.OperationFailed(
+                    $"Q7 pre-insert CK violation: Position user={offender.UserId} stock={offender.StockId} " +
+                    $"Q={offender.Quantity} R={offender.ReservedQuantity} " +
+                    $"SC={offender.ShortCollateral} SCcy={offender.ShortCollateralCurrencyCode}"),
+                    Array.Empty<RejectedFill>());
+            }
             await _db.InsertAllAsync(newPositionsThisCall, ct).ConfigureAwait(false);
         }
 
         return (null, rejected);
     }
 
-    // Round 2 Q7 diagnostic — see callsite at the end of SettleNoTxAsync.
-    private void CheckPositionInvariantsBeforeWrite(IReadOnlyList<Position> positions)
+    // R3 §0001 (Q7 structural defense). Replaces the round-2 diagnostic at the same site.
+    // Walks Positions about to be persisted, returns the first one violating the DB
+    // CK_Positions_Quantity_Invariants check (mirrored in Position.IsValid at Position.cs:98-100).
+    // Caller converts a non-null return into an OperationFailed that travels the rollback path.
+    // Logs the same ERROR line the round-2 diagnostic emitted so forensic log greps still hit.
+    private Position? FindInvariantViolation(
+        IReadOnlyList<Position> positions, Dictionary<int, Order> ordersById)
     {
         for (int i = 0; i < positions.Count; i++)
         {
@@ -727,11 +761,14 @@ internal sealed class TradeSettler
             if (!valid)
             {
                 _logger.LogError(
-                    "Q7 pre-write CK violation: Position #{Pid} user={U} stock={S} Q={Q} R={R} SC={SC} SCcy={SCcy}",
+                    "Q7 pre-write CK violation: Position #{Pid} user={U} stock={S} Q={Q} R={R} SC={SC} SCcy={SCcy} " +
+                    "(batch had {OrderCount} order(s) touching this batch)",
                     p.PositionId, p.UserId, p.StockId, p.Quantity, p.ReservedQuantity,
-                    p.ShortCollateral, p.ShortCollateralCurrencyCode);
+                    p.ShortCollateral, p.ShortCollateralCurrencyCode, ordersById.Count);
+                return p;
             }
         }
+        return null;
     }
 
     /// <summary> Restore cache from scope snapshots. Idempotent. </summary>
@@ -805,6 +842,19 @@ internal sealed class TradeSettler
             _ledger.LogOrder(o.UserId, o.OrderId, "RestoreSnapshots:Order",
                 prev.Buy - orderBuyBefore, orderBuyBefore, o.CurrentBuyReservation,
                 orderSellBefore, o.CurrentSellReservedQty);
+        }
+
+        // R3 §0001: restore pre-batch Order.Status. The matcher mutates Status to
+        // Filled / PartiallyFilled before SettleNoTxAsync's DB writes; without this restore a
+        // pre-write rejection (or any post-match settle failure) would leave the in-memory
+        // order at Filled while the DB row is back to its pre-batch status. The same
+        // order↔position desync mode warned about at TradeSettler:354-360 in the §P6
+        // precedent. The snapshot dict is populated by the matcher's existing reservation-
+        // snapshot pathway — see TradeBatchScope.OrderStatusSnapshots XML doc for the hook.
+        foreach (var (orderId, prevStatus) in scope.OrderStatusSnapshots)
+        {
+            if (!ordersById.TryGetValue(orderId, out var o)) continue;
+            if (o.Status != prevStatus) o.Status = prevStatus;
         }
     }
 }

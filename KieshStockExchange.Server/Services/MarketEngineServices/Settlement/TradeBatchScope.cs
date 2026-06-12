@@ -39,4 +39,22 @@ public sealed class TradeBatchScope
     /// <summary> New Positions created mid-batch. Shared across settle calls in one root tx;
     /// caller registers in cache after commit. </summary>
     public Dictionary<(int UserId, int StockId), Position> PendingNewPositions { get; } = new();
+
+    /// <summary>
+    /// R3 §0001 (Q7 follow-up): pre-mutation <see cref="Order.Status"/> snapshot for orders
+    /// touched by the matcher / settler. Captured on first touch and replayed on rollback so
+    /// the in-memory order Status stays in lock-step with the DB after a settle rejection —
+    /// closing the same order↔position desync mode the §P6 precedent at
+    /// <c>TradeSettler:354-360</c> warned about.
+    ///
+    /// **WHERE TO POPULATE** (local Claude action): the matcher in
+    /// <c>OrderExecutionService.cs</c> mutates Status to <see cref="Order.Statuses.Filled"/> /
+    /// <see cref="Order.Statuses.PartiallyFilled"/> in the maker/taker apply paths near
+    /// <c>:2010, 2028, 2040</c> and in <c>RestoreOrderToBook</c> at <c>:1949</c>. Add a
+    /// <c>scope.OrderStatusSnapshots.TryAdd(o.OrderId, o.Status)</c> guard at the same point
+    /// the matcher captures order-state for rollback (the existing reservation-snapshot
+    /// pathway). The pre-write rejector in <see cref="TradeSettler"/> reads from this dict in
+    /// <c>RestoreSnapshots</c> to roll the in-memory Status back to its pre-batch value.
+    /// </summary>
+    public Dictionary<int, string> OrderStatusSnapshots { get; } = new();
 }
