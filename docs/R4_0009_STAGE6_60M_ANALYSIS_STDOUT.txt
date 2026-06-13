@@ -1,0 +1,73 @@
+================================================================================
+STAGE 1 — MatchSymmetryProbe summary
+================================================================================
+group                                       count       mean     median
+-----------------------------------------------------------------------
+settler/sell/long_close                     75830     360.45     242.79
+settler/sell/flip                           55037     314.69     207.22
+matcher/buy/fill_vs_limit                   54064    -117.01    -134.76
+matcher/sell/fill_vs_limit                  53536     107.18     120.08
+settler/sell/short_open                     21791     398.09     305.56
+
+Matcher fill count: sell=53536 buy=54064 sell/buy=0.990x
+
+================================================================================
+BLOCK 1 — Decision-side buy/sell ratio (probe self-consistency)
+================================================================================
+Decision rows: buy=1159 sell=365 total=1524
+Decision sell/buy = 0.315x  (matcher Stage 1 was 1.27x)
+  -> within 5% of 1.27 matcher signal? False
+
+Per-hour buy/sell stability:
+  hour                  buy     sell   sell/buy
+  2026-06-13 11          50       24      0.480
+  2026-06-13 12        1109      341      0.307
+
+================================================================================
+BLOCK 2 — Per-(strategy, inventory bucket) component decomposition
+================================================================================
+group                                      n    pct  mean_buyP  mean_homeo   mean_dir  mean_anch  mean_herd
+--------------------------------------------------------------------------------------------------------------
+MarketMaker/long_heavy                   110   7.2%      0.750       0.532      0.000      0.251      0.000
+MeanReversion/long_heavy                 318  20.9%      0.785       0.512      0.002      0.230      0.000
+Scalper/long_heavy                       300  19.7%      0.761       0.529      0.000      0.240      0.000
+TrendFollower/long_heavy                 795  52.2%      0.757       0.516      0.000      0.238      0.000
+
+Overall mean contribution to (buy_prob - 0.5):
+  mean(buy_prob - 0.5) = 0.2632
+  homeostatic          mean=  0.5191  95%CI=(0.5117,0.5267)  contrib=197.2%
+  directional_eff      mean=  0.0007  95%CI=(0.0001,0.0012)  contrib=0.3%
+  anchor               mean=  0.2375  95%CI=(0.2336,0.2411)  contrib=90.3%
+  herd                 mean=  0.0000  95%CI=(0.0000,0.0000)  contrib=0.0%
+
+Stage 2 fire criterion (>=40% of |mean(buy_prob - 0.5)| with CI lower bound):
+  homeostatic          ci_lower_abs=0.5117  vs target=0.2632  (194.4% — FIRES)
+  directional_eff      ci_lower_abs=0.0001  vs target=0.2632  (0.0% — below)
+  anchor               ci_lower_abs=0.2336  vs target=0.2632  (88.8% — FIRES)
+  herd                 ci_lower_abs=0.0000  vs target=0.2632  (0.0% — below)
+
+================================================================================
+BLOCK 3 — Advanced cohort (kindPre, bias, kindPost) cross-tab
+================================================================================
+kindPre           bias kindPost             count    pct
+LongBracket          0 LongBracket          17097  58.9%
+ShortBracket         0 ShortBracket         11954  41.1%
+
+Inversions (kindPre != kindPost): 0/29051 = 0.0%
+
+Bracket-build success rate by kindPost:
+  LongBracket     6367/17097 = 37.2% success
+  ShortBracket    4542/11954 = 38.0% success
+
+================================================================================
+BLOCK 4 — MarketMaker quote-side ratio
+================================================================================
+MM quote rows: choseBuy=31455 choseSell=16643 total=48098
+Net buy-quote bias: +0.308  (positive = MMs lean toward buy quote)
+Per-bot mean (buys-sells)/(buys+sells): mean=-0.0341 median=-0.0238
+
+================================================================================
+BLOCK 5 — Matcher depth context
+================================================================================
+buy-taker: n=73238 mean_levelIdx=0.90 median_levelIdx=0.0 mean_oppositeWallDepth=11724 median_oppositeWallDepth=4488.0
+sell-taker: n=79425 mean_levelIdx=0.84 median_levelIdx=0 mean_oppositeWallDepth=17367 median_oppositeWallDepth=5461
