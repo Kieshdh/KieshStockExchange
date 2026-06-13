@@ -198,6 +198,14 @@ internal sealed class AiBotDecisionService
     // byte-identical to round 2.
     private readonly decimal _inventoryBiasShortMult;
 
+    // R4 §0009 Stage 4 — Option D: liquidity-aware limit-offset asymmetry. When on, the limit
+    // offset for a non-MM limit order is tilted by the book imbalance so that placing into the
+    // thick side gets pushed further from mid (less aggressive, doesn't add to the wall) while
+    // placing into the thin side gets pulled closer to mid (more aggressive, fills the gap).
+    // Default OFF (gain = 0 ⇒ no adjustment ⇒ byte-identical limit-offset path).
+    private readonly bool    _liquidityAwarePlacement;
+    private readonly decimal _liquidityAwareGain;
+
     internal AiBotDecisionService(IMarketDataService market, IAccountsCache accounts,
         IOrderBookEngine books, IStockService stocks, BotSentimentService sentiment,
         FundamentalService funds, StockProfileService profiles,
@@ -256,7 +264,11 @@ internal sealed class AiBotDecisionService
         // Round 2 Q1 follow-up: asymmetric short-side multiplier. Default 1.0 = byte-identical
         // to round 2. Set higher (suggest 2.5) to make heavy-short detection easier to trigger,
         // increasing the symmetric short→LongBracket pull that round-2 found too weak.
-        decimal inventoryBiasShortMult = 1m)
+        decimal inventoryBiasShortMult = 1m,
+        // R4 §0009 Stage 4 — Option D: liquidity-aware limit-offset asymmetry. Default off
+        // (gain = 0 ⇒ no adjustment). When on, the limit offset is tilted by book imbalance.
+        bool liquidityAwarePlacement = false,
+        decimal liquidityAwareGain = 0m)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -341,6 +353,9 @@ internal sealed class AiBotDecisionService
         _inventoryBias             = inventoryBias;
         _inventoryBiasThresholdPrc = Math.Max(0m, inventoryBiasThresholdPrc);
         _inventoryBiasShortMult    = Math.Max(1m, inventoryBiasShortMult);
+        // R4 §0009 Stage 4 — Option D: clamp gain to [0, 1] so the offset multiplier stays in [0, 2].
+        _liquidityAwarePlacement   = liquidityAwarePlacement;
+        _liquidityAwareGain        = liquidityAwareGain < 0m ? 0m : (liquidityAwareGain > 1m ? 1m : liquidityAwareGain);
     }
     #endregion
 
@@ -1133,6 +1148,39 @@ internal sealed class AiBotDecisionService
         var offset = Clamp01(Lerp(minOff, maxOff, ctx.Decimal01(user.AiUserId)));
         var jitter = (ctx.Decimal01(user.AiUserId) * 2m - 1m) * user.AggressivenessPrc;
         offset = Math.Max(minOff, Math.Min(maxOff, offset * (1m + jitter)));
+
+        // R4 §0009 Stage 4 — Option D: tilt the limit offset by book imbalance so adding to the
+        // thick side gets pushed further from mid (less crossable) while adding to the thin side
+        // gets pulled closer (more crossable). Addresses the Stage 3 A1 finding that randomized
+        // MM ties built a thicker ask wall with less-aggressive limits that don't get crossed,
+        // crashing throughput. Off ⇒ byte-identical (gain*0 = 0).
+        if (_liquidityAwarePlacement && _liquidityAwareGain > 0m)
+        {
+            try
+            {
+                var book = await _books.GetAsync(stockId, currency, ct).ConfigureAwait(false);
+                if (book is not null)
+                {
+                    var bidDepth = book.SumQuantity(buySide: true);
+                    var askDepth = book.SumQuantity(buySide: false);
+                    var totalDepth = bidDepth + askDepth;
+                    if (totalDepth > 0L)
+                    {
+                        // imbalance ∈ [-1, +1]; positive means bid thicker (sell-takers find easy liquidity).
+                        var imbalance = (decimal)(bidDepth - askDepth) / (decimal)totalDepth;
+                        // BUY adds to bid (dirSign=+1): bid thick ⇒ offset UP (less aggressive bid);
+                        //                                ask thick ⇒ offset DOWN (more aggressive bid → crosses thin ask).
+                        // SELL adds to ask (dirSign=-1): bid thick ⇒ offset DOWN (more aggressive ask → meets bid demand);
+                        //                                ask thick ⇒ offset UP (less aggressive ask).
+                        var dirSign = IsBuyOrder(type) ? 1m : -1m;
+                        offset = offset * (1m + dirSign * imbalance * _liquidityAwareGain);
+                        offset = Math.Max(minOff, Math.Min(maxOff, offset));
+                    }
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { /* defensive: book lookup or sum failed — keep original offset */ }
+        }
 
         var limitPrice = IsBuyOrder(type) ? anchor * (1m - offset) : anchor * (1m + offset);
 

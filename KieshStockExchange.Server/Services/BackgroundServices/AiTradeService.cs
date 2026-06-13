@@ -420,7 +420,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         inventoryBias:             _configuration.GetValue("Bots:Advanced:InventoryBias", false),
                         inventoryBiasThresholdPrc: _configuration.GetValue("Bots:Advanced:InventoryBiasThresholdPrc", 0.05m),
                         // Round 2 Q1 follow-up: short-side multiplier for asymmetric bear-tail compensation.
-                        inventoryBiasShortMult:    _configuration.GetValue("Bots:Advanced:InventoryBiasShortMult", 1m));
+                        inventoryBiasShortMult:    _configuration.GetValue("Bots:Advanced:InventoryBiasShortMult", 1m),
+                        // R4 §0009 Stage 4 — Option D: liquidity-aware limit-offset asymmetry.
+                        liquidityAwarePlacement:   _configuration.GetValue("Bots:LiquidityAwarePlacement", false),
+                        liquidityAwareGain:        _configuration.GetValue("Bots:LiquidityAwareGain", 0m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
