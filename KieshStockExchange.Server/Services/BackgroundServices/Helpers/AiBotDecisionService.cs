@@ -996,9 +996,19 @@ internal sealed class AiBotDecisionService
                 if (o.IsBuyOrder) buys++; else sells++;
             }
         }
-        var choseBuy = buys <= sells;
-        // R4 §0009 Stage 2: MM quote-side probe. Tests the sell-skip-when-no-inventory
-        // hypothesis — a net buy-quote-heavy MM cohort confirms surface (d).
+        // R4 §0009 Stage 3 (A1): symmetric tie-break. The old `buys <= sells` defaulted to BUY
+        // on every tied tick (the steady-state condition for an MM with an empty or balanced
+        // ladder), compounding into a 2.95× net buy-quote bias and a 32%-thicker bid wall
+        // (Stage 2 Block 4). Strict inequalities still steer toward the under-represented side;
+        // ties go 50/50 via the per-bot seeded RNG. The draw is consumed only on the MM path
+        // (early return at :813), so non-MM RNG sequences stay byte-identical.
+        bool choseBuy;
+        if      (buys < sells) choseBuy = true;
+        else if (buys > sells) choseBuy = false;
+        else                   choseBuy = ctx.Decimal01(user.AiUserId) < 0.5m;
+
+        // R4 §0009 Stage 2: MM quote-side probe — schema unchanged so the Stage 2 analysis
+        // script parses cleanly and the A/B soak can compare quote-side ratios directly.
         BotDecisionProbe.RecordMm(user.AiUserId, buys, sells, choseBuy);
         return choseBuy ? OrderType.LimitBuy : OrderType.LimitSell;
     }
