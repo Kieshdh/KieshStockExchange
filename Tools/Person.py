@@ -254,8 +254,17 @@ class Person:
         self.stop_prob          = clamp01(random.uniform(*prof["stop"]))
         self.trailing_prob      = clamp01(random.uniform(*prof["trailing"]))
         self.short_prob         = clamp01(random.uniform(*prof["short"]))
-        self.long_bracket_prob  = clamp01(random.uniform(*prof["long_bracket"]))
-        self.short_bracket_prob = clamp01(random.uniform(*prof["short_bracket"]))
+        # R4 §0009 Stage 6C (2026-06-13): bracket probabilities permanently zeroed across all bots.
+        # The Stage 6C A/B soak showed brackets caused the residual bear-tail asymmetry
+        # (gap 37.7pp → 9.6pp when removed) AND throttled throughput (-43%). The bracket cohort
+        # injects SL-cascade-driven price spikes that aren't realistic and aren't structural to
+        # the bot ecosystem. Stop / trailing / short probabilities remain bot-strategy seeded.
+        # Consume the same two RNG draws to preserve byte-identical determinism for every
+        # downstream draw (per-bot stocks, holdings, etc.).
+        _ = random.uniform(*prof["long_bracket"])
+        _ = random.uniform(*prof["short_bracket"])
+        self.long_bracket_prob  = 0.0
+        self.short_bracket_prob = 0.0
 
     def _tiers(self):
         # §P6 tiered limit ladder + protective-stop band + Far budget. Close is the existing
