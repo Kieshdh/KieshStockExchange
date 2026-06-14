@@ -127,6 +127,30 @@ Each row = one config experiment. Date format: HH:MM UTC.
 | 09:47 | exp16 inertia_xlong | exp11 + Inertia 180-3600s | 48.2 | -0.370 | 0.019 | 0.12 | ~5k | too long — broke lag-5,20 clustering |
 | **CHOICE** | **WINNER = exp11** | Herding + MomConv 0.15 + ScalpConv 0.12 + FatImp 0.04 + Inertia 120-1800s | **73.7** | | | | | Applied to appsettings.json |
 
+## exp11 3.5h confirmation soak (2026-06-14 10:35-14:14 UTC)
+
+Macro health: **excellent and stable across the full run**.
+- avg −1.00% / max +3.17 / min **−4.85** / medianAbs 1.10 / **5,838 trades/min** / 1.23M trades
+- CK = CONS = ERR = 0 throughout, zero shortfalls
+- Drift bounds flat from t=19m to t=219m — no degradation over time
+
+Realism score, window-dependent:
+| Window | Composite | Note |
+|---|---|---|
+| First 45m (the exp11 selection run) | **73.7** | fresh book |
+| Full 3.5h aggregate | 51.7 | longer window dilutes fat tails (itself a stylized fact: kurtosis → Gaussian as Δt grows) |
+| Last 50m (steady state) | 48.4 | deep-book steady state |
+
+**Honest conclusion**: exp11's realism gains are strongest at short timescales / fresh book. In deep-book steady state the multi-lag volatility clustering (lag-5, lag-20 abs-return autocorrelation) fades back toward the baseline level. What HOLDS at all timescales:
+- Candle shape: body/range, wick %, flat % all excellent
+- range_vol_corr stays strong in steady state (0.42)
+- lag-1 vol clustering present (0.18)
+- Macro stability + throughput + conservation
+
+What does NOT hold in steady state: lag-5/lag-20 vol clustering and high kurtosis (both fade as the book deepens and sample count grows).
+
+**Decision**: keep exp11 config (it's the best found, harms nothing — clean conservation, top throughput, tight drift, better candle shape than baseline). The residual `ret_acf_lag1 = −0.47` (bots over-mean-revert at 1-min) and the steady-state clustering fade are engine-level / structural issues beyond config tuning — flagged for a future round.
+
 ## Notes + observations log
 
 | When | Note |
