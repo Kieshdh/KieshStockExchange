@@ -167,3 +167,40 @@ What does NOT hold in steady state: lag-5/lag-20 vol clustering and high kurtosi
 - [Garman-Klass volatility estimator (CME paper)](https://www.cmegroup.com/trading/fx/files/a_estimation_of_security_price.pdf)
 - [Range-Based Volatility Estimators (Portfolio Optimizer)](https://portfoliooptimizer.io/blog/range-based-volatility-estimators-overview-and-examples-of-usage/)
 - [Body Ratio Indicator categories (MarketBulls / FxOpen)](https://market-bulls.com/candlestick-wicks/)
+
+## Steady-state fade root cause + fix (autonomous, 2026-06-14)
+
+ROOT CAUSE: order book grows linearly without bound (bid depth 28k→590k over 3.5h; only 24k of 1.28M orders ever cancelled). Deep book damps volatility → kills clustering → realism fades fresh-73.7 → steady-50.
+
+Experiments:
+| exp | config | book behaviour | steady-state realism | verdict |
+|---|---|---|---|---|
+| exp17 | MaxOpenMult 1.0→0.5 | slower linear growth (178k @ t120 vs 316k), throughput halved to 2k/min | last-50m 65.4 | confirms shallower book = more realistic, but cap doesn't plateau + kills throughput |
+| exp18 | OrderMaxAgeSec=600 (age-expiry) | **PLATEAUS ~48k** at t30-50m, full throughput 5k/min | excursions grew +25/-10 by t120 (book too thin to absorb momentum) | mechanism PROVEN, 600s lifetime too aggressive |
+
+The age-expiry mechanism (commit edb0dea) plateaus the book — the core fix works. 600s lifetime makes the book too thin (momentum runs). Next: longer lifetime (1800s) for a deeper-but-bounded book.
+
+| exp19 | OrderMaxAgeSec=1800 | **PLATEAUS ~117k** (deeper than exp18's 48k), full throughput | drift tight mid-run (max +3.6 @ t60) but late single-stock spike → +12.6 @ t120; last-50m realism noisy (26.6, skewed by 1 trending stock) | deeper book absorbs momentum better than 600s; lifetime tuning is metric-noise-limited |
+
+### Age-expiry conclusion (autonomous session end)
+The mechanism (commit edb0dea) PROVABLY plateaus the otherwise-unbounded book:
+- exp11 (no expiry): 28k→590k+ linear, never plateaus
+- exp18 (600s): plateaus ~48k (too thin → momentum runs, max +25)
+- exp19 (1800s): plateaus ~117k (deeper, drift tighter mid-run, max +12 with a late spike)
+
+Plateau + full throughput + clean conservation all confirmed. BUT the optimal
+lifetime can't be cleanly picked from 2h soaks: (a) lifetime trades book-depth
+against momentum-absorption, (b) the 4-stock realism sample is too noisy — a
+single trending name swings the composite score 20+ points (exp19 last-50m
+collapsed to 26.6 purely from one runaway stock making directional candles).
+
+DECISION: ship the mechanism available but DEFAULT-OFF (Bots:OrderMaxAgeSec=0).
+It harms nothing off, and is independently valuable for bounding the Orders
+table on long production runs. Baking a specific lifetime needs longer soaks +
+a wider realism sample (10-20 stocks, not 4) than this session could run cleanly.
+
+### Tooling limitation found
+scripts/r4_realism_score.py samples only 4 stocks (1 per class). A single
+trending stock skews the composite ±20 points. A future version should sample
+10-20 stocks per run for a stable score. The candle-SHAPE metrics (body/wick)
+are especially sensitive to this; the autocorrelation/clustering metrics less so.
