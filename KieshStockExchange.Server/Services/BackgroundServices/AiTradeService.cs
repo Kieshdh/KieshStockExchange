@@ -333,7 +333,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         conversionSkewBand: _configuration.GetValue("Bots:Arbitrage:ConversionSkewBand", 0.15m));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
-                        distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m));
+                        distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m),
+                        // Realism §: age-based resting-limit-order expiry. 0 = off (default, byte-identical).
+                        // When > 0, the prune sweep cancels open limit orders older than a per-order
+                        // randomized [0.5x, 1.5x] of this lifetime, so the book churns like a real
+                        // market instead of accumulating resting orders without bound.
+                        orderMaxAgeSec: _configuration.GetValue("Bots:OrderMaxAgeSec", 0));
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         _regime, _activity, _priceMemory,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),

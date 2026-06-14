@@ -28,6 +28,13 @@ internal sealed class AiBotStateService
     // distance drift far past it before the straggler cull fires, leaving the book wider than intended.
     private readonly decimal _distanceMult;
 
+    // Realism §: resting-limit-order lifetime in seconds. 0 = disabled (default, byte-identical).
+    // When > 0, PruneWorstOrdersAsync cancels open limit orders past a per-order randomized age so
+    // the book churns instead of accumulating resting orders without bound (the deep-book that damps
+    // steady-state volatility over a long soak). Per-order jitter via an OrderId hash avoids
+    // synchronized mass-cancels that would print an artificial volatility spike.
+    private readonly int _orderMaxAgeSec;
+
     // Throttle "Applied active bot cap" — the scaler may toggle the cap several
     // times per minute when load wobbles. One INFO per change buries everything
     // else; collapse identical state and rate-limit the rest to ApplyCapLogInterval.
@@ -38,7 +45,8 @@ internal sealed class AiBotStateService
 
     internal AiBotStateService(IDataBaseService db, IAccountsCache accounts,
         IOrderExecutionService orders, BotStatsLogger stats,
-        ILogger<AiBotStateService> logger, decimal distanceMult = 1m)
+        ILogger<AiBotStateService> logger, decimal distanceMult = 1m,
+        int orderMaxAgeSec = 0)
     {
         _db       = db       ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
@@ -46,6 +54,7 @@ internal sealed class AiBotStateService
         _stats    = stats    ?? throw new ArgumentNullException(nameof(stats));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
         _distanceMult = distanceMult <= 0m ? 1m : distanceMult;
+        _orderMaxAgeSec = orderMaxAgeSec < 0 ? 0 : orderMaxAgeSec;
     }
     #endregion
 
@@ -226,11 +235,31 @@ internal sealed class AiBotStateService
     internal async Task PruneWorstOrdersAsync(AiBotContext ctx, CancellationToken ct)
     {
         var toCancel = new List<(int userId, Order order)>();
+        // Realism §: age cutoff for resting-limit expiry. Computed once per sweep.
+        var nowUtc = TimeHelper.NowUtc();
+        bool ageExpiry = _orderMaxAgeSec > 0;
 
         foreach (var user in ctx.AiUsersByAiUserId.Values)
         {
             if (!ctx.OpenOrders.TryGetValue(user.UserId, out var userOrders) || userOrders.Count == 0)
                 continue;
+
+            // Rule 0 (realism, flag-gated): expire resting limit orders past their per-order
+            // randomized lifetime so the book churns instead of accumulating forever. Runs even
+            // for bots with no Far band (the FarLimitMax<=0 early-continue below would skip them).
+            if (ageExpiry)
+            {
+                foreach (var o in userOrders.Values)
+                {
+                    if (!o.IsOpenLimitOrder) continue;
+                    // Jitter the lifetime per order in [0.5x, 1.5x] via an OrderId hash (deterministic,
+                    // no RNG draw, no synchronized mass-cancel). Avalanche keeps adjacent ids uncorrelated.
+                    var lifetime = _orderMaxAgeSec * AgeJitterFactor(o.OrderId);
+                    if ((nowUtc - o.CreatedAt).TotalSeconds >= lifetime)
+                        toCancel.Add((user.UserId, o));
+                }
+            }
+
             // Skip bots that pre-date the tier columns (all-zero) — no Far band to reason about.
             if (user.FarLimitMaxPrc <= 0m) continue;
 
@@ -286,11 +315,13 @@ internal sealed class AiBotStateService
         if (toCancel.Count == 0) return;
 
         var ids = new List<int>(toCancel.Count);
+        var seen = new HashSet<int>(toCancel.Count);   // dedup: Rule 0 (age) and Rule 1/2 can both pick an order
         for (int i = 0; i < toCancel.Count; i++)
         {
             var (userId, order) = toCancel[i];
             if (!ctx.OpenOrders.TryGetValue(userId, out var userOrders)) continue;
             if (!userOrders.ContainsKey(order.OrderId)) continue;
+            if (!seen.Add(order.OrderId)) continue;
             ids.Add(order.OrderId);
         }
         if (ids.Count == 0) return;
@@ -338,6 +369,20 @@ internal sealed class AiBotStateService
                 failed, results.Count, firstFailedId, firstFailedStatus);
 
         if (pruned > 0) _stats.AddCancelled(pruned);
+    }
+
+    // Realism §: per-order lifetime jitter in [0.5, 1.5] from an OrderId avalanche hash. Deterministic
+    // and RNG-free (no draw, call-order-independent) so flag-on stays reproducible; spreads expiries so
+    // the book churns smoothly instead of mass-cancelling a whole cohort on one sweep.
+    private static double AgeJitterFactor(int orderId)
+    {
+        unchecked
+        {
+            ulong h = (ulong)orderId * 0x9E3779B97F4A7C15UL + 0x165667B19E3779F9UL;
+            h ^= h >> 33; h *= 0xFF51AFD7ED558CCDUL; h ^= h >> 33;
+            double u = (h & 0xFFFFFFFFUL) / (double)0xFFFFFFFFUL;   // [0,1]
+            return 0.5 + u;                                         // [0.5, 1.5]
+        }
     }
     #endregion
 }
