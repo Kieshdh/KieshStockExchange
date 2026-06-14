@@ -204,3 +204,24 @@ scripts/r4_realism_score.py samples only 4 stocks (1 per class). A single
 trending stock skews the composite ±20 points. A future version should sample
 10-20 stocks per run for a stable score. The candle-SHAPE metrics (body/wick)
 are especially sensitive to this; the autocorrelation/clustering metrics less so.
+
+## FINAL CONCLUSION (autonomous session, 2026-06-15)
+
+### What ships (all committed on feature/bot-market-realism-v2)
+1. **Brackets disabled** (8fb220a) — the dominant win. Gap 37.7→9.6pp, throughput +43%, holds at all timescales.
+2. **exp11 emergent-dynamics config** (75ad9a3) — Herding + sentiment boost + stretched inertia (120-1800s). Realism 73.7 fresh-book / ~50 steady.
+3. **Age-based order expiry** (edb0dea) — `Bots:OrderMaxAgeSec`, DEFAULT-OFF. Proven to plateau the otherwise-unbounded book (28k→590k becomes a stable ~110k at 1800s). Available for production book/DB-health; lifetime not baked pending wider validation.
+4. **16-stock realism scorer** (b4a1e7a) — `scripts/r4_realism_score.py --per-class 4`.
+
+### The realism ceiling: ret_acf_lag1
+Across all 19 experiments the composite steady-state score sits ~48-52, gated by TWO metrics stuck at 0%:
+- **ret_acf_lag1 ≈ -0.43** (1-min return autocorrelation). Real markets ≈ 0 (slight negative from bid-ask bounce). Ours is strongly negative = bots over-mean-revert at the 1-min scale. NO config knob moved this — inertia, herding, momentum conviction, reversion conviction, value/recent anchor strength, cash-homeostasis maxshift were all tried. It is STRUCTURAL: the per-tick decision re-evaluation + the anchor/reversion forces create 1-min mean reversion by design.
+- **tail_alpha** (Hill estimator) reads n/a or 0% — needs more tail samples per stock than a 50-min window provides; not a real failure, a measurement artifact.
+
+Everything else is good-to-excellent at steady state: candle shape (body/wick/flat), range-volume correlation, kurtosis (window-dependent), lag-1 vol clustering.
+
+### Recommendation for a future round (needs user input / engine work, not config)
+To break the ret_acf_lag1 ceiling: make bots NOT react to their own ~1-min-ago price impact. Options: (a) decision cadence decoupled from the 1-min candle (bots already decide on their own DecisionInterval, but the anchors recompute every tick) — slow the anchor recompute to a multi-minute cadence; (b) add a per-bot "reaction lag" so the cohort's response to a move is spread over minutes (the Lateness field exists but is under-used); (c) reduce the reversion/anchor pull further AND replace the lost price-bounding with a slower band. All are engine/design changes warranting a proper round.
+
+### Production-readiness of the shipped branch
+brackets-off + exp11 config: conservation clean across every soak (CK=CONS=ERR=0), throughput 5k+/min, drift bounded, candle shape realistic. The steady-state book growth (the one production concern) has a ready opt-in fix (OrderMaxAgeSec). Branch is shippable; the ret_acf_lag1 realism nuance is a known, documented, non-blocking limitation.
