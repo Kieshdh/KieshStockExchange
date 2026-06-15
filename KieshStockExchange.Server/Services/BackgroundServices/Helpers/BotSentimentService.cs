@@ -90,6 +90,20 @@ internal sealed class BotSentimentService
     private readonly Dictionary<int, double> _slopePrev = new(); // stockId → previous combined value (double)
     private readonly Dictionary<int, double> _dsFast    = new(); // stockId → fast EWMA slope
     private readonly Dictionary<int, double> _dsSlow    = new(); // stockId → slow EWMA slope
+
+    // Realism §price-reaction (#2): contrarian feedback so a SUSTAINED price move pushes sentiment the
+    // OTHER way (breaks the linear drift a long-lived slow ring otherwise prints). Leaky-integrates the
+    // per-tick return over τ — that sum ≈ the fractional move over the window and is tick-rate-stable —
+    // dead-bands small moves (so tick noise / the 1-min scale is left alone), and adds a clamped
+    // contrarian term to combined. Additive + RNG-free ⇒ flag-off is byte-identical AND flag-on leaves
+    // the OU rings' sequence untouched (the reaction rides on top).
+    private readonly bool   _priceReaction;
+    private readonly double _reactStrength;
+    private readonly double _reactTauSec;
+    private readonly double _reactDeadband;
+    private readonly double _reactCap;
+    private readonly Func<int, double>? _recentReturn;
+    private readonly Dictionary<int, double> _cumRet = new(); // leaky-integrated recent return per stock
     #endregion
 
     #region Services and Constructor
@@ -105,7 +119,10 @@ internal sealed class BotSentimentService
         bool newsEvents = true, double shockMeanIntervalHours = 6.0,
         decimal shockMinMagnitude = 0.3m, decimal shockMaxMagnitude = 1.5m,
         double shockMagnitudeExponent = 3.0, decimal shockDecayPerTick = 0.999m,
-        bool slopeEnabled = false, double slopeTauFastSec = 45.0, double slopeTauSlowSec = 180.0)
+        bool slopeEnabled = false, double slopeTauFastSec = 45.0, double slopeTauSlowSec = 180.0,
+        Func<int, double>? recentReturn = null,
+        bool priceReaction = false, double reactStrength = 6.0, double reactTauSec = 300.0,
+        double reactDeadband = 0.01, double reactCap = 0.40)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -119,6 +136,12 @@ internal sealed class BotSentimentService
         _slopeEnabled    = slopeEnabled;
         _slopeTauFastSec = Math.Max(MinDtSec, slopeTauFastSec);
         _slopeTauSlowSec = Math.Max(_slopeTauFastSec, slopeTauSlowSec);
+        _recentReturn   = recentReturn;
+        _priceReaction  = priceReaction;
+        _reactStrength  = Math.Max(0.0, reactStrength);
+        _reactTauSec    = Math.Max(MinDtSec, reactTauSec);
+        _reactDeadband  = Math.Max(0.0, reactDeadband);
+        _reactCap       = Math.Max(0.0, reactCap);
         _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
         var prior = _store.LoadTail(RecentSamplesMax);
@@ -182,6 +205,18 @@ internal sealed class BotSentimentService
                 sum += ring[k];
             }
             if (_shock.TryGetValue(sid, out var sh)) sum += sh;
+
+            // §price-reaction (#2): contrarian push from the stock's own sustained move. Leaky-integrate
+            // the per-tick return over τ (≈ fractional move over the window, tick-rate-stable), dead-band
+            // small moves, and add a clamped OPPOSITE-sign term so a multi-minute up-drift bends back down.
+            if (_priceReaction && _recentReturn != null)
+            {
+                double keep = Math.Exp(-dt / _reactTauSec);
+                double cum = keep * _cumRet.GetValueOrDefault(sid) + _recentReturn(sid);
+                _cumRet[sid] = cum;
+                sum += Math.Clamp(-_reactStrength * Deadband(cum, _reactDeadband), -_reactCap, _reactCap);
+            }
+
             _combined[sid] = (decimal)sum;
 
             // Sentiment-dynamics §: two-timescale EWMA of the slope (sign = trend direction, magnitude =
@@ -210,6 +245,14 @@ internal sealed class BotSentimentService
         double raw  = (sNow - sPrev) / dt;
         double keep = Math.Exp(-dt / Math.Max(MinDtSec, tauSec));
         return keep * dsPrev + (1.0 - keep) * raw;
+    }
+
+    // §price-reaction (#2): signed dead-band — zero within ±band, pass only the excess beyond it.
+    internal static double Deadband(double x, double band)
+    {
+        if (band <= 0.0) return x;
+        double m = Math.Abs(x) - band;
+        return m <= 0.0 ? 0.0 : (x < 0.0 ? -m : m);
     }
 
     // Unit-variance draw: U(-1,1)*√3.
@@ -339,6 +382,7 @@ internal sealed class BotSentimentService
         _slopePrev.Clear();
         _dsFast.Clear();
         _dsSlow.Clear();
+        _cumRet.Clear();
         lock (_samples) _samples.Clear();
 
         _globalSum = 0.0;

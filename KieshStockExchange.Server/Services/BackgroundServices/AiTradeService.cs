@@ -296,7 +296,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         shockDecayPerTick:       _configuration.GetValue("Bots:ShockDecayPerTick", 0.999m),
                         slopeEnabled:            sentimentDynamics,
                         slopeTauFastSec:         _configuration.GetValue("Bots:SentimentDynamics:SlopeTauFastSec", 45.0),
-                        slopeTauSlowSec:         _configuration.GetValue("Bots:SentimentDynamics:SlopeTauSlowSec", 180.0));
+                        slopeTauSlowSec:         _configuration.GetValue("Bots:SentimentDynamics:SlopeTauSlowSec", 180.0),
+                        // §price-reaction (#2): contrarian sentiment feedback on sustained moves. Default-off.
+                        recentReturn:            RecentReturnForActivity,
+                        priceReaction:           _configuration.GetValue("Bots:Sentiment:PriceReaction", false),
+                        reactStrength:           _configuration.GetValue("Bots:Sentiment:ReactStrength", 6.0),
+                        reactTauSec:             _configuration.GetValue("Bots:Sentiment:ReactTauSec", 300.0),
+                        reactDeadband:           _configuration.GetValue("Bots:Sentiment:ReactDeadband", 0.01),
+                        reactCap:                _configuration.GetValue("Bots:Sentiment:ReactCap", 0.40));
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
