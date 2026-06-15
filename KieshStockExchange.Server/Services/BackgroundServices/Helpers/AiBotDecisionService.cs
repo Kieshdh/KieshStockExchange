@@ -160,6 +160,9 @@ internal sealed class AiBotDecisionService
     private readonly decimal _anchorLagMinAlpha;     // B: EWMA alpha for max-Lateness bots (L=1, slowest)
     private readonly decimal _anchorLagMaxAlpha;     // B: EWMA alpha for min-Lateness bots (L=0, fastest)
     private readonly decimal _anchorDeadbandPrc;     // C: deviation band where anchors hold no pull (0 = off)
+    // Order-wall declumping: round-number snapping config. Default prob 0.30 + spread 0 ⇒ today's exact snap.
+    private readonly decimal _roundSnapProb;          // fraction of limit orders that snap toward a round level
+    private readonly decimal _roundSnapSpread;        // 0 = exact snap (wall); >0 disperses within ±spread*unit
     // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
@@ -278,7 +281,10 @@ internal sealed class AiBotDecisionService
         bool anchorReactionLag = false,
         decimal anchorLagMinAlpha = 0.05m,
         decimal anchorLagMaxAlpha = 0.30m,
-        decimal anchorDeadbandPrc = 0m)
+        decimal anchorDeadbandPrc = 0m,
+        // Order-wall declumping (round-number snap). Defaults reproduce the prior exact 30% snap.
+        decimal roundSnapProb = 0.30m,
+        decimal roundSnapSpread = 0m)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -372,6 +378,9 @@ internal sealed class AiBotDecisionService
         _anchorLagMaxAlpha         = anchorLagMaxAlpha < _anchorLagMinAlpha ? _anchorLagMinAlpha : (anchorLagMaxAlpha > 1m ? 1m : anchorLagMaxAlpha);
         // R5 §C: deviation band where anchors hold no pull (0 = off).
         _anchorDeadbandPrc         = anchorDeadbandPrc < 0m ? 0m : anchorDeadbandPrc;
+        // Order-wall declumping: clamp prob to [0,1]; spread floored at 0 (0 ⇒ exact snap, byte-identical).
+        _roundSnapProb             = roundSnapProb < 0m ? 0m : (roundSnapProb > 1m ? 1m : roundSnapProb);
+        _roundSnapSpread           = roundSnapSpread < 0m ? 0m : roundSnapSpread;
     }
     #endregion
 
@@ -1208,9 +1217,13 @@ internal sealed class AiBotDecisionService
 
         var limitPrice = IsBuyOrder(type) ? anchor * (1m - offset) : anchor * (1m + offset);
 
-        // ~30% chance: snap toward a psychologically significant round level
-        if (ctx.Decimal01(user.AiUserId) < 0.30m)
-            limitPrice = SnapToRoundNumber(limitPrice);
+        // Round-number attraction: a fraction of limit orders snap toward a psychologically significant
+        // level. Soft-snap (RoundSnapSpread>0) disperses them within ±spread·unit so volume forms a
+        // natural cluster near the level instead of one impassable wall. The dispersion draw is taken
+        // ONLY when spread>0 (ternary short-circuits), so prob 0.30 + spread 0 ⇒ today's exact snap.
+        if (ctx.Decimal01(user.AiUserId) < _roundSnapProb)
+            limitPrice = SnapToRoundNumber(limitPrice, _roundSnapSpread,
+                _roundSnapSpread > 0m ? ctx.Decimal01(user.AiUserId) : 0m);
 
         return CurrencyHelper.RoundMoney(limitPrice, currency);
     }
@@ -1878,7 +1891,10 @@ internal sealed class AiBotDecisionService
         return homeostatic;
     }
 
-    private static decimal SnapToRoundNumber(decimal price)
+    // Snap a price toward the nearest psychologically-significant level. spread>0 disperses the result
+    // within ±spread·unit of that level (jitter01 ∈ [0,1] is the dispersion draw) so a cohort of snapped
+    // orders forms a soft cluster across nearby ticks instead of one monolithic wall. spread=0 ⇒ exact.
+    internal static decimal SnapToRoundNumber(decimal price, decimal spread = 0m, decimal jitter01 = 0m)
     {
         decimal unit = price switch
         {
@@ -1887,7 +1903,10 @@ internal sealed class AiBotDecisionService
             >= 20m  => 0.50m,
             _       => 0.10m
         };
-        return Math.Max(0.01m, Math.Round(price / unit) * unit);
+        var rounded = Math.Max(0.01m, Math.Round(price / unit) * unit);
+        if (spread <= 0m) return rounded;
+        var disperse = (jitter01 * 2m - 1m) * spread * unit;   // ±spread·unit around the level
+        return Math.Max(0.01m, rounded + disperse);
     }
     #endregion
 }

@@ -433,7 +433,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         anchorReactionLag:         _configuration.GetValue("Bots:AnchorReactionLag", false),
                         anchorLagMinAlpha:         _configuration.GetValue("Bots:AnchorLagMinAlpha", 0.05m),
                         anchorLagMaxAlpha:         _configuration.GetValue("Bots:AnchorLagMaxAlpha", 0.30m),
-                        anchorDeadbandPrc:         _configuration.GetValue("Bots:AnchorDeadbandPrc", 0m));
+                        anchorDeadbandPrc:         _configuration.GetValue("Bots:AnchorDeadbandPrc", 0m),
+                        // Order-wall declumping: soft round-number snap. Defaults = prior exact 30% snap.
+                        roundSnapProb:             _configuration.GetValue("Bots:RoundSnapProb", 0.30m),
+                        roundSnapSpread:           _configuration.GetValue("Bots:RoundSnapSpread", 0m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
