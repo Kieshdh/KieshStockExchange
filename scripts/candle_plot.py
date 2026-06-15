@@ -56,6 +56,46 @@ def load(db, since, bucket):
         s[int(p[0])].append((float(p[1]), float(p[2]), float(p[3]), float(p[4]), float(p[5]), float(p[6])))
     return s
 
+def load_csv(path):
+    # Read 1-min OHLCV produced by candle_export.py. stock_id -> list[(epoch,o,h,l,c,v)] in bucket order.
+    s = defaultdict(list)
+    with open(path, encoding="utf-8") as f:
+        for ln in f.read().splitlines()[1:]:  # skip header
+            p = ln.split(",")
+            if len(p) < 7:
+                continue
+            s[int(p[0])].append((float(p[1]), float(p[2]), float(p[3]), float(p[4]), float(p[5]), float(p[6])))
+    for sid in s:
+        s[sid].sort()
+    return s
+
+def aggregate(series, bucket_sec):
+    # Re-bucket 1-min candles up to a higher timeframe: open=first, high=max, low=min, close=last, vol=sum.
+    if bucket_sec <= 60:
+        return series
+    out = defaultdict(list)
+    for sid, bars in series.items():
+        cur_key = None; o = h = l = c = 0.0; v = 0.0; t0 = 0.0
+        for (t, bo, bh, bl, bc, bv) in bars:
+            k = int(t // bucket_sec)
+            if k != cur_key:
+                if cur_key is not None:
+                    out[sid].append((t0, o, h, l, c, v))
+                cur_key = k; t0 = t; o = bo; h = bh; l = bl; c = bc; v = bv
+            else:
+                h = max(h, bh); l = min(l, bl); c = bc; v += bv
+        if cur_key is not None:
+            out[sid].append((t0, o, h, l, c, v))
+    return out
+
+def window_tail(series, window_min):
+    # Keep only the last window_min minutes RELATIVE to the data's own max epoch (CSV is historical).
+    if window_min <= 0:
+        return series
+    maxt = max((bars[-1][0] for bars in series.values() if bars), default=0)
+    cut = maxt - window_min * 60
+    return {sid: [b for b in bars if b[0] >= cut] for sid, bars in series.items()}
+
 def pick(series, n_per_class=1):
     by = defaultdict(list)
     for sid, pts in series.items():
@@ -93,6 +133,7 @@ def draw(ax, candles, title):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default="kse_soak")
+    ap.add_argument("--csv", default="", help="read 1-min candles from candle_export.py CSV instead of the DB")
     ap.add_argument("--bucket-sec", type=int, default=60)
     ap.add_argument("--window-min", type=float, default=20.0)
     ap.add_argument("--stocks", default="")
@@ -100,8 +141,13 @@ def main():
     ap.add_argument("--title", default="")
     args = ap.parse_args()
 
-    since = datetime.now(timezone.utc).timestamp() - args.window_min * 60
-    series = load(args.db, since, args.bucket_sec)
+    if args.csv:
+        # Pipeline step 5: CSV (1-min) -> aggregate to target timeframe -> image.
+        series = window_tail(aggregate(load_csv(args.csv), args.bucket_sec), args.window_min)
+    else:
+        since = datetime.now(timezone.utc).timestamp() - args.window_min * 60
+        series = load(args.db, since, args.bucket_sec)
+    series = {sid: bars for sid, bars in series.items() if bars}
     if not series:
         sys.exit("no candles in window")
 

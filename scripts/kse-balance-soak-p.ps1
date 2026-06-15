@@ -62,4 +62,10 @@ finally {
     Write-Host "[$(Stamp)] [$Db] stopping server (pid $($proc.Id))"
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
   }
+  # Pipeline: persist 1-min candles to CSV so the soak is reviewable/comparable after the DB is overwritten.
+  try {
+    $env:PYTHONIOENCODING = "utf-8"
+    $csv = "$root\logs\candles-$Db-$ts.csv"
+    & python "$root\scripts\candle_export.py" --db $Db --out $csv | Write-Host
+  } catch { Write-Host "[$(Stamp)] [$Db] candle export skipped: $_" }
 }
