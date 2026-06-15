@@ -385,7 +385,22 @@ public partial class ChartViewModel : StockAwareViewModel
         // Render fills already cached for the new stock, then pull the latest in the background
         // (RefreshAsync raises TransactionsChanged → SyncFillMarkers when it completes).
         SyncFillMarkers();
-        _ = _transactions.RefreshAsync(null, ct);
+        // Best-effort background pull — a transient transport fault (cancel/disconnect under load)
+        // is non-fatal (fills also arrive via TransactionsChanged) and must not fault the
+        // unobserved-task net. Genuine exceptions still propagate.
+        _ = SafeBackgroundTxRefresh(ct);
+    }
+
+    private async Task SafeBackgroundTxRefresh(CancellationToken ct)
+    {
+        try { await _transactions.RefreshAsync(null, ct).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is OperationCanceledException
+                                      or System.Net.Http.HttpRequestException
+                                      or System.IO.IOException)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[ChartViewModel] background tx refresh skipped (transient): {ex.Message}");
+        }
     }
 
     protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency,
