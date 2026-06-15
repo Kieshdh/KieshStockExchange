@@ -94,11 +94,29 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
         RefreshAll();
         // Kick async remote refreshes so the Activity card reflects the latest tape on first nav
         // even if the user hasn't visited the trade-history or portfolio views this session.
-        _ = _transactions.RefreshAsync(null);
-        _ = _stocks.EnsureLoadedAsync();
+        _ = KickBestEffort(_transactions.RefreshAsync(null), _stocks.EnsureLoadedAsync());
     }
 
     public void Refresh() => RefreshAll();
+
+    // First-nav warm-up refreshes are best-effort — the cards also refresh via the service change
+    // events — so a transient transport fault (cancel / premature-disconnect / IO, common when the
+    // bot-busy server cuts a read) must not fault the unobserved-task net with scary noise. Swallow
+    // those quietly; a genuinely unexpected exception still propagates so the global net logs it.
+    private static async Task KickBestEffort(params Task[] tasks)
+    {
+        foreach (var t in tasks)
+        {
+            try { await t.ConfigureAwait(false); }
+            catch (Exception ex) when (ex is OperationCanceledException
+                                          or System.Net.Http.HttpRequestException
+                                          or System.IO.IOException)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[AccountViewModel] best-effort refresh skipped (transient): {ex.Message}");
+            }
+        }
+    }
 
     // Base-currency switch needs RefreshFunds too -- the funds card formats
     // against the session's base currency.
