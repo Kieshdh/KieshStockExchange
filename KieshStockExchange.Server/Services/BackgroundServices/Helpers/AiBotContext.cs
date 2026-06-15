@@ -57,6 +57,11 @@ internal sealed class AiBotContext
     // on ClearAll. Empty (and never touched) when Bots:AnchorReactionLag is off.
     internal readonly Dictionary<(int userId, CurrencyType ccy), decimal> AnchorTiltLag = new();
 
+    // #1: per-(userId, currency) PERCEIVED directional tilt (EWMA). Same Lateness-staggered lag as the
+    // anchor, but on the FAST directional/sentiment loop — the slope reaction the bounce diagnostic
+    // implicated as the genuine 1-min mean-reversion driver. NOT cleared per tick; cleared on ClearAll.
+    internal readonly Dictionary<(int userId, CurrencyType ccy), decimal> DirectionalLag = new();
+
     // Reset by CheckDailyRefresh so a tx that fills across the day boundary isn't double-counted.
     internal readonly HashSet<int>              ProcessedTxIds = new();
 
@@ -302,6 +307,7 @@ internal sealed class AiBotContext
         BurstEndTimes.Clear();
         Stances.Clear();
         AnchorTiltLag.Clear();
+        DirectionalLag.Clear();
         ProcessedTxIds.Clear();
         LastRefreshDate = DateOnly.MinValue;
         // §patch 0001: per-tick caches also cleared on full reset.
@@ -314,18 +320,28 @@ internal sealed class AiBotContext
     private static decimal Clamp01(decimal x) => x < 0m ? 0m : x > 1m ? 1m : x;
 
     // R5 §B: EWMA the perceived anchor tilt toward the true tilt at a per-bot rate set by Lateness.
-    // alpha = maxAlpha − L·(maxAlpha − minAlpha): L=0 → maxAlpha (fast); L=1 → minAlpha (slow). Seeds at
-    // the target on first sight (no startup transient). Pure/deterministic — no RNG. Per-decision EWMA,
-    // so bots that decide more often track faster in wall-clock terms (active traders react faster).
     internal decimal LaggedAnchorTilt(int userId, CurrencyType ccy, decimal target, decimal lateness,
         decimal minAlpha, decimal maxAlpha)
+        => LaggedEwma(AnchorTiltLag, userId, ccy, target, lateness, minAlpha, maxAlpha);
+
+    // #1: EWMA the perceived directional tilt — same mechanism, on the fast slope/sentiment loop.
+    internal decimal LaggedDirectional(int userId, CurrencyType ccy, decimal target, decimal lateness,
+        decimal minAlpha, decimal maxAlpha)
+        => LaggedEwma(DirectionalLag, userId, ccy, target, lateness, minAlpha, maxAlpha);
+
+    // Per-(bot,ccy) Lateness-staggered EWMA toward a target. alpha = maxAlpha − L·(maxAlpha − minAlpha):
+    // L=0 → maxAlpha (fast); L=1 → minAlpha (slow). Seeds at the target on first sight (no startup
+    // transient). Pure/deterministic — no RNG. Per-decision EWMA, so bots that decide more often track
+    // faster in wall-clock terms (active traders react faster).
+    private static decimal LaggedEwma(Dictionary<(int userId, CurrencyType ccy), decimal> store,
+        int userId, CurrencyType ccy, decimal target, decimal lateness, decimal minAlpha, decimal maxAlpha)
     {
         var L = Clamp01(lateness);
         var alpha = maxAlpha - L * (maxAlpha - minAlpha);
         var key = (userId, ccy);
-        var prev = AnchorTiltLag.TryGetValue(key, out var p) ? p : target;
+        var prev = store.TryGetValue(key, out var p) ? p : target;
         var next = prev + alpha * (target - prev);
-        AnchorTiltLag[key] = next;
+        store[key] = next;
         return next;
     }
     #endregion

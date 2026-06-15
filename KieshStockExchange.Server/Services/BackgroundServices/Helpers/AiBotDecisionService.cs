@@ -163,6 +163,10 @@ internal sealed class AiBotDecisionService
     // Order-wall declumping: round-number snapping config. Default prob 0.30 + spread 0 ⇒ today's exact snap.
     private readonly decimal _roundSnapProb;          // fraction of limit orders that snap toward a round level
     private readonly decimal _roundSnapSpread;        // 0 = exact snap (wall); >0 disperses within ±spread*unit
+    // #1: Lateness-staggered lag on the FAST directional/sentiment loop (the genuine 1-min MR driver).
+    private readonly bool    _directionalReactionLag; // default off ⇒ byte-identical
+    private readonly decimal _dirLagMinAlpha;         // EWMA alpha for max-Lateness bots (slowest)
+    private readonly decimal _dirLagMaxAlpha;         // EWMA alpha for min-Lateness bots (fastest)
     // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
@@ -284,7 +288,11 @@ internal sealed class AiBotDecisionService
         decimal anchorDeadbandPrc = 0m,
         // Order-wall declumping (round-number snap). Defaults reproduce the prior exact 30% snap.
         decimal roundSnapProb = 0.30m,
-        decimal roundSnapSpread = 0m)
+        decimal roundSnapSpread = 0m,
+        // #1: Lateness-staggered lag on the directional/sentiment loop. Default off ⇒ byte-identical.
+        bool directionalReactionLag = false,
+        decimal dirLagMinAlpha = 0.05m,
+        decimal dirLagMaxAlpha = 0.30m)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -381,6 +389,10 @@ internal sealed class AiBotDecisionService
         // Order-wall declumping: clamp prob to [0,1]; spread floored at 0 (0 ⇒ exact snap, byte-identical).
         _roundSnapProb             = roundSnapProb < 0m ? 0m : (roundSnapProb > 1m ? 1m : roundSnapProb);
         _roundSnapSpread           = roundSnapSpread < 0m ? 0m : roundSnapSpread;
+        // #1: directional-loop lag — same band-clamp shape as the R5 anchor lag.
+        _directionalReactionLag    = directionalReactionLag;
+        _dirLagMinAlpha            = dirLagMinAlpha < 0m ? 0m : (dirLagMinAlpha > 1m ? 1m : dirLagMinAlpha);
+        _dirLagMaxAlpha            = dirLagMaxAlpha < _dirLagMinAlpha ? _dirLagMinAlpha : (dirLagMaxAlpha > 1m ? 1m : dirLagMaxAlpha);
     }
     #endregion
 
@@ -912,6 +924,13 @@ internal sealed class AiBotDecisionService
             var sentimentClamped = ClampSigned(AverageWatchlistSentiment(ctx, user, currency), 1m);
             directional += sentimentClamped * _sentimentMaxBias;
         }
+
+        // #1: per-bot Lateness lag on the fast directional/sentiment reaction (per-(bot,ccy) EWMA,
+        // persists across ticks). Staggers the cohort's slope reaction so the synchronized next-minute
+        // overcorrection — the genuine ~−0.31 mean-reversion the bounce diagnostic isolated — is smeared.
+        if (_directionalReactionLag)
+            directional = ctx.LaggedDirectional(user.UserId, currency, directional, user.Lateness,
+                _dirLagMinAlpha, _dirLagMaxAlpha);
 
         // §A4 role split: flatten the noise cohort's DIRECTIONAL part (cash homeostasis untouched) so it
         // stops diluting the directional cohort. Followers (and everyone when the flag is off) keep ×1.
