@@ -428,7 +428,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         inventoryBiasShortMult:    _configuration.GetValue("Bots:Advanced:InventoryBiasShortMult", 1m),
                         // R4 §0009 Stage 4 — Option D: liquidity-aware limit-offset asymmetry.
                         liquidityAwarePlacement:   _configuration.GetValue("Bots:LiquidityAwarePlacement", false),
-                        liquidityAwareGain:        _configuration.GetValue("Bots:LiquidityAwareGain", 0m));
+                        liquidityAwareGain:        _configuration.GetValue("Bots:LiquidityAwareGain", 0m),
+                        // R5 §B+C anchor-timing fix (breaks the −0.43 1-min return autocorrelation). Default-off.
+                        anchorReactionLag:         _configuration.GetValue("Bots:AnchorReactionLag", false),
+                        anchorLagMinAlpha:         _configuration.GetValue("Bots:AnchorLagMinAlpha", 0.05m),
+                        anchorLagMaxAlpha:         _configuration.GetValue("Bots:AnchorLagMaxAlpha", 0.30m),
+                        anchorDeadbandPrc:         _configuration.GetValue("Bots:AnchorDeadbandPrc", 0m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);

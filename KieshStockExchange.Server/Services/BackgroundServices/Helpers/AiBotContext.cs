@@ -51,6 +51,12 @@ internal sealed class AiBotContext
     // tick. Keyed by aiUserId, mirroring BurstEndTimes. Empty (and never touched) when the flag is off.
     internal readonly Dictionary<int, (sbyte dir, DateTime until)> Stances = new();
 
+    // R5 §B: per-(userId, currency) PERCEIVED anchor tilt (EWMA). A bot's slowly-updating view of the
+    // true anchor tilt — staggered by its Lateness so the cohort's correction spreads across minutes
+    // instead of snapping back in lockstep. NOT cleared per tick (it's persistent state); cleared only
+    // on ClearAll. Empty (and never touched) when Bots:AnchorReactionLag is off.
+    internal readonly Dictionary<(int userId, CurrencyType ccy), decimal> AnchorTiltLag = new();
+
     // Reset by CheckDailyRefresh so a tx that fills across the day boundary isn't double-counted.
     internal readonly HashSet<int>              ProcessedTxIds = new();
 
@@ -295,6 +301,7 @@ internal sealed class AiBotContext
         SmoothedPrices.Clear();
         BurstEndTimes.Clear();
         Stances.Clear();
+        AnchorTiltLag.Clear();
         ProcessedTxIds.Clear();
         LastRefreshDate = DateOnly.MinValue;
         // §patch 0001: per-tick caches also cleared on full reset.
@@ -305,5 +312,21 @@ internal sealed class AiBotContext
     }
 
     private static decimal Clamp01(decimal x) => x < 0m ? 0m : x > 1m ? 1m : x;
+
+    // R5 §B: EWMA the perceived anchor tilt toward the true tilt at a per-bot rate set by Lateness.
+    // alpha = maxAlpha − L·(maxAlpha − minAlpha): L=0 → maxAlpha (fast); L=1 → minAlpha (slow). Seeds at
+    // the target on first sight (no startup transient). Pure/deterministic — no RNG. Per-decision EWMA,
+    // so bots that decide more often track faster in wall-clock terms (active traders react faster).
+    internal decimal LaggedAnchorTilt(int userId, CurrencyType ccy, decimal target, decimal lateness,
+        decimal minAlpha, decimal maxAlpha)
+    {
+        var L = Clamp01(lateness);
+        var alpha = maxAlpha - L * (maxAlpha - minAlpha);
+        var key = (userId, ccy);
+        var prev = AnchorTiltLag.TryGetValue(key, out var p) ? p : target;
+        var next = prev + alpha * (target - prev);
+        AnchorTiltLag[key] = next;
+        return next;
+    }
     #endregion
 }

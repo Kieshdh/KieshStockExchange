@@ -155,6 +155,11 @@ internal sealed class AiBotDecisionService
     private readonly bool    _recentAnchorEnabled;
     private readonly decimal _recentAnchorStrength;
     private readonly decimal _recentAnchorScale;
+    // R5 anchor-timing fix (Options B + C). All default-off ⇒ byte-identical.
+    private readonly bool    _anchorReactionLag;     // B: per-bot Lateness EWMA on the anchor tilt
+    private readonly decimal _anchorLagMinAlpha;     // B: EWMA alpha for max-Lateness bots (L=1, slowest)
+    private readonly decimal _anchorLagMaxAlpha;     // B: EWMA alpha for min-Lateness bots (L=0, fastest)
+    private readonly decimal _anchorDeadbandPrc;     // C: deviation band where anchors hold no pull (0 = off)
     // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
@@ -268,7 +273,12 @@ internal sealed class AiBotDecisionService
         // R4 §0009 Stage 4 — Option D: liquidity-aware limit-offset asymmetry. Default off
         // (gain = 0 ⇒ no adjustment). When on, the limit offset is tilted by book imbalance.
         bool liquidityAwarePlacement = false,
-        decimal liquidityAwareGain = 0m)
+        decimal liquidityAwareGain = 0m,
+        // R5 §B+C anchor-timing fix. All default-off ⇒ byte-identical.
+        bool anchorReactionLag = false,
+        decimal anchorLagMinAlpha = 0.05m,
+        decimal anchorLagMaxAlpha = 0.30m,
+        decimal anchorDeadbandPrc = 0m)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -356,6 +366,12 @@ internal sealed class AiBotDecisionService
         // R4 §0009 Stage 4 — Option D: clamp gain to [0, 1] so the offset multiplier stays in [0, 2].
         _liquidityAwarePlacement   = liquidityAwarePlacement;
         _liquidityAwareGain        = liquidityAwareGain < 0m ? 0m : (liquidityAwareGain > 1m ? 1m : liquidityAwareGain);
+        // R5 §B: clamp alpha floor to [0,1], then the fast cap to [floor,1] so the band is never inverted.
+        _anchorReactionLag         = anchorReactionLag;
+        _anchorLagMinAlpha         = anchorLagMinAlpha < 0m ? 0m : (anchorLagMinAlpha > 1m ? 1m : anchorLagMinAlpha);
+        _anchorLagMaxAlpha         = anchorLagMaxAlpha < _anchorLagMinAlpha ? _anchorLagMinAlpha : (anchorLagMaxAlpha > 1m ? 1m : anchorLagMaxAlpha);
+        // R5 §C: deviation band where anchors hold no pull (0 = off).
+        _anchorDeadbandPrc         = anchorDeadbandPrc < 0m ? 0m : anchorDeadbandPrc;
     }
     #endregion
 
@@ -905,7 +921,9 @@ internal sealed class AiBotDecisionService
         var anchorTilt = 0m;
         if (_valueAnchorStrength > 0m)
         {
-            var gap = AverageWatchlistValueGap(ctx, user, currency) / _valueAnchorScale;
+            // R5 §C: dead-band the raw deviation (fraction of price) before scaling — inside the band the
+            // anchor exerts zero pull (price wanders freely, ret_acf→0 there); only the excess corrects.
+            var gap = ApplyAnchorDeadband(AverageWatchlistValueGap(ctx, user, currency)) / _valueAnchorScale;
             anchorTilt = gap * _valueAnchorStrength;
         }
 
@@ -916,9 +934,15 @@ internal sealed class AiBotDecisionService
         // contributes 0 and BotPriceMemoryService.Tick is also inert (anyConsumer=false).
         if (_recentAnchorEnabled && _recentAnchorStrength > 0m)
         {
-            var rgap = AverageWatchlistRecentGap(ctx, user, currency) / _recentAnchorScale;
+            var rgap = ApplyAnchorDeadband(AverageWatchlistRecentGap(ctx, user, currency)) / _recentAnchorScale;  // R5 §C
             anchorTilt += rgap * _recentAnchorStrength;
         }
+
+        // R5 §B: per-bot Lateness lag on the combined anchor tilt (per-(bot,ccy) EWMA, persists across ticks).
+        // Decouples the synchronized next-minute snap-back that pins ret_acf_lag1 ≈ −0.43.
+        if (_anchorReactionLag)
+            anchorTilt = ctx.LaggedAnchorTilt(user.UserId, currency, anchorTilt, user.Lateness,
+                _anchorLagMinAlpha, _anchorLagMaxAlpha);
 
         // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
         // around 0.5 (preserves diversity at extremes so sell-biased bots stay sell-biased under
@@ -1590,6 +1614,19 @@ internal sealed class AiBotDecisionService
             return Clamp01(0.5m + (homeostatic - 0.5m) * f + directionalShift + anchorTilt);
         }
         return Clamp01(homeostatic + directional * noiseFactor + herdTilt + anchorTilt);
+    }
+
+    // R5 §C: apply this bot's configured dead-band to a raw watchlist gap.
+    private decimal ApplyAnchorDeadband(decimal gap) => AnchorDeadband(gap, _anchorDeadbandPrc);
+
+    // R5 §C: signed Bollinger-style dead-band — zero pull within ±band, pass only the excess beyond it.
+    // band is in deviation units (fraction of price), matching the raw gap from the watchlist aggregators.
+    internal static decimal AnchorDeadband(decimal gap, decimal band)
+    {
+        if (band <= 0m) return gap;
+        var mag = Math.Abs(gap) - band;
+        if (mag <= 0m) return 0m;
+        return gap < 0m ? -mag : mag;
     }
 
     // Average signed gap to fundamental across the watchlist: (seed − price)/seed. Positive = broadly

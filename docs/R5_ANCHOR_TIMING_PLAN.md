@@ -6,15 +6,22 @@
 
 ## Option B (PRIMARY) — Lateness-staggered anchor reaction
 
-Each bot reacts to a *perceived* anchor tilt that lags the true tilt, with lag set by its per-bot `Lateness` ∈ [0,1] (already a column, currently used only in `DirectionalBias`). Early bots (L≈0) track instantly = today's behavior; late bots (L≈1) update slowly. Spreading the cohort's correction across minutes decouples the next-minute snap-back → ret_acf_lag1 → 0, while the multi-minute bounding force survives.
+Each bot reacts to a *perceived* anchor tilt that lags the true tilt, with lag set by its per-bot `Lateness` ∈ [0,1] (already a column, currently used only in `DirectionalBias`). Spreading the cohort's correction across minutes decouples the next-minute snap-back → ret_acf_lag1 → 0, while the multi-minute bounding force survives.
 
 Mechanism: per-(bot,currency) EWMA of the anchor tilt.
 ```
-alpha = 1 - L*(1 - minAlpha)      // L=0 → alpha=1 (instant); L=1 → alpha=minAlpha (laggy)
+alpha = maxAlpha - L*(maxAlpha - minAlpha)   // L=0 → maxAlpha (fast); L=1 → minAlpha (slow)
 perceived += alpha * (trueTilt - perceived)
 anchorTilt = perceived
 ```
 Seed `perceived = trueTilt` on first sight (no startup transient). No RNG (pure, deterministic, reproducible).
+
+### Refinement findings (why a `[minAlpha, maxAlpha]` band, not just `minAlpha`)
+Two empirical facts force a band rather than the original `alpha = 1 - L*(1-minAlpha)`:
+- **Lateness is right-skewed toward 0** (`lateness = u^2.2`, mean ≈ 0.31; ~70% of bots have L<0.5). With the original map the low-L majority gets `alpha≈1` ⇒ instant tracking ⇒ the bulk of the cohort *still* snaps back synchronously and ret_acf_lag1 barely moves. The mechanism needs **every** bot to lag at least a little (heterogeneity is what desynchronizes the cohort), so the fastest bot must have `maxAlpha < 1`.
+- **Bots decide every ~3–10 s** (`interval = 10 − 7·aggressive`, floor 1 s ⇒ 6–20 decisions/min). The EWMA advances per *decision*, so per-minute retention = `(1-alpha)^(decisions/min)`. For a slow bot to hold a ~1–2 min lag it needs `alpha ≈ 0.05–0.12`; with `alpha=1` a bot fully re-tracks within one decision. This sets the useful band.
+
+Starting band: `maxAlpha = 0.30`, `minAlpha = 0.05`. If ret_acf_lag1 doesn't move, push the whole band down (e.g. `maxAlpha=0.15, minAlpha=0.02`) to lag the bulk harder. `maxAlpha=1` recovers the original "L=0 instant" semantics if the baseline lag proves harmful.
 
 ## Option C (COMPLEMENTARY) — anchor dead-band (Bollinger-style)
 
@@ -32,22 +39,27 @@ B and C compose: C decides *when* the anchor acts (outside the band), B decides 
 ```csharp
 // R5 anchor-timing fix (Options B + C). All default-off ⇒ byte-identical.
 private readonly bool    _anchorReactionLag;     // B: per-bot Lateness EWMA on the anchor tilt
-private readonly decimal _anchorLagMinAlpha;     // B: EWMA alpha for max-Lateness bots (L=1)
+private readonly decimal _anchorLagMinAlpha;     // B: EWMA alpha for max-Lateness bots (L=1, slowest)
+private readonly decimal _anchorLagMaxAlpha;     // B: EWMA alpha for min-Lateness bots (L=0, fastest)
 private readonly decimal _anchorDeadbandPrc;     // C: deviation band where anchors hold no pull (0 = off)
 ```
 
 ### 2. New ctor params (end of param list, after `liquidityAwareGain`)
 ```csharp
 bool anchorReactionLag = false,
-decimal anchorLagMinAlpha = 0.1m,
+decimal anchorLagMinAlpha = 0.05m,
+decimal anchorLagMaxAlpha = 0.30m,
 decimal anchorDeadbandPrc = 0m)
 ```
 ### 3. Ctor assignments (with `_liquidityAwareGain` block)
 ```csharp
 _anchorReactionLag = anchorReactionLag;
-_anchorLagMinAlpha = anchorLagMinAlpha < 0m ? 0m : (anchorLagMinAlpha > 1m ? 1m : anchorLagMinAlpha);
+_anchorLagMinAlpha = Clamp(anchorLagMinAlpha, 0m, 1m);
+// maxAlpha clamped to [minAlpha, 1] so the band is never inverted.
+_anchorLagMaxAlpha = Clamp(anchorLagMaxAlpha, _anchorLagMinAlpha, 1m);
 _anchorDeadbandPrc = anchorDeadbandPrc < 0m ? 0m : anchorDeadbandPrc;
 ```
+(inline the clamp expressions if no `Clamp` helper exists in this file)
 
 ### 4. Anchor tilt block (replace lines ~905-921)
 ```csharp
@@ -66,7 +78,8 @@ if (_recentAnchorEnabled && _recentAnchorStrength > 0m)
 }
 // B: per-bot Lateness lag on the combined anchor tilt (per-(bot,ccy) EWMA, persistent across ticks).
 if (_anchorReactionLag)
-    anchorTilt = ctx.LaggedAnchorTilt(user.UserId, currency, anchorTilt, user.Lateness, _anchorLagMinAlpha);
+    anchorTilt = ctx.LaggedAnchorTilt(user.UserId, currency, anchorTilt, user.Lateness,
+        _anchorLagMinAlpha, _anchorLagMaxAlpha);
 ```
 NOTE: confirm `AverageWatchlistValueGap` / `AverageWatchlistRecentGap` return the RAW deviation (the current code does `gap = AverageWatchlistValueGap(...) / _valueAnchorScale`, so they return raw — deadband the raw, then divide).
 
@@ -88,10 +101,11 @@ private decimal ApplyAnchorDeadband(decimal gap)
 // bot's slowly-updating view. Cleared only on ClearAll.
 internal readonly Dictionary<(int userId, CurrencyType), decimal> AnchorTiltLag = new();
 
-internal decimal LaggedAnchorTilt(int userId, CurrencyType ccy, decimal target, decimal lateness, decimal minAlpha)
+internal decimal LaggedAnchorTilt(int userId, CurrencyType ccy, decimal target, decimal lateness,
+    decimal minAlpha, decimal maxAlpha)
 {
     var L = lateness < 0m ? 0m : (lateness > 1m ? 1m : lateness);
-    var alpha = 1m - L * (1m - minAlpha);
+    var alpha = maxAlpha - L * (maxAlpha - minAlpha);  // L=0→maxAlpha (fast); L=1→minAlpha (slow)
     var key = (userId, ccy);
     var prev = AnchorTiltLag.TryGetValue(key, out var p) ? p : target;  // seed at target → no startup transient
     var next = prev + alpha * (target - prev);
@@ -104,14 +118,16 @@ Add `AnchorTiltLag.Clear();` to `ClearAll()` (NOT to `ClearTickCaches()` — it 
 ### 7. AiTradeService.cs — wire config (in the AiBotDecisionService ctor call, after liquidityAwareGain)
 ```csharp
 anchorReactionLag: _configuration.GetValue("Bots:AnchorReactionLag", false),
-anchorLagMinAlpha: _configuration.GetValue("Bots:AnchorLagMinAlpha", 0.1m),
+anchorLagMinAlpha: _configuration.GetValue("Bots:AnchorLagMinAlpha", 0.05m),
+anchorLagMaxAlpha: _configuration.GetValue("Bots:AnchorLagMaxAlpha", 0.30m),
 anchorDeadbandPrc: _configuration.GetValue("Bots:AnchorDeadbandPrc", 0m));
 ```
 
 ### 8. appsettings.json — add under Bots: (all default-off)
 ```json
 "AnchorReactionLag": false,
-"AnchorLagMinAlpha": 0.1,
+"AnchorLagMinAlpha": 0.05,
+"AnchorLagMaxAlpha": 0.30,
 "AnchorDeadbandPrc": 0,
 ```
 
