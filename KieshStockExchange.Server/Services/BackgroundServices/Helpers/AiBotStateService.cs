@@ -252,9 +252,11 @@ internal sealed class AiBotStateService
                 foreach (var o in userOrders.Values)
                 {
                     if (!o.IsOpenLimitOrder) continue;
-                    // Jitter the lifetime per order in [0.5x, 1.5x] via an OrderId hash (deterministic,
-                    // no RNG draw, no synchronized mass-cancel). Avalanche keeps adjacent ids uncorrelated.
-                    var lifetime = _orderMaxAgeSec * AgeJitterFactor(o.OrderId);
+                    // Jitter the lifetime per order in [0.5x, 1.5x] via an OrderId hash, times a per-bot
+                    // patience factor in [0.7x, 1.3x] via a UserId hash (patient vs impatient traders).
+                    // Both deterministic, RNG-free, independent and mean-1.0 ⇒ the population mean lifetime
+                    // stays at _orderMaxAgeSec; the product just disperses expiries further (smoother churn).
+                    var lifetime = _orderMaxAgeSec * AgeJitterFactor(o.OrderId) * BotLifetimeFactor(user.UserId);
                     if ((nowUtc - o.CreatedAt).TotalSeconds >= lifetime)
                         toCancel.Add((user.UserId, o));
                 }
@@ -382,6 +384,20 @@ internal sealed class AiBotStateService
             h ^= h >> 33; h *= 0xFF51AFD7ED558CCDUL; h ^= h >> 33;
             double u = (h & 0xFFFFFFFFUL) / (double)0xFFFFFFFFUL;   // [0,1]
             return 0.5 + u;                                         // [0.5, 1.5]
+        }
+    }
+
+    // Realism §: per-bot patience factor in [0.7, 1.3] from a UserId avalanche hash (distinct mixing
+    // constants from AgeJitterFactor so the two factors are uncorrelated). Mean 1.0 ⇒ keeps the base mean
+    // lifetime unchanged; gives each bot its own holding horizon (patient vs impatient). RNG-free.
+    private static double BotLifetimeFactor(int userId)
+    {
+        unchecked
+        {
+            ulong h = (ulong)userId * 0xD1B54A32D192ED03UL + 0x2545F4914F6CDD1DUL;
+            h ^= h >> 33; h *= 0xC2B2AE3D27D4EB4FUL; h ^= h >> 29;
+            double u = (h & 0xFFFFFFFFUL) / (double)0xFFFFFFFFUL;   // [0,1]
+            return 0.7 + 0.6 * u;                                   // [0.7, 1.3]
         }
     }
     #endregion
