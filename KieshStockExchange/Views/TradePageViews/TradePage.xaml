@@ -125,8 +125,15 @@
                         <!-- §F11: bind context explicitly to the page VM — this content is reparented into
                              the SegmentedTabView's RightSlot, which drops the inherited TradeViewModel
                              context (label + checkbox would otherwise bind to nothing). -->
-                        <HorizontalStackLayout Spacing="6" VerticalOptions="Center"
-                                               BindingContext="{Binding Source={x:Reference TradePageRoot}, Path=BindingContext}">
+                        <HorizontalStackLayout Spacing="6" VerticalOptions="Center">
+                            <!-- Source is the page (TradePage), so annotate x:DataType on THIS binding only —
+                                 otherwise the compiled binding resolves Path=BindingContext against the ambient
+                                 TradeViewModel and errors. Children below keep the ambient TradeViewModel
+                                 (runtime BindingContext set here IS the VM). -->
+                            <HorizontalStackLayout.BindingContext>
+                                <Binding Source="{x:Reference TradePageRoot}" Path="BindingContext"
+                                         x:DataType="views:TradePage" />
+                            </HorizontalStackLayout.BindingContext>
                             <Label Text="{Binding TablesFilterLabel}"
                                    Style="{StaticResource MutedLabelStyle}"
                                    VerticalOptions="Center" />
