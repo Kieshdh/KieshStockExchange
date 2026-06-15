@@ -66,6 +66,18 @@ def pick(series, n_per_class=1):
             chosen.append(sid)
     return chosen
 
+def make_continuous(candles):
+    # Continuous candlesticks: each bar's OPEN is the previous bar's CLOSE (no artificial intrabar gaps
+    # for a continuously-traded asset). High/low are widened to include the carried-forward open so the
+    # wick still spans the true range. First bar keeps its own first-trade open.
+    out = []
+    prev_close = None
+    for (t, o, h, l, c, v) in candles:
+        op = prev_close if prev_close is not None else o
+        out.append((t, op, max(h, op), min(l, op), c, v))
+        prev_close = c
+    return out
+
 def draw(ax, candles, title):
     for i, (_t, o, h, l, c, _v) in enumerate(candles):
         up = c >= o
@@ -101,7 +113,7 @@ def main():
     n = len(stocks); cols = 2; rows = (n + cols - 1) // cols
     fig, axes = plt.subplots(rows, cols, figsize=(13, 3.3 * rows), squeeze=False)
     for i, sid in enumerate(stocks):
-        draw(axes[i // cols][i % cols], series[sid], f"stock {sid} [{stock_class(sid)}]  ({len(series[sid])} bars)")
+        draw(axes[i // cols][i % cols], make_continuous(series[sid]), f"stock {sid} [{stock_class(sid)}]  ({len(series[sid])} bars)")
     for j in range(n, rows * cols):
         axes[j // cols][j % cols].axis("off")
     sup = f"Candles — {args.title}" if args.title else "Candles"
