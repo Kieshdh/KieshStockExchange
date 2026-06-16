@@ -58,9 +58,12 @@ def load(db, since, bucket):
 
 def load_csv(path):
     # Read 1-min OHLCV produced by candle_export.py. stock_id -> list[(epoch,o,h,l,c,v)] in bucket order.
+    # Skips the '#'-commented metadata header and the column header.
     s = defaultdict(list)
     with open(path, encoding="utf-8") as f:
-        for ln in f.read().splitlines()[1:]:  # skip header
+        for ln in f.read().splitlines():
+            if not ln or ln.startswith("#") or ln.startswith("stock_id"):
+                continue
             p = ln.split(",")
             if len(p) < 7:
                 continue

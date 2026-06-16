@@ -369,3 +369,6 @@ KieshStockExchange.Server/Data/telemetry/
 # Phase 7 — production secrets (never commit real values)
 .env.production
 .env
+
+# Soak experiment data — candle CSVs kept locally for cross-soak comparison (not committed)
+/data/soaks/
