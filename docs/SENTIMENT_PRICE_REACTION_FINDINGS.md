@@ -38,14 +38,32 @@ User goal: break the **linear price drift** ("consistent wick-bottom delta per c
 5. **str20 over-damping** is a clear mechanistic signal, not noise (clustering collapsed) — so "more
    contrarian" is not the answer; there's a ceiling around str12.
 
-## Open test (in progress)
-- **Long-τ contrarian (ReactTauSec=900):** hypothesis that a *slower* contrarian lets a trend run ~15 min
-  then reverses it → slower/bigger **waves** → *lower* R² (the actual goal), rather than fast damping.
-  Result: _pending A/B5_.
+## A/B5 — long-τ contrarian (ReactTauSec=900), 90m, 48-stock
+FAILED the waviness goal: R² *rose again* (0.240→0.270), composite flat (57.6→57.0). A slower contrarian
+still *smooths* (removes noise faster than trend). **Insight:** the contrarian can't make waves — by
+construction it *opposes* moves, reducing variance. To get low R² you need genuine within-window trend
+**reversals** = bubble→crash, which requires a strong *positive* feedback that overshoots, then a brake.
 
-## Recommendation (pre long-τ)
-The contrarian is a **safe, mild drift-reducer** but doesn't deliver waviness; #3 adds clustering at a small
-`ret_acf` cost. Both are marginal and the "wavy not linear" goal is a **visual** call — so they stay
-**default-off** pending the user's eye on the charts. If long-τ doesn't produce waves, the linear drift is
-better attacked at its *source* — the slow per-stock OU rings (τ=1800/10800 s, σ=0.12/0.08) that create the
-sustained bias — e.g. lowering their σ, which is a different lever than price-reaction.
+## A/B6 — BUBBLE dynamics (str12 contrarian + STRONG SLOW momentum: MomStrength=15, MomTauSec=240, MomCap=0.40), 75m, 48-stock
+**BREAKTHROUGH — first config to lower R²:**
+| metric | baseline | bubbles |
+|------|------|------|
+| linear_fit_R² | 0.280 | **0.196 (wavier ✓)** |
+| Composite | 51.9 | **63.1** (+11) |
+| ret_acf_lag1 | −0.449 | **−0.421** (better — momentum offsets the over-reversion) |
+| has_wick% | 89.8 | 87.1 |
+| σ (drift) | 1.91 | 2.03 (bigger swings) |
+
+The slow strong momentum self-reinforces a move into a multi-minute **bubble**; the slow contrarian then
+**brakes/reverses** it → within-window reversals = lower R² (genuine waves), bigger swings, *and*
+`ret_acf_lag1` toward 0. The key is momentum must be **SLOW (τ≈240) + STRONG** — the earlier fast/weak
+momentum (τ=60, str8) only added noise. Confirming with a repeat A/B6c (pending).
+
+## Recommendation
+**Lead candidate = the BUBBLE config** (`PriceReaction=true, ReactStrength=12, ReactTauSec=300` +
+`MomStrength=15, MomTauSec=240, MomCap=0.40`). It's the only setting that achieved the user's actual goal
+(wavier / lower R²) while *also* improving composite and `ret_acf_lag1`, conservation clean. Pending the
+confirm + the user's visual sign-off (it's a look-and-feel call). Plain #2-contrarian alone is a safe mild
+drift-reducer but does NOT deliver waviness — don't ship it for that purpose. All flags remain default-off
+until the user blesses the bubble config on the charts; next tuning knobs = MomStrength/MomTauSec (bubble
+size/period) vs MomCap (overshoot ceiling).
