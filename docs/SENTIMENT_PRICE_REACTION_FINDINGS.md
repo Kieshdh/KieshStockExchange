@@ -73,6 +73,23 @@ swings/net_move), conservation clean — the most consistent realism gain of thi
 specific *lower-R²/waviness* effect was **not** reproducible (noise), and it **increases volatility** (min
 excursions ~−8% vs −6%), so it's a livelier-but-swingier market, not a proven de-linearizer. Plain
 #2-contrarian alone is a safe mild *drift-reducer* but SMOOTHS (raises R²) — don't ship it for waviness.
+## CONTINUATION — resume the realism work here (paused 2026-06-16 to focus on UI)
+State: all `Bots:Sentiment:*` flags **default-off**, nothing baked, branch `feature/bot-market-realism-v2`
+pushed (tip after `ea51ba7`). Both code paths (#2 #3) committed + tested. To resume:
+1. **User visual call first:** does the bubble config's livelier/swingier look (charts sent in chat;
+   regenerate via `candle_plot.py --csv data/soaks/candles-*.csv`) match "less arithmetic"? If yes → bake
+   the bubble config into `appsettings` + tune `MomCap` down if −8% excursions are too big.
+2. **If chasing waviness further (R²):** single 45–90 min soaks can't measure it (±noise). Run a
+   **multi-hour (2–3 h)** A/B and score `--per-class 12`, OR judge by eye only. Knobs: `MomStrength`/
+   `MomTauSec` = bubble size/period; `ReactStrength`/`ReactTauSec` = brake strength/horizon.
+3. **Untested alternative lever (likely better for linearity):** attack the drift at its *source* — the slow
+   per-stock OU rings in `BotSentimentService` (`PerStockTauSec`/`PerStockSigma` static arrays, τ=1800/10800,
+   σ=0.12/0.08) that create the sustained bias. These are currently hard-coded (NOT config) — would need a
+   `Bots:Sentiment:SlowRingDamp` multiplier to A/B lowering them. This directly reduces the persistent trend
+   rather than fighting it downstream.
+4. Methodology: score `--per-class 12` (48 stocks), compare arms in PARALLEL, max 2 soak servers
+   (Postgres conn cap), don't run builds/heavy scoring during a throughput-sensitive soak.
+
 All flags **default-off**: this is a look-and-feel call — the user should eyeball the bubble charts and
 decide if the livelier/swingier feel is wanted, then bless + tune (MomStrength/MomTauSec = swing size/period,
 MomCap = overshoot ceiling; lower MomCap if −8% excursions are too big). The R² metric proved too noisy at
