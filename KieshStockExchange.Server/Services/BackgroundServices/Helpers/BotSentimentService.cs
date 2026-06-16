@@ -104,6 +104,14 @@ internal sealed class BotSentimentService
     private readonly double _reactCap;
     private readonly Func<int, double>? _recentReturn;
     private readonly Dictionary<int, double> _cumRet = new(); // leaky-integrated recent return per stock
+
+    // #3 waves: a FAST positive-feedback (momentum) term that composes with the slow contrarian above —
+    // price up → brief sentiment UP (FOMO chase) over a short τ, then #2's slow contrarian sours it →
+    // boom-bust waves instead of linear drift. Default momStrength=0 ⇒ #3 off (even when #2 is on).
+    private readonly double _momStrength;
+    private readonly double _momTauSec;
+    private readonly double _momCap;
+    private readonly Dictionary<int, double> _cumRetFast = new();
     #endregion
 
     #region Services and Constructor
@@ -122,7 +130,8 @@ internal sealed class BotSentimentService
         bool slopeEnabled = false, double slopeTauFastSec = 45.0, double slopeTauSlowSec = 180.0,
         Func<int, double>? recentReturn = null,
         bool priceReaction = false, double reactStrength = 6.0, double reactTauSec = 300.0,
-        double reactDeadband = 0.01, double reactCap = 0.40)
+        double reactDeadband = 0.01, double reactCap = 0.40,
+        double momStrength = 0.0, double momTauSec = 60.0, double momCap = 0.25)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -142,6 +151,9 @@ internal sealed class BotSentimentService
         _reactTauSec    = Math.Max(MinDtSec, reactTauSec);
         _reactDeadband  = Math.Max(0.0, reactDeadband);
         _reactCap       = Math.Max(0.0, reactCap);
+        _momStrength    = Math.Max(0.0, momStrength);
+        _momTauSec      = Math.Max(MinDtSec, momTauSec);
+        _momCap         = Math.Max(0.0, momCap);
         _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
         var prior = _store.LoadTail(RecentSamplesMax);
@@ -211,10 +223,19 @@ internal sealed class BotSentimentService
             // small moves, and add a clamped OPPOSITE-sign term so a multi-minute up-drift bends back down.
             if (_priceReaction && _recentReturn != null)
             {
-                double keep = Math.Exp(-dt / _reactTauSec);
-                double cum = keep * _cumRet.GetValueOrDefault(sid) + _recentReturn(sid);
+                double r = _recentReturn(sid);
+                // #2 slow contrarian: leaky-integrate over τ, dead-band, push OPPOSITE the sustained move.
+                double cum = Math.Exp(-dt / _reactTauSec) * _cumRet.GetValueOrDefault(sid) + r;
                 _cumRet[sid] = cum;
                 sum += Math.Clamp(-_reactStrength * Deadband(cum, _reactDeadband), -_reactCap, _reactCap);
+                // #3 fast momentum (default off): leaky-integrate over a SHORT τ, push SAME direction (brief
+                // FOMO chase) so the slow contrarian above turns a drift into a boom-bust wave.
+                if (_momStrength > 0.0)
+                {
+                    double cf = Math.Exp(-dt / _momTauSec) * _cumRetFast.GetValueOrDefault(sid) + r;
+                    _cumRetFast[sid] = cf;
+                    sum += Math.Clamp(_momStrength * cf, -_momCap, _momCap);
+                }
             }
 
             _combined[sid] = (decimal)sum;
@@ -383,6 +404,7 @@ internal sealed class BotSentimentService
         _dsFast.Clear();
         _dsSlow.Clear();
         _cumRet.Clear();
+        _cumRetFast.Clear();
         lock (_samples) _samples.Clear();
 
         _globalSum = 0.0;

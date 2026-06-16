@@ -49,6 +49,21 @@ public class SentimentPriceReactionTests
 
     // ---- Leaky-integrated recent return is tick-rate-stable (≈ move over τ) ----
     // cum_t = keep·cum_{t-1} + r ; steady state for constant per-tick r ⇒ r/(1−keep) ≈ (r/dt)·τ.
+    // ---- #3 fast momentum term (same-sign, clamped) ----
+    private static double Momentum(double cumFast, double strength, double cap)
+        => System.Math.Clamp(strength * cumFast, -cap, cap);
+
+    [Fact]
+    public void Momentum_pushes_same_direction_as_the_move()
+    {
+        Assert.True(Momentum(+0.02, 5.0, 0.25) > 0.0); // up move ⇒ positive (chase)
+        Assert.True(Momentum(-0.02, 5.0, 0.25) < 0.0);
+    }
+
+    [Fact]
+    public void Momentum_is_clamped_to_cap()
+        => Assert.Equal(0.25, Momentum(0.10, 5.0, 0.25)); // 5*0.10=0.5 ⇒ pinned at +cap
+
     [Fact]
     public void Leaky_integral_of_returns_converges_to_window_move()
     {
