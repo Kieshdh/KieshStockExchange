@@ -94,3 +94,51 @@ All flags **default-off**: this is a look-and-feel call — the user should eyeb
 decide if the livelier/swingier feel is wanted, then bless + tune (MomStrength/MomTauSec = swing size/period,
 MomCap = overshoot ceiling; lower MomCap if −8% excursions are too big). The R² metric proved too noisy at
 45–90 min to optimize against — a real waviness verdict needs multi-hour soaks or the user's eye.
+
+## R-FINAL ROUND 1 — de-noised bubble verdict (2026-06-17, 180-min parallel A/B, 50 stocks)
+Resumed the realism work (24h autonomous mandate). Ran the de-noised multi-hour A/B the continuation asked
+for: baseline vs BUBBLE, both on the **current committed config** (Herding ON + SentimentDynamics ON — less
+headroom than the older findings baselines), 180 min, parallel, conservation CLEAN both arms (~395k/382k trades).
+
+| metric | baseline | bubble | read |
+|------|------|------|------|
+| linear_fit_R² (150m) | 0.257 | **0.281** | bubble *more* linear — WRONG way for waviness |
+| net_move | 1.96% | 2.21% | bubble swings bigger |
+| composite (90m, `--per-class 12`) | 27.5 | 31.0 | bubble +3.5 |
+| tail_alpha | 5.11 | **4.52** | bubble fatter tails (biggest single gain) |
+| absret_acf lag5 / lag20 | 0.010 / −0.038 | 0.035 / −0.003 | bubble better clustering decay |
+| absret_acf lag1 | 0.133 | 0.115 | bubble slightly WORSE |
+| mean drift | −0.82% | −0.57% | bubble less down-drift |
+
+**Verdict (de-noised, decisive):** bubble = **livelier + modestly more realistic (composite/tails/clustering/
+drift), NOT a de-linearizer.** R² went the WRONG way again (0.257→0.281) — the A/B6 "waviness breakthrough"
+(0.196) was confirmed to be variance. **User call 2026-06-17: KEEP HUNTING, do NOT bake bubble** — leave it
+default-off, pursue source-level de-linearizers instead. Charts: `logs/R1_baseline.png`, `logs/R1_bubble.png`.
+
+## R-FINAL ROUND 2 — SlowRingDamp (in progress)
+Implemented `Bots:Sentiment:SlowRingDamp` (commit `8d09892`, default-off=1.0, byte-identical, 161/161 tests):
+multiplier on the slow per-stock OU rings (τ≥1000s ⇒ 1800s/10800s) via `internal static SlowRingSigma`.
+Round 2 A/B running: baseline vs SlowRingDamp=0.5 (180 min, DBs `kse_soak_base` / `kse_soak_sd`).
+
+**Hypothesis caveat (worth recording before results land):** SlowRingDamp attacks the slow DRIFT source, but
+waviness (within-window reversals) is gated by the **`ret_acf_lag1 ≈ −0.43` over-mean-reversion ceiling** — the
+market over-reverts at the 1-min scale (every up-tick met with immediate selling → jagged-but-centered path +
+slow drift = the spiky-tall-candle look). Damping slow rings likely **flattens** (less drift) rather than
+**waves** (needs short-lag momentum persistence THEN a longer-lag reversal). So the *deepest* source-level fix
+is the ret_acf ceiling = **decouple bot reaction from its own 1-min price impact** (engine-level; memory-flagged
+as a future round; likely an Ultraplan candidate). Round 2 will empirically confirm/deny the flatten-vs-wave call.
+
+### Round 3+ candidate levers (source-level, in priority order; chosen after reading AiBotDecisionService buyProb)
+The over-reversion comes from the **anchor negative-feedback tilts** (`AiBotDecisionService` ~L944–973), all
+config-tunable — these are the source-level de-linearizers the user asked to pursue:
+1. **RecentAnchor:Strength ↓** (today 0.35, Scale 0.04). The medium-term EWMA pull added *specifically* to
+   damp fast moves ("a stock that ripped feels a negative-feedback tilt") — i.e. it deliberately kills
+   mini-trends. Lowering it (0.35→0.15→0) should let short moves persist → mini-trends → waves. Risk: the
+   runaway it was added to prevent. **Strongest Round-3 candidate; directly targets ret_acf_lag1.**
+2. **Anchor dead-band width ↑** (`ApplyAnchorDeadband`, R5 §C — inside the band the anchor exerts ZERO pull,
+   so ret_acf→0 there). Widening both anchors' dead-bands lets price wander further before any correction.
+3. **ValueAnchor:Strength ↓ / Scale ↑** — the long restoring force; smooths the path toward fundamental.
+4. **AnchorReactionLag=true** (R5 §B, already built, default-off) — was neutral-within-noise solo; may help
+   *combined* with (1)/(2). Cheap to re-A/B once the anchors are loosened.
+Engine-level (deferred, Ultraplan): decouple bot reaction from its OWN 1-min price impact (the 72% flow-MR
+component; the 28% is bid-ask bounce, a realistic microstructure artifact that washes out by design at 1-min).
