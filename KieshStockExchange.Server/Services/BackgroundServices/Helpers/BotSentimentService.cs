@@ -39,6 +39,11 @@ internal sealed class BotSentimentService
     private static readonly int PerStockRings = PerStockTauSec.Length;
     private static readonly int GlobalRings   = GlobalTauSec.Length;
 
+    // §slow-ring damp: rings at/above this τ are the SLOW sustained-bias scales (1800s/10800s) that
+    // print the linear price drift. A config multiplier scales their amplitude to attack the drift at
+    // its source, leaving the fast bounding scales untouched. Threshold is fixed; only the mult is config.
+    private const double SlowRingTauThresholdSec = 1000.0;
+
     private const double Sqrt3 = 1.7320508075688772; // makes U(-1,1)*Sqrt3 unit-variance
 
     // Deterministic seed so the simulation is reproducible across runs.
@@ -112,6 +117,9 @@ internal sealed class BotSentimentService
     private readonly double _momTauSec;
     private readonly double _momCap;
     private readonly Dictionary<int, double> _cumRetFast = new();
+
+    // §slow-ring damp: PerStockSigma with SlowRingDamp folded into the slow rings (×1.0 ⇒ identical doubles).
+    private readonly double[] _perStockSigmaEff;
     #endregion
 
     #region Services and Constructor
@@ -131,7 +139,8 @@ internal sealed class BotSentimentService
         Func<int, double>? recentReturn = null,
         bool priceReaction = false, double reactStrength = 6.0, double reactTauSec = 300.0,
         double reactDeadband = 0.01, double reactCap = 0.40,
-        double momStrength = 0.0, double momTauSec = 60.0, double momCap = 0.25)
+        double momStrength = 0.0, double momTauSec = 60.0, double momCap = 0.25,
+        double slowRingDamp = 1.0)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -154,6 +163,13 @@ internal sealed class BotSentimentService
         _momStrength    = Math.Max(0.0, momStrength);
         _momTauSec      = Math.Max(MinDtSec, momTauSec);
         _momCap         = Math.Max(0.0, momCap);
+
+        // Fold SlowRingDamp into the slow rings' amplitude once; ×1.0 ⇒ identical doubles (off path untouched).
+        double slowDamp = Math.Max(0.0, slowRingDamp);
+        _perStockSigmaEff = new double[PerStockRings];
+        for (int k = 0; k < PerStockRings; k++)
+            _perStockSigmaEff[k] = SlowRingSigma(PerStockSigma[k], PerStockTauSec[k], slowDamp);
+
         _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
         var prior = _store.LoadTail(RecentSamplesMax);
@@ -192,7 +208,7 @@ internal sealed class BotSentimentService
         {
             double a = Math.Exp(-dt / PerStockTauSec[k]);
             sAlpha[k] = a;
-            sNoise[k] = PerStockSigma[k] * Math.Sqrt(1.0 - a * a);
+            sNoise[k] = _perStockSigmaEff[k] * Math.Sqrt(1.0 - a * a);
         }
 
         // Global ring (computed once; common-mode across all stocks).
@@ -267,6 +283,11 @@ internal sealed class BotSentimentService
         double keep = Math.Exp(-dt / Math.Max(MinDtSec, tauSec));
         return keep * dsPrev + (1.0 - keep) * raw;
     }
+
+    // §slow-ring damp: a SLOW ring (τ ≥ threshold) gets its amplitude scaled by damp; fast rings pass
+    // through unchanged. ×1.0 ⇒ identical double (off path byte-identical). Pure ⇒ unit-testable.
+    internal static double SlowRingSigma(double baseSigma, double tauSec, double damp)
+        => baseSigma * (tauSec >= SlowRingTauThresholdSec ? damp : 1.0);
 
     // §price-reaction (#2): signed dead-band — zero within ±band, pass only the excess beyond it.
     internal static double Deadband(double x, double band)

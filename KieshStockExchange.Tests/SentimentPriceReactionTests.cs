@@ -73,4 +73,24 @@ public class SentimentPriceReactionTests
         // ≈ (r/dt)·τ = 0.0001·300 = 0.03 (a ~3% move over the 5-min window).
         Assert.InRange(cum, 0.029, 0.031);
     }
+
+    // ---- Slow-ring damp (attacks linear drift at its source; threshold τ ≥ 1000s) ----
+    [Fact]
+    public void SlowRingDamp_off_is_identity()
+    {
+        // ×1.0 must return the exact same double on every ring ⇒ off path byte-identical.
+        Assert.Equal(0.12, BotSentimentService.SlowRingSigma(0.12, 1800.0, 1.0));
+        Assert.Equal(0.08, BotSentimentService.SlowRingSigma(0.08, 10800.0, 1.0));
+        Assert.Equal(0.25, BotSentimentService.SlowRingSigma(0.25, 20.0, 1.0));
+    }
+
+    [Fact]
+    public void SlowRingDamp_scales_only_slow_rings()
+    {
+        Assert.Equal(0.06, BotSentimentService.SlowRingSigma(0.12, 1800.0, 0.5), 12);  // 30-min ⇒ damped
+        Assert.Equal(0.04, BotSentimentService.SlowRingSigma(0.08, 10800.0, 0.5), 12); // 3-hour ⇒ damped
+        Assert.Equal(0.25, BotSentimentService.SlowRingSigma(0.25, 20.0, 0.5));        // 20-sec ⇒ untouched
+        Assert.Equal(0.25, BotSentimentService.SlowRingSigma(0.25, 90.0, 0.5));        // 90-sec ⇒ untouched
+        Assert.Equal(0.20, BotSentimentService.SlowRingSigma(0.20, 360.0, 0.5));       // 6-min  ⇒ untouched (τ<1000)
+    }
 }

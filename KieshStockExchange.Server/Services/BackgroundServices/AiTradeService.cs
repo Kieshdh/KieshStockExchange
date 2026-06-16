@@ -307,7 +307,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // #3 waves: fast positive-feedback (momentum) term. MomStrength 0 ⇒ off.
                         momStrength:             _configuration.GetValue("Bots:Sentiment:MomStrength", 0.0),
                         momTauSec:               _configuration.GetValue("Bots:Sentiment:MomTauSec", 60.0),
-                        momCap:                  _configuration.GetValue("Bots:Sentiment:MomCap", 0.25));
+                        momCap:                  _configuration.GetValue("Bots:Sentiment:MomCap", 0.25),
+                        // §slow-ring damp: scale the slow per-stock OU rings to attack linear drift. 1.0 ⇒ off.
+                        slowRingDamp:            _configuration.GetValue("Bots:Sentiment:SlowRingDamp", 1.0));
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
