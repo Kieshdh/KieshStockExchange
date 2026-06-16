@@ -59,11 +59,21 @@ The slow strong momentum self-reinforces a move into a multi-minute **bubble**; 
 `ret_acf_lag1` toward 0. The key is momentum must be **SLOW (τ≈240) + STRONG** — the earlier fast/weak
 momentum (τ=60, str8) only added noise. Confirming with a repeat A/B6c (pending).
 
+## A/B6c — bubble CONFIRM (45m, 48-stock)
+R² did NOT corroborate: bubbles 0.262 vs baseline 0.219 (flipped vs A/B6's 0.196 vs 0.280) → **the
+R²/waviness gain was variance; that metric is too noisy to confirm.** BUT the bubble config's other effects
+**repeated**: composite +7.5 (59.5 vs 52.0), clustering up (0.152 vs 0.109), and **net_move up (2.57 vs
+1.82%)** with bigger excursions (min ~−8% vs −6%) — i.e. reliably **livelier / bigger swings**, conservation
+clean. So "less arithmetic" in the lively-chart sense is real; "lower-R² waves" is not provable.
+
 ## Recommendation
 **Lead candidate = the BUBBLE config** (`PriceReaction=true, ReactStrength=12, ReactTauSec=300` +
-`MomStrength=15, MomTauSec=240, MomCap=0.40`). It's the only setting that achieved the user's actual goal
-(wavier / lower R²) while *also* improving composite and `ret_acf_lag1`, conservation clean. Pending the
-confirm + the user's visual sign-off (it's a look-and-feel call). Plain #2-contrarian alone is a safe mild
-drift-reducer but does NOT deliver waviness — don't ship it for that purpose. All flags remain default-off
-until the user blesses the bubble config on the charts; next tuning knobs = MomStrength/MomTauSec (bubble
-size/period) vs MomCap (overshoot ceiling).
+`MomStrength=15, MomTauSec=240, MomCap=0.40`). It **reliably** improves composite (+7–11 across two runs), clustering, and chart liveliness (bigger
+swings/net_move), conservation clean — the most consistent realism gain of this exploration. Caveat: the
+specific *lower-R²/waviness* effect was **not** reproducible (noise), and it **increases volatility** (min
+excursions ~−8% vs −6%), so it's a livelier-but-swingier market, not a proven de-linearizer. Plain
+#2-contrarian alone is a safe mild *drift-reducer* but SMOOTHS (raises R²) — don't ship it for waviness.
+All flags **default-off**: this is a look-and-feel call — the user should eyeball the bubble charts and
+decide if the livelier/swingier feel is wanted, then bless + tune (MomStrength/MomTauSec = swing size/period,
+MomCap = overshoot ceiling; lower MomCap if −8% excursions are too big). The R² metric proved too noisy at
+45–90 min to optimize against — a real waviness verdict needs multi-hour soaks or the user's eye.
