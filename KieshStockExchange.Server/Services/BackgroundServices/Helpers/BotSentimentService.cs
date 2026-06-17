@@ -120,6 +120,17 @@ internal sealed class BotSentimentService
 
     // §slow-ring damp: PerStockSigma with SlowRingDamp folded into the slow rings (×1.0 ⇒ identical doubles).
     private readonly double[] _perStockSigmaEff;
+
+    // §System A — RegimeDrift: a PERSISTENT common-mode bounded random walk per stock (NOT mean-reverting like
+    // the OU rings) so price can TREND/wander for minutes. Bounded by a cubic soft-wall (free in the middle,
+    // walled near ±Cap) so it can't run away. Dedicated RNG drawn ONLY when enabled ⇒ off path byte-identical.
+    private readonly bool   _regimeEnabled;
+    private readonly double _regimeStepSigma;
+    private readonly double _regimeCap;
+    private readonly double _regimeSoftWallK;
+    private readonly double _regimeStrength;
+    private readonly Dictionary<int, double> _regime = new();
+    private Random _regimeRng = new(RngSeed ^ 0x2A2A);
     #endregion
 
     #region Services and Constructor
@@ -140,7 +151,9 @@ internal sealed class BotSentimentService
         bool priceReaction = false, double reactStrength = 6.0, double reactTauSec = 300.0,
         double reactDeadband = 0.01, double reactCap = 0.40,
         double momStrength = 0.0, double momTauSec = 60.0, double momCap = 0.25,
-        double slowRingDamp = 1.0)
+        double slowRingDamp = 1.0,
+        bool regimeEnabled = false, double regimeStepSigma = 0.03, double regimeCap = 0.5,
+        double regimeSoftWallK = 0.1, double regimeStrength = 1.0)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -169,6 +182,12 @@ internal sealed class BotSentimentService
         _perStockSigmaEff = new double[PerStockRings];
         for (int k = 0; k < PerStockRings; k++)
             _perStockSigmaEff[k] = SlowRingSigma(PerStockSigma[k], PerStockTauSec[k], slowDamp);
+
+        _regimeEnabled   = regimeEnabled;
+        _regimeStepSigma = Math.Max(0.0, regimeStepSigma);
+        _regimeCap       = Math.Max(0.0, regimeCap);
+        _regimeSoftWallK = Math.Max(0.0, regimeSoftWallK);
+        _regimeStrength  = Math.Max(0.0, regimeStrength);
 
         _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
@@ -254,6 +273,17 @@ internal sealed class BotSentimentService
                 }
             }
 
+            // §System A RegimeDrift: advance the per-stock bounded random walk and add its persistent,
+            // common-mode push. Increment std = StepSigma·√dt (unit-variance draw ×Sqrt3). Dedicated RNG,
+            // drawn ONLY when enabled ⇒ flag-off leaves both the value AND the main RNG sequence untouched.
+            if (_regimeEnabled && _regimeCap > 0.0)
+            {
+                double step = (_regimeRng.NextDouble() * 2.0 - 1.0) * Sqrt3 * _regimeStepSigma * Math.Sqrt(dt);
+                double rg = RegimeStep(_regime.GetValueOrDefault(sid), step, _regimeCap, _regimeSoftWallK);
+                _regime[sid] = rg;
+                sum += _regimeStrength * rg;
+            }
+
             _combined[sid] = (decimal)sum;
 
             // Sentiment-dynamics §: two-timescale EWMA of the slope (sign = trend direction, magnitude =
@@ -288,6 +318,16 @@ internal sealed class BotSentimentService
     // through unchanged. ×1.0 ⇒ identical double (off path byte-identical). Pure ⇒ unit-testable.
     internal static double SlowRingSigma(double baseSigma, double tauSec, double damp)
         => baseSigma * (tauSec >= SlowRingTauThresholdSec ? damp : 1.0);
+
+    // §System A RegimeDrift: one bounded-random-walk step — add the increment, apply a CUBIC soft-wall
+    // (≈0 near the middle so the walk persists/trends, strong near ±cap so it can't escape), then hard-clamp.
+    // Pure ⇒ unit-testable.
+    internal static double RegimeStep(double prev, double step, double cap, double softWallK)
+    {
+        if (cap <= 0.0) return 0.0;
+        double softPull = -softWallK * prev * (prev * prev) / (cap * cap); // = -k·prev³/cap²
+        return Math.Clamp(prev + step + softPull, -cap, cap);
+    }
 
     // §price-reaction (#2): signed dead-band — zero within ±band, pass only the excess beyond it.
     internal static double Deadband(double x, double band)
@@ -426,6 +466,8 @@ internal sealed class BotSentimentService
         _dsSlow.Clear();
         _cumRet.Clear();
         _cumRetFast.Clear();
+        _regime.Clear();
+        _regimeRng = new Random(RngSeed ^ 0x2A2A);
         lock (_samples) _samples.Clear();
 
         _globalSum = 0.0;

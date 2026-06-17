@@ -99,6 +99,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     public Task<string> ExportFailuresCsvAsync(string path, CancellationToken ct = default)
         => _failures.ExportCsvAsync(path, ct);
     public string BuildFailuresCsv(CancellationToken ct = default) => _failures.BuildCsv(ct);
+    public void ClearFailures() => _failures.ClearAll();
 
     // Reservation ledger surface delegates to the auditor.
     public int ReservationLedgerEntryCount => _auditor.LedgerEntryCount;
@@ -313,7 +314,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         momTauSec:               _configuration.GetValue("Bots:Sentiment:MomTauSec", 60.0),
                         momCap:                  _configuration.GetValue("Bots:Sentiment:MomCap", 0.25),
                         // §slow-ring damp: scale the slow per-stock OU rings to attack linear drift. 1.0 ⇒ off.
-                        slowRingDamp:            _configuration.GetValue("Bots:Sentiment:SlowRingDamp", 1.0));
+                        slowRingDamp:            _configuration.GetValue("Bots:Sentiment:SlowRingDamp", 1.0),
+                        // §System A: persistent common-mode bounded random-walk regime driver. Enabled=false ⇒ off.
+                        regimeEnabled:           _configuration.GetValue("Bots:Sentiment:RegimeDrift:Enabled", false),
+                        regimeStepSigma:         _configuration.GetValue("Bots:Sentiment:RegimeDrift:StepSigma", 0.03),
+                        regimeCap:               _configuration.GetValue("Bots:Sentiment:RegimeDrift:Cap", 0.5),
+                        regimeSoftWallK:         _configuration.GetValue("Bots:Sentiment:RegimeDrift:SoftWallK", 0.1),
+                        regimeStrength:          _configuration.GetValue("Bots:Sentiment:RegimeDrift:Strength", 1.0));
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
