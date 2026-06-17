@@ -367,6 +367,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         quoteHalfSpreadPrc: _configuration.GetValue("Bots:QuoteHalfSpreadPrc", 0.003m),
                         limitOffsetMult:    _configuration.GetValue("Bots:Liquidity:OffsetMult", 1m),
                         distanceMult:       _configuration.GetValue("Bots:DecisionDistanceMult", 1m),
+                        marketProbMult:     _configuration.GetValue("Bots:MarketProbMult", 1m),
                         maxOpenOrdersMult:  _configuration.GetValue("Bots:Liquidity:MaxOpenMult", 1m),
                         valueAnchorStrength: _configuration.GetValue("Bots:ValueAnchor:Strength", 0m),
                         valueAnchorScale:    _configuration.GetValue("Bots:ValueAnchor:Scale", 0.15m),

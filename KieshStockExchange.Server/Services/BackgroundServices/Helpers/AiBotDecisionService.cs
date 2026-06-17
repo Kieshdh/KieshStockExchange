@@ -74,6 +74,10 @@ internal sealed class AiBotDecisionService
     // trade size or the slippage caps. Distinct from _limitOffsetMult, which scales only the limit ladder.
     private readonly decimal _distanceMult;
 
+    // Market-order probability multiplier: scales each bot's UseMarketProb (more takers ⇒ more volume,
+    // fewer flat candles). 1 = unchanged.
+    private readonly decimal _marketProbMult;
+
     // Value anchor: a restoring force toward each stock's fundamental (seed) price. Without it the
     // price is a driftless momentum walk with no pull back to value, so it wanders unbounded. Strength
     // is the max buy/sell-probability tilt; Scale is the deviation fraction at which the tilt saturates.
@@ -228,7 +232,7 @@ internal sealed class AiBotDecisionService
         decimal blockTradeProb = 0.01m, decimal blockTradeMultiple = 4m,
         bool mmQuoting = true, decimal quoteHalfSpreadPrc = 0.003m,
         decimal limitOffsetMult = 1m, decimal maxOpenOrdersMult = 1m,
-        decimal distanceMult = 1m,
+        decimal distanceMult = 1m, decimal marketProbMult = 1m,
         decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal absoluteCapMax = 0m,
@@ -314,6 +318,7 @@ internal sealed class AiBotDecisionService
         _limitOffsetMult    = limitOffsetMult <= 0m ? 1m : limitOffsetMult;
         _maxOpenOrdersMult  = maxOpenOrdersMult <= 0m ? 1m : maxOpenOrdersMult;
         _distanceMult       = distanceMult <= 0m ? 1m : distanceMult;
+        _marketProbMult     = marketProbMult <= 0m ? 1m : marketProbMult;
         _valueAnchorStrength = Math.Max(0m, valueAnchorStrength);
         _valueAnchorScale    = valueAnchorScale <= 0m ? 0.15m : valueAnchorScale;
         _valueTargetSelection = valueTargetSelection;
@@ -980,8 +985,8 @@ internal sealed class AiBotDecisionService
         var buyProb = BuyProbHybrid(homeostatic, directional, noiseFactor, herdTilt, anchorTilt,
             _multiplicativeDirectional, _diversityGain);
 
-        // 3. Strategy-aware market-order probability
-        var effectiveUseMarket = user.UseMarketProb;
+        // 3. Strategy-aware market-order probability (scaled by the global MarketProbMult ⇒ more takers/volume)
+        var effectiveUseMarket = Math.Min(1m, user.UseMarketProb * _marketProbMult);
         if (_sentimentDynamics)
         {
             // Sentiment-dynamics §: momentum must TAKE liquidity to move price (§1b: limits won't trend).
