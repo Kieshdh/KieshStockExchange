@@ -51,13 +51,18 @@ def main():
         since = datetime.now(timezone.utc).timestamp() - args.window_min * 60
         where = f'WHERE extract(epoch from t."Timestamp") >= {since:.0f} '
 
+    # Restrict to each stock's PRIMARY listing — otherwise a dual-listed stock mixes its USD and EUR
+    # trades into one candle, faking a ~FX-gap-wide (~7%) wick every bar. (r4_realism_score uses the same join.)
+    join = ('JOIN "StockListings" sl ON sl."StockId"=t."StockId" '
+            'AND sl."Currency"=t."Currency" AND sl."IsPrimary"=true ')
+
     # 1-min OHLCV body.
     sql = ('SELECT t."StockId", floor(extract(epoch from t."Timestamp")/60)*60 AS b, '
            '(array_agg(t."Price" ORDER BY t."Timestamp" ASC))[1]  AS o, '
            'max(t."Price") AS h, min(t."Price") AS l, '
            '(array_agg(t."Price" ORDER BY t."Timestamp" DESC))[1] AS c, '
            'sum(t."Quantity") AS vol '
-           f'FROM "Transactions" t {where}GROUP BY t."StockId", b ORDER BY t."StockId", b;')
+           f'FROM "Transactions" t {join}{where}GROUP BY t."StockId", b ORDER BY t."StockId", b;')
     body = [ln for ln in psql(args.db, sql).splitlines()[1:] if ln.count(",") >= 6]
     if not body:
         sys.exit("no candles to export")
