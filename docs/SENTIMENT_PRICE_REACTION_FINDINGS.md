@@ -115,10 +115,29 @@ drift), NOT a de-linearizer.** R² went the WRONG way again (0.257→0.281) — 
 (0.196) was confirmed to be variance. **User call 2026-06-17: KEEP HUNTING, do NOT bake bubble** — leave it
 default-off, pursue source-level de-linearizers instead. Charts: `logs/R1_baseline.png`, `logs/R1_bubble.png`.
 
-## R-FINAL ROUND 2 — SlowRingDamp (in progress)
+## R-FINAL ROUND 2 — SlowRingDamp (DONE — negative)
 Implemented `Bots:Sentiment:SlowRingDamp` (commit `8d09892`, default-off=1.0, byte-identical, 161/161 tests):
 multiplier on the slow per-stock OU rings (τ≥1000s ⇒ 1800s/10800s) via `internal static SlowRingSigma`.
-Round 2 A/B running: baseline vs SlowRingDamp=0.5 (180 min, DBs `kse_soak_base` / `kse_soak_sd`).
+Round 2 A/B (180 min): baseline vs SlowRingDamp=0.5. Conservation clean both arms.
+
+| metric | R2 baseline | R2 slowdamp0.5 | read |
+|------|------|------|------|
+| linear_fit_R² (150m) | 0.168 | 0.192 | wrong way again (within noise) |
+| net_move | 1.86% | 2.10% | bigger displacement |
+| composite (90m) | 54.0 | 47.2 | slowdamp −6.8 |
+| trades | ~382k | 315k | **less activity** (less dispersion → fewer orders) |
+| ret_acf_lag5 | −0.014 | +0.005 | tiny nudge toward persistence |
+
+**Verdict: SlowRingDamp does NOT help** — slightly worse composite, more linear, less activity. Confirms the
+hypothesis: damping the slow DRIFT source ≠ waviness (waviness is gated by the ret_acf over-reversion). Lever
+stays committed but **default-off / not useful for the goal.**
+
+**⚠️ NOISE FLOOR is now the headline finding.** The SAME committed baseline scored R²=0.257/composite=27.5
+(R1) vs R²=0.168/composite=54.0 (R2) — soaks are non-deterministic (wall-clock dt jitter advances the OU RNG
+differently), so run-to-run noise (~±0.05 R², ~±15 composite) **dwarfs** every config effect measured so far
+(bubble +0.024 R², slowdamp +0.024 R²). This re-confirms the prior 19-experiment conclusion: **no config knob
+moves the ret_acf_lag1≈−0.43 ceiling.** Only a lever with a LARGE (above-noise) effect, or an engine-level
+change, can be detected/can work.
 
 **Hypothesis caveat (worth recording before results land):** SlowRingDamp attacks the slow DRIFT source, but
 waviness (within-window reversals) is gated by the **`ret_acf_lag1 ≈ −0.43` over-mean-reversion ceiling** — the
@@ -142,3 +161,11 @@ config-tunable — these are the source-level de-linearizers the user asked to p
    *combined* with (1)/(2). Cheap to re-A/B once the anchors are loosened.
 Engine-level (deferred, Ultraplan): decouple bot reaction from its OWN 1-min price impact (the 72% flow-MR
 component; the 28% is bid-ask bounce, a realistic microstructure artifact that washes out by design at 1-min).
+
+## R-FINAL ROUND 3 — RecentAnchor DISABLED (running)
+Decisive test of candidate #1: baseline vs `Bots:RecentAnchor:Enabled=false` (180 min, DBs `kse_soak_base` /
+`kse_soak_ra`). Turning OFF the medium-term negative feedback entirely (not a partial reduction) to see if it's
+a LARGE, above-noise effect — the only kind that can be trusted given the noise floor. If waviness appears (R²
+clearly down, trends persist longer, ret_acf less negative) → found the lever, then tune Strength vs runaway.
+If not → strong evidence that config can't do it and the engine-level ret_acf fix is required (Ultraplan).
+ValueAnchor (Strength 0.5) still backstops true runaway.
