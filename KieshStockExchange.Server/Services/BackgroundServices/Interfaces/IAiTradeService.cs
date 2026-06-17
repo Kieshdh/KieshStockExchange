@@ -105,6 +105,10 @@ public interface IAiTradeService
     /// the body without staging a temp file on the server.</summary>
     string BuildFailuresCsv(CancellationToken ct = default);
 
+    /// <summary>Clear all recorded failures — in-memory ring, aggregates, AND the persisted NDJSON (so old
+    /// failures don't replay on restart). Backs the dashboard's "Clear failures" button.</summary>
+    void ClearFailures();
+
     /// <summary>
     /// Suggested CSV file name (without an extension) for the save-file dialog
     /// the dashboard pops when the user exports failures. Centralised here so

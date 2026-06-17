@@ -75,6 +75,14 @@ internal sealed class BotFailureTracker
         _failuresByCategory.Clear();
         _failuresByStockId.Clear();
     }
+
+    /// <summary>Clear the in-memory ring + aggregates AND truncate the persisted NDJSON so old failures
+    /// don't replay on the next restart. Backs the dashboard's "Clear failures" action.</summary>
+    internal void ClearAll()
+    {
+        Reset();
+        _store.Clear();
+    }
     #endregion
 
     #region Snapshots
@@ -168,7 +176,7 @@ internal sealed class BotFailureTracker
     }
 
     private static string FormatLine(FailureRecord r) =>
-        $"{r.TimestampUtc.ToLocalTime():HH:mm:ss}  AIUser {r.AiUserId} stock {r.StockId}: " +
+        $"{r.TimestampUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss}  AIUser {r.AiUserId} stock {r.StockId}: " +
         $"{r.Category.DisplayName()} — {r.ErrorMessage}";
 
     private static string EscapeCsv(string value)

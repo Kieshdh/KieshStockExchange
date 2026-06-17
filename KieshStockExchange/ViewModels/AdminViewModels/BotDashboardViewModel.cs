@@ -343,6 +343,29 @@ public partial class BotDashboardViewModel : BaseViewModel, IDisposable
         DownloadServerCsvAsync("api/admin/bots/failures.csv", $"bot_failures_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}",
             "failure rows", v => ExportFailuresStatusText = v);
 
+    // Clears the server's failure ring + persisted NDJSON, then refreshes so the list empties immediately.
+    [RelayCommand]
+    private async Task ClearFailuresAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        try
+        {
+            await _admin.ClearFailuresAsync().ConfigureAwait(false);
+            ExportFailuresStatusText = "Failures cleared.";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to clear bot failures.");
+            ExportFailuresStatusText = $"Clear failed: {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+            await RefreshAsync().ConfigureAwait(false);
+        }
+    }
+
     [RelayCommand]
     private Task ExportEconomyAsync() =>
         DownloadServerCsvAsync("api/admin/bots/economy.csv", $"bot_economy_{TimeHelper.NowUtc():yyyyMMdd_HHmmss}",

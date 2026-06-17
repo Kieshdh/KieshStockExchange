@@ -162,6 +162,19 @@ public sealed class RingBufferStore<T> : IAsyncDisposable
     }
 
     /// <summary>
+    /// Truncate the backing file, dropping all persisted history (so a restart's LoadTail finds nothing).
+    /// The in-memory ring is the caller's concern. Used by manual "clear" actions, not the hot path.
+    /// </summary>
+    public void Clear()
+    {
+        lock (_syncWriteLock)
+        {
+            try { if (File.Exists(_path)) File.WriteAllText(_path, string.Empty); }
+            catch (IOException ex) { _logger?.LogWarning(ex, "RingBufferStore {Path}: clear failed", _path); }
+        }
+    }
+
+    /// <summary>
     /// Closes the producer side of the queue and waits for the consumer to
     /// flush every pending record to disk. Bot loop's stop path should call
     /// this before the engine shuts down so the audit tail is durable.

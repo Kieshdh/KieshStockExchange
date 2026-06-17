@@ -105,6 +105,13 @@ public sealed class AdminBotController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("failures/clear")]
+    public IActionResult ClearFailures()
+    {
+        _bots.ClearFailures();
+        return NoContent();
+    }
+
     // Single endpoint covers all four scaler/cap settings. Body fields are
     // optional — null leaves the existing value alone. Matches the
     // SetActiveBotCap / SetMaxBotCap / MinBotCap / AutoScale call surface

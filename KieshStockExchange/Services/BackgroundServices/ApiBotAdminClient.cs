@@ -40,6 +40,12 @@ public sealed class ApiBotAdminClient
         resp.EnsureSuccessStatusCode();
     }
 
+    public async Task ClearFailuresAsync(CancellationToken ct = default)
+    {
+        var resp = await _http.PostAsync("api/admin/bots/failures/clear", content: null, ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+    }
+
     public async Task UpdateScalerAsync(BotScalerSettings settings, CancellationToken ct = default)
     {
         var resp = await _http.PostAsJsonAsync("api/admin/bots/scaler", settings, ApiJsonOptions.Default, ct).ConfigureAwait(false);

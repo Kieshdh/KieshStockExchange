@@ -258,11 +258,16 @@
                         <VerticalStackLayout Spacing="8">
                             <Label Text="Failures"
                                    Style="{StaticResource AdminCardSubtitle}" />
-                            <Button Text="Export CSV"
-                                    Style="{StaticResource AdminPrimaryButton}"
-                                    Command="{Binding ExportFailuresCommand}"
-                                    HorizontalOptions="Start"
-                                    MinimumWidthRequest="120" />
+                            <HorizontalStackLayout Spacing="8">
+                                <Button Text="Export CSV"
+                                        Style="{StaticResource AdminPrimaryButton}"
+                                        Command="{Binding ExportFailuresCommand}"
+                                        MinimumWidthRequest="120" />
+                                <Button Text="Clear"
+                                        Style="{StaticResource AdminDangerButton}"
+                                        Command="{Binding ClearFailuresCommand}"
+                                        MinimumWidthRequest="90" />
+                            </HorizontalStackLayout>
                             <Label Text="{Binding ExportFailuresStatusText}"
                                    Style="{StaticResource AdminMutedNote}" />
                         </VerticalStackLayout>
