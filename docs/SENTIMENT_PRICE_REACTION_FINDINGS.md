@@ -191,6 +191,38 @@ A/B: baseline (0) vs τ=60 s. Hypothesis: bots perceive a ~1-min-lagged price �
 effect. Watch for: runaway (perceiving a stale price under a real trend), wider spreads / odd fills (limit
 placement reads the same EWMA), conservation.
 
+**RESULT (180m, conservation clean, NO runaway — drift −0.97% vs baseline −0.96%):**
+| metric | R4 baseline | R4 smoothed60 | read |
+|------|------|------|------|
+| **ret_acf_lag1** | −0.443 | −0.447 | **UNMOVED — the 1-min ceiling did not budge** |
+| ret_acf_lag5 (r4 / trend_diag) | −0.048 / −0.007 | **+0.030 / +0.038** | flipped POSITIVE — more multi-min trend persistence |
+| linear_fit_R² (150m) | 0.264 | 0.253 | slightly less linear (within noise) |
+| composite (90m) | 53.9 | 51.4 | −2.5 (clustering absret_acf down) |
+
+**Diagnostic verdict:** lagging the *perceived* price by 60 s did NOT move ret_acf_lag1 ⇒ the 1-min
+over-reversion is **NOT** driven by bots reacting to perceived price. It is microstructural: bid-ask BOUNCE
+(~28%, mechanical, a REAL stylized fact) + limit-order PLACEMENT around the instantaneous mid (GetMidPriceAsync,
+not smoothed) → post-trade limits cluster at the new mid and revert. The lever *does* lift multi-min trend
+persistence (lag5 −→+) and slightly de-spikes volatile names by eye (`logs/R4_{baseline,smoothed60}.png`), but
+costs clustering and doesn't touch the ceiling.
+
+## FINAL CONCLUSION (R-FINAL session, 2026-06-17) — user decision: STOP, keep all default-off
+The 1-min over-reversion ceiling (ret_acf_lag1 ≈ −0.43) is the binding constraint on "waviness," and across this
+session it resisted **everything tried**: bubble (R1), SlowRingDamp (R2), RecentAnchor-off (R3), and the
+time-based SmoothedPrices perception-lag engine lever (R4) — re-confirming the prior 19-experiment result.
+Run-to-run NOISE (baseline R² 0.168–0.289, composite 27.5–58.4) means only large effects are even measurable;
+none of the levers cleared it on the ceiling. The ceiling is now understood to be **microstructural** (bid-ask
+bounce — partly a realistic feature — plus limit-placement mean-reversion), not a sentiment/anchor/perception
+artifact. **User call: accept it as structural, keep all 4 levers DEFAULT-OFF (nothing baked), stop here.**
+The only untried lever is making limit-order PLACEMENT read a lagged price (would attack the placement-MR
+component) — deferred as a riskier engine change (stale-quote fills) for a future Ultraplan if ever revisited.
+
+### Levers shipped this session (all flag-gated, DEFAULT-OFF, byte-identical when off, tested)
+- `Bots:Sentiment:SlowRingDamp` (commit `8d09892`) — slow-ring amplitude. Negative for waviness.
+- `Bots:SmoothedPriceHalfLifeSec` (commit `a0f99fb`) — time-based price-perception lag. Moves lag5 not lag1.
+- (`Bots:Sentiment:PriceReaction`/`MomStrength` = bubble, prior commits; `Bots:RecentAnchor:Enabled` pre-existing.)
+All remain off in `appsettings.json`. 165/165 tests pass.
+
 ## ROOT-CAUSE FOUND for the ret_acf ceiling — the SmoothedPrices EWMA (engine lever, Ultraplan target)
 Traced the price bots actually react to. The anchor gaps (`AiBotDecisionService.AverageWatchlistValueGap` /
 `AverageWatchlistRecentGap`, ~L1675/1695) already read `ctx.SmoothedPrices`, NOT the raw last price — so a
