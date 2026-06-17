@@ -44,6 +44,10 @@ internal sealed class AiBotContext
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> PreviousPrices = new();
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal> SmoothedPrices = new();
 
+    // §smoothed-price half-life: per-key last-update time for the OPTIONAL time-based EWMA (when
+    // Bots:SmoothedPriceHalfLifeSec > 0). Empty/unused on the legacy fixed-α path.
+    internal readonly ConcurrentDictionary<(int, CurrencyType), DateTime> SmoothedPriceUpdatedUtc = new();
+
     internal readonly Dictionary<int, DateTime> BurstEndTimes  = new();
 
     // §A1 inertia: per-bot directional STANCE (dir +1 buy / -1 sell) that persists until `until`, so a
@@ -304,6 +308,7 @@ internal sealed class AiBotContext
         StockPrices.Clear();
         PreviousPrices.Clear();
         SmoothedPrices.Clear();
+        SmoothedPriceUpdatedUtc.Clear();
         BurstEndTimes.Clear();
         Stances.Clear();
         AnchorTiltLag.Clear();

@@ -207,6 +207,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly bool _advancedEnabled;       // §P6a master switch (default off)
     private readonly bool _batchArms;             // §A1a batch the stop/trailing arm route (default off)
     private readonly bool _bracketBatch;          // Round 2 §0005 batch the bracket + market-short routes (default off)
+    private readonly double _smoothedPriceHalfLifeSec; // 0 ⇒ legacy fixed α=0.15 EWMA; >0 ⇒ time-based half-life
 
     public AiTradeService(
         IOrderExecutionService marketOrders,
@@ -236,6 +237,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _bracket      = bracket      ?? throw new ArgumentNullException(nameof(bracket));
         _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        // §smoothed-price half-life: decouple bots from their OWN ~1-min price impact by perceiving a lagged
+        // price. 0 ⇒ legacy fixed per-quote α=0.15 (byte-identical rollback). Targets the ret_acf_lag1 ceiling.
+        _smoothedPriceHalfLifeSec = Math.Max(0.0, _configuration.GetValue("Bots:SmoothedPriceHalfLifeSec", 0.0));
         if (db          is null) throw new ArgumentNullException(nameof(db));
         if (ledger      is null) throw new ArgumentNullException(nameof(ledger));
         if (books       is null) throw new ArgumentNullException(nameof(books));
@@ -1230,10 +1234,30 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         _ctx.StockPrices[key] = quote.LastPrice;
 
-        // EWMA smoothing (α=0.15): reacts over ~6 ticks, dampens spike noise.
+        // EWMA smoothing. Legacy: fixed α=0.15 PER QUOTE (reacts over ~6 quotes — effectively seconds, so the
+        // perceived price tracks the instantaneous one and bots counter-trade their OWN 1-min impact). When
+        // SmoothedPriceHalfLifeSec > 0, use a TIME-based half-life so the perceived price lags by ~τ regardless
+        // of quote rate — decoupling bot reaction from same-minute impact (the ret_acf_lag1 ceiling).
         var smoothed = _ctx.SmoothedPrices.TryGetValue(key, out var s) ? s : quote.LastPrice;
-        _ctx.SmoothedPrices[key] = 0.85m * smoothed + 0.15m * quote.LastPrice;
+        if (_smoothedPriceHalfLifeSec <= 0.0)
+        {
+            _ctx.SmoothedPrices[key] = 0.85m * smoothed + 0.15m * quote.LastPrice;
+        }
+        else
+        {
+            var now = TimeHelper.NowUtc();
+            double dt = _ctx.SmoothedPriceUpdatedUtc.TryGetValue(key, out var last)
+                ? (now - last).TotalSeconds : 0.0;
+            _ctx.SmoothedPriceUpdatedUtc[key] = now;
+            decimal keep = (decimal)TimeEwmaKeep(dt, _smoothedPriceHalfLifeSec);
+            _ctx.SmoothedPrices[key] = keep * smoothed + (1m - keep) * quote.LastPrice;
+        }
     }
+
+    // Time-based EWMA keep weight (weight retained on the OLD value) for elapsed dt at a given half-life:
+    // 0.5^(dt/halfLife). dt≤0 or halfLife≤0 ⇒ keep 1 (no update). Pure ⇒ unit-testable.
+    internal static double TimeEwmaKeep(double dtSec, double halfLifeSec)
+        => (halfLifeSec <= 0.0 || dtSec <= 0.0) ? 1.0 : Math.Exp(-0.6931471805599453 * dtSec / halfLifeSec);
     #endregion
 
     #region Timers
