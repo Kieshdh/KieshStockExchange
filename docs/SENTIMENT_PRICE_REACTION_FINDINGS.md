@@ -162,13 +162,34 @@ config-tunable — these are the source-level de-linearizers the user asked to p
 Engine-level (deferred, Ultraplan): decouple bot reaction from its OWN 1-min price impact (the 72% flow-MR
 component; the 28% is bid-ask bounce, a realistic microstructure artifact that washes out by design at 1-min).
 
-## R-FINAL ROUND 3 — RecentAnchor DISABLED (running)
-Decisive test of candidate #1: baseline vs `Bots:RecentAnchor:Enabled=false` (180 min, DBs `kse_soak_base` /
-`kse_soak_ra`). Turning OFF the medium-term negative feedback entirely (not a partial reduction) to see if it's
-a LARGE, above-noise effect — the only kind that can be trusted given the noise floor. If waviness appears (R²
-clearly down, trends persist longer, ret_acf less negative) → found the lever, then tune Strength vs runaway.
-If not → strong evidence that config can't do it and the engine-level ret_acf fix is required (Ultraplan).
-ValueAnchor (Strength 0.5) still backstops true runaway.
+## R-FINAL ROUND 3 — RecentAnchor DISABLED (DONE — null on the ceiling)
+Decisive test of candidate #1: baseline vs `Bots:RecentAnchor:Enabled=false` (180 min). Conservation clean
+both; **no runaway** (drift −1.18% vs baseline −1.22% — ValueAnchor held).
+
+| metric | R3 baseline | R3 recentoff | read |
+|------|------|------|------|
+| linear_fit_R² (150m) | 0.289 | 0.263 | better but within noise (−0.026) |
+| **ret_acf_lag1** | **−0.460** | **−0.472** | **NOT toward 0 — slightly worse** |
+| composite (90m) | 58.4 | 64.7 | +6.3 (clustering absret_acf 0.140→0.181) |
+| net_move | 1.86% | 1.83% | flat |
+
+**Verdict: RecentAnchor is NOT the ret_acf ceiling.** Disabling it does not move ret_acf_lag1 toward 0 (it
+nudged the wrong way); the R² gain is within noise. So **all three config rounds (bubble, slowdamp, recentoff)
+failed to move the ceiling** — re-confirming "no config knob moves ret_acf_lag1≈−0.43." (Side note: recentoff
++6.3 composite via clustering is a real-ish minor gain, but irrelevant to waviness.) → **Escalate to the engine
+lever.**
+
+## R-FINAL ROUND 4 — time-based SmoothedPrices EWMA (engine lever, IMPLEMENTED default-off)
+Implemented the root-cause fix from above, flag-gated + byte-identical default (so it's a safe, reversible
+A/B — bake still needs user sign-off). Changes:
+- `AiBotContext`: `SmoothedPriceUpdatedUtc` per-key timestamp dict (+ cleared on reset).
+- `AiTradeService.OnQuoteUpdated`: when `Bots:SmoothedPriceHalfLifeSec > 0`, blend with a TIME-based keep
+  `0.5^(Δt/τ)` instead of the fixed per-quote 0.85/0.15. New `internal static TimeEwmaKeep` (+ unit tests).
+- `appsettings`: `Bots:SmoothedPriceHalfLifeSec: 0.0` (default = legacy).
+A/B: baseline (0) vs τ=60 s. Hypothesis: bots perceive a ~1-min-lagged price ⇒ stop counter-trading their own
+1-min impact ⇒ ret_acf_lag1 moves toward 0 ⇒ genuine multi-min trends/waves (R² down) — a LARGE, above-noise
+effect. Watch for: runaway (perceiving a stale price under a real trend), wider spreads / odd fills (limit
+placement reads the same EWMA), conservation.
 
 ## ROOT-CAUSE FOUND for the ret_acf ceiling — the SmoothedPrices EWMA (engine lever, Ultraplan target)
 Traced the price bots actually react to. The anchor gaps (`AiBotDecisionService.AverageWatchlistValueGap` /
