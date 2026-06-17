@@ -169,3 +169,23 @@ a LARGE, above-noise effect — the only kind that can be trusted given the nois
 clearly down, trends persist longer, ret_acf less negative) → found the lever, then tune Strength vs runaway.
 If not → strong evidence that config can't do it and the engine-level ret_acf fix is required (Ultraplan).
 ValueAnchor (Strength 0.5) still backstops true runaway.
+
+## ROOT-CAUSE FOUND for the ret_acf ceiling — the SmoothedPrices EWMA (engine lever, Ultraplan target)
+Traced the price bots actually react to. The anchor gaps (`AiBotDecisionService.AverageWatchlistValueGap` /
+`AverageWatchlistRecentGap`, ~L1675/1695) already read `ctx.SmoothedPrices`, NOT the raw last price — so a
+smoothing layer exists. BUT that EWMA is **fixed α=0.15 PER QUOTE** (`AiTradeService.OnQuoteUpdated` **L1235**:
+`Smoothed = 0.85·Smoothed + 0.15·LastPrice`), updated on **every quote** (sub-second). At realistic quote
+rates its effective time-constant is **seconds**, so the "smoothed" price tracks the instantaneous price almost
+immediately ⇒ **bots react to their OWN ~1-min price impact within seconds → the synchronized counter-order
+snap-back that pins ret_acf_lag1 ≈ −0.43 (the 72% flow-MR component).** `RecentReturnForActivity` (the #2/#3
+price-reaction driver) reads the same EWMA, so it's the single perception-lag chokepoint.
+
+**Proposed engine lever (Ultraplan, flag-gated, default byte-identical):** replace the per-quote α=0.15 with a
+**time-based EWMA** — `α = 1 − exp(−Δt/τ)` using a per-key last-update timestamp — gated by
+`Bots:SmoothedPriceHalfLifeSec` (≤0 ⇒ legacy fixed 0.85/0.15 = rollback path). A τ≈30–60 s makes bots perceive
+a ~1-min-LAGGED price, so a bot's own 1-min impact no longer triggers immediate counter-orders → ret_acf toward
+0 → genuine multi-min trends/waves possible. This is a LARGE (above-noise-floor) intervention, the right kind
+given the noise problem. Risks to cover in the plan: limit placement also reads SmoothedPrices (stale-quote
+fills / wider spreads), activity-driver coupling, hot-path cost of `NowUtc()`+timestamp dict per quote. A/B:
+baseline vs halflife=60s, watch ret_acf_lag1 (target less negative), R²/net_move, conservation, and runaway.
+**NOT YET IMPLEMENTED** — pending Round 3 evidence + user Ultraplan sign-off (per the engine-change commitment).
