@@ -133,4 +133,26 @@ flag-gated; byte-identical-off where possible):
 - **Group-commit metric**: log commits/sec + orders/commit so the real ceiling is directly visible.
 
 ## 10. Live findings log (filled as experiments run tonight)
-- _(pending — baseline run starts after the system-A A/B frees the soak servers)_
+- **System-A A/B (pre-perf, foundation, 50m, A-on vs A-off control):** composite 60.3→**61.8**, clustering
+  (absret_acf) 0.156→**0.196**, ret_acf_lag1 −0.370→−0.375 (~flat), R² 0.316→0.311 (~flat), conservation clean.
+  ⇒ the FOUNDATION (×5 + MarketProbMult 1.5 + weak anchors) is the big realism win (composite 60+, ret_acf up
+  from −0.44); RegimeDrift adds clustering + visible wander (user "looks good") but doesn't move aggregate
+  linearity. System A & foundation both look shippable. NOTE: cap throttled to ~1,870 → the perf problem below.
+- **Perf Round 1 (DONE, 25m parallel, foundation+A):** baseline vs `BatchArms=on`. **BatchArms = KEEP:**
+  adv ms/order **17.7→10.3 (−42%)**, cap 669→764 (+14%), orders/tick 38→44, adv/tick 8.7→10.1, tot ~627ms
+  both, conservation clean. ⇒ fold BatchArms into the working baseline. Caveats: (a) caps are low/contended —
+  both arms shared ONE docker Postgres in parallel (halves absolute cap; relative delta valid); (b) `batch`
+  = 6.96 ms/order locally vs ~0.6 on prod = the ~10× docker commit-latency skew (§3) confirmed; (c) `arb`
+  co-dominant (156–171 ms) = the 5-bot cohort's per-tx commits.
+- **Perf Round 2 (DONE, SOLO, foundation+A+BatchArms):** true un-contended **cap ≈ 893** (range 521–1331,
+  noisy), tot 646 ms = **batch 310 + arb 171 + adv 118** + collect 18 + maint 21. batch ms/order 6.12, adv
+  ms/order 10.0. ⇒ after BatchArms, the LOCAL ceiling is **batch (plain submit/match/settle) + arb**, both
+  commit/round-trip-bound (batch 6.12 ms/order vs ~0.6 prod = the docker skew). On PROD batch is cheap, so the
+  prod ceiling will be adv+arb count — confirms §7.1 (batch advanced/arb entry) is the transferable lever.
+- **Perf Round 3 (DONE, SOLO, `synchronous_commit=off`):** **BIG local win — cap 893→1424 (+59%)**, orders/tick
+  51→80, batch ms/order 6.12→4.58 (−25%), adv ms/order 10.0→5.54 (−45%), arb 171→105 (−39%), tot ~630ms.
+  ⇒ the local engine is **heavily FSYNC-bound**. **PROD win will be smaller** (in-network, fast disk — §3) and
+  it's a durability tradeoff (§8 Q2). **DECISION: keep sc=off SET on the docker instance for the rest of
+  tonight's throwaway soaks** (faster iteration + closer to prod's cheap-commit regime). ⚠️ REVERT
+  (`ALTER SYSTEM RESET synchronous_commit; SELECT pg_reload_conf();`) before any durability-sensitive run.
+  New dominant phase = `batch` 365 ms (plain submit/match/settle) = the structural Ultraplan target (§7.1/§7.2).
