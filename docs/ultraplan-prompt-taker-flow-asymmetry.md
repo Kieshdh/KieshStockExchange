@@ -76,6 +76,31 @@ flip `ShortProtectiveStops` on so the new shorts are protected symmetrically.** 
 Alternatively, if the bounded drift (gym soak: −0.67%/90m, within the ≤5%/4h budget, beyond50=0) is acceptable,
 no further action is needed.
 
+## REDESIGN — council-approved `BuyStopFraction` (2026-06-19, supersedes ShortProtectiveStops)
+The short-gated version produced ~0 buy-stops (no shorts). Council redesign (commit `89ed85f`, then `c77e651`):
+**`Bots:Advanced:BuyStopFraction` [0..1], default 0 (byte-identical).** A single seeded draw picks the trigger
+DIRECTION (buy if draw < fraction, else sell), then requires the matching resource (free shares for a sell-stop /
+free CASH for a buy-stop) with NO inventory fallback — so realized split = the fraction, not the net-long inventory.
+The buy-stop needs CASH, not a held short (the user's "buy the shares back on a breakout" insight). Determinism:
+seeded draw, no global controller. **Routing fix (`c77e651`):** a capped MARKET buy-stop reserved $0 (the engine
+reserves market buys via BuyBudget, null on that path → InsufficientFunds), so the bot buy-stop routes as a
+stop-LIMIT (limit = trigger×1.005) — reserves qty×Price correctly, TAKES on the breakout (limit ≥ ask), BOUNDED
+per fire. Removed the unusable capped-market overload.
+**EMPIRICAL RESULT (A/B sweeps, conservation clean throughout):** buy-stops now arm in volume and DO reverse the
+down-drift — but a buy-STOP is a MOMENTUM order (fires into a rally → pushes up → cascades), so it OVER-CORRECTS
+into a slow up-creep at every tested fraction: 0.35 → avg drift +0.08→+0.17→+0.48% and max 3.7→8.4→13.3% by t=15m;
+0.10 → +0.01→+0.04→+0.22% and max 3.3→4.3→8.3% by t=15m (slower, same direction). It trades down-drift for
+up-creep + higher two-sided volatility; no clean stable zero. Vindicates First-Principles/Contrarian (a buy-stop is
+not a stabilizer). **The clean stabilizing fix is buy-the-DIP (mean-reverting buy-LIMIT below market) — counteracts
+the sell-stop dip pressure on the SAME dips — NOT a buy-stop.** The buy-stop's real potential value is the
+**ret_acf realism ceiling** (the two-sided cascades = endogenous feedback the Expansionist flagged; the approved
+realism-ceiling ultraplan §3 explicitly tests this).
+**BAKE: `BuyStopFraction` stays default-0** (momentum over-corrects the drift; no clean win). Shipped + available.
+**IN-FLIGHT at this point (resume): A/B soak control `kse_soak_bsf0c` vs `kse_soak_bsf10` (BuyStopFraction 0.10),
+60m, for a proper ret_acf read (15m was too few candles).** HARVEST at completion: `python scripts/r4_realism_score.py
+--db kse_soak_bsf10` vs `--db kse_soak_bsf0c`, compare ret_acf_lag1 + absret_acf (clustering). If ret_acf improves
+→ buy-stops are a realism lever (feed the realism-ceiling ultraplan); else keep default-0.
+
 ## Verification queries (local Claude, post-soak)
 - Taker balance: `SELECT "Stop","Side",count(*) FROM "Orders" WHERE "Entry"='Market' OR "Stop"<>'None' GROUP BY 1,2`
   — buy-stops should now appear (Stop=Buy > 0) and the market buy/sell split should rebalance toward 50/50.
