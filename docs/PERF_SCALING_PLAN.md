@@ -239,3 +239,22 @@ MAUI client build clean.**
   bake BracketBatch (+ BatchArms) default-on. If still flat → BracketBatch is SAFE but no measurable LOCAL win;
   recommend baking on prod (where it was the measured #1 lever) or defer to user. _(pending)_
 - Arb-leg `Bots:Arbitrage:BatchLegs` stays default-off (stretch; one soak ≠ bake for new sequential code).
+
+## 13. PATCH VALIDATION — final result + bake decision (2026-06-18)
+**Commit-bound A/B (sc=on, expensive commits, BatchArms on both arms): BracketBatch ON gives ZERO adv ms/order
+drop (2.95→2.95), cap flat, conservation 0.** Same flat result uncontended (1.21→1.19). ⇒ **KEY STRUCTURAL
+FINDING:** batching the *entry* of MATCHED orders (short-opens/brackets) doesn't help — the advanced-order cost
+is the **match + settle group-tx** (per-`(stock,currency)`), and with ~50 stocks few orders share a group, so
+entry-batching merges almost nothing. BatchArms won (−42%) only because **arms are reserve+insert, NO match** →
+all arms collapse into ONE insert tx regardless of stock.
+- **BAKED: `Bots:Advanced:BatchArms` = true** (in-scope, conservation-clean across hours, measured −42% adv/order,
+  prod-gate already met). The one real, gate-meeting win.
+- **NOT baked: `Bots:Advanced:BracketBatch`** (conservation-SAFE — keep the patch's determinism fix + tests as
+  hardening — but no measurable throughput win; matching-bound). Flag stays default-off.
+- **Arb-leg `Bots:Arbitrage:BatchLegs`: SKIPPED** (kept default-off). Arb legs also MATCH (market buy/sell), so
+  by the same matching-bound logic entry-batching won't help; + 5-bot cohort = negligible. Not worth a soak.
+- **NEXT-LEVER REFINEMENT (for a future ultraplan):** the real advanced/matched-order cost is the per-
+  `(stock,currency)` match+settle group transaction, NOT entry-inserts. So §7.1 (batch the advanced entry) is
+  largely SPENT (BatchArms got the insert-only win; matched-order entry-batching is a no-op). The remaining
+  throughput lever is reducing/coalescing the **group-tx commits** themselves = §7.2 decision/commit decoupling
+  (group-commit pipeline) or per-currency sharding (§7.3) — confirmed as the next frontier.
