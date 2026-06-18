@@ -621,72 +621,60 @@ internal sealed class AiBotDecisionService
         }
     }
 
-    // P6a: protect the first watchlist long with FREE shares — a slippage-capped, fundamental-relative
-    // static sell-stop (bots no longer arm uncapped trailing stops; see ComputeAdvancedDecisionAsync).
-    // §patch 0003: uses EligibleWatchlist cache.
+    // P6a: protect a held position with a slippage-capped, fundamental-relative static stop (bots never
+    // arm uncapped trailing stops; see ComputeAdvancedDecisionAsync). §patch 0003: uses EligibleWatchlist.
+    // Flag OFF (default): the legacy path — protect the FIRST watchlist long with free shares (sell-stop).
+    // Flag ON (taker-symmetry): protect the LARGEST absolute exposure — long ⇒ sell-stop below market,
+    // short ⇒ buy-stop above market — so short-heavy bots add buy-side taker flow (the long-only sell-stops
+    // were the entire taker sell-skew / down-drift). Neither path draws RNG ⇒ flag-off is byte-identical.
     private async Task<BotAdvancedDecision?> BuildProtectiveStopAsync(AiBotContext ctx, AIUser user,
         CurrencyType currency, CancellationToken ct)
     {
         var watch = EligibleWatchlist(ctx, user, currency);
         if (watch.Length == 0) return null;
         int stockId = 0, qty = 0;
-        foreach (var id in watch)
+        bool isBuy = false;   // false = sell-stop (protect long); true = buy-stop (protect short)
+        if (!_shortProtectiveStops)
         {
-            var avail = _accounts.GetPosition(user.UserId, id)?.AvailableQuantity ?? 0;
-            if (avail > 0) { stockId = id; qty = Math.Min(avail, _advancedMaxQty); break; }
+            foreach (var id in watch)
+            {
+                var avail = _accounts.GetPosition(user.UserId, id)?.AvailableQuantity ?? 0;
+                if (avail > 0) { stockId = id; qty = Math.Min(avail, _advancedMaxQty); break; }
+            }
         }
-        // Taker-symmetry: no protectable long ⇒ if a short is held, protect it with a buy-stop instead
-        // (mirror of the sell-stop below). Flag-gated, so flag-off returns null here exactly as before.
-        // No RNG is drawn on either path, so the flag-off draw sequence is byte-identical.
-        if ((stockId <= 0 || qty <= 0) && _shortProtectiveStops)
-            return await BuildShortProtectiveStopAsync(ctx, user, currency, watch, ct).ConfigureAwait(false);
-        if (stockId <= 0 || qty <= 0) return null;
-        var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
-        if (price <= 0m) return null;
-
-        // §P6 fundamental-relative + de-clustered trigger, bounded inside the Far walls, and a low
-        // slippage cap on the fire. Bots NEVER arm an uncapped trailing stop: the `trailing` gate now
-        // also produces a capped static stop (real users' trailing path is unchanged). The reference
-        // blends market with fundamental, but the trigger is forced strictly below market so a sell-stop
-        // is always valid and varied stops don't pile at one level and chain-fire.
-        var offset = StopOffset(ctx, user);
-        var fund = Fundamental(stockId, currency, ctx);
-        var refPrice = fund > 0m ? (price + fund) / 2m : price;
-        var candidate = refPrice * (1m - offset);
-        var ceiling = price * (1m - 0.002m);
-        var stopPrice = CurrencyHelper.RoundMoney(Math.Min(candidate, ceiling), currency);
-        if (stopPrice <= 0m) return null;
-        return new BotAdvancedDecision(BotAdvancedKind.StopMarketSell, stockId, qty, currency,
-            StopPrice: stopPrice, StopSlippagePct: _stopSlippagePct);
-    }
-
-    // Taker-symmetry mirror of BuildProtectiveStopAsync: protect the first watchlist SHORT with a
-    // slippage-capped, fundamental-relative static BUY-stop ABOVE market (covers the short on a rally).
-    // Reserves CASH via the engine's existing buy-stop arm path (a short carries no share reservation —
-    // ReservedQuantity is long-only), so the arm is rejected cleanly if the bot lacks free cash. The
-    // trigger is forced strictly ABOVE market so a buy-stop is always valid and varied stops don't pile.
-    private async Task<BotAdvancedDecision?> BuildShortProtectiveStopAsync(AiBotContext ctx, AIUser user,
-        CurrencyType currency, int[] watch, CancellationToken ct)
-    {
-        int stockId = 0, qty = 0;
-        foreach (var id in watch)
+        else
         {
-            var heldQty = _accounts.GetPosition(user.UserId, id)?.Quantity ?? 0;
-            if (heldQty < 0) { stockId = id; qty = Math.Min(-heldQty, _advancedMaxQty); break; }
+            // Pick the single largest protectable exposure across the watchlist (deterministic; first wins ties).
+            int bestExposure = 0;
+            foreach (var id in watch)
+            {
+                var pos = _accounts.GetPosition(user.UserId, id);
+                if (pos is null) continue;
+                int longAvail = pos.AvailableQuantity;                  // >0 ⇒ protectable long
+                int shortMag  = pos.Quantity < 0 ? -pos.Quantity : 0;   // >0 ⇒ protectable short
+                if (longAvail > bestExposure)
+                { bestExposure = longAvail; stockId = id; qty = Math.Min(longAvail, _advancedMaxQty); isBuy = false; }
+                if (shortMag > bestExposure)
+                { bestExposure = shortMag;  stockId = id; qty = Math.Min(shortMag,  _advancedMaxQty); isBuy = true;  }
+            }
         }
         if (stockId <= 0 || qty <= 0) return null;
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
 
+        // §P6 fundamental-relative + de-clustered trigger, slippage-capped on the fire. The reference blends
+        // market with fundamental; the trigger is forced strictly past market (below for a sell-stop, above
+        // for a buy-stop) so the stop is always valid and varied stops don't pile at one level and chain-fire.
         var offset = StopOffset(ctx, user);
         var fund = Fundamental(stockId, currency, ctx);
         var refPrice = fund > 0m ? (price + fund) / 2m : price;
-        var candidate = refPrice * (1m + offset);
-        var floor = price * (1m + 0.002m);                       // strictly above market (mirror of the sell ceiling)
-        var stopPrice = CurrencyHelper.RoundMoney(Math.Max(candidate, floor), currency);
+        decimal stopPrice = isBuy
+            ? CurrencyHelper.RoundMoney(Math.Max(refPrice * (1m + offset), price * (1m + 0.002m)), currency)
+            : CurrencyHelper.RoundMoney(Math.Min(refPrice * (1m - offset), price * (1m - 0.002m)), currency);
         if (stopPrice <= 0m) return null;
-        return new BotAdvancedDecision(BotAdvancedKind.StopMarketBuy, stockId, qty, currency,
-            StopPrice: stopPrice, StopSlippagePct: _stopSlippagePct);
+        return new BotAdvancedDecision(
+            isBuy ? BotAdvancedKind.StopMarketBuy : BotAdvancedKind.StopMarketSell,
+            stockId, qty, currency, StopPrice: stopPrice, StopSlippagePct: _stopSlippagePct);
     }
 
     // P6b: open a flat-only cash-collateralized short (market sell on a stock the bot doesn't hold). Flat-only
