@@ -179,10 +179,16 @@ flag-gated; byte-identical-off where possible):
   minority) + local commit-skew — magnitude scales with adv/tick → bigger on prod (BatchArms-style caveat).
   Strong green light for the ultraplan PR's bake decision.
 
-## 11. RESUME STATE (compaction handoff — read this to pick up)
-**Big picture:** realism work is essentially DONE/shippable (foundation + system-A default-off, user "looks
-good", composite 60+, conservation clean). Tonight = PERF. An **Ultraplan is running on the web** (kicked off
-via `/ultraplan`) to return a PATCH for batching the advanced/arb entry route; scope + runbook in
+## 11. RESUME STATE (⚠️ mid-night snapshot — CURRENT state is §13–15; read those first)
+**CURRENT (2026-06-18, post-everything):** all decisions resolved (§15). BAKED: BatchArms (`adc2f63`),
+realism foundation+system-A + injection-config (`f70070c`). Batch ultraplan validated & DONE (§13). Docker PG
+REVERTED to safe defaults. Nothing running (no soaks/servers/monitors). Next = the **per-currency sharding +
+staggering ultraplan** (`docs/ultraplan-prompt-per-currency-sharding.md`); pending = sc=off-prod deploy +
+EUR-seed Tools task. The snapshot below is from mid-night and is superseded.
+
+---
+**[mid-night snapshot]** realism work essentially DONE/shippable; an Ultraplan was running on the web for the
+batch advanced/arb entry route (now validated — see §13). Original batch handoff:
 `docs/ultraplan-prompt-batch-advanced-arb-entry.md`.
 
 **In-flight right now:**
