@@ -204,7 +204,7 @@ public partial class SelectedStockService : ObservableObject, ISelectedStockServ
                 PriceUpdatedAt = updated;
             });
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { } // genuine cancel; a timeout falls through below
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "UpdateFromLiveAsync failed for {StockId}/{Currency}", StockId, Currency);

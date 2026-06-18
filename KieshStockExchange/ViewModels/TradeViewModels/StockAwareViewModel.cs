@@ -80,7 +80,7 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
         {
             await OnStockChangedAsync(stockId, currency, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { } // Ignored on cancellation
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { } // genuine cancel (superseded switch); a timeout falls through below
         catch (Exception ex)
         {
             // Swallow to keep the SynchronizationContext from tearing down the app.
@@ -110,7 +110,7 @@ public abstract class StockAwareViewModel : BaseViewModel, IDisposable
         {
             await OnPriceUpdatedAsync(stockId, currency, price, updatedAt, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { } // Ignored on cancellation
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { } // genuine cancel (superseded switch); a timeout falls through below
         catch (Exception ex)
         {
             _logger.LogError(ex, "{ViewModel}: OnPriceUpdatedAsync failed.", GetType().Name);

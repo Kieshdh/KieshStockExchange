@@ -143,7 +143,7 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
             NotifyPagerProperties();
             IsBusy = false;
         }
-        catch (OperationCanceledException) { /* superseded by a newer request */ }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { /* superseded by a newer request; a timeout falls through below */ }
         catch (Exception ex)
         {
             _logger.LogError(ex, "{TableType}: LoadPage failed (page {Page}, size {Size}, filter {Filter}).",
