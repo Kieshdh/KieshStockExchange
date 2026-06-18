@@ -122,6 +122,16 @@ Ask Ultraplan to instrument decision-level buy% vs market-touch (filtered for sh
 slippage-cap fires) and propose a symmetric correction. NOT BLOCKING — the converged config bounds the
 drift well within the user's "hug the seed" goal.
 
+**CONFIRMED ROOT CAUSE (2026-06-18, on `kse_soak_bake` 533k trades — supersedes the 3 hypotheses above):**
+The sell-skew is NOT slippage geometry. Plain MARKET (taker) orders are **50/50 balanced** (Buy 166,184 /
+Sell 165,971 — the plain decision path is symmetric: `isBuy`/`isMarket` are independent draws, no side branch).
+**The entire taker sell-skew is the protective-stop population: 80,512 stop orders, 100% SELL, ZERO buy-stops.**
+`BotAdvancedKind` only has `StopMarketSell`/`TrailingStopSell` ("protect a held long") — there is **no buy-stop
+kind to protect a held short**. Bots run net-long (plain limits 397k buy / 364k sell), so their one-sided
+sell-stops fire market-sells on dips with no symmetric counterforce → the down-drift. **Fix = add symmetric
+short-protective buy-stops (StopMarketBuy/TrailingStopBuy).** Ultraplan handoff written:
+`docs/ultraplan-prompt-taker-flow-asymmetry.md`.
+
 ## Recommended commit
 Single-file bake of the converged Bots:* config to `appsettings.json`. The four-item edit is already
 applied to the working tree (Strength/Scale/OverheatCap on ValueAnchor; Enabled/MomentumConviction/
