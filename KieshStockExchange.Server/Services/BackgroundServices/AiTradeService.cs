@@ -477,7 +477,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         roundSnapProb:             _configuration.GetValue("Bots:RoundSnapProb", 0.30m),
                         roundSnapSpread:           _configuration.GetValue("Bots:RoundSnapSpread", 0m),
                         // #1: Lateness-staggered lag on the directional/sentiment loop. Default-off.
-                        shortProtectiveStops:      _configuration.GetValue("Bots:Advanced:ShortProtectiveStops", false),
+                        buyStopFraction:           _configuration.GetValue("Bots:Advanced:BuyStopFraction", 0m),
                         directionalReactionLag:    _configuration.GetValue("Bots:DirectionalReactionLag", false),
                         dirLagMinAlpha:            _configuration.GetValue("Bots:DirLagMinAlpha", 0.05m),
                         dirLagMaxAlpha:            _configuration.GetValue("Bots:DirLagMaxAlpha", 0.30m));

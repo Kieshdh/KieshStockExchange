@@ -103,9 +103,10 @@ internal sealed class AiBotDecisionService
 
     // §P6 advanced-order generation for the bot soak (all off by default).
     private readonly bool    _advancedEnabled;
-    // Taker-symmetry: when on, a bot with no protectable long but a held SHORT arms a protective
-    // buy-stop (mirror of the long sell-stop) instead of returning null. Default off ⇒ byte-identical.
-    private readonly bool    _shortProtectiveStops;
+    // Taker-symmetry (council design): fraction of protective-trigger decisions routed to a BUY-stop
+    // (up-trigger, cash-gated) vs a sell-stop (down-trigger, share-gated). 0 ⇒ legacy sell-only,
+    // byte-identical. The realized buy/sell split is this fraction (a seeded draw, no inventory fallback).
+    private readonly decimal _buyStopFraction;
     // §3.6 P6: the per-kind advanced-order probabilities are now PER-BOT (AIUser.*Prob, seeded by
     // strategy in Tools/Person.py), read directly off `user` in ComputeAdvancedDecisionAsync.
     private readonly decimal _stopOffsetMin;     // SL distance from entry/market (fraction)
@@ -303,8 +304,8 @@ internal sealed class AiBotDecisionService
         bool directionalReactionLag = false,
         decimal dirLagMinAlpha = 0.05m,
         decimal dirLagMaxAlpha = 0.30m,
-        // Taker-symmetry: short-protective buy-stops (mirror of long sell-stops). Default off ⇒ byte-identical.
-        bool shortProtectiveStops = false)
+        // Taker-symmetry: fraction of protective triggers routed to buy-stops. 0 ⇒ byte-identical sell-only.
+        decimal buyStopFraction = 0m)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -338,7 +339,7 @@ internal sealed class AiBotDecisionService
         _stopSlippagePct    = Math.Max(0m, stopSlippagePct);
         _maxSweepFractionOfDepth = Math.Max(0m, maxSweepFractionOfDepth);
         _advancedEnabled    = advancedEnabled;
-        _shortProtectiveStops = shortProtectiveStops;
+        _buyStopFraction    = Math.Clamp(buyStopFraction, 0m, 1m);
         _stopOffsetMin      = stopOffsetMin;
         _stopOffsetMax      = stopOffsetMax;
         _tpOffsetMin        = tpOffsetMin;
@@ -621,50 +622,63 @@ internal sealed class AiBotDecisionService
         }
     }
 
-    // P6a: protect a held position with a slippage-capped, fundamental-relative static stop (bots never
-    // arm uncapped trailing stops; see ComputeAdvancedDecisionAsync). §patch 0003: uses EligibleWatchlist.
-    // Flag OFF (default): the legacy path — protect the FIRST watchlist long with free shares (sell-stop).
-    // Flag ON (taker-symmetry): protect the LARGEST absolute exposure — long ⇒ sell-stop below market,
-    // short ⇒ buy-stop above market — so short-heavy bots add buy-side taker flow (the long-only sell-stops
-    // were the entire taker sell-skew / down-drift). Neither path draws RNG ⇒ flag-off is byte-identical.
+    // P6a: arm a slippage-capped, fundamental-relative static TRIGGER order (bots never arm uncapped
+    // trailing stops; see ComputeAdvancedDecisionAsync). §patch 0003: uses EligibleWatchlist.
+    // BuyStopFraction == 0 (default): legacy SELL-ONLY — protect the first watchlist long with free shares
+    // (sell-stop below market). BYTE-IDENTICAL (no RNG drawn).
+    // BuyStopFraction > 0 (council design — taker-flow symmetry): one seeded draw picks the trigger
+    // DIRECTION (buy if draw < fraction, else sell), then the matching RESOURCE is required — free shares
+    // for a sell-stop, free CASH for a buy-stop — with NO fallback to the other side, so the realized
+    // buy/sell split is the enforced fraction (not the net-long inventory). A buy-stop fires a capped
+    // market BUY above market (covers a short if held, else a breakout buy), the up-trigger mirror of the
+    // sell-stop. Start the fraction conservative: the buy side is structurally stronger (cash is ~unlimited
+    // vs a finite long inventory + momentum), so taker-VOLUME balance is the soak gate, not order count.
     private async Task<BotAdvancedDecision?> BuildProtectiveStopAsync(AiBotContext ctx, AIUser user,
         CurrencyType currency, CancellationToken ct)
     {
         var watch = EligibleWatchlist(ctx, user, currency);
         if (watch.Length == 0) return null;
-        int stockId = 0, qty = 0;
-        bool isBuy = false;   // false = sell-stop (protect long); true = buy-stop (protect short)
-        if (!_shortProtectiveStops)
+
+        bool wantBuy = _buyStopFraction > 0m && ctx.Decimal01(user.AiUserId) < _buyStopFraction;
+
+        if (!wantBuy)
         {
+            // Sell-stop: first watchlist long with free shares (legacy path). No resource ⇒ skip (no fallback).
             foreach (var id in watch)
             {
                 var avail = _accounts.GetPosition(user.UserId, id)?.AvailableQuantity ?? 0;
-                if (avail > 0) { stockId = id; qty = Math.Min(avail, _advancedMaxQty); break; }
+                if (avail > 0)
+                    return await BuildCappedTriggerAsync(ctx, user, currency, id,
+                        Math.Min(avail, _advancedMaxQty), isBuy: false, ct).ConfigureAwait(false);
             }
+            return null;
         }
-        else
+
+        // Buy-stop (up-trigger, cash-gated): cover a held short if any, else a breakout buy on the first
+        // eligible name. Sized from free cash at the trigger anchor, capped like the sell side.
+        decimal availCash = _accounts.GetFund(user.UserId, currency)?.AvailableBalance ?? 0m;
+        if (availCash <= 0m) return null;
+        int stockId = 0;
+        foreach (var id in watch)
         {
-            // Pick the single largest protectable exposure across the watchlist (deterministic; first wins ties).
-            int bestExposure = 0;
-            foreach (var id in watch)
-            {
-                var pos = _accounts.GetPosition(user.UserId, id);
-                if (pos is null) continue;
-                int longAvail = pos.AvailableQuantity;                  // >0 ⇒ protectable long
-                int shortMag  = pos.Quantity < 0 ? -pos.Quantity : 0;   // >0 ⇒ protectable short
-                if (longAvail > bestExposure)
-                { bestExposure = longAvail; stockId = id; qty = Math.Min(longAvail, _advancedMaxQty); isBuy = false; }
-                if (shortMag > bestExposure)
-                { bestExposure = shortMag;  stockId = id; qty = Math.Min(shortMag,  _advancedMaxQty); isBuy = true;  }
-            }
+            if ((_accounts.GetPosition(user.UserId, id)?.Quantity ?? 0) < 0) { stockId = id; break; }
         }
-        if (stockId <= 0 || qty <= 0) return null;
+        if (stockId <= 0) stockId = watch[0];
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
+        int qty = Math.Min(_advancedMaxQty, (int)Math.Floor(availCash / price));   // reserve ≈ qty × anchor
+        if (qty <= 0) return null;
+        return await BuildCappedTriggerAsync(ctx, user, currency, stockId, qty, isBuy: true, ct).ConfigureAwait(false);
+    }
 
-        // §P6 fundamental-relative + de-clustered trigger, slippage-capped on the fire. The reference blends
-        // market with fundamental; the trigger is forced strictly past market (below for a sell-stop, above
-        // for a buy-stop) so the stop is always valid and varied stops don't pile at one level and chain-fire.
+    // Shared trigger builder: a slippage-capped, fundamental-relative static stop forced strictly PAST market
+    // (below for a sell-stop, above for a buy-stop) so it's always valid and varied triggers don't pile at one
+    // level and chain-fire. Returns the StopMarketSell/StopMarketBuy decision.
+    private async Task<BotAdvancedDecision?> BuildCappedTriggerAsync(AiBotContext ctx, AIUser user,
+        CurrencyType currency, int stockId, int qty, bool isBuy, CancellationToken ct)
+    {
+        var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
+        if (price <= 0m) return null;
         var offset = StopOffset(ctx, user);
         var fund = Fundamental(stockId, currency, ctx);
         var refPrice = fund > 0m ? (price + fund) / 2m : price;
