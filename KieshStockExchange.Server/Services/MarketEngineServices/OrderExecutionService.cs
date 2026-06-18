@@ -45,6 +45,17 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly int _defaultCurrencyGroupBudget;
     private readonly IConfiguration _config;
     private readonly ConcurrentDictionary<CurrencyType, SemaphoreSlim> _currencyGates = new();
+    // §group-commit (default off): coalesce a currency's per-(stock,currency) group commits into ONE
+    // root tx (one fsync) per chunk, with each group a SAVEPOINT inside it so per-group rollback is
+    // preserved. Cuts fsyncs/tick from groups.Count to ~#currencies. Off ⇒ each group commits its own
+    // root tx exactly as before (byte-identical). MaxBatch caps groups per root tx (bounds tx size /
+    // lock-hold / crash-window blast radius). CRASH WINDOW: a process death between a savepoint release
+    // and the per-currency root commit loses that currency's in-flight chunk — but the root tx is
+    // all-or-nothing, so the durable DB stays internally conserved, and on restart the cache cold-loads
+    // from the DB (cache == DB). ConservationProbe reads the cache and is blind to this window; the
+    // GroupCommit crash test reconciles the durable rows ALONE.
+    private readonly bool _groupCommit;
+    private readonly int _groupCommitMaxBatch;
 
     public OrderExecutionService(IDataBaseService db, IOrderBookEngine books,
         IMatchingEngine matching, IOrderValidator validator, ISettlementEngine settlement,
@@ -79,6 +90,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _perCurrencyGates = config.GetValue("Db:PerCurrencyGroupGates", false);
         _defaultCurrencyGroupBudget = Math.Max(1,
             config.GetValue("Db:PerCurrencyMaxGroups:Default", (int)Math.Ceiling(maxGroups * 0.75)));
+        // §group-commit: default OFF ⇒ byte-identical per-group commit path.
+        _groupCommit = config.GetValue("Db:GroupCommit:Enabled", false);
+        _groupCommitMaxBatch = Math.Max(1, config.GetValue("Db:GroupCommit:MaxBatch", 64));
     }
 
     // §per-currency gate: lazily build one inner semaphore per currency (race-safe via GetOrAdd).
@@ -885,15 +899,26 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // comment ("SQLite writer is shared so we'd serialise anyway") was
         // stale. Each group's catch is wrapped in RunGroupWithRecoveryAsync
         // so a single group failure doesn't tear down the WhenAll.
-        var groupTasks = new List<Task<List<Transaction>>>(groups.Count);
-        foreach (var kv in groups)
+        List<Transaction>[] groupResults;
+        if (!_groupCommit)
         {
-            var (stockId, currency) = kv.Key;
-            var groupItems = kv.Value;
-            groupTasks.Add(RunGroupWithRecoveryAsync(stockId, currency, groupItems, results, ct));
-        }
+            var groupTasks = new List<Task<List<Transaction>>>(groups.Count);
+            foreach (var kv in groups)
+            {
+                var (stockId, currency) = kv.Key;
+                var groupItems = kv.Value;
+                groupTasks.Add(RunGroupWithRecoveryAsync(stockId, currency, groupItems, results, ct));
+            }
 
-        var groupResults = await Task.WhenAll(groupTasks).ConfigureAwait(false);
+            groupResults = await Task.WhenAll(groupTasks).ConfigureAwait(false);
+        }
+        else
+        {
+            // §group-commit: shard the groups by currency and commit each shard's groups under ONE
+            // root tx (one fsync), each group a savepoint. Shards run in parallel on disjoint
+            // (userId,currency)/(userId,stockId) keys, so no new cross-user race vs the per-group path.
+            groupResults = await RunGroupCommitShardsAsync(groups, results, ct).ConfigureAwait(false);
+        }
 
         var allFills = new List<Transaction>();
         for (int i = 0; i < groupResults.Length; i++)
@@ -922,7 +947,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private async Task<List<Transaction>> RunGroupWithRecoveryAsync(
         int stockId, CurrencyType currency,
         List<(int index, Order order)> groupItems,
-        OrderResult[] results, CancellationToken ct)
+        OrderResult[] results, CancellationToken ct,
+        bool deferPostCommit = false,
+        List<DeferredGroup>? deferred = null,
+        List<(List<(int index, Order order)> Items, string Error)>? failedSink = null)
     {
         // Acquire the global pool guard outside the try — a canceled wait must not hit the Release
         // in finally. The per-currency inner gate (when enabled) is acquired AFTER it, in a fixed
@@ -938,7 +966,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
             {
                 try
                 {
-                    return await RunGroupTxAsync(stockId, currency, groupItems, results, ct).ConfigureAwait(false);
+                    return await RunGroupTxAsync(stockId, currency, groupItems, results, ct,
+                        deferPostCommit, deferred).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
                 {
@@ -946,11 +975,22 @@ public sealed class OrderExecutionService : IOrderExecutionService
                         "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
                         stockId, currency);
 
-                    // The group tx already rolled back any settle DB writes. The orders for this
-                    // group are still in DB (inserted in Phase 2) but they aren't on the book and
-                    // the engine doesn't know about them. Cancel them and release the Phase 1.5/1.6
-                    // reservations they consumed so the books don't get ghost open rows that the
-                    // bot's next refresh treats as still-pending.
+                    // The group tx already rolled back any settle DB writes (its savepoint under
+                    // group-commit, or its own root tx otherwise). The orders for this group are
+                    // still in DB (inserted in Phase 2) but they aren't on the book and the engine
+                    // doesn't know about them. Cancel them and release the Phase 1.5/1.6 reservations
+                    // they consumed so the books don't get ghost open rows that the bot's next
+                    // refresh treats as still-pending.
+                    if (deferPostCommit)
+                    {
+                        // §group-commit: we are inside the shard's root tx. Recovery does its own DB
+                        // writes — defer them to AFTER the chunk resolves (on a fresh tx) so a chunk
+                        // rollback can't undo the recovery. The group's savepoint already rolled back
+                        // and RestoreCacheSnapshots ran, so the settle-pass cache is consistent; only
+                        // the Phase 1.5/1.6 reservation release + order cancel are deferred.
+                        failedSink!.Add((groupItems, ex.Message));
+                        return new List<Transaction>();
+                    }
                     await RecoverFailedGroupAsync(groupItems, results, ex.Message, ct).ConfigureAwait(false);
                     return new List<Transaction>();
                 }
@@ -976,7 +1016,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
         int stockId, CurrencyType currency,
         List<(int index, Order order)> groupItems,
         OrderResult[] results,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool deferPostCommit = false,
+        List<DeferredGroup>? deferred = null)
     {
         // Parallel groups (P2) can deadlock in Postgres when two group txs lock the same
         // rows in opposite order. 40P01/40001 are transient — the inner catch rolls back
@@ -1133,6 +1175,29 @@ public sealed class OrderExecutionService : IOrderExecutionService
 
         if (!committed) return groupFills; // unreachable in practice — throw above covers it
 
+        if (deferPostCommit)
+        {
+            // §group-commit: the savepoint "commit" (RELEASE) above is NOT durable until the shard's
+            // single root commit. Defer the post-commit side-effects (cache TrackNewPosition, order-
+            // cache notify, results stamp, registry cleanup) until the shard confirms the durable
+            // commit — otherwise a chunk rollback would leave the cache/UI ahead of the DB.
+            deferred!.Add(new DeferredGroup(outcome, groupScope, groupOrdersById, groupItems));
+            return groupFills;
+        }
+
+        ApplyGroupPostCommit(outcome, groupScope, results);
+        return groupFills;
+        }
+    }
+
+    /// <summary>
+    /// Side-effects that are only valid once a group's writes are durably committed: register new
+    /// positions in the cache, notify the order cache for affected users, stamp success results, and
+    /// drop fully-filled zero-reservation orders from the registry. Called inline after a per-group
+    /// root commit (default path) or, under group-commit, after the per-currency root commit.
+    /// </summary>
+    private void ApplyGroupPostCommit(GroupOutcome outcome, TradeBatchScope groupScope, OrderResult[] results)
+    {
         // After commit: register newly-created positions in the cache and fire the order
         // cache notify for this group's affected users. Per-group notifies replace the
         // single batch-wide notify so the UI gets smaller, more frequent pushes.
@@ -1177,9 +1242,114 @@ public sealed class OrderExecutionService : IOrderExecutionService
                 }
             }
         }
+    }
 
-        return groupFills;
+    // §group-commit: a group whose match+settle succeeded to its savepoint, captured so the shard can
+    // apply its post-commit side-effects after the durable root commit (or restore + recover it if the
+    // root commit fails). Items/OrdersById are retained for the failure path (RecoverFailedGroupAsync
+    // + RestoreCacheSnapshots).
+    private readonly record struct DeferredGroup(
+        GroupOutcome Outcome,
+        TradeBatchScope Scope,
+        Dictionary<int, Order> OrdersById,
+        List<(int index, Order order)> Items);
+
+    /// <summary>
+    /// §group-commit Phase 3: shard the tick's groups by currency and run each shard under
+    /// <see cref="RunCurrencyShardAsync"/>. Shards run in parallel (one root tx / one fsync each); USD
+    /// and EUR touch disjoint (userId,currency)/(userId,stockId) keys so there is no new cross-user
+    /// race vs the per-group path. Returns one fills list per shard (Phase 4 only concatenates).
+    /// </summary>
+    private async Task<List<Transaction>[]> RunGroupCommitShardsAsync(
+        Dictionary<(int, CurrencyType), List<(int index, Order order)>> groups,
+        OrderResult[] results, CancellationToken ct)
+    {
+        var byCurrency = new Dictionary<CurrencyType,
+            List<KeyValuePair<(int, CurrencyType), List<(int index, Order order)>>>>();
+        foreach (var kv in groups)
+        {
+            if (!byCurrency.TryGetValue(kv.Key.Item2, out var list))
+                byCurrency[kv.Key.Item2] = list = new();
+            list.Add(kv);
         }
+
+        var shardTasks = new List<Task<List<Transaction>>>(byCurrency.Count);
+        foreach (var shard in byCurrency)
+            shardTasks.Add(RunCurrencyShardAsync(shard.Value, results, ct));
+
+        return await Task.WhenAll(shardTasks).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Run one currency's groups in chunks of <see cref="_groupCommitMaxBatch"/>, each chunk under ONE
+    /// root tx (one fsync) with each group a savepoint. Post-commit side-effects are applied only after
+    /// the durable root commit. If a chunk's root commit fails, the whole chunk rolled back in the DB,
+    /// so the deferred groups' cache mutations are restored and their orders recovered on a fresh tx —
+    /// leaving cache == DB (conserved). Per-group settle failures are recovered after the chunk too
+    /// (their savepoints already rolled back; deferring keeps the recovery writes off the chunk tx).
+    /// </summary>
+    private async Task<List<Transaction>> RunCurrencyShardAsync(
+        List<KeyValuePair<(int, CurrencyType), List<(int index, Order order)>>> shardGroups,
+        OrderResult[] results, CancellationToken ct)
+    {
+        var shardFills = new List<Transaction>();
+        for (int start = 0; start < shardGroups.Count; start += _groupCommitMaxBatch)
+        {
+            int take = Math.Min(_groupCommitMaxBatch, shardGroups.Count - start);
+            var deferred = new List<DeferredGroup>(take);
+            var failed = new List<(List<(int index, Order order)> Items, string Error)>();
+            var chunkFills = new List<Transaction>();
+            bool committed = false;
+            try
+            {
+                await _db.RunInTransactionAsync(async ct2 =>
+                {
+                    for (int i = 0; i < take; i++)
+                    {
+                        var kv = shardGroups[start + i];
+                        var fills = await RunGroupWithRecoveryAsync(
+                            kv.Key.Item1, kv.Key.Item2, kv.Value, results, ct2,
+                            deferPostCommit: true, deferred, failed).ConfigureAwait(false);
+                        chunkFills.AddRange(fills);
+                    }
+                }, ct).ConfigureAwait(false);
+                committed = true;
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+            {
+                // The per-currency root commit (or a write within it) failed: Postgres rolled back the
+                // whole chunk, so NONE of the deferred groups are durable. Revert their in-memory
+                // settle-pass mutations so the cache matches the (empty) durable state.
+                _logger.LogError(ex,
+                    "RunCurrencyShardAsync: group-commit chunk failed; rolling back {Count} group(s).",
+                    deferred.Count);
+                foreach (var d in deferred)
+                    _settlement.RestoreCacheSnapshots(d.OrdersById, d.Scope);
+            }
+
+            if (committed)
+            {
+                // Root commit is durable — now the deferred side-effects are safe to apply.
+                foreach (var d in deferred)
+                    ApplyGroupPostCommit(d.Outcome, d.Scope, results);
+                shardFills.AddRange(chunkFills);
+            }
+            else
+            {
+                // Chunk rolled back: the deferred groups' orders are open Phase-2 rows again — cancel
+                // them + release their Phase 1.5/1.6 reservations (on fresh txs, outside the dead tx).
+                foreach (var d in deferred)
+                    await RecoverFailedGroupAsync(d.Items, results, "group-commit chunk rolled back", ct)
+                        .ConfigureAwait(false);
+            }
+
+            // Per-group settle failures (savepoint already rolled back) — recover their orders
+            // regardless of the chunk outcome; deferring kept these writes off the chunk's root tx.
+            for (int i = 0; i < failed.Count; i++)
+                await RecoverFailedGroupAsync(failed[i].Items, results, failed[i].Error, ct)
+                    .ConfigureAwait(false);
+        }
+        return shardFills;
     }
 
     // 40P01 deadlock_detected, 40001 serialization_failure — Postgres aborts one tx of a

@@ -310,8 +310,10 @@ build). Two slices, both default-off.
   over-mean-reversion; within rig noise + at the already-shipped −0.37 level, but directionally real; arms also ran
   at different caps = a confound). **BAKE DECISION: hold — recommend Slots=2 (gentler cadence, ~half the headroom,
   likely realism-neutral) pending user nod / one confirming soak. Flag stays shipped + default-off + validated.**
-- **Slice 2 — per-currency group-gate (`Db:PerCurrencyGroupGates`):** A/B PENDING (runs after the Gate-0 baseline).
-  Expectation per §13: marginal (group concurrency 24→40 was marginal before; bake only if EUR genuinely starved).
+- **Slice 2 — per-currency group-gate (`Db:PerCurrencyGroupGates`):** 60m A/B done. **NO BAKE.** Conservation clean
+  both arms; equilibrium cap flat (1236 vs 1237); EUR fill +3.8% trades / +4.5% vol, USD +1.9% (all under the ≥20%
+  trust threshold = noise). Confirms §13/history (group concurrency 24→40 was marginal). Flag stays default-off,
+  available. Real EUR fix = seed rebalance / FX-drain, not this throttle.
 
 ## 17. NEXT ULTRAPLAN — decision/commit decoupling, GATE 0 result (2026-06-18 day)
 Handoff `docs/ultraplan-prompt-decision-commit-decoupling.md` (council-reviewed). Gate-0 patch
