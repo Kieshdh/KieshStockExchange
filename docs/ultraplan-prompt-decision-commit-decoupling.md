@@ -146,6 +146,35 @@ applies, builds, runs the full test suite, soaks, and bakes only conservation-cl
 5. **Interaction with the scaler** — fewer fsyncs ⇒ lighter ticks ⇒ the scaler admits more bots; confirm the
    EWMA setpoint still self-levels and the cap rises rather than oscillating.
 
+## ITERATION-2 DIRECTIVE (2026-06-18 — after Slice-1 landed `6c68a40` + A/B'd)
+Gate-0 PASSED and Slice-1 (per-currency sharded group-commit writer, `Db:GroupCommit`) shipped + A/B'd. **Result:
+NO BAKE — the coalescing did NOT fire in the live engine.** Evidence (commits/sec + round-trips/order metric from
+Gate-0): group-commit ON ran **~38 commits/tick vs ~45 OFF** (coalescing predicts ~3-5), HIGHER `batch` ms (350-420
+vs 200-296), LOWER cap. Conservation clean (it's safe, just ineffective). Root inference: the inner per-group
+`BeginTransactionAsync` under the shard's `_db.RunInTransactionAsync` is **still producing root commits, not
+savepoint-nested releases** — so per-group commits aren't collapsing into the chunk root. The equivalence test's
+mock `RunInTransactionAsync` ran the action inline and the crash test used a hand-rolled nesting fake, so neither
+caught that the REAL `PgDBService` AsyncLocal nesting doesn't engage on this path.
+
+**The iteration-2 ultraplan must do, in order:**
+1. **Root-cause the non-firing nesting (cheap, do first).** Read `PgDBService` (AsyncLocal ambient tx + savepoint
+   creation in `BeginTransactionAsync`) and the Slice-1 `RunCurrencyShardAsync` path. Determine WHY the inner
+   per-group tx roots instead of nesting under the shard's `RunInTransactionAsync` ambient — e.g. parallel shard
+   `Task.WhenAll` not flowing the AsyncLocal, a separate-connection open, or `RunGroupTxAsync` calling a
+   root-forcing overload. The `commits/tick` instrument (already shipped, `a5f46e7`) is the oracle: a fix is proven
+   only when ON's commits/tick drops to ~#chunks, not ~#groups.
+2. **DECIDE (use the council):** (a) if it's a cheap ambient/flow fix AND fixing it makes group-commit beat the
+   parallel per-group writer on commits/tick + cap with conservation clean → ship the fix. BUT note the A/B also
+   showed the **serial per-currency shard loses the OFF path's 24-way parallelism** (higher batch ms) — so even
+   with nesting fixed, coalescing must out-earn the lost parallelism; the microbench says the prod-regime
+   (sc=off) coalescing win is only ~2.3×, so this is not obviously a win. (b) **PIVOT (First-Principles' call,
+   now empirically supported): keep the PROVEN parallel per-group writer, and move the DECISION stage off the
+   critical path** — parallel read-only decision (bots read cache+book snapshots, emit intents, no locks/writes)
+   → deterministic ordered handoff → the existing parallel writer. Don't touch durability. This attacks the real
+   post-sc=off constraint (one thread doing N serial round-trips) without the coalescing-vs-parallelism tradeoff.
+3. Deliverable unchanged: ONE `git apply --check`-clean patch (flag default-off, byte-identical off, equivalence +
+   determinism tests; if any write-behind, the DB-alone crash test) + a ready-to-paste bake prompt for local Claude.
+
 ## Soak evidence to feed in (local Claude gathers)
 Group-commit A/B (on/off) on the baked realism config: **commits/sec** (new metric — add to BotPhase or a probe),
 equilibrium cap, ms/round-trips-per-order, EUR fill-rate, and the full conservation battery (ConservationProbe/CK/
