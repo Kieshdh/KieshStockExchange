@@ -266,3 +266,25 @@ sc=on (durability-safe). **Conservation CLEAN over 3h (0 suspect lines); cap ram
 NIGHT SUMMARY: BatchArms baked (the perf win), realism foundation+A validated (conservation-clean, drift
 bounded), patch kept as hardening, next-lever = match/settle group-tx coalescing (§7.2/§7.3). Docker PG on
 durability-safe defaults. Realism foundation config is env-passed (NOT baked into appsettings) — see §11 block.
+
+## 15. Open decisions — RESOLVED (2026-06-18) + follow-ups
+User answered all 7 §8 decisions:
+1. **Scaling target = PROD capacity** (local = measurement rig; judge ms/round-trips-per-order).
+2. **Bake realism (foundation + system-A) → DONE** (commit `f70070c`): DecisionDistanceMult 0.2, MarketProbMult
+   1.5, Tiers 0.85/0.10, ValueAnchor Strength 0.40/Scale 0.12/AbsoluteCapMax 0.20, RecentAnchor 0.10,
+   RegimeDrift on. (Was env-only; now prod defaults. Validated conservation-clean + drift-bounded.)
+3. **Injection → config + 30m → DONE** (`f70070c`): `Bots:CashInjection:IntervalMinutes` (const 1h → config,
+   default 30m) for more buying/volume.
+4. **`synchronous_commit=off` on PROD = YES → PENDING DEPLOY** (sim, <1s loss acceptable). Apply on the Netcup
+   prod box: `docker exec <pg> psql -U kse -d postgres -c "ALTER SYSTEM SET synchronous_commit='off';"` then
+   `SELECT pg_reload_conf();`. (NOT a repo change.)
+5. **Next perf lever = per-currency SHARDING → ultraplan handoff written:**
+   `docs/ultraplan-prompt-per-currency-sharding.md` (folds in bot staggering as Slice 1).
+6. **Bot staggering = YES (build on Lateness) → folded into the sharding ultraplan (Slice 1, ship first).**
+7. **EUR liquidity = more bots on EUR (seed) → PENDING Tools task:** rebalance bot currency/watchlist
+   allocation toward EUR names in `Tools/GenerateAIUsers.py` + reseed (out of tonight's scope; user-prioritised).
+   (Sharding §5 also helps EUR structurally; the FX EUR→USD drain is the deeper cause, not chosen for now.)
+
+**Net banked tonight:** BatchArms (`adc2f63`) + realism foundation+system-A + injection-config (`f70070c`),
+all conservation-validated. **Pending:** sc=off prod deploy (1 command), the sharding+staggering ultraplan,
+the EUR-seed Tools task.
