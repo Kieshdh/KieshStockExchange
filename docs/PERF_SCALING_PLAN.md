@@ -156,3 +156,16 @@ flag-gated; byte-identical-off where possible):
   tonight's throwaway soaks** (faster iteration + closer to prod's cheap-commit regime). ⚠️ REVERT
   (`ALTER SYSTEM RESET synchronous_commit; SELECT pg_reload_conf();`) before any durability-sensitive run.
   New dominant phase = `batch` 365 ms (plain submit/match/settle) = the structural Ultraplan target (§7.1/§7.2).
+- **Perf Round 4 (DONE, SOLO, sc=off + `full_page_writes=off` + `commit_delay=50`):** cap 1424→**1539 (+8%)**,
+  batch ms/order 4.58→4.19 (−9%) — within noise; minor add-on to sc=off. Keep (harmless for soaks; revert with
+  sc=off before prod). **Config levers now exhausted** — the ceiling is `batch` (plain submit/match/settle, no
+  config knob) → structural Ultraplan (§7).
+- **MaxPerTick: SKIPPED (low value).** adv/tick ≈ 18 < the 50 cap → not binding; lowering it only sheds ~5.5
+  ms/advanced-order at the cost of fewer stops/brackets (behavior/realism tradeoff). Note for Ultraplan, not a
+  tonight lever.
+- **CONFIG-LEVER SUMMARY (local, foundation+A):** baseline cap 893 → BatchArms (already in) → +sc=off **1424
+  (+59%)** → +fpw/commit_delay **1539 (+72% vs 893)**. All conservation-clean. The big lever is sc=off (fsync).
+  The rest of the headroom needs the structural §7 fixes. ⚠️ docker now has sc=off+fpw=off+commit_delay SET —
+  revert before any durability-sensitive run.
+- **Perf Round 5 = 4h CONFIRMATION soak (RUNNING):** best config (foundation+A+BatchArms, sc=off+fpw+commit_delay)
+  → validate cap stability, conservation/CK, and realism (ret_acf/composite) over 4h. _(pending)_
