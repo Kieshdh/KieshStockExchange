@@ -258,3 +258,11 @@ all arms collapse into ONE insert tx regardless of stock.
   largely SPENT (BatchArms got the insert-only win; matched-order entry-batching is a no-op). The remaining
   throughput lever is reducing/coalescing the **group-tx commits** themselves = §7.2 decision/commit decoupling
   (group-commit pipeline) or per-currency sharding (§7.3) — confirmed as the next frontier.
+
+## 14. FINAL confirmation soak (3h, baked end-state config)
+Config: BatchArms baked-on + foundation (×5 closeness, MarketProbMult 1.5, weak anchors) + system-A RegimeDrift,
+sc=on (durability-safe). **Conservation CLEAN over 3h (0 suspect lines); cap ramped to a stable ~6.7–9k; drift
+−2.0%/3h (within the ≤5%/4h budget); no runaway.** ⇒ the night's baked end state is validated stable.
+NIGHT SUMMARY: BatchArms baked (the perf win), realism foundation+A validated (conservation-clean, drift
+bounded), patch kept as hardening, next-lever = match/settle group-tx coalescing (§7.2/§7.3). Docker PG on
+durability-safe defaults. Realism foundation config is env-passed (NOT baked into appsettings) — see §11 block.
