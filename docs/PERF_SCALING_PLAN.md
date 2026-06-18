@@ -309,9 +309,11 @@ build). Two slices, both default-off.
   headroom but nudges ret_acf ~0.04 worse + composite −4 (fewer actors/min → fewer wicks + marginally more
   over-mean-reversion; within rig noise + at the already-shipped −0.37 level, but directionally real; arms also ran
   at different caps = a confound). **BAKED `Bots:Staggering:{Enabled:true, Slots:2}`** (user-approved Slots=2 over
-  Slots=4: gentler per-minute cadence, ~half the headroom, minimizes the realism perturbation). The 90m gym
-  confirmation soak validates the baked Slots=2 config (conservation + realism in tolerance); revert if realism
-  regresses.
+  Slots=4: gentler per-minute cadence, ~half the headroom, minimizes the realism perturbation). **CONFIRMED by the
+  90m gym soak (single-server, baked config): conservation CLEAN over 90m / 533k trades; cap tail-mean 5891 (max
+  7672, +~18% vs the no-stagger Gate-0 baseline ~5000); ret_acf_lag1 = −0.337 = IDENTICAL to the no-stagger control
+  (−0.336), has_wick 87% (baseline), composite 64.7 (in-family with the night's baked ~60-62). The bake gate —
+  ret_acf must not regress — is MET. Slots=2 keeps the headroom without the Slots=4 realism cost (−0.378). Bake stays.**
 - **Slice 2 — per-currency group-gate (`Db:PerCurrencyGroupGates`):** 60m A/B done. **NO BAKE.** Conservation clean
   both arms; equilibrium cap flat (1236 vs 1237); EUR fill +3.8% trades / +4.5% vol, USD +1.9% (all under the ≥20%
   trust threshold = noise). Confirms §13/history (group concurrency 24→40 was marginal). Flag stays default-off,
