@@ -172,7 +172,12 @@ flag-gated; byte-identical-off where possible):
 - **BracketBatch validation A/B (RUNNING, ~90m parallel):** `kse_soak_bboff` (BatchArms on, BracketBatch OFF,
   :5080) vs `kse_soak_bbon` (BatchArms on, BracketBatch ON, :5081). Foundation+A, sc=off+fpw+commit_delay.
   Measures: ConservationProbe/CK/ReservationAuditor clean? adv ms/order drop? = the pre-evidence for baking the
-  already-coded BracketBatch (A1b/A1c). _(pending — harvest then append + feed the ultraplan brief §8)_
+  already-coded BracketBatch (A1b/A1c). **RESULT (90m parallel): CONSERVATION CLEAN BOTH ARMS (0 suspect lines —
+  no CK/ConservationProbe/ReservationAuditor/shortfall/phantom/unhandled).** Perf: cap 740→763 (+3%, noise),
+  adv ms/order 7.36→7.27 (~flat), orders/tick 47→50. ⇒ **BracketBatch is SAFE to bake** (the key blocker
+  cleared); local perf delta modest because `adv` is a minor phase here (~9 adv/tick, brackets/short-opens a
+  minority) + local commit-skew — magnitude scales with adv/tick → bigger on prod (BatchArms-style caveat).
+  Strong green light for the ultraplan PR's bake decision.
 
 ## 11. RESUME STATE (compaction handoff — read this to pick up)
 **Big picture:** realism work is essentially DONE/shippable (foundation + system-A default-off, user "looks

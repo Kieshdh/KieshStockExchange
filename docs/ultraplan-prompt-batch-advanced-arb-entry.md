@@ -95,6 +95,12 @@ commit_delay=50` set for throwaway soaks — local Claude reverts before any dur
 3. Bake BatchArms + BracketBatch together (one soak) or staged?
 4. What equivalence/property tests best gate batched bracket *partial parent fills* (the fragile case)?
 
-## 8. Soak evidence (local Claude is gathering NOW, will append)
-- BatchArms+BracketBatch ON vs BatchArms-only A/B running tonight → conservation + adv ms/order results feed
-  back into this doc + `PERF_SCALING_PLAN.md §10` before/with the patch apply.
+## 8. Soak evidence (gathered 2026-06-18)
+- **BracketBatch OFF vs ON, 90-min parallel A/B (BatchArms on both, foundation+A, sc=off+fpw+commit_delay):
+  CONSERVATION CLEAN BOTH ARMS** — 0 suspect lines (no CK_Funds/CK_Positions, no ConservationProbe delta, no
+  ReservationAuditor mismatch, no collateral shortfall, no phantom, no unhandled exception). ⇒ the already-coded
+  BracketBatch (A1b short-opens + A1c brackets) is **SAFE** under sustained batched load — the primary blocker
+  is cleared; bake is gated only on the added equivalence tests + a confirm round. Perf: cap 740→763 (+3%,
+  within noise), adv ms/order 7.36→7.27 (~flat), orders/tick 47→50 — modest LOCALLY (`adv` is a minor phase
+  here: ~9 adv/tick, brackets/short-opens a minority; + docker commit-skew). The win scales with adv/tick →
+  larger on prod (BatchArms-style). BatchArms itself: prior A/B adv −42%/order, conservation clean.
