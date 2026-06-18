@@ -150,7 +150,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly TimeSpan _sentimentLogInterval;
     // Cash injection: 1-hour nominal-growth driver; per-bot frequency knob
     // gates each bot's actual deposit within the cycle.
-    private static readonly TimeSpan CashInjectionInterval = TimeSpan.FromHours(1);
+    private readonly TimeSpan _cashInjectionInterval; // Bots:CashInjection:IntervalMinutes (default 30m)
 
     // Schedule fires on drain signal; engine only fires if drain times out.
     private CancellationTokenSource? _schedulingCts;
@@ -238,6 +238,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _bracket      = bracket      ?? throw new ArgumentNullException(nameof(bracket));
         _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        // Cash-injection cadence: was a hard-coded 1h const; now config (default 30m) so "more money" is a live dial.
+        _cashInjectionInterval = TimeSpan.FromMinutes(Math.Max(1.0, _configuration.GetValue("Bots:CashInjection:IntervalMinutes", 30.0)));
         // §smoothed-price half-life: decouple bots from their OWN ~1-min price impact by perceiving a lagged
         // price. 0 ⇒ legacy fixed per-quote α=0.15 (byte-identical rollback). Targets the ret_acf_lag1 ceiling.
         _smoothedPriceHalfLifeSec = Math.Max(0.0, _configuration.GetValue("Bots:SmoothedPriceHalfLifeSec", 0.0));
@@ -656,7 +658,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
         _nextSentimentLogTime  = TimeHelper.NowUtc() + _sentimentLogInterval;
-        _nextCashInjectionTime = TimeHelper.NowUtc() + CashInjectionInterval;
+        _nextCashInjectionTime = TimeHelper.NowUtc() + _cashInjectionInterval;
         LastTradeAtUtc   = null;
         LoopStartedAtUtc = TimeHelper.NowUtc();
     }
@@ -1337,7 +1339,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (now >= _nextCashInjectionTime)
         {
             await _injector.RunAsync(ct).ConfigureAwait(false);
-            _nextCashInjectionTime = now + CashInjectionInterval;
+            _nextCashInjectionTime = now + _cashInjectionInterval;
         }
     }
 
