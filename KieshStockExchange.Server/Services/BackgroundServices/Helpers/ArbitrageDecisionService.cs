@@ -3,6 +3,7 @@ using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
+using KieshStockExchange.Services.MarketEngineServices.CommandDtos;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -43,10 +44,15 @@ internal sealed class ArbitrageDecisionService
     // churning on every tick.
     private readonly decimal _conversionSkewBand;
 
+    // STRETCH (Bots:Arbitrage:BatchLegs): when true, the cohort's round-trip ENTRIES run as two
+    // batched engine passes (leg1 buys, then leg2 sells sized per leg1 fill) instead of 2×N txs.
+    // Flatten + FX rebalance stay per-bot. Default false ⇒ the per-bot sequential path is unchanged.
+    private readonly bool _batchLegs;
+
     internal ArbitrageDecisionService(IOrderEntryService entry, IOrderBookEngine books,
         IAccountsCache accounts, IFxRateService fxRates, IUserPortfolioService portfolio,
         IStockService stocks, BotEconomyTelemetry economy, ILogger<ArbitrageDecisionService> logger,
-        decimal conversionSkewBand = 0.15m)
+        decimal conversionSkewBand = 0.15m, bool batchLegs = false)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _books     = books     ?? throw new ArgumentNullException(nameof(books));
@@ -57,6 +63,7 @@ internal sealed class ArbitrageDecisionService
         _economy   = economy   ?? throw new ArgumentNullException(nameof(economy));
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
         _conversionSkewBand = Math.Max(0m, conversionSkewBand);
+        _batchLegs = batchLegs;
     }
     #endregion
 
@@ -66,6 +73,12 @@ internal sealed class ArbitrageDecisionService
         // Snapshot the throttle once per pass: when the cohort + house wealth fraction is over the
         // ceiling, suspend OPENING new round-trips (the lever) but keep flattening held inventory.
         var throttled = _economy.ArbThrottleEngaged;
+
+        // STRETCH: when batching legs, collect each bot's sized round-trip during the per-bot loop
+        // (in ascending-aiUserId order) instead of executing it inline; the two batched passes run
+        // after the loop. Null ⇒ per-bot inline execution (default, byte-identical to before).
+        List<(AIUser User, RoundTripPlan Plan)>? pendingEntries =
+            (_batchLegs && !throttled) ? new() : null;
 
         // Iterate in ascending AiUserId for the same seed-determinism contract as the main loop.
         foreach (var user in ctx.AiUsersByAiUserId.Values.OrderBy(u => u.AiUserId))
@@ -83,9 +96,20 @@ internal sealed class ArbitrageDecisionService
                 foreach (var stockId in candidates)
                     await TryFlattenAsync(ctx, user, stockId, ct).ConfigureAwait(false);
 
-                // 2) Entry: open a fresh round-trip on the best gap (unless throttled).
+                // 2) Entry: open a fresh round-trip on the best gap (unless throttled). When batching,
+                //    only SIZE it here and defer execution to the post-loop batched passes.
                 if (!throttled)
-                    await TryRoundTripAsync(ctx, user, candidates, ct).ConfigureAwait(false);
+                {
+                    if (pendingEntries is not null)
+                    {
+                        var plan = await PrepareRoundTripAsync(ctx, user, candidates, ct).ConfigureAwait(false);
+                        if (plan is { } p) pendingEntries.Add((user, p));
+                    }
+                    else
+                    {
+                        await TryRoundTripAsync(ctx, user, candidates, ct).ConfigureAwait(false);
+                    }
+                }
 
                 // 3) Re-arm: rebalance the USD/EUR cash mix on the bot's own cadence. This is the
                 //    conversion that pays the spread into the house account.
@@ -98,6 +122,12 @@ internal sealed class ArbitrageDecisionService
                 user.RecordError();
             }
         }
+
+        // STRETCH: the two batched entry passes — leg1 buys for the whole cohort, then leg2 sells
+        // sized from each leg1 fill. Preserves the per-round-trip fill dependency while collapsing
+        // 2×N transactions into 2 batched passes.
+        if (pendingEntries is { Count: > 0 })
+            await ExecuteBatchedEntriesAsync(pendingEntries, ct).ConfigureAwait(false);
     }
     #endregion
 
@@ -167,10 +197,17 @@ internal sealed class ArbitrageDecisionService
     #endregion
 
     #region Execution
-    private async Task TryRoundTripAsync(AiBotContext ctx, AIUser user, List<int> candidates, CancellationToken ct)
+    // A sized, ready-to-place round-trip: the chosen opportunity, the leg1 quantity, and the
+    // buy-side available cash (the leg1 market-buy budget).
+    private readonly record struct RoundTripPlan(Opp Opp, int Qty, decimal Avail);
+
+    // Opportunity selection + sizing half of a round-trip — no engine calls. Shared by the per-bot
+    // inline path (TryRoundTripAsync) and the batched collection path (RunAsync).
+    private async Task<RoundTripPlan?> PrepareRoundTripAsync(AiBotContext ctx, AIUser user,
+        List<int> candidates, CancellationToken ct)
     {
         var opps = await CollectOppsAsync(user, candidates, ct).ConfigureAwait(false);
-        if (opps.Count == 0) return;
+        if (opps.Count == 0) return null;
 
         var opp = PickWeighted(ctx, user, opps);
 
@@ -182,11 +219,19 @@ internal sealed class ArbitrageDecisionService
         var avail = _accounts.GetFund(user.UserId, opp.BuyCcy)?.AvailableBalance ?? 0m;
         int byCash = opp.BuyAsk > 0m ? (int)Math.Floor(avail / opp.BuyAsk) : 0;
         int qty = Min4(room, byCash, opp.BuyAskQty, opp.SellBidQty);
-        if (qty <= 0) return;
+        if (qty <= 0) return null;
+        return new RoundTripPlan(opp, qty, avail);
+    }
+
+    private async Task TryRoundTripAsync(AiBotContext ctx, AIUser user, List<int> candidates, CancellationToken ct)
+    {
+        var plan = await PrepareRoundTripAsync(ctx, user, candidates, ct).ConfigureAwait(false);
+        if (plan is not { } p) return;
+        var opp = p.Opp;
 
         // Leg 1 — market-buy on the cheap book, budget-capped at the bot's available cash.
         var buy = await _entry.PlaceTrueMarketBuyOrderAsync(
-            user.UserId, opp.StockId, qty, avail, opp.BuyCcy, ct).ConfigureAwait(false);
+            user.UserId, opp.StockId, p.Qty, p.Avail, opp.BuyCcy, ct).ConfigureAwait(false);
         int filled = buy.TotalFilledQuantity;
         if (filled <= 0) return;
         RecordFills(user, buy);
@@ -201,6 +246,49 @@ internal sealed class ArbitrageDecisionService
         var sell = await _entry.PlaceTrueMarketSellOrderAsync(
             user.UserId, opp.StockId, sellable, opp.SellCcy, ct).ConfigureAwait(false);
         RecordFills(user, sell);
+    }
+
+    // STRETCH (Bots:Arbitrage:BatchLegs): execute the collected round-trips as two batched passes.
+    // Pass 1 places every leg1 buy in one engine batch; pass 2 places each leg2 sell sized from its
+    // own leg1 fill (the dependency the per-order path enforces sequentially). Entries arrive in
+    // ascending-aiUserId order and that order is preserved through both passes (determinism).
+    private async Task ExecuteBatchedEntriesAsync(
+        List<(AIUser User, RoundTripPlan Plan)> entries, CancellationToken ct)
+    {
+        var buyReqs = new List<TrueMarketBuyBatchRequest>(entries.Count);
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var (user, plan) = entries[i];
+            buyReqs.Add(new TrueMarketBuyBatchRequest(
+                user.UserId, plan.Opp.StockId, plan.Qty, plan.Avail, plan.Opp.BuyCcy));
+        }
+
+        var buyResults = await _entry.PlaceTrueMarketBuyBatchAsync(buyReqs, ct).ConfigureAwait(false);
+
+        // Size leg2 from each confirmed leg1 fill (never oversell into a short).
+        var sellEntries = new List<(AIUser User, RoundTripPlan Plan)>(entries.Count);
+        var sellReqs = new List<TrueMarketSellBatchRequest>(entries.Count);
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var (user, plan) = entries[i];
+            var buy = buyResults[i];
+            int filled = buy.TotalFilledQuantity;
+            if (filled <= 0) continue;
+            RecordFills(user, buy);
+
+            var afterBuy = _accounts.GetPosition(user.UserId, plan.Opp.StockId);
+            int sellable = Math.Min(filled, afterBuy?.AvailableQuantity ?? 0);
+            if (sellable <= 0) continue;
+
+            sellEntries.Add((user, plan));
+            sellReqs.Add(new TrueMarketSellBatchRequest(
+                user.UserId, plan.Opp.StockId, sellable, plan.Opp.SellCcy));
+        }
+        if (sellReqs.Count == 0) return;
+
+        var sellResults = await _entry.PlaceTrueMarketSellBatchAsync(sellReqs, ct).ConfigureAwait(false);
+        for (int i = 0; i < sellEntries.Count; i++)
+            RecordFills(sellEntries[i].User, sellResults[i]);
     }
 
     // Flatten any leftover position on a cross-listed stock by selling on the higher-bidding book

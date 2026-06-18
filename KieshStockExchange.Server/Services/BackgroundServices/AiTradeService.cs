@@ -354,7 +354,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _arbitrageEnabled = _configuration.GetValue("Bots:Arbitrage:Enabled", true);
         _arbitrage = new ArbitrageDecisionService(entry, books, accounts, fxRates, portfolio, stocks, _economy,
                         new SeparatorLogger<ArbitrageDecisionService>(loggerFactory, loggerOptions),
-                        conversionSkewBand: _configuration.GetValue("Bots:Arbitrage:ConversionSkewBand", 0.15m));
+                        conversionSkewBand: _configuration.GetValue("Bots:Arbitrage:ConversionSkewBand", 0.15m),
+                        // STRETCH (unbaked): batch the arb cohort's round-trip legs into 2 passes/tick.
+                        batchLegs: _configuration.GetValue("Bots:Arbitrage:BatchLegs", false));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
                         distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m),

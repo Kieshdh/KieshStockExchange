@@ -95,3 +95,20 @@ public sealed record MarketShortBatchRequest(
     int StockId,
     int Quantity,
     CurrencyType Currency);
+
+// STRETCH (Bots:Arbitrage:BatchLegs): one leg of the arb cohort's batched round-trip.
+// Leg1 is a budget-capped true-market buy; mirrors PlaceTrueMarketBuyOrderAsync.
+public sealed record TrueMarketBuyBatchRequest(
+    int UserId,
+    int StockId,
+    int Quantity,
+    decimal BuyBudget,
+    CurrencyType Currency);
+
+// STRETCH (Bots:Arbitrage:BatchLegs): leg2 of the arb round-trip — a true-market sell sized from
+// the matching leg1 fill; mirrors PlaceTrueMarketSellOrderAsync.
+public sealed record TrueMarketSellBatchRequest(
+    int UserId,
+    int StockId,
+    int Quantity,
+    CurrencyType Currency);

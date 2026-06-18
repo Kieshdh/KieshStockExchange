@@ -1666,7 +1666,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
         // cannot collapse this loop without rewriting the SettleOrderAsync/MatchAndSettleAsync
         // reservation handshake, which is out of scope for round 2. The win for this patch comes
         // from the §0006 leg-insert bulk below.
-        var triplesById = new Dictionary<int, int>(triples.Count); // parentOrderId -> index
+        // `placed` holds the index into `triples` of every parent that reserved successfully, in
+        // SUBMISSION ORDER. The cohort is handed to us already sorted ascending aiUserId
+        // (AiTradeService.SubmitAdvancedAsync), so submission order IS the determinism contract. We
+        // deliberately do NOT key this off a Dictionary: Dictionary<,> enumeration order is not
+        // contractual, and Phase 3 below matches each parent against the live book, so a reordered
+        // walk would consume liquidity in a different order than the per-order path and diverge the
+        // fills for two brackets on the same (stock, currency) book + side.
+        var placed = new List<int>(triples.Count);
         for (int i = 0; i < triples.Count; i++)
         {
             var (parent, _, _) = triples[i];
@@ -1676,16 +1683,16 @@ public sealed class OrderExecutionService : IOrderExecutionService
             var reserveError = await _settlement.SettleOrderAsync(parent, ct).ConfigureAwait(false);
             if (reserveError != null) { results[i] = reserveError; continue; }
 
-            triplesById[parent.OrderId] = i;
+            placed.Add(i);
         }
-        if (triplesById.Count == 0) return results;
+        if (placed.Count == 0) return results;
 
-        // Phase 2: ONE bulk-insert across every successful parent's child legs, in ascending
-        // parentOrderId order. Each child carries its ParentOrderId from the parent's just-
+        // Phase 2: ONE bulk-insert across every successful parent's child legs, in submission order
+        // (== ascending aiUserId). Each child carries its ParentOrderId from the parent's just-
         // assigned id and Status = Attached (dormant until the parent fills).
-        var legs = new List<Order>(triplesById.Count * 4);
-        var legParents = new List<int>(triplesById.Count * 4); // index in `triples` per leg, parallel to `legs`
-        foreach (var (pid, idx) in triplesById)
+        var legs = new List<Order>(placed.Count * 4);
+        var legParents = new List<int>(placed.Count * 4); // index in `triples` per leg, parallel to `legs`
+        foreach (var idx in placed)
         {
             var (parent, sl, tps) = triples[idx];
             if (sl is not null)
@@ -1718,8 +1725,9 @@ public sealed class OrderExecutionService : IOrderExecutionService
             {
                 _logger.LogError(ex, "PlaceBracketBatchAsync: bulk leg insert failed; cancelling cohort.");
                 // Partial-failure path: every triple loses its legs but the parent is still in the
-                // book + reservations. Best-effort cancel the parents we just successfully placed.
-                foreach (var (pid, idx) in triplesById)
+                // book + reservations. Best-effort cancel the parents we just successfully placed,
+                // in submission order.
+                foreach (var idx in placed)
                 {
                     var (parent, _, _) = triples[idx];
                     try { await _settlement.CancelRemainderAsync(parent, ct).ConfigureAwait(false); }
@@ -1730,9 +1738,10 @@ public sealed class OrderExecutionService : IOrderExecutionService
             }
         }
 
-        // Phase 3: register each bracket parent + run match+settle on the parent. Sequential
-        // so causal ordering is preserved within a single user's submissions.
-        foreach (var (pid, idx) in triplesById)
+        // Phase 3: register each bracket parent + run match+settle on the parent, in submission
+        // order (== ascending aiUserId) so causal ordering AND cross-bracket book-consumption order
+        // match the per-order PlaceBracketAsync path exactly.
+        foreach (var idx in placed)
         {
             var (parent, _, _) = triples[idx];
             _bracket.RegisterBracket(parent.OrderId);

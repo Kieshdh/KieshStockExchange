@@ -92,4 +92,16 @@ public interface IOrderEntryService
     /// per-request semantics as PlaceTrueMarketSellOrderAsync. Gated by Bots:Advanced:BracketBatch.</summary>
     Task<IReadOnlyList<OrderResult>> PlaceMarketShortBatchAsync(
         IReadOnlyList<CommandDtos.MarketShortBatchRequest> requests, CancellationToken ct = default);
+
+    /// <summary>STRETCH (Bots:Arbitrage:BatchLegs): batch-place the arb cohort's leg1 true-market
+    /// buys in one engine pass. Same per-request semantics as PlaceTrueMarketBuyOrderAsync; one
+    /// result per request, aligned by index.</summary>
+    Task<IReadOnlyList<OrderResult>> PlaceTrueMarketBuyBatchAsync(
+        IReadOnlyList<CommandDtos.TrueMarketBuyBatchRequest> requests, CancellationToken ct = default);
+
+    /// <summary>STRETCH (Bots:Arbitrage:BatchLegs): batch-place the arb cohort's leg2 true-market
+    /// sells (sized per bot from each leg1 fill) in one engine pass. Same per-request semantics as
+    /// PlaceTrueMarketSellOrderAsync; one result per request, aligned by index.</summary>
+    Task<IReadOnlyList<OrderResult>> PlaceTrueMarketSellBatchAsync(
+        IReadOnlyList<CommandDtos.TrueMarketSellBatchRequest> requests, CancellationToken ct = default);
 }

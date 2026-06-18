@@ -686,6 +686,72 @@ public sealed class OrderEntryService : IOrderEntryService
         }
         return results;
     }
+
+    // STRETCH (Bots:Arbitrage:BatchLegs): batch the arb cohort's leg1 true-market buys through the
+    // plain PlaceAndMatchBatch path (the same route the normal bot cohort uses). Per-request
+    // construction/validation mirrors PlaceTrueMarketBuyOrderAsync exactly; the only change vs the
+    // per-order path is that the cohort's inserts + settles are amortised into one batch.
+    public async Task<IReadOnlyList<OrderResult>> PlaceTrueMarketBuyBatchAsync(
+        IReadOnlyList<TrueMarketBuyBatchRequest> requests, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (requests is null || requests.Count == 0) return Array.Empty<OrderResult>();
+
+        var orders = new List<Order>(requests.Count);
+        var results = new OrderResult[requests.Count];
+        for (int i = 0; i < requests.Count; i++)
+        {
+            var r = requests[i];
+            var inputValidation = _validator.ValidateInput(r.UserId, r.StockId, r.Quantity, 0m,
+                r.Currency, buyOrder: true, limitOrder: false, slippagePercent: null, buyBudget: r.BuyBudget);
+            if (inputValidation != null) { results[i] = inputValidation; continue; }
+            orders.Add(CreateOrder(r.UserId, r.StockId, r.Quantity, 0m, buyBudget: r.BuyBudget,
+                r.Currency, buyOrder: true, limitOrder: false, slippagePercent: null));
+        }
+        if (orders.Count == 0) return results;
+
+        var engineResults = await _engine.PlaceAndMatchBatchAsync(orders, ct).ConfigureAwait(false);
+
+        int w = 0;
+        for (int i = 0; i < requests.Count; i++)
+        {
+            if (results[i] is not null) continue;
+            results[i] = engineResults[w++];
+        }
+        return results;
+    }
+
+    // STRETCH (Bots:Arbitrage:BatchLegs): batch the arb cohort's leg2 true-market sells (each sized
+    // by the caller from its own leg1 fill). Per-request semantics match PlaceTrueMarketSellOrderAsync.
+    public async Task<IReadOnlyList<OrderResult>> PlaceTrueMarketSellBatchAsync(
+        IReadOnlyList<TrueMarketSellBatchRequest> requests, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (requests is null || requests.Count == 0) return Array.Empty<OrderResult>();
+
+        var orders = new List<Order>(requests.Count);
+        var results = new OrderResult[requests.Count];
+        for (int i = 0; i < requests.Count; i++)
+        {
+            var r = requests[i];
+            var inputValidation = _validator.ValidateInput(r.UserId, r.StockId, r.Quantity, 0m,
+                r.Currency, buyOrder: false, limitOrder: false, slippagePercent: null, buyBudget: null);
+            if (inputValidation != null) { results[i] = inputValidation; continue; }
+            orders.Add(CreateOrder(r.UserId, r.StockId, r.Quantity, 0m, buyBudget: null,
+                r.Currency, buyOrder: false, limitOrder: false, slippagePercent: null));
+        }
+        if (orders.Count == 0) return results;
+
+        var engineResults = await _engine.PlaceAndMatchBatchAsync(orders, ct).ConfigureAwait(false);
+
+        int w = 0;
+        for (int i = 0; i < requests.Count; i++)
+        {
+            if (results[i] is not null) continue;
+            results[i] = engineResults[w++];
+        }
+        return results;
+    }
     #endregion
 
     #region Private methods
