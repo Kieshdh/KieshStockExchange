@@ -221,3 +221,21 @@ relative delta is valid; trust deltas ≥20%; conservation/CK=0 is the kill-gate
 `Bots:SmoothedPriceHalfLifeSec`, `Bots:Sentiment:RegimeDrift:*` (system A), `Bots:MarketProbMult`, dashboard
 failure date + Clear button. Foundation realism config (the user likes) = the env block above; NOT baked into
 appsettings (passed via env for soaks). Open decisions for the user = §8.
+
+## 12. ULTRAPLAN PATCH validation (2026-06-18)
+Patch `advanced-batch-bake.patch` applied clean + committed `760c955` (flags default-OFF). **3 sandbox-compile
+gaps fixed** (author had no SDK): missing `using` (ArbBatchLegs test), missing `GetOrderById` mock stub
+(MarketShort test), missing arb-batch client stubs (`ApiOrderEntryClient`). **H0 gate PASSED: 177/177 tests +
+MAUI client build clean.**
+- **Patched BracketBatch on/off (90m, high load, sc=off uncontended): CONSERVATION CLEAN BOTH at adv/tick ≈ 49,
+  451 orders/tick** (a strong safety validation — the determinism fix holds at prod-like load). Perf FLAT
+  (cap 7843→7734, adv ms/order 1.21→1.19) — uncontended machine ⇒ `adv` already ~1.2 ms/order ⇒ no batching
+  headroom to measure. ⇒ per the user's gate ("bake only with an ms-per-order drop"), **NOT baked** — the
+  drop isn't demonstrable when commits are cheap.
+- **Docker PG REVERTED to durability-safe defaults** (synchronous_commit=on, full_page_writes=on,
+  commit_delay=0) — the §11 caveat is cleared.
+- **Commit-bound A/B RUNNING (sc=on, 60m, `kse_soak_bb3off`/`bb3on`):** measures BracketBatch's adv ms/order
+  drop in the regime where it matters (expensive commits). If it shows the drop + stays conservation-clean →
+  bake BracketBatch (+ BatchArms) default-on. If still flat → BracketBatch is SAFE but no measurable LOCAL win;
+  recommend baking on prod (where it was the measured #1 lever) or defer to user. _(pending)_
+- Arb-leg `Bots:Arbitrage:BatchLegs` stays default-off (stretch; one soak ≠ bake for new sequential code).
