@@ -308,8 +308,10 @@ build). Two slices, both default-off.
   −0.336 / −0.378; clustering (absret_acf_lag1) 0.158 / **0.240** (better); has_wick 86% / 81%. ⇒ Slots4 buys big
   headroom but nudges ret_acf ~0.04 worse + composite −4 (fewer actors/min → fewer wicks + marginally more
   over-mean-reversion; within rig noise + at the already-shipped −0.37 level, but directionally real; arms also ran
-  at different caps = a confound). **BAKE DECISION: hold — recommend Slots=2 (gentler cadence, ~half the headroom,
-  likely realism-neutral) pending user nod / one confirming soak. Flag stays shipped + default-off + validated.**
+  at different caps = a confound). **BAKED `Bots:Staggering:{Enabled:true, Slots:2}`** (user-approved Slots=2 over
+  Slots=4: gentler per-minute cadence, ~half the headroom, minimizes the realism perturbation). The 90m gym
+  confirmation soak validates the baked Slots=2 config (conservation + realism in tolerance); revert if realism
+  regresses.
 - **Slice 2 — per-currency group-gate (`Db:PerCurrencyGroupGates`):** 60m A/B done. **NO BAKE.** Conservation clean
   both arms; equilibrium cap flat (1236 vs 1237); EUR fill +3.8% trades / +4.5% vol, USD +1.9% (all under the ≥20%
   trust threshold = noise). Confirms §13/history (group concurrency 24→40 was marginal). Flag stays default-off,
@@ -326,6 +328,25 @@ Handoff `docs/ultraplan-prompt-decision-commit-decoupling.md` (council-reviewed)
   PROD-regime win (sc=off already approved) is **modest ~2.3×**, not 8× (First-Principles was right that sc=off eats
   most of the fsync cost). **Bonus:** Mode C (pipelined `NpgsqlBatch`) = 68× even at sc=off = a *network*
   round-trip win, not fsync ⇒ statement-pipelining inside the group-tx may beat commit-coalescing alone; flag to the
-  Slice-1 design. Baseline soak (commits/sec + cap baseline) RUNNING. Per the runbook: PASS ⇒ request the Slice-1
-  patch (per-currency SHARDED group-commit writer + parallel read-only decision stage + crash-injection test that
-  reconciles the DB ALONE; flag `Db:GroupCommit` default-off).
+  Slice-1 design. Baseline (30m): steady 51 commits/sec, 0.30 round-trips/order, cap ~5000.
+
+## 18. SLICE-1 group-commit writer — landed `6c68a40`, A/B = NO BAKE (coalescing not firing)
+Patch `slice1-group-commit.patch` (per-currency sharded group-commit writer, `Db:GroupCommit` default-off) applied
++ committed `6c68a40` (one 1-line accessibility fix on the crash-test `Frame` type; 191/191 tests incl. equivalence
++ 2 crash tests reconciling the durable DB alone; full-stack build). **A/B (off vs on, ~12m, conservation CLEAN
+both, 0 suspect lines): NO BAKE.** ON shows LOWER cap (~660–960 vs ~870–1160), HIGHER `batch` ms (350–420 vs
+200–296 — serial per-currency shard loses the OFF path's 24-way parallel per-group commit), and **commits/tick ≈ 38
+vs 45 — NOT the ~3–5 coalescing predicts.** ⇒ **the savepoint-nesting coalescing the patch relies on is NOT firing
+in the live engine**: the inner per-group `BeginTransactionAsync` under the shard's `RunInTransactionAsync` is still
+producing root commits, not savepoint-nested releases. The equivalence test's mock `RunInTransactionAsync` ran the
+action inline (didn't model commit-collapse) and the crash test used a hand-rolled nesting fake — neither caught
+that the real `PgDBService` AsyncLocal path doesn't nest here. **Flag stays default-off.** Group-commit is
+conservation-SAFE but ineffective as written. **Next iteration must FIX/verify the nesting (instrument commits/tick,
+assert it drops) OR pivot per First-Principles to Slice 2: keep the proven parallel per-group writer, move the
+DECISION stage off the critical path (parallel read-only decisions → intent handoff), don't touch durability.**
+
+## 19. ROUND BAKE SUMMARY (2026-06-18 day)
+**Baked:** staggering `Slots=2` (the round's real win — cap headroom, conservation-clean) + Gate-0 commit
+instrumentation (`a5f46e7`). **Landed default-off (NOT baked):** per-currency gate (no win), group-commit writer
+(coalescing not firing). **Pending:** 90m gym confirmation soak of the baked Slots=2 end-state; Slice-2 ultraplan
+(decision-stage off-thread). sc=off prod deploy + EUR-seed Tools task still open from the prior round.
