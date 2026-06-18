@@ -345,8 +345,28 @@ conservation-SAFE but ineffective as written. **Next iteration must FIX/verify t
 assert it drops) OR pivot per First-Principles to Slice 2: keep the proven parallel per-group writer, move the
 DECISION stage off the critical path (parallel read-only decisions → intent handoff), don't touch durability.**
 
+## 18b. ITERATION-2 parallel read-only decision stage — KILLED by the free Amdahl gate (NOT applied)
+Iteration-2 ultraplan root-caused Slice-1's non-coalescing precisely: `_ambient` is a static `AsyncLocal<TxScope?>`
+that only flows back to the caller when `BeginTransactionAsync` finishes SYNCHRONOUSLY; Slice-1's parallel
+`Task.WhenAll` shard-open suspends → ambient lost on resume → every inner per-group tx roots (commits/tick ~38, +
+lost 24-way parallelism). Council PIVOTED to (b): parallelize the read-only DECISION stage (`Bots:ParallelDecision`,
+flag default-off), feed the unchanged writer, determinism as the gate (ships `BotParallelDecisionDeterminismTests`;
+`AiBotContext` caches → `ConcurrentDictionary`). **KILLED at the runbook's own free Step-3 Amdahl gate WITHOUT
+applying:** measured `collect` = **3.9%** of the tick (24ms/627ms) on the live baked baseline; dominant phases are
+`batch` 38% + `arb` 29% + `adv` 15% = the WRITER/commit side. Parallelizing a 3.9% phase can lift the cap ≤~4% «
+the 20% bake bar. Landing it would also swap hot-path `Dictionary`→`ConcurrentDictionary` for zero payoff
+(net-negative). **Not applied/soaked/baked; patch kept as a documented artifact.** ⇒ **within-tick SOFTWARE levers
+are now EXHAUSTED** (entry-batch spent, commit-coalesce doesn't fire + loses parallelism, decision-parallelism
+Amdahl-capped). Remaining real levers: **(1) `sc=off` on PROD** (approved, pending deploy — microbench 3.7× on the
+per-commit path); **(2) cross-process / multi-engine sharding** (true horizontal scale, the §7.3 "real" version);
+**(3) the `arb` phase = 29% of the tick for a 5-bot cohort** — suspiciously large, worth a tx-count diagnostic
+(each arb leg is its own tx; if it issues many legs/tick that's a concentrated, controlled commit-count target).
+
 ## 19. ROUND BAKE SUMMARY (2026-06-18 day)
 **Baked:** staggering `Slots=2` (the round's real win — cap headroom, conservation-clean) + Gate-0 commit
 instrumentation (`a5f46e7`). **Landed default-off (NOT baked):** per-currency gate (no win), group-commit writer
-(coalescing not firing). **Pending:** 90m gym confirmation soak of the baked Slots=2 end-state; Slice-2 ultraplan
-(decision-stage off-thread). sc=off prod deploy + EUR-seed Tools task still open from the prior round.
+(coalescing not firing). **NOT applied (killed by free Amdahl gate):** iteration-2 parallel decision stage
+(collect=3.9%, §18b). **CONCLUSION: within-tick software levers EXHAUSTED** — the engine ceiling is the
+`batch`+`arb` commit/writer side (67% of the tick). **Next real levers (next ultraplan / ops):** (1) `sc=off`
+PROD deploy (1 command, approved); (2) cross-process/multi-engine sharding; (3) `arb`-29% tx-count diagnostic.
+**Pending:** gym confirmation soak of the baked Slots=2 end-state (running); EUR-seed Tools task.
