@@ -254,6 +254,9 @@ public sealed class KseDbContext : DbContext
             b.Property(x => x.TpOffsetMaxPrc).HasColumnType(Money);
             // Sentiment-dynamics §: per-bot lateness for the slope-aware phase model.
             b.Property(x => x.Lateness).HasColumnType(Money);
+            // R2 §0012: bracket-flip round-trip bias. Money type matches the AddBotRoundtripBias
+            // migration's numeric(20,10); the omission here is what left the model/snapshot adrift.
+            b.Property(x => x.RoundtripBiasPrc).HasColumnType(Money);
             // §3.7 arbitrage params. The two int columns map to integer by default.
             b.Property(x => x.MinArbitrageRatePrc).HasColumnType(Money);
 
