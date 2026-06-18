@@ -167,5 +167,52 @@ flag-gated; byte-identical-off where possible):
   (+59%)** → +fpw/commit_delay **1539 (+72% vs 893)**. All conservation-clean. The big lever is sc=off (fsync).
   The rest of the headroom needs the structural §7 fixes. ⚠️ docker now has sc=off+fpw=off+commit_delay SET —
   revert before any durability-sensitive run.
-- **Perf Round 5 = 4h CONFIRMATION soak (RUNNING):** best config (foundation+A+BatchArms, sc=off+fpw+commit_delay)
-  → validate cap stability, conservation/CK, and realism (ret_acf/composite) over 4h. _(pending)_
+- **Perf Round 5 = 4h confirmation soak: STARTED then STOPPED** at ~30 min — superseded by the user's pivot to
+  the ultraplan + the BracketBatch validation A/B (below). Not harvested.
+- **BracketBatch validation A/B (RUNNING, ~90m parallel):** `kse_soak_bboff` (BatchArms on, BracketBatch OFF,
+  :5080) vs `kse_soak_bbon` (BatchArms on, BracketBatch ON, :5081). Foundation+A, sc=off+fpw+commit_delay.
+  Measures: ConservationProbe/CK/ReservationAuditor clean? adv ms/order drop? = the pre-evidence for baking the
+  already-coded BracketBatch (A1b/A1c). _(pending — harvest then append + feed the ultraplan brief §8)_
+
+## 11. RESUME STATE (compaction handoff — read this to pick up)
+**Big picture:** realism work is essentially DONE/shippable (foundation + system-A default-off, user "looks
+good", composite 60+, conservation clean). Tonight = PERF. An **Ultraplan is running on the web** (kicked off
+via `/ultraplan`) to return a PATCH for batching the advanced/arb entry route; scope + runbook in
+`docs/ultraplan-prompt-batch-advanced-arb-entry.md`.
+
+**In-flight right now:**
+- BracketBatch validation A/B soaking (DBs `kse_soak_bboff` :5080 / `kse_soak_bbon` :5081), ~90 min.
+- Generic crash-watch monitor running (follows newest `soakP-*.log`).
+- ⚠️ **Docker Postgres has `synchronous_commit=off` + `full_page_writes=off` + `commit_delay=50` SET** for
+  tonight's throwaway soaks. REVERT before any durability-sensitive/prod-like run:
+  `docker exec kieshstockexchange-postgres-1 psql -U kse -d postgres -c "ALTER SYSTEM RESET synchronous_commit;"`
+  (+ same for `full_page_writes`, `commit_delay`) then `SELECT pg_reload_conf();`
+- Client `KieshStockExchange/Resources/Raw/appsettings.json` still repointed to localhost:5080 (uncommitted) —
+  revert to the duckdns prod URL before any prod client build.
+
+**NEXT ACTIONS (in order):**
+1. Harvest the BracketBatch validation A/B → conservation (must be clean) + adv ms/order delta → append to §10
+   + the ultraplan brief §8 "Soak evidence".
+2. **When the ultraplan PATCH arrives:** `git apply --check` (one-shot clean or reject) → apply → build server
+   (`dotnet build KieshStockExchange.Server/...`) + MAUI client → `dotnet test` (full suite) → soak per the
+   runbook in the ultraplan doc §5 → **bake only what stays ConservationProbe=0 / CK=0 / ReservationAuditor in
+   tolerance AND shows adv/arb ms-per-order drop.** Arb-leg batching (if in patch) stays flag-default-off.
+3. Keep `Bots:Advanced:MaxPerTick` as the instant fallback. Structural decoupling is OUT (future ultraplan).
+
+**Canonical soak launch (lowercase DB names; ABSOLUTE script path — relative `.\scripts` fails if cwd drifts):**
+```
+$env:Bots__DecisionDistanceMult='0.2'; $env:Bots__Tiers__CloseProb='0.85'; $env:Bots__Tiers__MidProb='0.10';
+$env:Bots__MarketProbMult='1.5'; $env:Bots__ValueAnchor__AbsoluteCapMax='0.20'; $env:Bots__ValueAnchor__Strength='0.40';
+$env:Bots__ValueAnchor__Scale='0.12'; $env:Bots__RecentAnchor__Strength='0.10'; $env:Bots__Sentiment__RegimeDrift__Enabled='true';
+$env:Bots__Advanced__BatchArms='true'; $env:Bots__PhaseTimingSeconds='30';  # +Bots__Advanced__BracketBatch / arb flag per experiment
+& 'C:\Users\kjden\source\repos\Kieshdh\KieshStockExchange\scripts\kse-balance-soak-p.ps1' -Db <lowercase> -Tmpl kse_soak_seed -Port 5080 -Minutes N -SampleEverySec 120 -Note "..."
+```
+**BotPhase harvest:** python regex on `cap (\d+)\]: ...ms/tick = check .. + collect .. + batch .. + adv .. + arb
+.. + recon .. + maint ..; (\d+) orders + (..) adv/tick`, mean over the steady window (drop first ⅓). Compare
+arms by plateau cap + per-phase ms + ms-per-order. Parallel A/B halves absolute cap (shared docker PG) but the
+relative delta is valid; trust deltas ≥20%; conservation/CK=0 is the kill-gate.
+
+**Config knobs shipped this session (all flag-gated default-off, in git):** `Bots:Sentiment:SlowRingDamp`,
+`Bots:SmoothedPriceHalfLifeSec`, `Bots:Sentiment:RegimeDrift:*` (system A), `Bots:MarketProbMult`, dashboard
+failure date + Clear button. Foundation realism config (the user likes) = the env block above; NOT baked into
+appsettings (passed via env for soaks). Open decisions for the user = §8.
