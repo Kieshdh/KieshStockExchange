@@ -61,6 +61,21 @@ down-drift shrink toward 0?) + **market-order buy/sell taker balance** (should m
 full conservation battery → **bake default-on only if conservation-clean AND the drift/taker-balance measurably
 improves** (re-run the winner once; trust deltas that clear the run-to-run noise).
 
+## IMPLEMENTED + EMPIRICAL FINDING (2026-06-19) — buy-stops shipped, but inert without short inventory
+Bidirectional protective stops were IMPLEMENTED (flag `Bots:Advanced:ShortProtectiveStops`, default-off, commits
+`5c6fd78`/`af46d5e`): a bot's protective stop now protects its LARGEST exposure — long ⇒ sell-stop, short ⇒
+buy-stop — routed through the engine's existing conservation-tested buy-stop arm path. 191/191 + full-stack build,
+flag-off byte-identical. **BUT the A/B soak produced ~0 buy-stops because the bot population is ~98% long-only:**
+on a 20k-active soak, **20,000 bots have a dominant long and only 400 hold ANY short** (none dominant-short). A
+protective buy-stop requires a held short, so with almost no shorts the feature is INERT against the down-drift.
+⇒ **The down-drift's true substrate is the net-long population (tiny per-bot `ShortProb`), not the stop mechanism.**
+The buy-stop is the correct, necessary PRIMITIVE but only bites when shorts exist. **Real fix = PAIR it with more
+short inventory: raise per-bot `ShortProb` (+ ShortBracket) in `Tools/Person.py` and reseed (a /Tools task), then
+flip `ShortProtectiveStops` on so the new shorts are protected symmetrically.** Bake decision: **keep
+`ShortProtectiveStops` default-off** (no measured drift win possible until shorts exist); shipped + available.
+Alternatively, if the bounded drift (gym soak: −0.67%/90m, within the ≤5%/4h budget, beyond50=0) is acceptable,
+no further action is needed.
+
 ## Verification queries (local Claude, post-soak)
 - Taker balance: `SELECT "Stop","Side",count(*) FROM "Orders" WHERE "Entry"='Market' OR "Stop"<>'None' GROUP BY 1,2`
   — buy-stops should now appear (Stop=Buy > 0) and the market buy/sell split should rebalance toward 50/50.
