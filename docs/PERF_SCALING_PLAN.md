@@ -359,8 +359,11 @@ the 20% bake bar. Landing it would also swap hot-path `Dictionary`→`Concurrent
 are now EXHAUSTED** (entry-batch spent, commit-coalesce doesn't fire + loses parallelism, decision-parallelism
 Amdahl-capped). Remaining real levers: **(1) `sc=off` on PROD** (approved, pending deploy — microbench 3.7× on the
 per-commit path); **(2) cross-process / multi-engine sharding** (true horizontal scale, the §7.3 "real" version);
-**(3) the `arb` phase = 29% of the tick for a 5-bot cohort** — suspiciously large, worth a tx-count diagnostic
-(each arb leg is its own tx; if it issues many legs/tick that's a concentrated, controlled commit-count target).
+**(3) the `arb` phase = 29% of the tick** — DIAGNOSED = the known LOCAL round-trip mirage (§3), NOT a prod lever:
+each of the 5 arb bots issues flatten + 2 round-trip legs + an FX rebalance, each its own market-order tx (~10-15
+small commits/tick); on the local rig (~5-10ms/commit) that's the 29%, but on prod's cheap in-network commits it
+shrinks away. `Bots:Arbitrage:BatchLegs` stays correctly skipped (legs match → matching-bound). ⇒ deprioritize arb;
+the only structural lever left is cross-process / multi-engine sharding (a major rewrite, decide deliberately).
 
 ## 19. ROUND BAKE SUMMARY (2026-06-18 day)
 **Baked:** staggering `Slots=2` (the round's real win — cap headroom, conservation-clean) + Gate-0 commit
