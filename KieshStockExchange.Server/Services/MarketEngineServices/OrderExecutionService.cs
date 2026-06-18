@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Server.Services.OtherServices;
 using Npgsql;
+using System.Collections.Concurrent;
 
 namespace KieshStockExchange.Services.MarketEngineServices;
 
@@ -36,6 +37,14 @@ public sealed class OrderExecutionService : IOrderExecutionService
     private readonly ILogger<OrderExecutionService> _logger;
     // Caps concurrent per-group settlement txs so the fan-out can't exhaust the Npgsql pool.
     private readonly SemaphoreSlim _groupGate;
+    // §per-currency gate (default off): inner, optional throttle nested UNDER _groupGate. Bounds any
+    // single currency's share of the global budget so a flood in one currency (e.g. USD) can't starve
+    // the other's (e.g. EUR) settlement concurrency. The global gate still enforces the real pool
+    // bound, so these per-currency budgets may overlap (sum > global) and stay work-conserving.
+    private readonly bool _perCurrencyGates;
+    private readonly int _defaultCurrencyGroupBudget;
+    private readonly IConfiguration _config;
+    private readonly ConcurrentDictionary<CurrencyType, SemaphoreSlim> _currencyGates = new();
 
     public OrderExecutionService(IDataBaseService db, IOrderBookEngine books,
         IMatchingEngine matching, IOrderValidator validator, ISettlementEngine settlement,
@@ -60,8 +69,23 @@ public sealed class OrderExecutionService : IOrderExecutionService
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _bracket = bracket ?? throw new ArgumentNullException(nameof(bracket));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _groupGate = new SemaphoreSlim(Math.Max(1, config.GetValue("Db:MaxConcurrentGroups", 24)));
+        int maxGroups = Math.Max(1, config.GetValue("Db:MaxConcurrentGroups", 24));
+        _groupGate = new SemaphoreSlim(maxGroups);
+        // §per-currency gate config. Default off ⇒ identical concurrency. When on, each currency's
+        // inner budget defaults to 75% of the global cap (override per currency via
+        // Db:PerCurrencyMaxGroups:<CCY>, e.g. :USD / :EUR). A separate key from MaxConcurrentGroups
+        // so the global cap stays a scalar (JSON can't be both a value and a section).
+        _config = config;
+        _perCurrencyGates = config.GetValue("Db:PerCurrencyGroupGates", false);
+        _defaultCurrencyGroupBudget = Math.Max(1,
+            config.GetValue("Db:PerCurrencyMaxGroups:Default", (int)Math.Ceiling(maxGroups * 0.75)));
     }
+
+    // §per-currency gate: lazily build one inner semaphore per currency (race-safe via GetOrAdd).
+    private SemaphoreSlim GateFor(CurrencyType currency)
+        => _currencyGates.GetOrAdd(currency, c =>
+            new SemaphoreSlim(Math.Max(1,
+                _config.GetValue($"Db:PerCurrencyMaxGroups:{c}", _defaultCurrencyGroupBudget))));
 
     // User ids touched in this settlement, for real-time order-cache refresh
     private static HashSet<int> CollectAffectedUsers(Order taker, IReadOnlyDictionary<int, Order> ordersById)
@@ -900,27 +924,40 @@ public sealed class OrderExecutionService : IOrderExecutionService
         List<(int index, Order order)> groupItems,
         OrderResult[] results, CancellationToken ct)
     {
-        // Acquire outside the try — a canceled wait must not hit the Release in finally.
+        // Acquire the global pool guard outside the try — a canceled wait must not hit the Release
+        // in finally. The per-currency inner gate (when enabled) is acquired AFTER it, in a fixed
+        // global→currency order so there is no AB/BA deadlock, and released in reverse below.
         await _groupGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            // §per-currency gate: optional inner throttle. If a canceled wait throws here, the outer
+            // finally still releases _groupGate; the inner gate was not acquired so it is not released.
+            SemaphoreSlim? ccyGate = _perCurrencyGates ? GateFor(currency) : null;
+            if (ccyGate != null) await ccyGate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                return await RunGroupTxAsync(stockId, currency, groupItems, results, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
-            {
-                _logger.LogError(ex,
-                    "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
-                    stockId, currency);
+                try
+                {
+                    return await RunGroupTxAsync(stockId, currency, groupItems, results, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+                {
+                    _logger.LogError(ex,
+                        "PlaceAndMatchBatchAsync: group ({StockId},{Currency}) failed; releasing Phase 1.5/1.6 reservations",
+                        stockId, currency);
 
-                // The group tx already rolled back any settle DB writes. The orders for this
-                // group are still in DB (inserted in Phase 2) but they aren't on the book and
-                // the engine doesn't know about them. Cancel them and release the Phase 1.5/1.6
-                // reservations they consumed so the books don't get ghost open rows that the
-                // bot's next refresh treats as still-pending.
-                await RecoverFailedGroupAsync(groupItems, results, ex.Message, ct).ConfigureAwait(false);
-                return new List<Transaction>();
+                    // The group tx already rolled back any settle DB writes. The orders for this
+                    // group are still in DB (inserted in Phase 2) but they aren't on the book and
+                    // the engine doesn't know about them. Cancel them and release the Phase 1.5/1.6
+                    // reservations they consumed so the books don't get ghost open rows that the
+                    // bot's next refresh treats as still-pending.
+                    await RecoverFailedGroupAsync(groupItems, results, ex.Message, ct).ConfigureAwait(false);
+                    return new List<Transaction>();
+                }
+            }
+            finally
+            {
+                ccyGate?.Release();
             }
         }
         finally

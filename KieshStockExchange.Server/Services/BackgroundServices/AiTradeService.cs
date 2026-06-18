@@ -209,6 +209,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly bool _batchArms;             // §A1a batch the stop/trailing arm route (default off)
     private readonly bool _bracketBatch;          // Round 2 §0005 batch the bracket + market-short routes (default off)
     private readonly double _smoothedPriceHalfLifeSec; // 0 ⇒ legacy fixed α=0.15 EWMA; >0 ⇒ time-based half-life
+    // §stagger: phase-offset each bot's act cadence across ticks. Default off ⇒ byte-identical.
+    private readonly bool _staggerEnabled;        // master switch (default off)
+    private readonly int  _staggerSlots;          // tick-phase buckets = the per-tick load-cut factor N
 
     public AiTradeService(
         IOrderExecutionService marketOrders,
@@ -474,6 +477,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
+        // §stagger: deterministic per-bot tick-phase scheduling. Default off ⇒ byte-identical;
+        // Slots is the per-tick load-cut factor N (only ~1/N of bots are due to act per tick).
+        _staggerEnabled     = _configuration.GetValue("Bots:Staggering:Enabled", false);
+        _staggerSlots       = Math.Max(1, _configuration.GetValue("Bots:Staggering:Slots", 4));
 
         // R3 §0006: legacy-config warning. The Bots:Advanced:BracketRoundTrip key was a
         // Path-1-minimal flag (qty-clamped ShortBracket on flat-or-long), strict subset of
@@ -1059,6 +1066,21 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// §stagger: deterministic tick-phase gate. Returns true when a bot is due to act on the given
+    /// tick. A bot belongs to slot <c>aiUserId % slots</c> and acts only on ticks whose
+    /// <c>tickId % slots</c> matches its slot, so each tick sees ~1/slots of the cohort. Pure
+    /// function of (id, tick) — no RNG, no wall-clock — so it is reproducible and unit-testable.
+    /// <paramref name="slots"/> &lt;= 1 ⇒ always due (the staggering-off / disabled behaviour).
+    /// </summary>
+    internal static bool StaggerDue(int aiUserId, long tickId, int slots)
+    {
+        if (slots <= 1) return true;
+        // aiUserId is a non-negative identity column; guard anyway so the modulo never goes negative.
+        int slot = (int)(((long)aiUserId % slots + slots) % slots);
+        return (int)((tickId % slots + slots) % slots) == slot;
+    }
+
     private async Task<(List<(AIUser user, Order order)> Plain, List<(AIUser user, BotAdvancedDecision dec)> Advanced)>
         CollectPendingOrdersAsync(DateTime now, CancellationToken ct)
     {
@@ -1110,6 +1132,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var div = Math.Clamp(actMult, 0.25m, 4m);
                 effectiveInterval = TimeSpan.FromSeconds(Math.Max(1.0, effectiveInterval.TotalSeconds / (double)div));
             }
+
+            // §stagger: deterministic per-bot tick-phase. A bot in slot (AiUserId % Slots) is only
+            // due to act on ticks where (TickId % Slots) == its slot, cutting per-tick decision +
+            // order-placement load ~Slots-fold. Pure function of (id, tick) — NO RNG, so runs stay
+            // reproducible. Off (or Slots<=1) ⇒ StaggerDue is always true ⇒ byte-identical. Burst /
+            // quiet / activity bookkeeping above still runs every tick, so their RNG streams and the
+            // interval floor below are untouched when off.
+            if (_staggerEnabled && !StaggerDue(user.AiUserId, _ctx.TickId, _staggerSlots)) continue;
 
             if (now - user.LastDecisionTime < effectiveInterval) continue;
 
