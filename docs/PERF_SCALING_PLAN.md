@@ -294,3 +294,36 @@ User answered all 7 §8 decisions:
 **Net banked tonight:** BatchArms (`adc2f63`) + realism foundation+system-A + injection-config (`f70070c`),
 all conservation-validated. **Pending:** sc=off prod deploy (1 command), the sharding+staggering ultraplan,
 the EUR-seed Tools task.
+
+## 16. SHARDING/STAGGERING round (2026-06-18 day) — patch landed, soaks run
+Ultraplan patch (`bot-realism-v2.patch`) applied + committed **`2ea9e78`** (both flags default-off, byte-identical;
+H0: 187/187 tests incl. StaggerDue determinism + per-currency gate-split equivalence suites; server+tests+MAUI all
+build). Two slices, both default-off.
+- **Slice 1 — bot staggering (`Bots:Staggering:{Enabled,Slots}`), `StaggerDue(id,tick,slots)` pure fn:**
+  90m parallel A/B (Slots4 on :5081 vs off control :5080, baked-realism env, sc=on). **CONSERVATION CLEAN both arms
+  (CK/CONS/ERR/shortfall=0 throughout, no runaway: beyond50=0).** **Perf WIN:** equilibrium cap OFF 1967 / ON 2508
+  tail-mean (**+27%**), and still climbing at 90m — last-sample cap 3430→**5192 (+51%)** — at the SAME ~637 ms
+  setpoint (the load-cut converts to headroom, exactly the hypothesis). Drift bounded both (avg −0.30%/−0.63%,
+  medianAbs ~1%, no beyond50). **Realism (r4 scorer, 75m window):** composite OFF 70.9 / ON 66.9; ret_acf_lag1
+  −0.336 / −0.378; clustering (absret_acf_lag1) 0.158 / **0.240** (better); has_wick 86% / 81%. ⇒ Slots4 buys big
+  headroom but nudges ret_acf ~0.04 worse + composite −4 (fewer actors/min → fewer wicks + marginally more
+  over-mean-reversion; within rig noise + at the already-shipped −0.37 level, but directionally real; arms also ran
+  at different caps = a confound). **BAKE DECISION: hold — recommend Slots=2 (gentler cadence, ~half the headroom,
+  likely realism-neutral) pending user nod / one confirming soak. Flag stays shipped + default-off + validated.**
+- **Slice 2 — per-currency group-gate (`Db:PerCurrencyGroupGates`):** A/B PENDING (runs after the Gate-0 baseline).
+  Expectation per §13: marginal (group concurrency 24→40 was marginal before; bake only if EUR genuinely starved).
+
+## 17. NEXT ULTRAPLAN — decision/commit decoupling, GATE 0 result (2026-06-18 day)
+Handoff `docs/ultraplan-prompt-decision-commit-decoupling.md` (council-reviewed). Gate-0 patch
+(`gate0-commit-decoupling.patch`) = instrumentation only: `EngineCommitMetrics` root-commit counter + commits/sec
+& round-trips/order on the BotPhase line + `GroupCommitFsyncMicrobench` test. Additive, default-off (rides
+`PhaseTimingSeconds>0`), byte-identical. **H0: 188/188 tests + full-stack build clean.**
+- **GATE 0.1 fsync microbench (docker PG, N=2000, one connection) = PROCEED:** B/A (one-commit vs separate-commit)
+  speedup **8.2× at sync_commit=on, 2.3× at sync_commit=off**; per-commit path A gets 3.7× from sc=off alone
+  (394→1475 commits/sec). ⇒ **coalescing is real AND survives sc=off (2.3×, not ~1×) → Slice 1 justified**, but the
+  PROD-regime win (sc=off already approved) is **modest ~2.3×**, not 8× (First-Principles was right that sc=off eats
+  most of the fsync cost). **Bonus:** Mode C (pipelined `NpgsqlBatch`) = 68× even at sc=off = a *network*
+  round-trip win, not fsync ⇒ statement-pipelining inside the group-tx may beat commit-coalescing alone; flag to the
+  Slice-1 design. Baseline soak (commits/sec + cap baseline) RUNNING. Per the runbook: PASS ⇒ request the Slice-1
+  patch (per-currency SHARDED group-commit writer + parallel read-only decision stage + crash-injection test that
+  reconciles the DB ALONE; flag `Db:GroupCommit` default-off).
