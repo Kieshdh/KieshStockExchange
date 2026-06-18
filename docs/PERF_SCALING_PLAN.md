@@ -375,3 +375,31 @@ instrumentation (`a5f46e7`). **Landed default-off (NOT baked):** per-currency ga
 `batch`+`arb` commit/writer side (67% of the tick). **Next real levers (next ultraplan / ops):** (1) `sc=off`
 PROD deploy (1 command, approved); (2) cross-process/multi-engine sharding; (3) `arb`-29% tx-count diagnostic.
 **Pending:** gym confirmation soak of the baked Slots=2 end-state (running); EUR-seed Tools task.
+
+## 20. PLAN CLOSE-OUT (2026-06-18 late) — deferred fixes + validation
+- **#142 HTTP-cancellation (`71ea233`):** client HTTP-load sites bare-caught `OperationCanceledException`,
+  swallowing HttpClient TIMEOUTS too. Guarded with `when (ct.IsCancellationRequested)` so genuine cancel is
+  ignored but a timeout surfaces (StockAwareViewModel, BaseAdminTableViewModel, SelectedStockService).
+- **#141 EF PendingModelChangesWarning (`59641ae`):** root cause = two hand-written 06-12 migrations
+  (FlipQuantity / RoundtripBiasPrc) with malformed casing/no designer → invisible to design-time tooling → stale
+  snapshot → `Database.Migrate()` threw at every boot. Fix: RoundtripBiasPrc→Money in the model, regenerated
+  snapshot (model==snapshot), + idempotent `SyncRoundtripFlipSnapshot` migration (no-op on prod/seed, provisions
+  cols on a FRESH DB — also fixes a latent nuke+reseed bug the design-time-skip would have caused). Validated:
+  has-pending clean, 191/191, fresh-DB + existing-DB updates, clean server boot.
+- **End-to-end validation:** order-engine smoke (`scripts/kse-order-smoke.ps1`) vs the live server on the baked
+  config + #141 fix = **37/37 PASS** (limit/market/stop-market/stop-limit/bracket w/ per-leg modify+cancel+TP-only
+  flip, resting-short collateral, conservation sweep clean).
+
+### PLAN STATUS — what's done vs what genuinely remains
+**DONE (code, shipped on `feature/bot-market-realism-v2`):** realism foundation+system-A, staggering Slots=2 (baked
++confirmed), Gate-0 instrumentation; group-commit / per-currency-gate / parallel-decision all resolved (validated →
+no-bake, with reasons); #141 + #142 fixed; order engine smoke-validated. **Within-tick software perf levers are
+EXHAUSTED.**
+**REMAINS — NOT auto-finishable tonight (needs the user / ops / a deliberate effort):**
+1. **Manual MAUI UI tests (#131-140)** — require a human at the client (server is up on :5080, client connectable,
+   backend smoke-green). Cannot be driven autonomously (desktop UI, not web).
+2. **Ops: `sc=off` PROD deploy** (1 command, approved — the biggest unrealized win) + **merge branch→master & deploy**
+   (revert client appsettings localhost→duckdns first).
+3. **Cross-process / multi-engine sharding** — the only remaining structural perf lever, a major multi-session
+   rewrite. RECOMMENDATION: do NOT build speculatively — deploy sc=off + staggering to prod, measure, and pursue
+   sharding only if prod still misses the volume target. (Prod already hit 13.7k cap pre-staggering.)
