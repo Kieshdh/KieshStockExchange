@@ -172,6 +172,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private DateTime _nextPhaseLogTime = DateTime.MaxValue;
     private long _phCheckUs, _phCollectUs, _phBatchUs, _phAdvUs, _phArbUs, _phReconUs, _phMaintUs;
     private long _phPending, _phAdvCount, _phTicks;
+    // Window snapshot of the process-cumulative root-commit (fsync) counter, so the
+    // BotPhase line can report commits/sec + round-trips/order — the commit-bound
+    // metrics that transfer to prod (per-tick ms / cap are docker-skew artifacts).
+    private long _cmPrevCommits;
 
     private readonly AiBotContext         _ctx;
     private readonly AiBotStateService    _state;
@@ -257,6 +261,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         Math.Max(1.0, _configuration.GetValue("Bots:SentimentLogIntervalSeconds", 60.0)));
         _phaseTimingInterval = TimeSpan.FromSeconds(
                         Math.Max(0.0, _configuration.GetValue("Bots:PhaseTimingSeconds", 0.0)));
+        // Engine commit counting rides the same opt-in switch: on only when phase timing
+        // is enabled, so the default path stays byte-identical (no counting, no log line).
+        EngineCommitMetrics.Configure(_phaseTimingInterval > TimeSpan.Zero);
         _ctx       = new AiBotContext(accounts,
                         personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true));
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
@@ -662,6 +669,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _nextPhaseLogTime      = _phaseTimingInterval > TimeSpan.Zero ? TimeHelper.NowUtc() + _phaseTimingInterval : DateTime.MaxValue;
         _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = 0;
         _phPending = _phAdvCount = _phTicks = 0;
+        _cmPrevCommits = EngineCommitMetrics.ReadCommits(); // first window measures from loop start
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
         _nextSentimentLogTime  = TimeHelper.NowUtc() + _sentimentLogInterval;
@@ -1255,14 +1263,25 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (_phTicks == 0) return;
         double n = _phTicks, k = 1000.0;
         double tot = (_phCheckUs + _phCollectUs + _phBatchUs + _phAdvUs + _phArbUs + _phReconUs + _phMaintUs) / n / k;
+        // Commit telemetry (the prod-transferable lever metric): root commits == fsync
+        // round-trips this window. commits/sec is the headline; round-trips/order is
+        // normalized to plain orders (the dominant commit driver — advanced arms collapse
+        // into one insert via BatchArms, arb is a tiny cohort), matching the {Pend} field.
+        long commitsNow  = EngineCommitMetrics.ReadCommits();
+        long dCommits    = commitsNow - _cmPrevCommits;
+        double winSec    = _phaseTimingInterval > TimeSpan.Zero ? _phaseTimingInterval.TotalSeconds : n;
+        double commitsPerSec   = winSec > 0 ? dCommits / winSec : 0.0;
+        double roundTripsPerOrder = _phPending > 0 ? (double)dCommits / _phPending : 0.0;
         _logger.LogInformation(
-            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick",
+            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order)",
             _phTicks, ActiveBotCap?.ToString() ?? "all", tot,
             _phCheckUs / n / k, _phCollectUs / n / k, _phBatchUs / n / k,
             _phAdvUs / n / k, _phArbUs / n / k, _phReconUs / n / k, _phMaintUs / n / k,
-            _phPending / n, _phAdvCount / n);
+            _phPending / n, _phAdvCount / n,
+            (double)dCommits, commitsPerSec, roundTripsPerOrder);
         _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = _phMaintUs = 0;
         _phPending = _phAdvCount = _phTicks = 0;
+        _cmPrevCommits = commitsNow;
     }
 
     private void OnQuoteUpdated(object? sender, LiveQuote quote)

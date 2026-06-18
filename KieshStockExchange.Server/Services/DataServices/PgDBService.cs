@@ -305,6 +305,10 @@ public sealed partial class PgDBService : IDataBaseService
                 try
                 {
                     await _tx.CommitAsync(ct).ConfigureAwait(false);
+                    // One root COMMIT == one fsync round-trip. Counted (no-op unless the
+                    // opt-in PhaseTiming diagnostic is on) so the soak can adjudicate
+                    // commits/sec; nested savepoint RELEASE below is intentionally not.
+                    BackgroundServices.Helpers.EngineCommitMetrics.RecordRootCommit();
                 }
                 finally
                 {
