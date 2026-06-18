@@ -55,11 +55,6 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         decimal stopPrice, decimal buyBudget, CurrencyType currency, CancellationToken ct = default)
         => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Market, StopKind.Stop, currency, buyBudget: buyBudget, stopPrice: stopPrice), ct);
 
-    // Taker-symmetry: slippage-capped market buy-stop (mirror of the sell below).
-    public Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
-        decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default)
-        => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Buy, EntryType.Market, StopKind.Stop, currency, slippagePct: slippagePct, stopPrice: stopPrice), ct);
-
     public Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default)
         => PlaceAsync(Req(userId, stockId, quantity, OrderSide.Sell, EntryType.Market, StopKind.Stop, currency, slippagePct: slippagePct, stopPrice: stopPrice), ct);

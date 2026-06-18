@@ -1022,11 +1022,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     BotAdvancedKind.StopMarketSell =>
                         await _entry.PlaceStopMarketSellOrderAsync(
                             user.UserId, d.StockId, d.Quantity, d.StopPrice, d.Currency, d.StopSlippagePct, ct).ConfigureAwait(false),
-                    // Taker-symmetry: protective buy-stop above market to cover a held short (mirror of the
-                    // sell-stop). Cash-reserved via the engine's existing buy-stop arm path.
+                    // Taker-symmetry: up-trigger BUY routed as a stop-LIMIT (limit = trigger × 1.005). The
+                    // limit path reserves cash correctly (qty × Price) — a capped market buy-stop reserves via
+                    // BuyBudget, which is $0 here → rejects. The limit ≥ ask at trigger, so it TAKES on the
+                    // breakout (adds buy taker pressure) yet is BOUNDED per fire (council's no-up-runaway rule).
                     BotAdvancedKind.StopMarketBuy =>
-                        await _entry.PlaceStopMarketBuyOrderAsync(
-                            user.UserId, d.StockId, d.Quantity, d.StopPrice, d.Currency, d.StopSlippagePct, ct).ConfigureAwait(false),
+                        await _entry.PlaceStopLimitBuyOrderAsync(
+                            user.UserId, d.StockId, d.Quantity, d.StopPrice,
+                            CurrencyHelper.RoundMoney(d.StopPrice * 1.005m, d.Currency), d.Currency, ct).ConfigureAwait(false),
                     BotAdvancedKind.TrailingStopSell =>
                         await _entry.PlaceTrailingStopSellOrderAsync(
                             user.UserId, d.StockId, d.Quantity, d.TrailOffset, d.TrailIsPercent, d.Currency, ct).ConfigureAwait(false),
