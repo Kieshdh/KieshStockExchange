@@ -477,6 +477,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         roundSnapProb:             _configuration.GetValue("Bots:RoundSnapProb", 0.30m),
                         roundSnapSpread:           _configuration.GetValue("Bots:RoundSnapSpread", 0m),
                         // #1: Lateness-staggered lag on the directional/sentiment loop. Default-off.
+                        shortProtectiveStops:      _configuration.GetValue("Bots:Advanced:ShortProtectiveStops", false),
                         directionalReactionLag:    _configuration.GetValue("Bots:DirectionalReactionLag", false),
                         dirLagMinAlpha:            _configuration.GetValue("Bots:DirLagMinAlpha", 0.05m),
                         dirLagMaxAlpha:            _configuration.GetValue("Bots:DirLagMaxAlpha", 0.30m));
@@ -1020,6 +1021,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 {
                     BotAdvancedKind.StopMarketSell =>
                         await _entry.PlaceStopMarketSellOrderAsync(
+                            user.UserId, d.StockId, d.Quantity, d.StopPrice, d.Currency, d.StopSlippagePct, ct).ConfigureAwait(false),
+                    // Taker-symmetry: protective buy-stop above market to cover a held short (mirror of the
+                    // sell-stop). Cash-reserved via the engine's existing buy-stop arm path.
+                    BotAdvancedKind.StopMarketBuy =>
+                        await _entry.PlaceStopMarketBuyOrderAsync(
                             user.UserId, d.StockId, d.Quantity, d.StopPrice, d.Currency, d.StopSlippagePct, ct).ConfigureAwait(false),
                     BotAdvancedKind.TrailingStopSell =>
                         await _entry.PlaceTrailingStopSellOrderAsync(

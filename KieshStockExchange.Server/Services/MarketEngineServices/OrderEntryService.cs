@@ -200,6 +200,14 @@ public sealed class OrderEntryService : IOrderEntryService
         => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice: null, buyBudget: buyBudget,
             slippagePct: null, currency, buyOrder: true, limitStop: false, ct);
 
+    // Taker-symmetry: slippage-capped market buy-stop (mirror of PlaceStopMarketSellOrderAsync). Capped
+    // ⇒ BuildStopOrderAsync sets Price=arm-time anchor + SlippagePercent and reserves cash at the anchor;
+    // the fire is a market buy bounded by the cap. No buyBudget (the anchor price is the reservation base).
+    public Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default)
+        => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice: null, buyBudget: null,
+            slippagePct: slippagePct, currency, buyOrder: true, limitStop: false, ct);
+
     public Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default)
         => ArmStopOrderAsync(userId, stockId, quantity, stopPrice, limitPrice: null, buyBudget: null,

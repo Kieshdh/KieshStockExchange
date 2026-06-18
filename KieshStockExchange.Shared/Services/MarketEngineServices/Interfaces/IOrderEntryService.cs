@@ -56,6 +56,12 @@ public interface IOrderEntryService
     Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
         decimal stopPrice, decimal buyBudget, CurrencyType currency, CancellationToken ct = default);
 
+    // Taker-symmetry: a SLIPPAGE-CAPPED market buy-stop (the buy mirror of the capped sell-stop below).
+    // Used by the bots' short-protective stops so a buy-stop cascade is bounded per fire (no upward
+    // runaway). slippagePct null = fires as a true market buy. Reserves cash at the arm-time anchor.
+    Task<OrderResult> PlaceStopMarketBuyOrderAsync(int userId, int stockId, int quantity,
+        decimal stopPrice, CurrencyType currency, decimal? slippagePct = null, CancellationToken ct = default);
+
     // §3.6: a sell-stop may fire as a slippage-capped market order (a guard so a stop-loss
     // doesn't dump at any price). slippagePct null = fires as a true market sell.
     Task<OrderResult> PlaceStopMarketSellOrderAsync(int userId, int stockId, int quantity,

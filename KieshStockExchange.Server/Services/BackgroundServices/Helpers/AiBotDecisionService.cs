@@ -12,8 +12,11 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
 // §P6: an advanced-order decision, submitted via the entry/arm route (not the batch matcher).
 //   StopMarketSell/TrailingStopSell (P6a): protect a held long.
+//   StopMarketBuy (taker-symmetry): protect a held SHORT — a capped market buy-stop ABOVE market that
+//     covers the short on a rally. Mirrors StopMarketSell so protective stops exist in BOTH directions
+//     (the long-only sell-stops were the entire taker sell-skew / down-drift). Flag-gated, default off.
 //   ShortOpen (P6b): flat-only market short.  LongBracket (P6b)/ShortBracket (P6c): bracketed entry.
-internal enum BotAdvancedKind { StopMarketSell, TrailingStopSell, ShortOpen, LongBracket, ShortBracket }
+internal enum BotAdvancedKind { StopMarketSell, TrailingStopSell, ShortOpen, LongBracket, ShortBracket, StopMarketBuy }
 
 internal sealed record BotAdvancedDecision(
     BotAdvancedKind Kind, int StockId, int Quantity, CurrencyType Currency,
@@ -100,6 +103,9 @@ internal sealed class AiBotDecisionService
 
     // §P6 advanced-order generation for the bot soak (all off by default).
     private readonly bool    _advancedEnabled;
+    // Taker-symmetry: when on, a bot with no protectable long but a held SHORT arms a protective
+    // buy-stop (mirror of the long sell-stop) instead of returning null. Default off ⇒ byte-identical.
+    private readonly bool    _shortProtectiveStops;
     // §3.6 P6: the per-kind advanced-order probabilities are now PER-BOT (AIUser.*Prob, seeded by
     // strategy in Tools/Person.py), read directly off `user` in ComputeAdvancedDecisionAsync.
     private readonly decimal _stopOffsetMin;     // SL distance from entry/market (fraction)
@@ -296,7 +302,9 @@ internal sealed class AiBotDecisionService
         // #1: Lateness-staggered lag on the directional/sentiment loop. Default off ⇒ byte-identical.
         bool directionalReactionLag = false,
         decimal dirLagMinAlpha = 0.05m,
-        decimal dirLagMaxAlpha = 0.30m)
+        decimal dirLagMaxAlpha = 0.30m,
+        // Taker-symmetry: short-protective buy-stops (mirror of long sell-stops). Default off ⇒ byte-identical.
+        bool shortProtectiveStops = false)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -330,6 +338,7 @@ internal sealed class AiBotDecisionService
         _stopSlippagePct    = Math.Max(0m, stopSlippagePct);
         _maxSweepFractionOfDepth = Math.Max(0m, maxSweepFractionOfDepth);
         _advancedEnabled    = advancedEnabled;
+        _shortProtectiveStops = shortProtectiveStops;
         _stopOffsetMin      = stopOffsetMin;
         _stopOffsetMax      = stopOffsetMax;
         _tpOffsetMin        = tpOffsetMin;
@@ -626,6 +635,11 @@ internal sealed class AiBotDecisionService
             var avail = _accounts.GetPosition(user.UserId, id)?.AvailableQuantity ?? 0;
             if (avail > 0) { stockId = id; qty = Math.Min(avail, _advancedMaxQty); break; }
         }
+        // Taker-symmetry: no protectable long ⇒ if a short is held, protect it with a buy-stop instead
+        // (mirror of the sell-stop below). Flag-gated, so flag-off returns null here exactly as before.
+        // No RNG is drawn on either path, so the flag-off draw sequence is byte-identical.
+        if ((stockId <= 0 || qty <= 0) && _shortProtectiveStops)
+            return await BuildShortProtectiveStopAsync(ctx, user, currency, watch, ct).ConfigureAwait(false);
         if (stockId <= 0 || qty <= 0) return null;
         var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (price <= 0m) return null;
@@ -643,6 +657,35 @@ internal sealed class AiBotDecisionService
         var stopPrice = CurrencyHelper.RoundMoney(Math.Min(candidate, ceiling), currency);
         if (stopPrice <= 0m) return null;
         return new BotAdvancedDecision(BotAdvancedKind.StopMarketSell, stockId, qty, currency,
+            StopPrice: stopPrice, StopSlippagePct: _stopSlippagePct);
+    }
+
+    // Taker-symmetry mirror of BuildProtectiveStopAsync: protect the first watchlist SHORT with a
+    // slippage-capped, fundamental-relative static BUY-stop ABOVE market (covers the short on a rally).
+    // Reserves CASH via the engine's existing buy-stop arm path (a short carries no share reservation —
+    // ReservedQuantity is long-only), so the arm is rejected cleanly if the bot lacks free cash. The
+    // trigger is forced strictly ABOVE market so a buy-stop is always valid and varied stops don't pile.
+    private async Task<BotAdvancedDecision?> BuildShortProtectiveStopAsync(AiBotContext ctx, AIUser user,
+        CurrencyType currency, int[] watch, CancellationToken ct)
+    {
+        int stockId = 0, qty = 0;
+        foreach (var id in watch)
+        {
+            var heldQty = _accounts.GetPosition(user.UserId, id)?.Quantity ?? 0;
+            if (heldQty < 0) { stockId = id; qty = Math.Min(-heldQty, _advancedMaxQty); break; }
+        }
+        if (stockId <= 0 || qty <= 0) return null;
+        var price = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
+        if (price <= 0m) return null;
+
+        var offset = StopOffset(ctx, user);
+        var fund = Fundamental(stockId, currency, ctx);
+        var refPrice = fund > 0m ? (price + fund) / 2m : price;
+        var candidate = refPrice * (1m + offset);
+        var floor = price * (1m + 0.002m);                       // strictly above market (mirror of the sell ceiling)
+        var stopPrice = CurrencyHelper.RoundMoney(Math.Max(candidate, floor), currency);
+        if (stopPrice <= 0m) return null;
+        return new BotAdvancedDecision(BotAdvancedKind.StopMarketBuy, stockId, qty, currency,
             StopPrice: stopPrice, StopSlippagePct: _stopSlippagePct);
     }
 
