@@ -307,10 +307,10 @@ def main():
         agg[k] = sum(vals)/len(vals) if vals else None
 
     # Per-stock table
-    print(f"{'sid/cls':<14} {'br_mean':>8} {'wick%':>7} {'flat%':>6} {'rv_r':>6} {'rt_kurt':>8} {'tail_a':>7} {'rAC1':>6} {'absAC1':>7} {'absAC5':>7} {'absAC20':>8}")
+    print(f"{'sid/cls':<14} {'br_mean':>8} {'wick%':>7} {'flat%':>6} {'rv_r':>6} {'rt_kurt':>8} {'tail_a':>7} {'rAC1':>6} {'rAC5':>6} {'absAC1':>7} {'absAC5':>7} {'absAC20':>8}")
     for m in all_metrics:
         line = f"{m['stock']:>4} {m['class']:<8}"
-        for k in ["body_ratio_mean","has_wick_pct","flat_pct","range_vol_corr","return_kurt_excess","tail_alpha","ret_acf_lag1","absret_acf_lag1","absret_acf_lag5","absret_acf_lag20"]:
+        for k in ["body_ratio_mean","has_wick_pct","flat_pct","range_vol_corr","return_kurt_excess","tail_alpha","ret_acf_lag1","ret_acf_lag5","absret_acf_lag1","absret_acf_lag5","absret_acf_lag20"]:
             v = m[k]
             if v is None: line += "    n/a"
             elif k in ("has_wick_pct","flat_pct"): line += f" {v:>6.1f}"

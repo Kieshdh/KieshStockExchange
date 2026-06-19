@@ -190,6 +190,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly BotRegimeService     _regime;    // §A2/A3/A4 shared regime (default off)
     private readonly BotActivityService   _activity;  // §Pillar B activity field (default off)
     private readonly FundamentalService   _funds;     // §P6 slowly-drifting fundamentals
+    private readonly ExogenousShockService _news;     // §exogenous-information news-shock bus (default off)
     private readonly StockProfileService  _profiles;  // §P6 per-stock personality
     private readonly BotCashInjector      _injector;
     private readonly ArbitrageDecisionService _arbitrage; // §3.7 cohort runs OUT of the normal path
@@ -258,6 +259,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _reactionRef            = _configuration.GetValue("Bots:ImpactDecoupleReference", false);
         _reactionRefHalfLifeSec = Math.Max(0.0, _configuration.GetValue("Bots:ImpactDecoupleReferenceHalfLifeSec", 240.0));
         ImpactHoldProbe.Configure(_configuration.GetValue("Bots:ImpactHoldProbe", false));
+        ChaserProbe.Configure(_configuration.GetValue("Bots:ExogShock:ChaserProbe", false));
         if (db          is null) throw new ArgumentNullException(nameof(db));
         if (ledger      is null) throw new ArgumentNullException(nameof(ledger));
         if (books       is null) throw new ArgumentNullException(nameof(books));
@@ -288,13 +290,56 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // sentiment + decision services because both consume them.
         _profiles  = new StockProfileService(
                         enabled: _configuration.GetValue("Bots:Personality:Enabled", true));
+        // §exogenous-information: the news-shock bus + its random source. Built before _funds and _decisions
+        // because both consume it. Default-OFF ⇒ GetShock≡0 and Tick is a no-op ⇒ byte-identical.
+        var exogEnabled        = _configuration.GetValue("Bots:ExogShock:Enabled", false);
+        var exogCap            = _configuration.GetValue("Bots:ExogShock:Cap", 0.06);
+        var exogChaserStrength = _configuration.GetValue("Bots:ExogShock:ChaserStrength", 0.0);
+        var exogChaserFraction = _configuration.GetValue("Bots:ExogShock:ChaserFraction", 0.0);
+        var exogChaserScale    = _configuration.GetValue("Bots:ExogShock:ChaserScale", 0.08);
+        var exogSource = new RandomShockSource(stocks,
+                        meanIntervalMinutes: _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
+                        minMagnitude:        _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
+                        maxMagnitude:        _configuration.GetValue("Bots:ExogShock:MaxMagnitude", 0.06),
+                        magnitudeExponent:   _configuration.GetValue("Bots:ExogShock:MagnitudeExponent", 1.8));
+        _news      = new ExogenousShockService(stocks, _profiles,
+                        new SeparatorLogger<ExogenousShockService>(loggerFactory, loggerOptions), exogSource,
+                        enabled:          exogEnabled,
+                        decayHalfLifeSec: _configuration.GetValue("Bots:ExogShock:DecayHalfLifeSec", 300.0),
+                        cap:              exogCap,
+                        softWallK:        _configuration.GetValue("Bots:ExogShock:SoftWallK", 0.1),
+                        difficultyMult:   _configuration.GetValue("Bots:ExogShock:DifficultyMult", 1.0));
+
+        // Anti-runaway validation for AnchorTracksShock: the moving target must stay provably INTERIOR to the
+        // hard overheat veto. Require Enabled, CapFromSeed=true (veto pinned to SEED while the soft target
+        // moves), AbsoluteCapMax>0, and Band+Cap < AbsoluteCapMax. Unsafe ⇒ log error and refuse (don't enable).
+        var exogAnchorTracks = _configuration.GetValue("Bots:ExogShock:AnchorTracksShock", false);
+        var fundBand   = _configuration.GetValue("Bots:Fundamental:Band", 0.12m);
+        var absCapMax  = _configuration.GetValue("Bots:ValueAnchor:AbsoluteCapMax", 0m);
+        var capFromSeed = _configuration.GetValue("Bots:ValueAnchor:CapFromSeed", false);
+        if (exogAnchorTracks)
+        {
+            bool safe = exogEnabled && capFromSeed && absCapMax > 0m && (fundBand + (decimal)exogCap) < absCapMax;
+            if (!safe)
+            {
+                _logger.LogError("CONFIGCHECK ExogShock REFUSING AnchorTracksShock: needs Enabled && CapFromSeed " +
+                    "&& AbsoluteCapMax>0 && Band+Cap<AbsoluteCapMax (Enabled={En} CapFromSeed={Cfs} Band={Band} " +
+                    "Cap={Cap} AbsoluteCapMax={Abs}).", exogEnabled, capFromSeed, fundBand, exogCap, absCapMax);
+                exogAnchorTracks = false;
+            }
+        }
+
         _funds     = new FundamentalService(stocks, _profiles,
                         new SeparatorLogger<FundamentalService>(loggerFactory, loggerOptions),
                         enabled:          _configuration.GetValue("Bots:Fundamental:Enabled", true),
-                        band:             _configuration.GetValue("Bots:Fundamental:Band", 0.12m),
+                        band:             fundBand,
                         theta:            _configuration.GetValue("Bots:Fundamental:Theta", 0.02),
                         sigma:            _configuration.GetValue("Bots:Fundamental:Sigma", 0.004),
-                        driftIntervalSec: _configuration.GetValue("Bots:Fundamental:DriftIntervalSeconds", 60.0));
+                        driftIntervalSec: _configuration.GetValue("Bots:Fundamental:DriftIntervalSeconds", 60.0),
+                        // §exogenous-information: anchor target tracks the news shock when validated-safe.
+                        exogShock:        exogAnchorTracks ? (Func<int, double>)_news.GetShock : null,
+                        anyShockActive:   exogAnchorTracks ? (Func<bool>)(() => _news.AnyActive) : null,
+                        shockCap:         (decimal)exogCap);
         // Sentiment-dynamics §: the master flag gates BOTH the EWMA slope (here) and the directional phase
         // model (in AiBotDecisionService). Off ⇒ no slope compute and byte-identical decisions.
         var sentimentDynamics = _configuration.GetValue("Bots:SentimentDynamics:Enabled", false);
@@ -497,7 +542,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         dirLagMaxAlpha:            _configuration.GetValue("Bots:DirLagMaxAlpha", 0.30m),
                         // §impact-decouple B: hard per-bot refractory on the directional stance. Default off.
                         reactionHold:              _configuration.GetValue("Bots:ImpactDecoupleHold", false),
-                        reactionHoldWindowSec:     _configuration.GetValue("Bots:ImpactDecoupleHoldWindowSec", 90.0));
+                        reactionHoldWindowSec:     _configuration.GetValue("Bots:ImpactDecoupleHoldWindowSec", 90.0),
+                        // §exogenous-information chaser cohort. Strength/fraction default 0 ⇒ no tilt ⇒ byte-identical.
+                        chaserStrength:            exogEnabled ? exogChaserStrength : 0.0,
+                        chaserFraction:            exogEnabled ? exogChaserFraction : 0.0,
+                        chaserScale:               exogChaserScale,
+                        shockOf:                   _news.GetShock,
+                        shockIdOf:                 _news.GetShockId,
+                        anyShockActive:            () => _news.AnyActive);
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _logger.LogInformation(
@@ -507,6 +559,17 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _configuration.GetValue("Bots:ImpactDecoupleHold", false),
             _configuration.GetValue("Bots:ImpactDecoupleHoldWindowSec", -1.0),
             _configuration.GetValue("Bots:ImpactHoldProbe", false));
+        // §exogenous-information arm marker: full knob set + resolved invariants so an A/B arm is auditable from
+        // the log alone (anchorTracksResolved reflects the anti-runaway validation, not just the requested flag).
+        _logger.LogInformation(
+            "CONFIGCHECK ExogShock enabled={En} anchorTracks={Anchor} cap={Cap} chaserStrength={Cs} chaserFraction={Cf} " +
+            "chaserScale={Csc} meanIntervalMin={Mi} halfLifeSec={Hl} mag=[{MinM},{MaxM}] exp={Exp} (off ⇒ byte-identical)",
+            exogEnabled, exogAnchorTracks, exogCap, exogChaserStrength, exogChaserFraction, exogChaserScale,
+            _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
+            _configuration.GetValue("Bots:ExogShock:DecayHalfLifeSec", 300.0),
+            _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
+            _configuration.GetValue("Bots:ExogShock:MaxMagnitude", 0.06),
+            _configuration.GetValue("Bots:ExogShock:MagnitudeExponent", 1.8));
         // Microstructure bounce arm marker: lets an A/B soak operator confirm OFF (0) vs ON from the log.
         _logger.LogInformation("CONFIGCHECK TouchTighten touchTighten={TouchTighten} (absent ⇒ 0 ⇒ byte-identical)",
             _configuration.GetValue("Bots:TouchTightenPrc", 0m));
@@ -690,6 +753,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _regime.Reset(TimeHelper.NowUtc());    // §A2/A3/A4: open from a deterministic +1 regime
         _activity.Reset(TimeHelper.NowUtc());  // §Pillar B: open neutral (field ≡ baseline/1)
         _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
+        _news.Reset(TimeHelper.NowUtc()); // §exogenous-information: clear shocks + reseed source (inert when off)
         _priceMemory.Reset(TimeHelper.NowUtc()); // re-seed EWMA + day window; inert until Tick if anyConsumer=false
         _fxDesk.Reset();  // §3.7: fresh per-session FX-desk conversion tallies
 
@@ -1442,6 +1506,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _sentiment.Tick(now);
         _regime.Tick(now);    // §A2/A3/A4 regime (no-op when all consumers disabled)
         _activity.Tick(now);  // §Pillar B activity field (no-op when disabled); reads sentiment shock above
+        _news.Tick(now);    // §exogenous-information: decay + arrive news shocks before consumers read them
         _funds.Tick(now);   // §P6: advance the slowly-drifting fundamentals (internally gated to its interval)
         _priceMemory.Tick(now); // EWMA + day-TWAP; short-circuits at top when anyConsumer=false
         if (now >= _nextDailyCheck)
@@ -1481,6 +1546,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (now >= _nextSentimentLogTime)
         {
             _sentiment.LogSnapshot();
+            _news.LogSnapshot(); // §exogenous-information: durable per-stock shock series for the soak harvester
             // §impact-decouple liveliness (so an inert flag is caught in ~1 min, not after a 150-min soak).
             if (_reactionRef) LogReactionRefDivergence();
             if (ImpactHoldProbe.Enabled)
@@ -1488,6 +1554,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var (held, recomputed, heldFrac) = ImpactHoldProbe.Drain();
                 _logger.LogInformation("IMPACTHOLD held={Held} recomputed={Recomp} heldFrac={Frac:0.000}",
                     held, recomputed, heldFrac);
+            }
+            if (ChaserProbe.Enabled)
+            {
+                var (bots, net, meanAbs) = ChaserProbe.Drain();
+                _logger.LogInformation("CHASER bots={Bots} netSignedTilt={Net:0.0000} meanAbsTilt={Mean:0.0000}",
+                    bots, net, meanAbs);
             }
             _nextSentimentLogTime = now + _sentimentLogInterval;
         }

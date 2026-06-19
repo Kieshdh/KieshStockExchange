@@ -332,11 +332,7 @@ internal sealed class BotSentimentService
     // (≈0 near the middle so the walk persists/trends, strong near ±cap so it can't escape), then hard-clamp.
     // Pure ⇒ unit-testable.
     internal static double RegimeStep(double prev, double step, double cap, double softWallK)
-    {
-        if (cap <= 0.0) return 0.0;
-        double softPull = -softWallK * prev * (prev * prev) / (cap * cap); // = -k·prev³/cap²
-        return Math.Clamp(prev + step + softPull, -cap, cap);
-    }
+        => BotMath.SoftWallStep(prev, step, cap, softWallK); // shared cubic soft-wall (same math ⇒ byte-identical)
 
     // §price-reaction (#2): signed dead-band — zero within ±band, pass only the excess beyond it.
     internal static double Deadband(double x, double band)

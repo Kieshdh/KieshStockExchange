@@ -32,6 +32,15 @@ internal sealed class FundamentalService
     private readonly double  _sigma;       // per-step shock as a fraction of seed
     private readonly double  _driftIntervalSec;
 
+    // §exogenous-information: when wired (AnchorTracksShock on), the anchor TARGET = current × (1 + shock),
+    // bounded to seed × [1 ± (Band + ShockCap)]. Null ⇒ the OU walk only ⇒ byte-identical to the pre-feature
+    // engine. Composition is at READ time only (Tick/Gaussian untouched), so the OU RNG stream is identical
+    // on AND off. _anyShockActive is a cheap global fast-path to skip composition when no shock is live.
+    private readonly Func<int, double>? _exogShock;
+    private readonly Func<bool>?        _anyShockActive;
+    private readonly decimal            _shockCap;
+    private const double ShockFloorEpsilon = 1e-6; // near-rest decay dust ⇒ return legacy value (byte-identical)
+
     private readonly Dictionary<(int, CurrencyType), decimal> _seed = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _current = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _sigmaMult = new();
@@ -41,7 +50,8 @@ internal sealed class FundamentalService
 
     internal FundamentalService(IStockService stocks, StockProfileService profiles,
         ILogger<FundamentalService> logger, bool enabled = true, decimal band = 0.12m,
-        double theta = 0.02, double sigma = 0.004, double driftIntervalSec = 60.0)
+        double theta = 0.02, double sigma = 0.004, double driftIntervalSec = 60.0,
+        Func<int, double>? exogShock = null, Func<bool>? anyShockActive = null, decimal shockCap = 0m)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -51,6 +61,9 @@ internal sealed class FundamentalService
         _theta = Math.Clamp(theta, 0.0, 1.0);
         _sigma = Math.Max(0.0, sigma);
         _driftIntervalSec = Math.Max(1.0, driftIntervalSec);
+        _exogShock = exogShock;
+        _anyShockActive = anyShockActive;
+        _shockCap = Math.Max(0m, shockCap);
     }
 
     /// <summary>Seed every (stock,currency) fundamental at its listing seed price and arm the clock.</summary>
@@ -106,11 +119,28 @@ internal sealed class FundamentalService
         }
     }
 
-    /// <summary>Current fundamental for (stock,currency); the fixed seed when disabled or unseeded.</summary>
+    /// <summary>
+    /// Current fundamental for (stock,currency); the fixed seed when disabled or unseeded. When the anchor
+    /// tracks the exogenous shock, the returned target is <c>current × (1 + shock)</c>, hard-bounded to
+    /// <c>seed × [1 ± (Band + ShockCap)]</c>. Byte-identical to the legacy value whenever the shock is unwired
+    /// or at rest (the floor-epsilon early-out guards against decimal round-trip noise).
+    /// </summary>
     internal decimal Get(int stockId, CurrencyType currency)
     {
         var key = (stockId, currency);
-        if (_enabled && _current.TryGetValue(key, out var f)) return f;
+        if (_enabled && _current.TryGetValue(key, out var f))
+        {
+            // No shock wired, or a global fast-path says none is live ⇒ legacy OU value.
+            if (_exogShock is null || (_anyShockActive is not null && !_anyShockActive())) return f;
+            double shock = _exogShock(stockId);
+            if (Math.Abs(shock) < ShockFloorEpsilon) return f; // near-rest ⇒ byte-identical to legacy
+            var seed = _seed[key];
+            var moved = f * (1m + (decimal)shock);             // decimal multiply (no decimal→double round-trip)
+            var span = _band + _shockCap;
+            var lo = seed * (1m - span);
+            var hi = seed * (1m + span);
+            return moved < lo ? lo : moved > hi ? hi : moved;
+        }
         return _seed.TryGetValue(key, out var s) ? s : 0m;
     }
 

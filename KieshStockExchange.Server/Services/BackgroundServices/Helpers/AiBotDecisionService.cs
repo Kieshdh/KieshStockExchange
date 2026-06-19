@@ -187,6 +187,19 @@ internal sealed class AiBotDecisionService
     // term as _directionalReactionLag — not meant to be co-enabled with it.
     private readonly bool _reactionHold;
     private readonly long _reactionHoldWindowTicks;   // (long)(HoldWindowSec * TimeSpan.TicksPerSecond); 0 ⇒ off
+
+    // §exogenous-information chaser cohort: a salted, per-(bot,shock) hash-selected slice of eligible bots
+    // (non-MM) adds strength·tanh(shock/scale) to the directional accumulator, supplying persistent 1-min
+    // directional flow INTO the bounded news shock. Strength is the smooth primary ACF dial; Fraction is a
+    // coarse cohort-size cap. Default strength/fraction 0 ⇒ no tilt ⇒ byte-identical. ChaserSalt keeps this
+    // cohort independent of the RegimeDrift IsFollower split.
+    private const int ChaserSalt = 0x5A17;
+    private readonly double _chaserStrength;
+    private readonly double _chaserFraction;
+    private readonly double _chaserScale;
+    private readonly Func<int, double>? _shockOf;
+    private readonly Func<int, int>?    _shockIdOf;
+    private readonly Func<bool>?        _anyShockActive;
     // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
@@ -319,7 +332,11 @@ internal sealed class AiBotDecisionService
         decimal buyStopFraction = 0m,
         // §impact-decouple B: hard per-bot refractory on the directional stance. Default off ⇒ byte-identical.
         bool reactionHold = false,
-        double reactionHoldWindowSec = 90.0)
+        double reactionHoldWindowSec = 90.0,
+        // §exogenous-information chaser cohort. Default strength/fraction 0 ⇒ no tilt ⇒ byte-identical. The
+        // delegates read the live exogenous shock + its generation id; null when the feature is off.
+        double chaserStrength = 0.0, double chaserFraction = 0.0, double chaserScale = 0.08,
+        Func<int, double>? shockOf = null, Func<int, int>? shockIdOf = null, Func<bool>? anyShockActive = null)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -427,6 +444,12 @@ internal sealed class AiBotDecisionService
         // §impact-decouple B: precompute the hold window in ticks once (guard ≤0 ⇒ off / no-op in HeldDirectional).
         _reactionHold              = reactionHold;
         _reactionHoldWindowTicks   = reactionHoldWindowSec > 0.0 ? (long)(reactionHoldWindowSec * TimeSpan.TicksPerSecond) : 0L;
+        _chaserStrength            = Math.Max(0.0, chaserStrength);
+        _chaserFraction            = Math.Clamp(chaserFraction, 0.0, 1.0);
+        _chaserScale               = Math.Max(1e-6, chaserScale); // guard tanh(·/0); CONFIGCHECK asserts ≥ Cap
+        _shockOf                   = shockOf;
+        _shockIdOf                 = shockIdOf;
+        _anyShockActive            = anyShockActive;
     }
     #endregion
 
@@ -1008,6 +1031,19 @@ internal sealed class AiBotDecisionService
         if (_reactionHold)
             directional = ctx.HeldDirectional(user.UserId, currency, directional,
                 ctx.TickNowTicks, _reactionHoldWindowTicks);
+
+        // §exogenous-information chaser: eligible (non-MM) bots add a tilt INTO the live news shock, supplying
+        // the persistent 1-min directional flow that dilutes the negative ACF from the VARIANCE side. Placed
+        // AFTER the impact-decouple lag/hold so the exogenous signal stays live (it is not self-impact, so the
+        // self-fade refractory must not freeze it — by design). Guarded so off/idle is byte-identical and pays
+        // no watchlist walk; the ±1 re-clamp applies ONLY on the chaser-on path so it can't inflate taker
+        // aggression (Math.Abs(directional)) beyond today's dynamic range.
+        if (notMM && _chaserStrength > 0.0 && _chaserFraction > 0.0 &&
+            _shockOf is not null && _anyShockActive is not null && _anyShockActive())
+        {
+            directional += AverageWatchlistChase(ctx, user);
+            directional = ClampSigned(directional, 1m);
+        }
 
         // §A4 role split: flatten the noise cohort's DIRECTIONAL part (cash homeostasis untouched) so it
         // stops diluting the directional cohort. Followers (and everyone when the flag is off) keep ×1.
@@ -1655,6 +1691,52 @@ internal sealed class AiBotDecisionService
         foreach (var sid in user.Watchlist) { sum += _sentiment.GetSentimentSlope(sid, fast); count++; }
         return count > 0 ? sum / count : 0m;
     }
+
+    /// <summary>
+    /// §exogenous-information: watchlist-averaged chaser tilt. For each watchlist stock with a live shock, if
+    /// this bot is in that shock's (salted, per-(bot,shock)) chaser cohort, add <c>strength·tanh(shock/scale)</c>.
+    /// Averaged over the FULL watchlist (never the shocked-count) so an empty or unshocked watchlist yields
+    /// exactly 0m — never 0/0 = NaN into buyProb. Per-tick memoized (pure within a tick). Callers gate on
+    /// strength&gt;0 &amp;&amp; fraction&gt;0 &amp;&amp; AnyActive, so this runs only when the feature is live.
+    /// </summary>
+    private decimal AverageWatchlistChase(AiBotContext ctx, AIUser user)
+    {
+        if (user.Watchlist == null || user.Watchlist.Count == 0) return 0m;
+        if (ctx.WatchlistChaseCache.TryGetValue(user.AiUserId, out var cached)) return cached;
+
+        double sum = 0.0;
+        foreach (var sid in user.Watchlist)
+        {
+            double shock = _shockOf!(sid);
+            if (shock != 0.0 && IsChaser(user.AiUserId, _shockIdOf!(sid), _chaserFraction, ChaserSalt))
+                sum += ChaserResponse(shock, _chaserStrength, _chaserScale);
+        }
+        var result = (decimal)(sum / user.Watchlist.Count);
+        if (result != 0m) ChaserProbe.Record((double)result); // liveliness probe (no-op unless enabled)
+        ctx.WatchlistChaseCache[user.AiUserId] = result;
+        return result;
+    }
+
+    /// <summary>
+    /// §exogenous-information: whether this bot chases this shock — a pure, RNG-free, salted, per-(bot,shock)
+    /// avalanche hash compared to the cohort fraction. Salt keeps the cohort independent of the RegimeDrift
+    /// IsFollower split; keying on shockId reshuffles the cohort per genuine impulse. Deterministic & call-order
+    /// independent. <c>(uint)</c>-safe inside <see cref="BotMath.HashUnit01(int,int)"/> for negative ids/salt.
+    /// </summary>
+    internal static bool IsChaser(int aiUserId, int shockId, double fraction, int salt)
+    {
+        if (fraction <= 0.0) return false;
+        if (fraction >= 1.0) return true;
+        return BotMath.HashUnit01(aiUserId ^ salt, shockId) < fraction;
+    }
+
+    /// <summary>
+    /// §exogenous-information: the per-bot chase tilt for a live shock — <c>strength·tanh(shock/scale)</c>,
+    /// odd-symmetric in shock. Scale ≥ Cap keeps it near-linear so the push tracks shock magnitude (preserving
+    /// volatility clustering rather than saturating to a constant). Pure &amp; RNG-free → unit-testable.
+    /// </summary>
+    internal static double ChaserResponse(double shock, double strength, double scale)
+        => strength * Math.Tanh(shock / scale);
 
     /// <summary>
     /// Sentiment-dynamics §: the per-strategy directional bias added to buyProb, a pure deterministic

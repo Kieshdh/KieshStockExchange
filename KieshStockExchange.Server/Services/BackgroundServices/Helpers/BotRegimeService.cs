@@ -113,15 +113,8 @@ internal sealed class BotRegimeService
     /// </summary>
     internal static decimal StableUnit(int aiUserId) => HashUnit(aiUserId);
 
-    // Pure hash → [0,1). Avalanche mix (same family as StockProfileService) so adjacent ids don't correlate.
-    private static decimal HashUnit(int aiUserId)
-    {
-        unchecked
-        {
-            ulong h = (ulong)aiUserId * 0x9E3779B97F4A7C15UL + 0x165667B19E3779F9UL;
-            h ^= h >> 33; h *= 0xff51afd7ed558ccdUL; h ^= h >> 33;
-            return (decimal)((double)(h & 0xFFFFFFFFUL) / 4294967296.0); // [0,1)
-        }
-    }
+    // Pure hash → [0,1). Delegates to the shared BotMath avalanche (same math ⇒ byte-identical) so adjacent
+    // ids don't correlate and the hash isn't re-derived per file.
+    private static decimal HashUnit(int aiUserId) => (decimal)BotMath.HashUnit01(aiUserId);
     #endregion
 }
