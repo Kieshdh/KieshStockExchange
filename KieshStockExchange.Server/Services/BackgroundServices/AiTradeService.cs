@@ -488,6 +488,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // Order-wall declumping: soft round-number snap. Defaults = prior exact 30% snap.
                         roundSnapProb:             _configuration.GetValue("Bots:RoundSnapProb", 0.30m),
                         roundSnapSpread:           _configuration.GetValue("Bots:RoundSnapSpread", 0m),
+                        // Microstructure bid-ask bounce: tighten the touch toward mid. Default 0 ⇒ byte-identical.
+                        touchTightenPrc:           _configuration.GetValue("Bots:TouchTightenPrc", 0m),
                         // #1: Lateness-staggered lag on the directional/sentiment loop. Default-off.
                         buyStopFraction:           _configuration.GetValue("Bots:Advanced:BuyStopFraction", 0m),
                         directionalReactionLag:    _configuration.GetValue("Bots:DirectionalReactionLag", false),
@@ -505,6 +507,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _configuration.GetValue("Bots:ImpactDecoupleHold", false),
             _configuration.GetValue("Bots:ImpactDecoupleHoldWindowSec", -1.0),
             _configuration.GetValue("Bots:ImpactHoldProbe", false));
+        // Microstructure bounce arm marker: lets an A/B soak operator confirm OFF (0) vs ON from the log.
+        _logger.LogInformation("CONFIGCHECK TouchTighten touchTighten={TouchTighten} (absent ⇒ 0 ⇒ byte-identical)",
+            _configuration.GetValue("Bots:TouchTightenPrc", 0m));
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
         // §stagger: deterministic per-bot tick-phase scheduling. Default off ⇒ byte-identical;

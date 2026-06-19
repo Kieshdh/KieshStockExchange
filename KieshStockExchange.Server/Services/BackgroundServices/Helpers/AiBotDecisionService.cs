@@ -174,6 +174,9 @@ internal sealed class AiBotDecisionService
     // Order-wall declumping: round-number snapping config. Default prob 0.30 + spread 0 ⇒ today's exact snap.
     private readonly decimal _roundSnapProb;          // fraction of limit orders that snap toward a round level
     private readonly decimal _roundSnapSpread;        // 0 = exact snap (wall); >0 disperses within ±spread*unit
+    // Microstructure bid-ask bounce: >0 tightens the touch-setting orders (MM symmetric quote + non-MM close
+    // tier) toward mid by (1-prc) so consecutive fills zig-zag less across the spread. 0 = off (byte-identical).
+    private readonly decimal _touchTightenPrc;
     // #1: Lateness-staggered lag on the FAST directional/sentiment loop (the genuine 1-min MR driver).
     private readonly bool    _directionalReactionLag; // default off ⇒ byte-identical
     private readonly decimal _dirLagMinAlpha;         // EWMA alpha for max-Lateness bots (slowest)
@@ -306,6 +309,8 @@ internal sealed class AiBotDecisionService
         // Order-wall declumping (round-number snap). Defaults reproduce the prior exact 30% snap.
         decimal roundSnapProb = 0.30m,
         decimal roundSnapSpread = 0m,
+        // Microstructure bid-ask bounce: tighten the touch toward mid. Default 0 ⇒ byte-identical.
+        decimal touchTightenPrc = 0m,
         // #1: Lateness-staggered lag on the directional/sentiment loop. Default off ⇒ byte-identical.
         bool directionalReactionLag = false,
         decimal dirLagMinAlpha = 0.05m,
@@ -413,6 +418,8 @@ internal sealed class AiBotDecisionService
         // Order-wall declumping: clamp prob to [0,1]; spread floored at 0 (0 ⇒ exact snap, byte-identical).
         _roundSnapProb             = roundSnapProb < 0m ? 0m : (roundSnapProb > 1m ? 1m : roundSnapProb);
         _roundSnapSpread           = roundSnapSpread < 0m ? 0m : roundSnapSpread;
+        // Microstructure bounce: tightening fraction in [0,1]; 0 ⇒ off / byte-identical.
+        _touchTightenPrc           = touchTightenPrc < 0m ? 0m : (touchTightenPrc > 1m ? 1m : touchTightenPrc);
         // #1: directional-loop lag — same band-clamp shape as the R5 anchor lag.
         _directionalReactionLag    = directionalReactionLag;
         _dirLagMinAlpha            = dirLagMinAlpha < 0m ? 0m : (dirLagMinAlpha > 1m ? 1m : dirLagMinAlpha);
@@ -1248,9 +1255,12 @@ internal sealed class AiBotDecisionService
             var mid = await GetMidPriceAsync(stockId, currency, ct).ConfigureAwait(false);
             if (mid is > 0m)
             {
+                // Microstructure bounce: narrow the symmetric quote toward mid so the touch MMs set is
+                // tighter. Symmetric ⇒ no directional taker tilt; off (0) ⇒ half unchanged ⇒ byte-identical.
+                var half = _touchTightenPrc > 0m ? _quoteHalfSpreadPrc * (1m - _touchTightenPrc) : _quoteHalfSpreadPrc;
                 var quote = IsBuyOrder(type)
-                    ? mid.Value * (1m - _quoteHalfSpreadPrc)
-                    : mid.Value * (1m + _quoteHalfSpreadPrc);
+                    ? mid.Value * (1m - half)
+                    : mid.Value * (1m + half);
                 return CurrencyHelper.RoundMoney(quote, currency);
             }
         }
@@ -1264,7 +1274,11 @@ internal sealed class AiBotDecisionService
         // §P6 tiered ladder: pick Close / Mid / Far, then widen the chosen band by the liquidity
         // multiplier and add bidirectional jitter. Close churns at the touch; Far rests standing walls
         // that absorb fired (slippage-capped) stops instead of letting them sweep empty space.
-        var (tierMin, tierMax) = PickLimitTier(ctx, user);
+        var (tierMin, tierMax, isCloseTier) = PickLimitTier(ctx, user);
+        // Microstructure bounce: pull the close-tier band (the non-MM orders nearest mid that set the touch)
+        // toward mid by (1-prc). Close tier only — Mid/Far are standing-wall depth. Off ⇒ no-op, byte-identical.
+        tierMin = TightenOffset(tierMin, isCloseTier, _touchTightenPrc);
+        tierMax = TightenOffset(tierMax, isCloseTier, _touchTightenPrc);
         var minOff = tierMin * _limitOffsetMult * _distanceMult;
         var maxOff = tierMax * _limitOffsetMult * _distanceMult;
         var offset = Clamp01(Lerp(minOff, maxOff, ctx.Decimal01(user.AiUserId)));
@@ -1498,17 +1512,20 @@ internal sealed class AiBotDecisionService
     // §P6 tiered ladder: roll Close / Mid / Far and return that tier's (min,max) offset band. Mid/Far
     // fall back to the Close band if a bot pre-dates the tier columns (all-zero), so behaviour degrades
     // gracefully on an un-regenerated workbook.
-    private (decimal min, decimal max) PickLimitTier(AiBotContext ctx, AIUser user)
+    private (decimal min, decimal max, bool isClose) PickLimitTier(AiBotContext ctx, AIUser user)
     {
         var r = ctx.Decimal01(user.AiUserId);
-        if (r < _tierCloseProb) return (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc);
+        // isClose flags the touch-churning tier (the only one the bounce-tighten touches). Mid/Far fall back to
+        // the Close band when their columns are unset, so the tier identity is reported here rather than inferred
+        // from the returned (min,max) at the call site (which would be ambiguous under that fallback).
+        if (r < _tierCloseProb) return (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, true);
         if (r < _tierCloseProb + _tierMidProb)
             return user.MidLimitMaxPrc > 0m
-                ? (user.MidLimitMinPrc, user.MidLimitMaxPrc)
-                : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc);
+                ? (user.MidLimitMinPrc, user.MidLimitMaxPrc, false)
+                : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, false);
         return user.FarLimitMaxPrc > 0m
-            ? (user.FarLimitMinPrc, user.FarLimitMaxPrc)
-            : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc);
+            ? (user.FarLimitMinPrc, user.FarLimitMaxPrc, false)
+            : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, false);
     }
 
     // §P6: per-bot protective-stop distance — drawn from the bot's StopDistance band (config fallback
@@ -1987,6 +2004,14 @@ internal sealed class AiBotDecisionService
         }
         return homeostatic;
     }
+
+    // Microstructure bid-ask bounce: scale a close-tier offset toward mid by (1-touchTightenPrc) so the touch
+    // tightens and each spread-crossing print zig-zags less. Applies only to the close tier (the touch-churning
+    // orders); Mid/Far standing walls pass through untouched. touchTightenPrc=0 (or non-close) ⇒ no-op,
+    // byte-identical. Scaling the band before the Lerp is identical to scaling the final clamped offset (the
+    // Lerp and its clamp bounds scale by the same factor), so the clamp stays valid and dispersion is preserved.
+    internal static decimal TightenOffset(decimal offset, bool isCloseTier, decimal touchTightenPrc)
+        => (touchTightenPrc > 0m && isCloseTier) ? offset * (1m - touchTightenPrc) : offset;
 
     // Snap a price toward the nearest psychologically-significant level. spread>0 disperses the result
     // within ±spread·unit of that level (jitter01 ∈ [0,1] is the dispersion draw) so a cohort of snapped
