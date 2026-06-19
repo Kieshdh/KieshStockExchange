@@ -403,3 +403,23 @@ EXHAUSTED.**
 3. **Cross-process / multi-engine sharding** — the only remaining structural perf lever, a major multi-session
    rewrite. RECOMMENDATION: do NOT build speculatively — deploy sc=off + staggering to prod, measure, and pursue
    sharding only if prod still misses the volume target. (Prod already hit 13.7k cap pre-staggering.)
+
+## 21. UPDATE 2026-06-19 — realism-ceiling round closed (separate thread) + remaining reaffirmed
+The realism thread that ran after this perf plan is now also concluded (see `docs/REALISM_CEILING_INVESTIGATION.md`):
+two ultraplan patches landed default-off — **impact-decouple** (`9d360e2`: A lagged-reference, B per-bot refractory)
+and **microstructure touch-tighten** (`2c4b27d`: `Bots:TouchTightenPrc`). A/B soaks (R1/R2/R3 + microstructure 0.20/
+0.40 + all-on): **every lever's effect is below the OFF run-to-run noise floor (MDE≈±0.03-0.04 at n=1)** → **baked
+nothing**, all flags default-off. Council (5 advisors + 3 reviewers) UNANIMOUS: ret_acf `−0.43` is **done for now**
+(structural-by-hypothesis = the anchor↔runaway tradeoff), stop grinding, **redirect**. The one real future realism
+bet is **exogenous information-driven order flow** (a new subsystem, own budget, runaway risk) — backlog, not now.
+
+**REMAINING across the whole project (consolidated, 2026-06-19):**
+1. **Manual MAUI UI tests #131-140** — needs the user at the desktop client (can't be driven autonomously).
+2. **Ops: `sc=off` PROD deploy** (1 cmd, approved, biggest unrealized perf win) + **merge `feature/bot-market-realism-v2`
+   → master & deploy** (FIRST revert client `Resources/Raw/appsettings.json` localhost→duckdns).
+3. **Cross-process / multi-engine sharding** — only remaining structural perf lever; RECOMMEND defer (deploy sc=off+
+   staggering to prod, measure, build sharding only if prod misses the volume target; prod already hit 13.7k cap).
+4. **Backlog (realism): exogenous information-driven flow** — the only path that could move ret_acf, deliberate future
+   subsystem, gated on a real power analysis.
+Everything else (realism foundation, staggering, BatchArms, #141/#142, order-engine smoke, impact-decouple +
+microstructure investigation) is DONE/shipped. Within-tick software perf levers are EXHAUSTED.
