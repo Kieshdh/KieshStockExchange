@@ -178,6 +178,12 @@ internal sealed class AiBotDecisionService
     private readonly bool    _directionalReactionLag; // default off ⇒ byte-identical
     private readonly decimal _dirLagMinAlpha;         // EWMA alpha for max-Lateness bots (slowest)
     private readonly decimal _dirLagMaxAlpha;         // EWMA alpha for min-Lateness bots (fastest)
+    // §impact-decouple B: HARD per-bot refractory on the combined directional stance. Unlike the soft EWMA
+    // lag above (which still re-responds every tick), a bot holds its stance for the whole window so it cannot
+    // fade its own move within the minute it caused. Default off ⇒ byte-identical. Acts on the SAME directional
+    // term as _directionalReactionLag — not meant to be co-enabled with it.
+    private readonly bool _reactionHold;
+    private readonly long _reactionHoldWindowTicks;   // (long)(HoldWindowSec * TimeSpan.TicksPerSecond); 0 ⇒ off
     // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
@@ -305,7 +311,10 @@ internal sealed class AiBotDecisionService
         decimal dirLagMinAlpha = 0.05m,
         decimal dirLagMaxAlpha = 0.30m,
         // Taker-symmetry: fraction of protective triggers routed to buy-stops. 0 ⇒ byte-identical sell-only.
-        decimal buyStopFraction = 0m)
+        decimal buyStopFraction = 0m,
+        // §impact-decouple B: hard per-bot refractory on the directional stance. Default off ⇒ byte-identical.
+        bool reactionHold = false,
+        double reactionHoldWindowSec = 90.0)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -408,6 +417,9 @@ internal sealed class AiBotDecisionService
         _directionalReactionLag    = directionalReactionLag;
         _dirLagMinAlpha            = dirLagMinAlpha < 0m ? 0m : (dirLagMinAlpha > 1m ? 1m : dirLagMinAlpha);
         _dirLagMaxAlpha            = dirLagMaxAlpha < _dirLagMinAlpha ? _dirLagMinAlpha : (dirLagMaxAlpha > 1m ? 1m : dirLagMaxAlpha);
+        // §impact-decouple B: precompute the hold window in ticks once (guard ≤0 ⇒ off / no-op in HeldDirectional).
+        _reactionHold              = reactionHold;
+        _reactionHoldWindowTicks   = reactionHoldWindowSec > 0.0 ? (long)(reactionHoldWindowSec * TimeSpan.TicksPerSecond) : 0L;
     }
     #endregion
 
@@ -981,6 +993,14 @@ internal sealed class AiBotDecisionService
         if (_directionalReactionLag)
             directional = ctx.LaggedDirectional(user.UserId, currency, directional, user.Lateness,
                 _dirLagMinAlpha, _dirLagMaxAlpha);
+
+        // §impact-decouple B: HARD per-bot refractory — hold the combined directional stance for the whole
+        // window so the bot cannot reverse it within the minute it acted (kills the 1-min self-fade without
+        // the soft lag's residual every-tick response). Applied before role-split/herd/anchor and before the
+        // §taker aggression term reads |directional| (so a held stance also freezes that, by design).
+        if (_reactionHold)
+            directional = ctx.HeldDirectional(user.UserId, currency, directional,
+                ctx.TickNowTicks, _reactionHoldWindowTicks);
 
         // §A4 role split: flatten the noise cohort's DIRECTIONAL part (cash homeostasis untouched) so it
         // stops diluting the directional cohort. Followers (and everyone when the flag is off) keep ×1.
@@ -1723,6 +1743,11 @@ internal sealed class AiBotDecisionService
             var f = Fundamental(sid, currency, ctx);
             if (f <= 0m) continue;
             if (!ctx.SmoothedPrices.TryGetValue((sid, currency), out var p) || p <= 0m) continue;
+            // §impact-decouple A: measure the value gap against the >1-min reference so the anchor stops fading
+            // the cohort's own 1-min push (the live self-impact channel under SentimentDynamics). The slow
+            // fundamental target f is unchanged ⇒ the multi-minute restoring force (runaway guard) survives.
+            // Off ⇒ ReactionRefOr returns p ⇒ byte-identical.
+            p = ctx.ReactionRefOr((sid, currency), p);
             sum += (f - p) / f;
             count++;
         }
@@ -1743,6 +1768,9 @@ internal sealed class AiBotDecisionService
             var r = _priceMemory.GetRecentEwma(sid, currency);
             if (r <= 0m) continue;
             if (!ctx.SmoothedPrices.TryGetValue((sid, currency), out var p) || p <= 0m) continue;
+            // §impact-decouple A: gap against the >1-min reference, not the 1s-tracking smoothed price (the
+            // recent-EWMA target r is unchanged, so medium-term mean-reversion survives). Off ⇒ p unchanged.
+            p = ctx.ReactionRefOr((sid, currency), p);
             sum += (r - p) / r;
             count++;
         }

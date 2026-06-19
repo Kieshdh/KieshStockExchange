@@ -108,6 +108,10 @@ internal sealed class BotSentimentService
     private readonly double _reactDeadband;
     private readonly double _reactCap;
     private readonly Func<int, double>? _recentReturn;
+    // §impact-decouple A: when non-null (flag on), the price-reaction term reads the >1-min-decoupled return
+    // instead of _recentReturn's ~1s return. Null ⇒ uses _recentReturn ⇒ byte-identical. Leaves the activity
+    // driver (_recentReturn = RecentReturnForActivity) untouched.
+    private readonly Func<int, double>? _reactionReturn;
     private readonly Dictionary<int, double> _cumRet = new(); // leaky-integrated recent return per stock
 
     // #3 waves: a FAST positive-feedback (momentum) term that composes with the slow contrarian above —
@@ -153,7 +157,9 @@ internal sealed class BotSentimentService
         double momStrength = 0.0, double momTauSec = 60.0, double momCap = 0.25,
         double slowRingDamp = 1.0,
         bool regimeEnabled = false, double regimeStepSigma = 0.03, double regimeCap = 0.5,
-        double regimeSoftWallK = 0.1, double regimeStrength = 1.0)
+        double regimeSoftWallK = 0.1, double regimeStrength = 1.0,
+        // §impact-decouple A: optional >1-min-decoupled return for the price-reaction term. Null ⇒ byte-identical.
+        Func<int, double>? reactionReturn = null)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -168,6 +174,7 @@ internal sealed class BotSentimentService
         _slopeTauFastSec = Math.Max(MinDtSec, slopeTauFastSec);
         _slopeTauSlowSec = Math.Max(_slopeTauFastSec, slopeTauSlowSec);
         _recentReturn   = recentReturn;
+        _reactionReturn = reactionReturn;
         _priceReaction  = priceReaction;
         _reactStrength  = Math.Max(0.0, reactStrength);
         _reactTauSec    = Math.Max(MinDtSec, reactTauSec);
@@ -258,7 +265,9 @@ internal sealed class BotSentimentService
             // small moves, and add a clamped OPPOSITE-sign term so a multi-minute up-drift bends back down.
             if (_priceReaction && _recentReturn != null)
             {
-                double r = _recentReturn(sid);
+                // §impact-decouple A: use the >1-min-decoupled return when wired (flag on), else the legacy ~1s
+                // return. Selector is byte-identical off because _reactionReturn is null unless the flag is on.
+                double r = _reactionReturn != null ? _reactionReturn(sid) : _recentReturn(sid);
                 // #2 slow contrarian: leaky-integrate over τ, dead-band, push OPPOSITE the sustained move.
                 double cum = Math.Exp(-dt / _reactTauSec) * _cumRet.GetValueOrDefault(sid) + r;
                 _cumRet[sid] = cum;

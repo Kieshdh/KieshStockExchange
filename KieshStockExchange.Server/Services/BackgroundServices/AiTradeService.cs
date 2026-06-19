@@ -213,6 +213,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly bool _batchArms;             // §A1a batch the stop/trailing arm route (default off)
     private readonly bool _bracketBatch;          // Round 2 §0005 batch the bracket + market-short routes (default off)
     private readonly double _smoothedPriceHalfLifeSec; // 0 ⇒ legacy fixed α=0.15 EWMA; >0 ⇒ time-based half-life
+    // §impact-decouple A: the >1-min reaction reference EWMA (maintained in OnQuoteUpdated). Default off.
+    private readonly bool   _reactionRef;
+    private readonly double _reactionRefHalfLifeSec;
     // §stagger: phase-offset each bot's act cadence across ticks. Default off ⇒ byte-identical.
     private readonly bool _staggerEnabled;        // master switch (default off)
     private readonly int  _staggerSlots;          // tick-phase buckets = the per-tick load-cut factor N
@@ -250,6 +253,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // §smoothed-price half-life: decouple bots from their OWN ~1-min price impact by perceiving a lagged
         // price. 0 ⇒ legacy fixed per-quote α=0.15 (byte-identical rollback). Targets the ret_acf_lag1 ceiling.
         _smoothedPriceHalfLifeSec = Math.Max(0.0, _configuration.GetValue("Bots:SmoothedPriceHalfLifeSec", 0.0));
+        // §impact-decouple A/B: structural break of the 1-min self-impact reaction loop (the ret_acf_lag1
+        // ceiling). Both default OFF ⇒ byte-identical. ImpactHoldProbe is a default-off liveliness counter for B.
+        _reactionRef            = _configuration.GetValue("Bots:ImpactDecoupleReference", false);
+        _reactionRefHalfLifeSec = Math.Max(0.0, _configuration.GetValue("Bots:ImpactDecoupleReferenceHalfLifeSec", 240.0));
+        ImpactHoldProbe.Configure(_configuration.GetValue("Bots:ImpactHoldProbe", false));
         if (db          is null) throw new ArgumentNullException(nameof(db));
         if (ledger      is null) throw new ArgumentNullException(nameof(ledger));
         if (books       is null) throw new ArgumentNullException(nameof(books));
@@ -265,7 +273,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // is enabled, so the default path stays byte-identical (no counting, no log line).
         EngineCommitMetrics.Configure(_phaseTimingInterval > TimeSpan.Zero);
         _ctx       = new AiBotContext(accounts,
-                        personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true));
+                        personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true),
+                        reactionRef:       _reactionRef);
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions),
@@ -332,7 +341,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         regimeStepSigma:         _configuration.GetValue("Bots:Sentiment:RegimeDrift:StepSigma", 0.03),
                         regimeCap:               _configuration.GetValue("Bots:Sentiment:RegimeDrift:Cap", 0.5),
                         regimeSoftWallK:         _configuration.GetValue("Bots:Sentiment:RegimeDrift:SoftWallK", 0.1),
-                        regimeStrength:          _configuration.GetValue("Bots:Sentiment:RegimeDrift:Strength", 1.0));
+                        regimeStrength:          _configuration.GetValue("Bots:Sentiment:RegimeDrift:Strength", 1.0),
+                        // §impact-decouple A: wire the >1-min-decoupled return ONLY when the flag is on; null ⇒
+                        // the price-reaction term uses the legacy ~1s return ⇒ byte-identical.
+                        reactionReturn:          _reactionRef ? ReactionReturnForSentiment : (Func<int, double>?)null);
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
@@ -480,9 +492,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         buyStopFraction:           _configuration.GetValue("Bots:Advanced:BuyStopFraction", 0m),
                         directionalReactionLag:    _configuration.GetValue("Bots:DirectionalReactionLag", false),
                         dirLagMinAlpha:            _configuration.GetValue("Bots:DirLagMinAlpha", 0.05m),
-                        dirLagMaxAlpha:            _configuration.GetValue("Bots:DirLagMaxAlpha", 0.30m));
+                        dirLagMaxAlpha:            _configuration.GetValue("Bots:DirLagMaxAlpha", 0.30m),
+                        // §impact-decouple B: hard per-bot refractory on the directional stance. Default off.
+                        reactionHold:              _configuration.GetValue("Bots:ImpactDecoupleHold", false),
+                        reactionHoldWindowSec:     _configuration.GetValue("Bots:ImpactDecoupleHoldWindowSec", 90.0));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
+        _logger.LogInformation(
+            "CONFIGCHECK ImpactDecouple ref={Ref} refHL={Hl} hold={Hold} holdWin={Win} probe={Probe} (absent ⇒ false/-1)",
+            _configuration.GetValue("Bots:ImpactDecoupleReference", false),
+            _configuration.GetValue("Bots:ImpactDecoupleReferenceHalfLifeSec", -1.0),
+            _configuration.GetValue("Bots:ImpactDecoupleHold", false),
+            _configuration.GetValue("Bots:ImpactDecoupleHoldWindowSec", -1.0),
+            _configuration.GetValue("Bots:ImpactHoldProbe", false));
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
         // §stagger: deterministic per-bot tick-phase scheduling. Default off ⇒ byte-identical;
@@ -1105,6 +1127,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // foreach. Cache entries from the previous tick would be stale (stock prices, OpenOrders
         // composition, committed totals, OverBand verdicts all change tick-to-tick).
         _ctx.TickId = Interlocked.Read(ref _tickCount);
+        _ctx.TickNowTicks = now.Ticks;   // §impact-decouple B: one deterministic clock for all bots this tick
         _ctx.ClearTickCaches();
 
         var pending = new List<(AIUser user, Order order)>();
@@ -1322,6 +1345,22 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             decimal keep = (decimal)TimeEwmaKeep(dt, _smoothedPriceHalfLifeSec);
             _ctx.SmoothedPrices[key] = keep * smoothed + (1m - keep) * quote.LastPrice;
         }
+
+        // §impact-decouple A: maintain the >1-min reaction reference as its OWN time-based EWMA with a
+        // DEDICATED timestamp dict (never SmoothedPriceUpdatedUtc, which is empty when the smoothed half-life
+        // is 0 — the prod/bake default — and would freeze dt=0 ⇒ keep=1 ⇒ ref stuck). Gated ⇒ zero cost and
+        // byte-identical when off. First quote seeds ref = LastPrice ((cur-ref)=0), then converges to a
+        // ~halflife-lagged price. RNG-free; per-quote-key, on the quote-drain thread (ConcurrentDictionary).
+        if (_reactionRef)
+        {
+            var rnow = TimeHelper.NowUtc();
+            var rprev = _ctx.ReactionRefPrices.TryGetValue(key, out var rp) ? rp : quote.LastPrice;
+            double rdt = _ctx.ReactionRefUpdatedUtc.TryGetValue(key, out var rlast)
+                ? (rnow - rlast).TotalSeconds : 0.0;
+            _ctx.ReactionRefUpdatedUtc[key] = rnow;
+            decimal rkeep = (decimal)TimeEwmaKeep(rdt, _reactionRefHalfLifeSec);
+            _ctx.ReactionRefPrices[key] = rkeep * rprev + (1m - rkeep) * quote.LastPrice;
+        }
     }
 
     // Time-based EWMA keep weight (weight retained on the OLD value) for elapsed dt at a given half-life:
@@ -1343,6 +1382,51 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 return (double)((cur - prev) / prev);
         }
         return 0.0;
+    }
+
+    // §impact-decouple A: the sentiment price-reaction's return measured against the >1-min reference instead
+    // of the ~1s prior price. Mirrors RecentReturnForActivity's first-match currency selection EXACTLY, then
+    // uses the reference for THAT same currency, falling back to the legacy (cur-prev)/prev when its ref is
+    // unseeded (never crosses to a different currency's ref). Decimal-divide-then-(double)-cast, as the
+    // original — so with ref==prev it is bit-for-bit RecentReturnForActivity. Wired only when the flag is on.
+    private double ReactionReturnForSentiment(int stockId)
+    {
+        foreach (var ccy in CurrenciesToTrade)
+        {
+            if (_ctx.SmoothedPrices.TryGetValue((stockId, ccy), out var cur) && cur > 0m &&
+                _ctx.PreviousPrices.TryGetValue((stockId, ccy), out var prev) && prev > 0m)
+            {
+                var baseline = _ctx.ReactionRefPrices.TryGetValue((stockId, ccy), out var rr) && rr > 0m ? rr : prev;
+                return (double)((cur - baseline) / baseline);
+            }
+        }
+        return 0.0;
+    }
+
+    // §impact-decouple A liveliness: prove the reference is genuinely decoupled (NOT tracking cur). Logs the
+    // mean |return vs the >1-min reference| against the mean |return vs the ~1s prior price| over seeded keys.
+    // ratio≈1 ⇒ A is inert (e.g. the dt=0/keep=1 failure). Loop-thread read, RNG-free, self-contained (does
+    // not touch the memoized decision paths).
+    private void LogReactionRefDivergence()
+    {
+        double sumRef = 0.0, sumPrev = 0.0;
+        int n = 0;
+        foreach (var kv in _ctx.ReactionRefPrices)
+        {
+            var key = kv.Key;
+            var refp = kv.Value;
+            if (refp <= 0m) continue;
+            if (!_ctx.SmoothedPrices.TryGetValue(key, out var cur) || cur <= 0m) continue;
+            sumRef += Math.Abs((double)((cur - refp) / refp));
+            if (_ctx.PreviousPrices.TryGetValue(key, out var prev) && prev > 0m)
+                sumPrev += Math.Abs((double)((cur - prev) / prev));
+            n++;
+        }
+        if (n == 0) return;
+        double mref = sumRef / n, mprev = sumPrev / n;
+        _logger.LogInformation(
+            "REACTIONREF n={N} meanAbsRefRet={A:0.00000} meanAbsPrevRet={B:0.00000} ratio={R:0.000}",
+            n, mref, mprev, mprev > 0 ? mref / mprev : 0.0);
     }
 
     private async Task CheckTimers(DateTime now, CancellationToken ct)
@@ -1392,6 +1476,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (now >= _nextSentimentLogTime)
         {
             _sentiment.LogSnapshot();
+            // §impact-decouple liveliness (so an inert flag is caught in ~1 min, not after a 150-min soak).
+            if (_reactionRef) LogReactionRefDivergence();
+            if (ImpactHoldProbe.Enabled)
+            {
+                var (held, recomputed, heldFrac) = ImpactHoldProbe.Drain();
+                _logger.LogInformation("IMPACTHOLD held={Held} recomputed={Recomp} heldFrac={Frac:0.000}",
+                    held, recomputed, heldFrac);
+            }
             _nextSentimentLogTime = now + _sentimentLogInterval;
         }
         if (now >= _nextCashInjectionTime)

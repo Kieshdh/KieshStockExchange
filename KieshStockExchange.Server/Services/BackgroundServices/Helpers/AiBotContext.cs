@@ -17,11 +17,15 @@ internal sealed class AiBotContext
     #region Services and Constructor
     private readonly IAccountsCache _accounts;
     private readonly bool _personalSentiment;
+    // §impact-decouple A: gates the reaction-reference reads (ReactionRefOr). Off ⇒ every read returns its
+    // legacy fallback ⇒ byte-identical. The matching reference EWMA is maintained in AiTradeService.OnQuoteUpdated.
+    private readonly bool _reactionRef;
 
-    internal AiBotContext(IAccountsCache accounts, bool personalSentiment = true)
+    internal AiBotContext(IAccountsCache accounts, bool personalSentiment = true, bool reactionRef = false)
     {
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _personalSentiment = personalSentiment;
+        _reactionRef = reactionRef;
     }
     #endregion
 
@@ -48,6 +52,15 @@ internal sealed class AiBotContext
     // Bots:SmoothedPriceHalfLifeSec > 0). Empty/unused on the legacy fixed-α path.
     internal readonly ConcurrentDictionary<(int, CurrencyType), DateTime> SmoothedPriceUpdatedUtc = new();
 
+    // §impact-decouple A (Bots:ImpactDecoupleReference): a >1-min EWMA reference price the directional
+    // REACTION reads instead of the ~1s-lagged Previous/Smoothed price, so the cohort stops fading its own
+    // 1-min impact (the ret_acf_lag1≈-0.43 driver). Maintained per quote in AiTradeService.OnQuoteUpdated
+    // with its OWN dedicated timestamp dict (NOT SmoothedPriceUpdatedUtc — that is empty when the smoothed
+    // half-life is 0, the prod default, which would freeze dt=0). Cross-thread (quote-thread writer,
+    // loop-thread reader) ⇒ ConcurrentDictionary. Empty/untouched when the flag is off.
+    internal readonly ConcurrentDictionary<(int, CurrencyType), decimal>  ReactionRefPrices     = new();
+    internal readonly ConcurrentDictionary<(int, CurrencyType), DateTime> ReactionRefUpdatedUtc = new();
+
     internal readonly Dictionary<int, DateTime> BurstEndTimes  = new();
 
     // §A1 inertia: per-bot directional STANCE (dir +1 buy / -1 sell) that persists until `until`, so a
@@ -66,6 +79,13 @@ internal sealed class AiBotContext
     // implicated as the genuine 1-min mean-reversion driver. NOT cleared per tick; cleared on ClearAll.
     internal readonly Dictionary<(int userId, CurrencyType ccy), decimal> DirectionalLag = new();
 
+    // §impact-decouple B (Bots:ImpactDecoupleHold): per-(userId, currency) sample-and-hold of the combined
+    // directional stance plus the tick it was last changed. A bot may change its stance at most once per the
+    // hold window, so it cannot fade its own move within the minute it caused (the HARD refractory the soft
+    // EWMA lag above lacked). Loop-thread-only ⇒ plain Dictionary (mirrors DirectionalLag). NOT cleared per
+    // tick; cleared only on ClearAll. Empty (and never touched) when the flag is off.
+    internal readonly Dictionary<(int userId, CurrencyType ccy), (decimal value, long lastChangeTicks)> ReactionHold = new();
+
     // Reset by CheckDailyRefresh so a tx that fills across the day boundary isn't double-counted.
     internal readonly HashSet<int>              ProcessedTxIds = new();
 
@@ -82,6 +102,10 @@ internal sealed class AiBotContext
     // Plain Dictionary (not ConcurrentDictionary) because they're touched only by the bot-loop
     // thread — OnQuoteUpdated writes only to StockPrices/PreviousPrices/SmoothedPrices.
     internal long TickId;
+    // §impact-decouple B: the loop's single per-tick now.Ticks, stamped beside TickId in
+    // CollectPendingOrdersAsync so HeldDirectional reads one deterministic clock for every bot in the tick
+    // (no per-bot NowUtc() call, no within-tick boundary skew).
+    internal long TickNowTicks;
     internal readonly Dictionary<(int, CurrencyType), bool>     OverBandBuyCache  = new();
     internal readonly Dictionary<(int, CurrencyType), bool>     OverBandSellCache = new();
     internal readonly Dictionary<(int, CurrencyType), decimal>  FundamentalCache  = new();
@@ -206,7 +230,9 @@ internal sealed class AiBotContext
             SmoothedPrices.TryGetValue((stockId, currency), out var cur) && cur > 0m &&
             PreviousPrices.TryGetValue((stockId, currency), out var prev) && prev > 0m)
         {
-            var ret = (cur - prev) / prev;
+            // §impact-decouple A: baseline is the >1-min reference when on, else prev (byte-identical off).
+            var baseline = ReactionRefOr((stockId, currency), prev);
+            var ret = (cur - baseline) / baseline;
             react = sign * ClampSigned(ret * ReturnGain, 1m);
         }
 
@@ -246,6 +272,40 @@ internal sealed class AiBotContext
 
     private static decimal ClampSigned(decimal x, decimal mag) =>
         x < -mag ? -mag : x > mag ? mag : x;
+    #endregion
+
+    #region Impact-decouple (§reaction reference + refractory)
+    /// <summary>
+    /// §impact-decouple A: the price the directional reaction should measure against. When
+    /// Bots:ImpactDecoupleReference is on AND a >1-min reference is seeded for this key, returns that
+    /// reference (so the reaction responds to the multi-minute trend, not the cohort's own 1-min impact);
+    /// otherwise the supplied <paramref name="fallback"/> (the legacy SmoothedPrice / PreviousPrice). Pure,
+    /// RNG-free; off ⇒ returns fallback ⇒ byte-identical.
+    /// </summary>
+    internal decimal ReactionRefOr((int, CurrencyType) key, decimal fallback)
+        => _reactionRef && ReactionRefPrices.TryGetValue(key, out var r) && r > 0m ? r : fallback;
+
+    /// <summary>
+    /// §impact-decouple B: per-bot &gt;1-min refractory (sample-and-hold) on the combined directional stance.
+    /// A bot may change its held stance at most once per <paramref name="windowTicks"/>, so it cannot fade
+    /// its own move within the minute it caused. Pure given the stored entry, <paramref name="nowTicks"/>,
+    /// <paramref name="windowTicks"/> and <paramref name="value"/> — NO RNG, NO clock read (nowTicks is the
+    /// loop's per-tick value, passed in). windowTicks ≤ 0 ⇒ no-op (returns value). Callers invoke this ONLY
+    /// when the flag is on, so the flag-off path is byte-identical.
+    /// </summary>
+    internal decimal HeldDirectional(int userId, CurrencyType ccy, decimal value, long nowTicks, long windowTicks)
+    {
+        if (windowTicks <= 0L) return value;                                    // disabled / mis-set ⇒ no-op
+        var key = (userId, ccy);
+        if (ReactionHold.TryGetValue(key, out var st) && nowTicks - st.lastChangeTicks < windowTicks)
+        {
+            ImpactHoldProbe.Record(held: true);
+            return st.value;                                                    // within refractory ⇒ hold
+        }
+        ReactionHold[key] = (value, nowTicks);                                  // expired / first ⇒ adopt + reset
+        ImpactHoldProbe.Record(held: false);
+        return value;
+    }
     #endregion
 
     #region Financial Computations
@@ -289,7 +349,10 @@ internal sealed class AiBotContext
             if (SmoothedPrices.TryGetValue(key, out var curr) && curr > 0m &&
                 PreviousPrices.TryGetValue(key, out var prev) && prev > 0m)
             {
-                total += (curr - prev) / prev;
+                // §impact-decouple A: measure the move against the >1-min reference, not the ~1s prior price.
+                // Off ⇒ baseline == prev ⇒ (curr-prev)/prev byte-identical.
+                var baseline = ReactionRefOr(key, prev);
+                total += (curr - baseline) / baseline;
                 count++;
             }
         }
@@ -313,6 +376,9 @@ internal sealed class AiBotContext
         Stances.Clear();
         AnchorTiltLag.Clear();
         DirectionalLag.Clear();
+        ReactionRefPrices.Clear();
+        ReactionRefUpdatedUtc.Clear();
+        ReactionHold.Clear();
         ProcessedTxIds.Clear();
         LastRefreshDate = DateOnly.MinValue;
         // §patch 0001: per-tick caches also cleared on full reset.
