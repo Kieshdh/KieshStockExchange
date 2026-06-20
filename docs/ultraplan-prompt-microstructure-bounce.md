@@ -76,3 +76,16 @@ winner once).
 - Realism: `python scripts/r4_realism_score.py --db <db>` for OFF vs ON — compare `ret_acf_lag1` (toward 0) and
   `absret_acf` (must NOT collapse).
 - Spread/wall: confirm typical touch width did not widen and round-grid limit volume stayed ~1% (no wall regress).
+
+## UPDATE 2026-06-20 — bounce is now THE binding constraint (escalate beyond touch-tighten)
+The exogenous-flow chaser (`docs/ultraplan-prompt-exogenous-information-flow.md`, baked v1) now handles the **flow**
+component: it pulls the **VWAP/bounce-removed** ret_acf into the target band (K0: VWAP −0.20→−0.13). But the
+**CLOSE/last-trade headline = VWAP − bounce**, and the bounce (~+0.20) is untouched by the chaser. So the bounce is
+now the SOLE limiter on the CLOSE headline ret_acf. Empirically **`Bots:TouchTightenPrc=0.40` only floors the bounce
+at ~+0.15-0.17** (≈25% cut) — NOT enough; to get the CLOSE headline to `|ret_acf| < 0.10` the bounce must drop below
+~+0.05-0.10. Touch-tightening the limit *offset* is therefore capped (the baked closeness ×5 already tightened it).
+**This round must go beyond touch-tighten to the deeper candidates: (a) fill / candle-close at MID or micro-price
+instead of last-trade (kills the mechanical bid↔ask zig-zag at the source — the single biggest bounce lever), and/or
+(b) finer tick / `CurrencyHelper.RoundMoney` granularity so each print snaps less.** Pair-test against the chaser ON
+(so the measured CLOSE reflects the combined end-state). WIN = CLOSE ret_acf into [−0.15,−0.05] with the chaser on,
+absret clustering preserved, spread not widened, conservation clean. This is the OTHER HALF of `ret_acf < 0.1`.
