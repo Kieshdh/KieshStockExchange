@@ -194,9 +194,10 @@ internal sealed class AiBotDecisionService
     // coarse cohort-size cap. Default strength/fraction 0 ⇒ no tilt ⇒ byte-identical. ChaserSalt keeps this
     // cohort independent of the RegimeDrift IsFollower split.
     private const int ChaserSalt = 0x5A17;
-    private readonly double _chaserStrength;
     private readonly double _chaserFraction;
-    private readonly double _chaserScale;
+    private readonly double _chaserNotionalFrac;     // §direct-flow chaser: primary dial (0 ⇒ off, byte-identical)
+    private readonly double _chaserMaxNotionalFrac;  // §direct-flow chaser: per-order notional cap (frac of seed PV)
+    private readonly double _exogCap;                // shock hard-clamp Cap, reused for sizing intensity
     private readonly Func<int, double>? _shockOf;
     private readonly Func<int, int>?    _shockIdOf;
     private readonly Func<bool>?        _anyShockActive;
@@ -333,9 +334,11 @@ internal sealed class AiBotDecisionService
         // §impact-decouple B: hard per-bot refractory on the directional stance. Default off ⇒ byte-identical.
         bool reactionHold = false,
         double reactionHoldWindowSec = 90.0,
-        // §exogenous-information chaser cohort. Default strength/fraction 0 ⇒ no tilt ⇒ byte-identical. The
-        // delegates read the live exogenous shock + its generation id; null when the feature is off.
-        double chaserStrength = 0.0, double chaserFraction = 0.0, double chaserScale = 0.08,
+        // §direct-flow chaser cohort. NotionalFrac default 0 ⇒ no chase order ⇒ byte-identical. The delegates
+        // read the live exogenous shock + its generation id; null when the feature is off. The retired buyProb
+        // tilt (chaserStrength/chaserScale) is gone — those are no longer ctor params.
+        double chaserFraction = 0.0, double chaserNotionalFrac = 0.0, double chaserMaxNotionalFrac = 0.0,
+        double exogCap = 0.06,
         Func<int, double>? shockOf = null, Func<int, int>? shockIdOf = null, Func<bool>? anyShockActive = null)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
@@ -444,9 +447,10 @@ internal sealed class AiBotDecisionService
         // §impact-decouple B: precompute the hold window in ticks once (guard ≤0 ⇒ off / no-op in HeldDirectional).
         _reactionHold              = reactionHold;
         _reactionHoldWindowTicks   = reactionHoldWindowSec > 0.0 ? (long)(reactionHoldWindowSec * TimeSpan.TicksPerSecond) : 0L;
-        _chaserStrength            = Math.Max(0.0, chaserStrength);
         _chaserFraction            = Math.Clamp(chaserFraction, 0.0, 1.0);
-        _chaserScale               = Math.Max(1e-6, chaserScale); // guard tanh(·/0); CONFIGCHECK asserts ≥ Cap
+        _chaserNotionalFrac        = Math.Max(0.0, chaserNotionalFrac);
+        _chaserMaxNotionalFrac     = Math.Max(0.0, chaserMaxNotionalFrac);
+        _exogCap                   = Math.Max(1e-6, exogCap); // guard /0 in ChaseNotionalCap
         _shockOf                   = shockOf;
         _shockIdOf                 = shockIdOf;
         _anyShockActive            = anyShockActive;
@@ -471,12 +475,36 @@ internal sealed class AiBotDecisionService
     internal async Task<Order?> ComputeOrderAsync(AiBotContext ctx, AIUser user,
         CurrencyType currency, CancellationToken ct = default)
     {
-        var type    = ChooseOrderType(ctx, user, currency);
+        // §direct-flow chaser: a selected chaser of a live shock submits a marketable order INTO the shock —
+        // real persistent directional volume (the retired buyProb tilt could not move VWAP ret_acf). This is a
+        // COMPLETE, draw-free substitution of the normal decision (0 seeded draws, 0 wall-clock reads). The gate
+        // short-circuits on _chaserNotionalFrac==0 BEFORE _anyShockActive(), so OFF is byte-identical; resolved
+        // here, ABOVE the first RNG draw (ChooseOrderType), so the OFF/non-chase draw stream is unperturbed.
+        int chaseStockId = 0; OrderType chaseType = default; decimal chaseNotionalCap = 0m;
+        if (_chaserNotionalFrac > 0.0 && _chaserFraction > 0.0 &&
+            _shockOf is not null && _shockIdOf is not null && _anyShockActive is not null && _anyShockActive())
+        {
+            var pick = ChaseSelect(ctx, user, currency);
+            if (pick is { } p)
+            {
+                var seedPv = ctx.SeedPortfolioValue(user.UserId, currency, (s, c) => SeedPrice(s, c, ctx));
+                var capN   = ChaseNotionalCap(p.Shock, _exogCap, _chaserNotionalFrac, _chaserMaxNotionalFrac, seedPv);
+                if (capN > 0m)
+                {
+                    chaseStockId     = p.StockId;
+                    chaseType        = p.Shock > 0.0 ? OrderType.SlippageMarketBuy : OrderType.SlippageMarketSell;
+                    chaseNotionalCap = capN;
+                }
+            }
+        }
+        bool isChase = chaseStockId > 0;
+
+        var type    = isChase ? chaseType : ChooseOrderType(ctx, user, currency);
         // §perf C4: snapshot every "already committed" total in ONE walk of this user's open orders, then
         // reuse it below — the sell path used to re-walk OpenOrders once per sell candidate inside ChooseStockId.
         // §patch 0001: routed through GetCommitted so the same tick's other consumers hit the cache.
         var committed = GetCommitted(ctx, user.UserId);
-        var stockId = ChooseStockId(ctx, user, type, currency, committed);
+        var stockId = isChase ? chaseStockId : ChooseStockId(ctx, user, type, currency, committed);
         if (stockId <= 0) return null;
 
         // When the chosen stock's raw sentiment crosses ±1, force the order into a slippage-capped market
@@ -484,7 +512,8 @@ internal sealed class AiBotDecisionService
         // No-op when the override would point at zero shares (sell with no position).
         // Sentiment-dynamics §: SKIPPED when the slope-aware phase model is on — that engine already owns the
         // directional behaviour (incl. the FOMO/Contrarian/Panic intent), so running both would double-act.
-        if (!_sentimentDynamics)
+        // §direct-flow chaser: a chase order already carries its direction from the shock sign — skip the override.
+        if (!isChase && !_sentimentDynamics)
             type = ApplyExtremeReaction(ctx, user, stockId, currency, type);
 
         // Value-band veto: don't chase price past the band — refuse to buy a stock already far above
@@ -493,8 +522,14 @@ internal sealed class AiBotDecisionService
         if (IsSellOrder(type) && IsOverBand(ctx, stockId, currency, isBuy: false)) return null;
 
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
-        var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, committed, ct).ConfigureAwait(false);
-        if (quantity <= 0) return null;
+        // §direct-flow chaser: a slippage order with Price 0 (no live market price) fails validation and would
+        // silently drop — count it as a suppressed chase rather than a phantom no-op.
+        if (isChase && price <= 0m) { ChaserProbe.RecordSuppressed(); return null; }
+        var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, committed,
+            isChase ? chaseNotionalCap : 0m, ct).ConfigureAwait(false);
+        // §direct-flow chaser: qty 0 means cash/shares exhausted on the chase name (e.g. a share-gated sell with
+        // no free inventory) — record the distinct "selected but clamped to 0" bucket so a flat probe is diagnosable.
+        if (quantity <= 0) { if (isChase) ChaserProbe.RecordSuppressed(); return null; }
 
         decimal? buyBudget = null;
         if (type == OrderType.TrueMarketBuy)
@@ -509,12 +544,18 @@ internal sealed class AiBotDecisionService
         // position after every other draw — only when the feature is on (off ⇒ no draw, byte-identical), and
         // applied only to slippage orders. Price impact only; the structural anti-sweep DEPTH cap is untouched.
         var slippageFrac = EffectiveSlippage(user, stockId);
-        if (_fatImpactProb > 0m)
+        // §direct-flow chaser: skip the fat-impact RNG draw on a chase tick (it must consume 0 seeded draws).
+        if (!isChase && _fatImpactProb > 0m)
         {
             bool fat = ctx.Decimal01(user.AiUserId) < _fatImpactProb;
             if (fat && IsSlippageOrder(type))
                 slippageFrac = Math.Min(user.SlippageTolerancePrc, Math.Max(slippageFrac, _rangeMaxSlippage));
         }
+
+        // §direct-flow chaser: telemetry — a real chase order was built (placed into the batch). RecordOrder
+        // takes side + signed-ready notional so the soak can prove orders fire AND watch per-window net flow.
+        if (isChase)
+            ChaserProbe.RecordOrder(IsBuyOrder(type), CurrencyHelper.Notional(price, quantity, currency));
 
         // §3.6 decomposition: bots place plain (non-stop) orders — set the dimensions directly.
         return new Order
@@ -1032,18 +1073,9 @@ internal sealed class AiBotDecisionService
             directional = ctx.HeldDirectional(user.UserId, currency, directional,
                 ctx.TickNowTicks, _reactionHoldWindowTicks);
 
-        // §exogenous-information chaser: eligible (non-MM) bots add a tilt INTO the live news shock, supplying
-        // the persistent 1-min directional flow that dilutes the negative ACF from the VARIANCE side. Placed
-        // AFTER the impact-decouple lag/hold so the exogenous signal stays live (it is not self-impact, so the
-        // self-fade refractory must not freeze it — by design). Guarded so off/idle is byte-identical and pays
-        // no watchlist walk; the ±1 re-clamp applies ONLY on the chaser-on path so it can't inflate taker
-        // aggression (Math.Abs(directional)) beyond today's dynamic range.
-        if (notMM && _chaserStrength > 0.0 && _chaserFraction > 0.0 &&
-            _shockOf is not null && _anyShockActive is not null && _anyShockActive())
-        {
-            directional += AverageWatchlistChase(ctx, user);
-            directional = ClampSigned(directional, 1m);
-        }
+        // §direct-flow chaser: the old buyProb tilt (directional += AverageWatchlistChase) is RETIRED here — the
+        // chaser now emits real marketable order flow, resolved at the top of ComputeOrderAsync. Nothing is added
+        // to `directional` for the shock; this keeps the directional accumulator byte-identical to the no-chaser path.
 
         // §A4 role split: flatten the noise cohort's DIRECTIONAL part (cash homeostasis untouched) so it
         // stops diluting the directional cohort. Followers (and everyone when the flag is off) keep ×1.
@@ -1388,24 +1420,37 @@ internal sealed class AiBotDecisionService
     }
 
     private async Task<int> ComputeOrderQuantityAsync(AiBotContext ctx, AIUser user, OrderType type,
-        int stockId, CurrencyType currency, CommittedTotals committed, CancellationToken ct)
+        int stockId, CurrencyType currency, CommittedTotals committed, decimal notionalCapOverride, CancellationToken ct)
     {
         var portfolio = ctx.PortfolioValueByCurrency(user.UserId, currency);
         if (portfolio <= 0m) return 0;
 
-        // Fat tails: skew the uniform draw so typical orders sit near Min with a heavy
-        // right tail to Max. tailShape 0 (or feature off) = uniform, as before.
-        var u = ctx.Decimal01(user.AiUserId);
-        if (_fatTails && _tradeSizeTailShape > 0m)
-            u = (decimal)Math.Pow((double)u, 1.0 + (double)_tradeSizeTailShape * TailExponentScale);
-        var tradePrc = Lerp(user.MinTradeAmountPrc, user.MaxTradeAmountPrc, u);
-        var jitter   = ctx.Decimal01(user.AiUserId) * user.AggressivenessPrc;
-        tradePrc     = Math.Min(tradePrc * (1m + jitter), user.MaxTradeAmountPrc);
-        // Rare block trade: an occasional outsized order past the per-bot Max. The
-        // downstream room/cash/position clamps truncate it to actual capacity.
-        if (_fatTails && _blockTradeProb > 0m && ctx.Decimal01(user.AiUserId) < _blockTradeProb)
-            tradePrc *= _blockTradeMultiple;
-        if (tradePrc <= 0m) return 0;
+        // §direct-flow chaser: when sizing is overridden (the chase notional cap, already sized off a SEED-price
+        // portfolio base), take NO random size draws — a chase tick must consume 0 seeded draws. The override is
+        // treated exactly like a normal rawTrade so every downstream clamp (cash, position room, AvailableQuantity,
+        // short-cover, depth cap) still applies — i.e. no naked flow. Otherwise the normal fat-tailed draws run.
+        decimal rawTrade;
+        if (notionalCapOverride > 0m)
+        {
+            rawTrade = notionalCapOverride;
+        }
+        else
+        {
+            // Fat tails: skew the uniform draw so typical orders sit near Min with a heavy
+            // right tail to Max. tailShape 0 (or feature off) = uniform, as before.
+            var u = ctx.Decimal01(user.AiUserId);
+            if (_fatTails && _tradeSizeTailShape > 0m)
+                u = (decimal)Math.Pow((double)u, 1.0 + (double)_tradeSizeTailShape * TailExponentScale);
+            var tradePrc = Lerp(user.MinTradeAmountPrc, user.MaxTradeAmountPrc, u);
+            var jitter   = ctx.Decimal01(user.AiUserId) * user.AggressivenessPrc;
+            tradePrc     = Math.Min(tradePrc * (1m + jitter), user.MaxTradeAmountPrc);
+            // Rare block trade: an occasional outsized order past the per-bot Max. The
+            // downstream room/cash/position clamps truncate it to actual capacity.
+            if (_fatTails && _blockTradeProb > 0m && ctx.Decimal01(user.AiUserId) < _blockTradeProb)
+                tradePrc *= _blockTradeMultiple;
+            if (tradePrc <= 0m) return 0;
+            rawTrade = tradePrc * portfolio;
+        }
 
         var marketPrice = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
         if (marketPrice <= 0m) return 0;
@@ -1424,7 +1469,6 @@ internal sealed class AiBotDecisionService
         var capValue   = user.PerPositionMaxPrc * portfolio;
         var currentVal = CurrencyHelper.Notional(marketPrice, pos.Quantity, currency);
         var roomValue  = Math.Max(0m, capValue - currentVal);
-        var rawTrade   = tradePrc * portfolio;
 
         if (IsBuyOrder(type))
         {
@@ -1692,30 +1736,61 @@ internal sealed class AiBotDecisionService
         return count > 0 ? sum / count : 0m;
     }
 
-    /// <summary>
-    /// §exogenous-information: watchlist-averaged chaser tilt. For each watchlist stock with a live shock, if
-    /// this bot is in that shock's (salted, per-(bot,shock)) chaser cohort, add <c>strength·tanh(shock/scale)</c>.
-    /// Averaged over the FULL watchlist (never the shocked-count) so an empty or unshocked watchlist yields
-    /// exactly 0m — never 0/0 = NaN into buyProb. Per-tick memoized (pure within a tick). Callers gate on
-    /// strength&gt;0 &amp;&amp; fraction&gt;0 &amp;&amp; AnyActive, so this runs only when the feature is live.
-    /// </summary>
-    private decimal AverageWatchlistChase(AiBotContext ctx, AIUser user)
-    {
-        if (user.Watchlist == null || user.Watchlist.Count == 0) return 0m;
-        if (ctx.WatchlistChaseCache.TryGetValue(user.AiUserId, out var cached)) return cached;
+    /// <summary>§direct-flow chaser: the resolved chase target — the watchlist stock to chase and its signed shock.</summary>
+    internal readonly record struct ChasePick(int StockId, double Shock);
 
-        double sum = 0.0;
-        foreach (var sid in user.Watchlist)
+    /// <summary>
+    /// §direct-flow chaser: pick the watchlist stock this bot chases — the largest |shock| among the bot's
+    /// eligible (listed-in-currency) watchlist names that carry a live shock AND for which this bot is in the
+    /// salted per-(bot,shock) cohort. Instance wrapper: pulls the per-(bot,tick) eligible watchlist (reusing the
+    /// existing memoized view) and delegates the deterministic argmax to the pure core. RNG-free; 0 seeded draws.
+    /// </summary>
+    private ChasePick? ChaseSelect(AiBotContext ctx, AIUser user, CurrencyType currency)
+        => ChaseSelectCore(EligibleWatchlist(ctx, user, currency), _shockOf!, _shockIdOf!,
+                           user.AiUserId, _chaserFraction, ChaserSalt, 0.0);
+
+    /// <summary>
+    /// §direct-flow chaser: pure deterministic argmax. Returns the candidate with the greatest |shock| (tie-broken
+    /// by LOWEST stockId — cap-saturated shocks frequently tie at ±Cap, so the tie-break must be total and stable),
+    /// among candidates with |shock| &gt; floor that this bot chases. Independent of input iteration order, so a
+    /// HashSet-backed watchlist can never make selection nondeterministic. Pure &amp; RNG-free → unit-testable.
+    /// </summary>
+    internal static ChasePick? ChaseSelectCore(int[] candidates, Func<int, double> shockOf, Func<int, int> shockIdOf,
+        int aiUserId, double fraction, int salt, double floor)
+    {
+        int bestId = 0; double bestShock = 0.0, bestAbs = -1.0;
+        foreach (var sid in candidates)
         {
-            double shock = _shockOf!(sid);
-            if (shock != 0.0 && IsChaser(user.AiUserId, _shockIdOf!(sid), _chaserFraction, ChaserSalt))
-                sum += ChaserResponse(shock, _chaserStrength, _chaserScale);
+            double shock = shockOf(sid);
+            double abs   = Math.Abs(shock);
+            if (abs <= floor) continue;
+            if (!IsChaser(aiUserId, shockIdOf(sid), fraction, salt)) continue;
+            if (abs > bestAbs || (abs == bestAbs && sid < bestId))
+            {
+                bestAbs = abs; bestShock = shock; bestId = sid;
+            }
         }
-        var result = (decimal)(sum / user.Watchlist.Count);
-        if (result != 0m) ChaserProbe.Record((double)result); // liveliness probe (no-op unless enabled)
-        ctx.WatchlistChaseCache[user.AiUserId] = result;
-        return result;
+        return bestId > 0 ? new ChasePick(bestId, bestShock) : (ChasePick?)null;
     }
+
+    /// <summary>
+    /// §direct-flow chaser: per-order chase notional. Sized for PERSISTENCE across the shock's life (a flat
+    /// intensity floor, not pure ∝|shock| which front-loads all volume at onset), off a SEED-price portfolio base
+    /// (mark-independent, so a chaser buying into a rising shock cannot inflate its own order size — no positive
+    /// feedback). Capped to <paramref name="maxFrac"/>·seedPortfolio. Pure &amp; RNG-free → unit-testable.
+    /// </summary>
+    internal static decimal ChaseNotionalCap(double shock, double cap, double notionalFrac, double maxFrac,
+        decimal seedPortfolio)
+    {
+        if (seedPortfolio <= 0m || notionalFrac <= 0.0) return 0m;
+        double intensity = Math.Max(ChaseFloorIntensity, Math.Abs(shock) / Math.Max(1e-6, cap));
+        decimal notional = (decimal)(notionalFrac * intensity) * seedPortfolio;
+        decimal hardCap  = (decimal)Math.Max(0.0, maxFrac) * seedPortfolio;
+        return hardCap > 0m ? Math.Min(notional, hardCap) : notional;
+    }
+
+    /// <summary>§direct-flow chaser: flat intensity floor so chase volume persists across the shock's whole life.</summary>
+    private const double ChaseFloorIntensity = 0.25;
 
     /// <summary>
     /// §exogenous-information: whether this bot chases this shock — a pure, RNG-free, salted, per-(bot,shock)

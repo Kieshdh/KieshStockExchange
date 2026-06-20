@@ -294,9 +294,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // because both consume it. Default-OFF ⇒ GetShock≡0 and Tick is a no-op ⇒ byte-identical.
         var exogEnabled        = _configuration.GetValue("Bots:ExogShock:Enabled", false);
         var exogCap            = _configuration.GetValue("Bots:ExogShock:Cap", 0.06);
-        var exogChaserStrength = _configuration.GetValue("Bots:ExogShock:ChaserStrength", 0.0);
+        var exogChaserStrength = _configuration.GetValue("Bots:ExogShock:ChaserStrength", 0.0); // retired tilt — logged for back-compat audit only
+        var exogChaserScale    = _configuration.GetValue("Bots:ExogShock:ChaserScale", 0.08);   // retired tilt — logged for back-compat audit only
         var exogChaserFraction = _configuration.GetValue("Bots:ExogShock:ChaserFraction", 0.0);
-        var exogChaserScale    = _configuration.GetValue("Bots:ExogShock:ChaserScale", 0.08);
+        // §direct-flow chaser dials: NotionalFrac is the primary ACF lever (0 ⇒ off, byte-identical),
+        // MaxNotionalFrac is the per-order cap as a fraction of seed-price portfolio value.
+        var exogChaserNotionalFrac    = _configuration.GetValue("Bots:ExogShock:ChaserNotionalFrac", 0.0);
+        var exogChaserMaxNotionalFrac = _configuration.GetValue("Bots:ExogShock:ChaserMaxNotionalFrac", 0.02);
         var exogSource = new RandomShockSource(stocks,
                         meanIntervalMinutes: _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
                         minMagnitude:        _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
@@ -543,10 +547,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // §impact-decouple B: hard per-bot refractory on the directional stance. Default off.
                         reactionHold:              _configuration.GetValue("Bots:ImpactDecoupleHold", false),
                         reactionHoldWindowSec:     _configuration.GetValue("Bots:ImpactDecoupleHoldWindowSec", 90.0),
-                        // §exogenous-information chaser cohort. Strength/fraction default 0 ⇒ no tilt ⇒ byte-identical.
-                        chaserStrength:            exogEnabled ? exogChaserStrength : 0.0,
+                        // §direct-flow chaser cohort. NotionalFrac default 0 ⇒ no chase order ⇒ byte-identical.
                         chaserFraction:            exogEnabled ? exogChaserFraction : 0.0,
-                        chaserScale:               exogChaserScale,
+                        chaserNotionalFrac:        exogEnabled ? exogChaserNotionalFrac : 0.0,
+                        chaserMaxNotionalFrac:     exogEnabled ? exogChaserMaxNotionalFrac : 0.0,
+                        exogCap:                   exogCap,
                         shockOf:                   _news.GetShock,
                         shockIdOf:                 _news.GetShockId,
                         anyShockActive:            () => _news.AnyActive);
@@ -562,9 +567,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // §exogenous-information arm marker: full knob set + resolved invariants so an A/B arm is auditable from
         // the log alone (anchorTracksResolved reflects the anti-runaway validation, not just the requested flag).
         _logger.LogInformation(
-            "CONFIGCHECK ExogShock enabled={En} anchorTracks={Anchor} cap={Cap} chaserStrength={Cs} chaserFraction={Cf} " +
-            "chaserScale={Csc} meanIntervalMin={Mi} halfLifeSec={Hl} mag=[{MinM},{MaxM}] exp={Exp} (off ⇒ byte-identical)",
-            exogEnabled, exogAnchorTracks, exogCap, exogChaserStrength, exogChaserFraction, exogChaserScale,
+            "CONFIGCHECK ExogShock enabled={En} anchorTracks={Anchor} cap={Cap} chaserFraction={Cf} " +
+            "chaserNotionalFrac={Cnf} chaserMaxNotionalFrac={Cmf} (retired: chaserStrength={Cs} chaserScale={Csc}) " +
+            "meanIntervalMin={Mi} halfLifeSec={Hl} mag=[{MinM},{MaxM}] exp={Exp} (off ⇒ byte-identical)",
+            exogEnabled, exogAnchorTracks, exogCap, exogChaserFraction,
+            exogChaserNotionalFrac, exogChaserMaxNotionalFrac, exogChaserStrength, exogChaserScale,
             _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
             _configuration.GetValue("Bots:ExogShock:DecayHalfLifeSec", 300.0),
             _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
@@ -1557,9 +1564,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             }
             if (ChaserProbe.Enabled)
             {
-                var (bots, net, meanAbs) = ChaserProbe.Drain();
-                _logger.LogInformation("CHASER bots={Bots} netSignedTilt={Net:0.0000} meanAbsTilt={Mean:0.0000}",
-                    bots, net, meanAbs);
+                var (orders, suppressed, netNotional, meanAbsNotional) = ChaserProbe.Drain();
+                _logger.LogInformation(
+                    "CHASER orders={Orders} suppressed={Suppressed} netNotional={Net:0.00} meanAbsNotional={Mean:0.00}",
+                    orders, suppressed, netNotional, meanAbsNotional);
             }
             _nextSentimentLogTime = now + _sentimentLogInterval;
         }

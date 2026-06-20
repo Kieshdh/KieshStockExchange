@@ -118,9 +118,6 @@ internal sealed class AiBotContext
     internal readonly Dictionary<(int userId, CurrencyType), decimal> WatchlistRecentGapCache   = new();
     internal readonly Dictionary<int, decimal> WatchlistSharedSentimentCache = new();
     internal readonly Dictionary<(int userId, bool fast), decimal> WatchlistSlopeCache = new();
-    // §exogenous-information: per-(bot) watchlist-averaged chaser tilt. Pure within a tick (depends only on
-    // watchlist + live shocks + shock ids), so it's per-tick-cache-safe. Empty/untouched when the chaser is off.
-    internal readonly Dictionary<int, decimal> WatchlistChaseCache = new();
     // R4 §0009 Stage 2: per-(bot, currency) max long/short notional from the watchlist.
     // Memoizes ComputeInventoryBias's walk + feeds the BotDecisionProbe's invNotional column.
     internal readonly Dictionary<(int userId, CurrencyType), (decimal longNotional, decimal shortNotional)>
@@ -135,7 +132,6 @@ internal sealed class AiBotContext
         WatchlistValueGapCache.Clear(); WatchlistRecentGapCache.Clear();
         WatchlistSharedSentimentCache.Clear(); WatchlistSlopeCache.Clear();
         WatchlistInventoryNotionalCache.Clear();
-        WatchlistChaseCache.Clear();
     }
 
     // §patch 0003: per-(bot, tick) eligible-watchlist cache. Today every advanced builder
@@ -323,6 +319,26 @@ internal sealed class AiBotContext
             if (pos is null || pos.Quantity <= 0) continue;
             if (StockPrices.TryGetValue((stockId, currency), out var price))
                 total += CurrencyHelper.Notional(price, pos.Quantity, currency);
+        }
+        return total;
+    }
+
+    /// <summary>
+    /// §direct-flow chaser: portfolio value marked at SEED price instead of the live last-trade. Used to size
+    /// the chase order off a base that does NOT inflate as the chaser pushes price up — removing the
+    /// positive-feedback loop where a mark-to-live base would grow the order (and its own cap) tick-over-tick.
+    /// <paramref name="seedOf"/> supplies the per-(stock,currency) seed price (the decision service's SeedPrice).
+    /// </summary>
+    internal decimal SeedPortfolioValue(int userId, CurrencyType currency, Func<int, CurrencyType, decimal> seedOf)
+    {
+        decimal total = GetFund(userId, currency).TotalBalance;
+        if (!StocksByUser.TryGetValue(userId, out var stocks)) return total;
+        foreach (var stockId in stocks)
+        {
+            var pos = _accounts.GetPosition(userId, stockId);
+            if (pos is null || pos.Quantity <= 0) continue;
+            var sp = seedOf(stockId, currency);
+            if (sp > 0m) total += CurrencyHelper.Notional(sp, pos.Quantity, currency);
         }
         return total;
     }
