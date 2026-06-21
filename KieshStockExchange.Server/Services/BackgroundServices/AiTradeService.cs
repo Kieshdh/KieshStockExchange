@@ -301,6 +301,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // MaxNotionalFrac is the per-order cap as a fraction of seed-price portfolio value.
         var exogChaserNotionalFrac    = _configuration.GetValue("Bots:ExogShock:ChaserNotionalFrac", 0.0);
         var exogChaserMaxNotionalFrac = _configuration.GetValue("Bots:ExogShock:ChaserMaxNotionalFrac", 0.02);
+        // §chaser-v2 ratio-fix co-dials (default 0 ⇒ byte-identical) + per-bot chase cadence. SellSymFrac caps a
+        // chase-SELL to the bot's own buy-ceiling (drift↓); BuyRoomRelaxFrac relaxes the chase-BUY room toward
+        // cash-only (gross↑). MinIntervalSec → tick count HERE (using TradeInterval) so the decision path stays
+        // wall-clock-free; 0 ⇒ off.
+        var exogChaserSellSymFrac      = _configuration.GetValue("Bots:ExogShock:ChaserSellSymFrac", 0.0);
+        var exogChaserBuyRoomRelaxFrac = _configuration.GetValue("Bots:ExogShock:ChaserBuyRoomRelaxFrac", 0.0);
+        var exogChaserMinIntervalSec   = _configuration.GetValue("Bots:ExogShock:ChaserMinIntervalSec", 0.0);
+        var exogChaserIntervalTicks    = exogChaserMinIntervalSec <= 0.0 ? 0
+            : (int)Math.Ceiling(exogChaserMinIntervalSec / Math.Max(0.001, TradeInterval.TotalSeconds));
         var exogSource = new RandomShockSource(stocks,
                         meanIntervalMinutes: _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
                         minMagnitude:        _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
@@ -551,6 +560,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         chaserFraction:            exogEnabled ? exogChaserFraction : 0.0,
                         chaserNotionalFrac:        exogEnabled ? exogChaserNotionalFrac : 0.0,
                         chaserMaxNotionalFrac:     exogEnabled ? exogChaserMaxNotionalFrac : 0.0,
+                        // §chaser-v2 ratio-fix co-dials + cadence (gated by exogEnabled ⇒ 0 when the arm is off).
+                        chaserSellSymFrac:         exogEnabled ? exogChaserSellSymFrac : 0.0,
+                        chaserBuyRoomRelaxFrac:    exogEnabled ? exogChaserBuyRoomRelaxFrac : 0.0,
+                        chaserIntervalTicks:       exogEnabled ? exogChaserIntervalTicks : 0,
                         exogCap:                   exogCap,
                         shockOf:                   _news.GetShock,
                         shockIdOf:                 _news.GetShockId,
@@ -568,10 +581,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // the log alone (anchorTracksResolved reflects the anti-runaway validation, not just the requested flag).
         _logger.LogInformation(
             "CONFIGCHECK ExogShock enabled={En} anchorTracks={Anchor} cap={Cap} chaserFraction={Cf} " +
-            "chaserNotionalFrac={Cnf} chaserMaxNotionalFrac={Cmf} (retired: chaserStrength={Cs} chaserScale={Csc}) " +
+            "chaserNotionalFrac={Cnf} chaserMaxNotionalFrac={Cmf} " +
+            "chaserSellSymFrac={Css} chaserBuyRoomRelaxFrac={Cbr} chaserMinIntervalSec={Cmi} chaserIntervalTicks={Cit} " +
+            "(retired: chaserStrength={Cs} chaserScale={Csc}) " +
             "meanIntervalMin={Mi} halfLifeSec={Hl} mag=[{MinM},{MaxM}] exp={Exp} (off ⇒ byte-identical)",
             exogEnabled, exogAnchorTracks, exogCap, exogChaserFraction,
-            exogChaserNotionalFrac, exogChaserMaxNotionalFrac, exogChaserStrength, exogChaserScale,
+            exogChaserNotionalFrac, exogChaserMaxNotionalFrac,
+            exogChaserSellSymFrac, exogChaserBuyRoomRelaxFrac, exogChaserMinIntervalSec, exogChaserIntervalTicks,
+            exogChaserStrength, exogChaserScale,
             _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
             _configuration.GetValue("Bots:ExogShock:DecayHalfLifeSec", 300.0),
             _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
@@ -1564,10 +1581,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             }
             if (ChaserProbe.Enabled)
             {
-                var (orders, suppressed, netNotional, meanAbsNotional) = ChaserProbe.Drain();
+                var (buyOrders, sellOrders, buySupp, sellSupp, buyNotional, sellNotional, netNotional, grossNotional)
+                    = ChaserProbe.Drain();
+                // §chaser-v2 separability readout: WIN ⇒ netNotional → 0 (drift removed) while grossNotional stays
+                // ~flat vs OFF (acf-driving volume retained). Per-side counts make a one-sided lean obvious.
                 _logger.LogInformation(
-                    "CHASER orders={Orders} suppressed={Suppressed} netNotional={Net:0.00} meanAbsNotional={Mean:0.00}",
-                    orders, suppressed, netNotional, meanAbsNotional);
+                    "CHASER buyOrders={Bo} sellOrders={So} buySuppressed={Bs} sellSuppressed={Ss} " +
+                    "buyNotional={Bn:0.00} sellNotional={Sn:0.00} netNotional={Net:0.00} grossNotional={Gross:0.00}",
+                    buyOrders, sellOrders, buySupp, sellSupp, buyNotional, sellNotional, netNotional, grossNotional);
             }
             _nextSentimentLogTime = now + _sentimentLogInterval;
         }

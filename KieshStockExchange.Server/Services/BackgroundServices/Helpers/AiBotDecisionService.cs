@@ -194,9 +194,18 @@ internal sealed class AiBotDecisionService
     // coarse cohort-size cap. Default strength/fraction 0 ⇒ no tilt ⇒ byte-identical. ChaserSalt keeps this
     // cohort independent of the RegimeDrift IsFollower split.
     private const int ChaserSalt = 0x5A17;
+    // §chaser-v2: a distinct salt for the cadence duty-cycle so a bot's "due window" is independent of its
+    // chase-cohort membership (which keys on ChaserSalt).
+    private const int ChaserCadenceSalt = 0x3B9F;
     private readonly double _chaserFraction;
     private readonly double _chaserNotionalFrac;     // §direct-flow chaser: primary dial (0 ⇒ off, byte-identical)
     private readonly double _chaserMaxNotionalFrac;  // §direct-flow chaser: per-order notional cap (frac of seed PV)
+    // §chaser-v2 ratio-fix co-dials (default 0 ⇒ byte-identical). SellSymFrac caps a chase-SELL to the same
+    // structural buy-ceiling the bot's chase-BUY would face (drift down); BuyRoomRelaxFrac relaxes the chase-BUY
+    // position-room clamp toward cash-only (gross up). IntervalTicks (0 ⇒ off) is a per-bot chase cadence.
+    private readonly double _chaserSellSymFrac;
+    private readonly double _chaserBuyRoomRelaxFrac;
+    private readonly int    _chaserIntervalTicks;
     private readonly double _exogCap;                // shock hard-clamp Cap, reused for sizing intensity
     private readonly Func<int, double>? _shockOf;
     private readonly Func<int, int>?    _shockIdOf;
@@ -338,6 +347,8 @@ internal sealed class AiBotDecisionService
         // read the live exogenous shock + its generation id; null when the feature is off. The retired buyProb
         // tilt (chaserStrength/chaserScale) is gone — those are no longer ctor params.
         double chaserFraction = 0.0, double chaserNotionalFrac = 0.0, double chaserMaxNotionalFrac = 0.0,
+        // §chaser-v2 ratio-fix co-dials + per-bot chase cadence; all default 0 ⇒ byte-identical.
+        double chaserSellSymFrac = 0.0, double chaserBuyRoomRelaxFrac = 0.0, int chaserIntervalTicks = 0,
         double exogCap = 0.06,
         Func<int, double>? shockOf = null, Func<int, int>? shockIdOf = null, Func<bool>? anyShockActive = null)
     {
@@ -450,6 +461,9 @@ internal sealed class AiBotDecisionService
         _chaserFraction            = Math.Clamp(chaserFraction, 0.0, 1.0);
         _chaserNotionalFrac        = Math.Max(0.0, chaserNotionalFrac);
         _chaserMaxNotionalFrac     = Math.Max(0.0, chaserMaxNotionalFrac);
+        _chaserSellSymFrac         = Math.Max(0.0, chaserSellSymFrac);
+        _chaserBuyRoomRelaxFrac    = Math.Clamp(chaserBuyRoomRelaxFrac, 0.0, 1.0);
+        _chaserIntervalTicks       = Math.Max(0, chaserIntervalTicks);
         _exogCap                   = Math.Max(1e-6, exogCap); // guard /0 in ChaseNotionalCap
         _shockOf                   = shockOf;
         _shockIdOf                 = shockIdOf;
@@ -481,7 +495,11 @@ internal sealed class AiBotDecisionService
         // short-circuits on _chaserNotionalFrac==0 BEFORE _anyShockActive(), so OFF is byte-identical; resolved
         // here, ABOVE the first RNG draw (ChooseOrderType), so the OFF/non-chase draw stream is unperturbed.
         int chaseStockId = 0; OrderType chaseType = default; decimal chaseNotionalCap = 0m;
+        // §chaser-v2 cadence: ChaseCadenceDue gates this bot to ≤1 chase per IntervalTicks window. IntervalTicks≤1
+        // ⇒ always due (no-op), so OFF stays byte-identical and a cadence skip just falls through to the normal
+        // (non-chase) decision below. Pure hash on (aiUserId, tickId) ⇒ 0 RNG draws, no wall-clock.
         if (_chaserNotionalFrac > 0.0 && _chaserFraction > 0.0 &&
+            ChaseCadenceDue(user.AiUserId, ctx.TickId, _chaserIntervalTicks, ChaserCadenceSalt) &&
             _shockOf is not null && _shockIdOf is not null && _anyShockActive is not null && _anyShockActive())
         {
             var pick = ChaseSelect(ctx, user, currency);
@@ -524,12 +542,12 @@ internal sealed class AiBotDecisionService
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
         // §direct-flow chaser: a slippage order with Price 0 (no live market price) fails validation and would
         // silently drop — count it as a suppressed chase rather than a phantom no-op.
-        if (isChase && price <= 0m) { ChaserProbe.RecordSuppressed(); return null; }
+        if (isChase && price <= 0m) { ChaserProbe.RecordSuppressed(IsBuyOrder(type)); return null; }
         var quantity = await ComputeOrderQuantityAsync(ctx, user, type, stockId, currency, committed,
             isChase ? chaseNotionalCap : 0m, ct).ConfigureAwait(false);
         // §direct-flow chaser: qty 0 means cash/shares exhausted on the chase name (e.g. a share-gated sell with
         // no free inventory) — record the distinct "selected but clamped to 0" bucket so a flat probe is diagnosable.
-        if (quantity <= 0) { if (isChase) ChaserProbe.RecordSuppressed(); return null; }
+        if (quantity <= 0) { if (isChase) ChaserProbe.RecordSuppressed(IsBuyOrder(type)); return null; }
 
         decimal? buyBudget = null;
         if (type == OrderType.TrueMarketBuy)
@@ -1470,17 +1488,27 @@ internal sealed class AiBotDecisionService
         var currentVal = CurrencyHelper.Notional(marketPrice, pos.Quantity, currency);
         var roomValue  = Math.Max(0m, capValue - currentVal);
 
+        // §chaser-v2: the bot's structural BUY ceiling on the cash side, hoisted out of the buy branch so the
+        // symmetric sell gate (C3) can mirror it. Pure relocation of the former buy-branch computation — no
+        // behaviour change (the buy branch still reads the same spendableBalance below).
+        var committedBuy      = committed.BuyFundsByCurrency.GetValueOrDefault(currency);
+        var ctxFreeBalance    = Math.Max(0m, fund.TotalBalance - committedBuy);
+        // Plan B: clamp to the engine's AvailableBalance so the bot never generates an order that's doomed at
+        // Phase 1.6 — same defence as the sell branch below.
+        var engineFreeBalance = _accounts.GetFund(user.UserId, currency)?.AvailableBalance ?? 0m;
+        var freeBalance       = Math.Min(ctxFreeBalance, engineFreeBalance);
+        // Always leave at least BuySafetyBuffer un-reserved in the user's currency.
+        var spendableBalance  = Math.Max(0m, freeBalance - BuySafetyBuffer);
+
         if (IsBuyOrder(type))
         {
-            var committedBuy    = committed.BuyFundsByCurrency.GetValueOrDefault(currency);
-            var ctxFreeBalance  = Math.Max(0m, fund.TotalBalance - committedBuy);
-            // Plan B: clamp to the engine's AvailableBalance so the bot never generates
-            // an order that's doomed at Phase 1.6 — same defence as the sell branch below.
-            var engineFreeBalance = _accounts.GetFund(user.UserId, currency)?.AvailableBalance ?? 0m;
-            var freeBalance       = Math.Min(ctxFreeBalance, engineFreeBalance);
-            // Always leave at least BuySafetyBuffer un-reserved in the user's currency.
-            var spendableBalance  = Math.Max(0m, freeBalance - BuySafetyBuffer);
-            var allowedBalance    = Math.Min(Math.Min(spendableBalance, rawTrade), roomValue);
+            // §chaser-v2 C5: on a chase tick, relax the position-room clamp toward cash-only by BuyRoomRelaxFrac
+            // (0 ⇒ effRoom==roomValue, byte-identical; 1 ⇒ room drops out, buy limited only by cash/notional).
+            // Adds buy gross to balance the free sells; still cash-gated ⇒ conservation-safe (no naked flow).
+            var effRoom = roomValue;
+            if (_chaserBuyRoomRelaxFrac > 0.0 && notionalCapOverride > 0m)
+                effRoom = roomValue + (decimal)_chaserBuyRoomRelaxFrac * (Math.Max(roomValue, spendableBalance) - roomValue);
+            var allowedBalance    = Math.Min(Math.Min(spendableBalance, rawTrade), effRoom);
             var qty = (int)Math.Floor(allowedBalance / estimatePrice);
             // Floor at 1 share when the intended notional rounds to zero but the bot can
             // still afford a share within its spendable + position room — mirrors the sell
@@ -1522,6 +1550,13 @@ internal sealed class AiBotDecisionService
             // §P6 anti-sweep: a market sell can't take more than a fraction of resting bids.
             if (IsSlippageOrder(type))
                 sellQty = ApplyDepthCap(sellQty, isBuy: false, stockId, currency);
+            // §chaser-v2 C3: on a chase tick, cap the sell to the SAME structural buy-ceiling this bot's chase-BUY
+            // would face (drift-neutral per-bot for a net-long population). Applied LAST so it can only ever
+            // tighten the anti-sweep cap, never widen it. roomValue is the buy branch's actual room (correct for
+            // shorts too). Off (symFrac=0) ⇒ untouched.
+            if (_chaserSellSymFrac > 0.0 && notionalCapOverride > 0m)
+                sellQty = ChaseSymmetricSellQty(sellQty, estimatePrice, roomValue, spendableBalance,
+                                                capValue, _chaserSellSymFrac, ChaseFloorIntensity);
             return sellQty;
         }
     }
@@ -1789,8 +1824,40 @@ internal sealed class AiBotDecisionService
         return hardCap > 0m ? Math.Min(notional, hardCap) : notional;
     }
 
-    /// <summary>§direct-flow chaser: flat intensity floor so chase volume persists across the shock's whole life.</summary>
+    /// <summary>§direct-flow chaser: flat intensity floor so chase volume persists across the shock's whole life.
+    /// Reused by <see cref="ChaseSymmetricSellQty"/> as the floorFrac so an at-cap long is never frozen out.</summary>
     private const double ChaseFloorIntensity = 0.25;
+
+    /// <summary>
+    /// §chaser-v2 ratio-fix (C3): cap a chase-SELL's quantity to the SAME structural buy-ceiling the same bot's
+    /// chase-BUY would face — symFrac·min(buyRoomValue, spendableBuyValue) — with a floorRoom (floorFrac·capValue)
+    /// so a bot at its position cap (roomValue 0) can still shed a small amount into a shock rather than being
+    /// frozen. For a net-long population this removes the free-sell lean per-bot. Pure &amp; RNG-free; only ever
+    /// REDUCES qty (conservation-safe). symFrac&lt;=0 or non-positive price ⇒ passthrough (off).
+    /// </summary>
+    internal static int ChaseSymmetricSellQty(int desiredSellQty, decimal estimatePrice,
+        decimal buyRoomValue, decimal spendableBuyValue, decimal capValue, double symFrac, double floorFrac)
+    {
+        if (symFrac <= 0.0 || estimatePrice <= 0m) return desiredSellQty;
+        decimal floorRoom = (decimal)Math.Max(0.0, floorFrac) * Math.Max(0m, capValue);
+        decimal buyCeil   = Math.Max(floorRoom, Math.Min(buyRoomValue, spendableBuyValue));
+        int symQty = (int)Math.Floor((decimal)symFrac * buyCeil / estimatePrice);
+        return Math.Min(desiredSellQty, symQty); // only ever reduces
+    }
+
+    /// <summary>
+    /// §chaser-v2 cadence: whether this bot may chase on this tick — at most once per <paramref name="intervalTicks"/>
+    /// window, by a deterministic per-(bot, window) slot. A salted avalanche hash picks the one due slot in each
+    /// window, so firing is spread across bots and reproducible across runs (keys on the pure TickId counter, not
+    /// wall-clock). <paramref name="intervalTicks"/> &lt;= 1 ⇒ always due (feature off). Pure &amp; RNG-free.
+    /// </summary>
+    internal static bool ChaseCadenceDue(int aiUserId, long tickId, int intervalTicks, int salt)
+    {
+        if (intervalTicks <= 1) return true;
+        long bucket = tickId / intervalTicks;
+        int  slot   = (int)(tickId % intervalTicks);
+        return (int)(BotMath.HashUnit01(aiUserId ^ salt, (int)bucket) * intervalTicks) == slot;
+    }
 
     /// <summary>
     /// §exogenous-information: whether this bot chases this shock — a pure, RNG-free, salted, per-(bot,shock)

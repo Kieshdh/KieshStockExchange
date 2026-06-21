@@ -81,4 +81,149 @@ public class ChaserDirectFlowTests
         var tinyShock = AiBotDecisionService.ChaseNotionalCap(0.0001, cap, frac, maxFrac: 1.0, seedPortfolio: 10_000m);
         Assert.True(tinyShock > 0m);
     }
+
+    // ───────────────────────── §chaser-v2 ratio-fix co-dials ─────────────────────────
+    // ChaseFloorIntensity (0.25) is the floorFrac the production call site passes; mirror it here.
+    private const double FloorFrac = 0.25;
+
+    [Fact]
+    public void ChaseSymmetricSellQty_off_is_passthrough()
+    {
+        // symFrac <= 0 ⇒ feature off ⇒ the desired qty is returned untouched, regardless of room/cash.
+        Assert.Equal(100, AiBotDecisionService.ChaseSymmetricSellQty(
+            desiredSellQty: 100, estimatePrice: 10m, buyRoomValue: 0m, spendableBuyValue: 0m,
+            capValue: 1_000m, symFrac: 0.0, floorFrac: FloorFrac));
+    }
+
+    [Fact]
+    public void ChaseSymmetricSellQty_only_ever_reduces_and_caps_to_buy_ceiling()
+    {
+        // symFrac = 1 ⇒ sell capped to min(room, spendable)/price. room=300, spendable=500 ⇒ ceil=300 ⇒ 30 shares.
+        var capped = AiBotDecisionService.ChaseSymmetricSellQty(
+            desiredSellQty: 100, estimatePrice: 10m, buyRoomValue: 300m, spendableBuyValue: 500m,
+            capValue: 1_000m, symFrac: 1.0, floorFrac: 0.0);
+        Assert.Equal(30, capped);
+        Assert.InRange(capped, 0, 100);               // never increases the desired qty
+
+        // A bot whose buy-ceiling already exceeds the desired notional is barely touched (returns desired).
+        var loose = AiBotDecisionService.ChaseSymmetricSellQty(
+            desiredSellQty: 10, estimatePrice: 10m, buyRoomValue: 10_000m, spendableBuyValue: 10_000m,
+            capValue: 50_000m, symFrac: 1.0, floorFrac: 0.0);
+        Assert.Equal(10, loose);
+    }
+
+    [Fact]
+    public void ChaseSymmetricSellQty_net_long_throttled_vs_flat_bot()
+    {
+        // A net-LONG bot sits near its cap ⇒ small room ⇒ heavily throttled. A flat bot has full room ⇒ free.
+        // Same shares-held desire (100 @ $10) and same capValue; only room differs.
+        var atCapLong = AiBotDecisionService.ChaseSymmetricSellQty(
+            100, 10m, buyRoomValue: 50m, spendableBuyValue: 10_000m, capValue: 1_000m, symFrac: 1.0, floorFrac: 0.0);
+        var flat = AiBotDecisionService.ChaseSymmetricSellQty(
+            100, 10m, buyRoomValue: 1_000m, spendableBuyValue: 10_000m, capValue: 1_000m, symFrac: 1.0, floorFrac: 0.0);
+        Assert.True(atCapLong < flat);                // the over-long bot is the one throttled
+        Assert.Equal(5, atCapLong);                   // 50/10
+    }
+
+    [Fact]
+    public void ChaseSymmetricSellQty_floor_keeps_at_cap_long_from_freezing()
+    {
+        // roomValue == 0 (exactly at position cap). Without a floor the sell would clamp to 0 (frozen long).
+        // floorFrac · capValue = 0.25 · 1000 = 250 ⇒ 25 shares can still be shed into the shock.
+        var floored = AiBotDecisionService.ChaseSymmetricSellQty(
+            desiredSellQty: 100, estimatePrice: 10m, buyRoomValue: 0m, spendableBuyValue: 10_000m,
+            capValue: 1_000m, symFrac: 1.0, floorFrac: FloorFrac);
+        Assert.Equal(25, floored);
+
+        // With no floor (floorFrac 0), the same at-cap long is frozen out (qty 0).
+        var frozen = AiBotDecisionService.ChaseSymmetricSellQty(
+            100, 10m, 0m, 10_000m, 1_000m, symFrac: 1.0, floorFrac: 0.0);
+        Assert.Equal(0, frozen);
+    }
+
+    [Fact]
+    public void ChaseSymmetricSellQty_is_pure_and_price_guarded()
+    {
+        // Deterministic: same inputs ⇒ same output.
+        var a = AiBotDecisionService.ChaseSymmetricSellQty(80, 7m, 210m, 500m, 2_000m, 0.5, FloorFrac);
+        var b = AiBotDecisionService.ChaseSymmetricSellQty(80, 7m, 210m, 500m, 2_000m, 0.5, FloorFrac);
+        Assert.Equal(a, b);
+        // Non-positive price ⇒ passthrough (no divide-by-zero).
+        Assert.Equal(80, AiBotDecisionService.ChaseSymmetricSellQty(80, 0m, 210m, 500m, 2_000m, 1.0, FloorFrac));
+    }
+
+    [Fact]
+    public void ChaseCadenceDue_off_when_interval_le_one()
+    {
+        // intervalTicks <= 1 ⇒ always due (feature off) for every bot/tick.
+        for (long t = 0; t < 50; t++)
+        {
+            Assert.True(AiBotDecisionService.ChaseCadenceDue(7, t, 0, ChaserCadenceSalt));
+            Assert.True(AiBotDecisionService.ChaseCadenceDue(7, t, 1, ChaserCadenceSalt));
+        }
+    }
+
+    [Fact]
+    public void ChaseCadenceDue_fires_at_most_once_per_window_and_is_deterministic()
+    {
+        const int interval = 12;
+        for (int bot = 1; bot <= 40; bot++)
+        {
+            int due = 0;
+            for (long t = 0; t < interval; t++)          // one full window
+            {
+                bool d1 = AiBotDecisionService.ChaseCadenceDue(bot, t, interval, ChaserCadenceSalt);
+                bool d2 = AiBotDecisionService.ChaseCadenceDue(bot, t, interval, ChaserCadenceSalt);
+                Assert.Equal(d1, d2);                    // pure / reproducible
+                if (d1) due++;
+            }
+            Assert.Equal(1, due);                        // exactly one due slot per window per bot
+        }
+    }
+
+    // Mirror of the production constant (private in AiBotDecisionService); kept in sync by these tests.
+    private const int ChaserCadenceSalt = 0x3B9F;
+
+    [Fact]
+    public void ChaserProbe_per_side_net_and_gross()
+    {
+        ChaserProbe.Configure(true);
+        try
+        {
+            ChaserProbe.Drain();                          // clear any prior state
+            ChaserProbe.RecordOrder(isBuy: true,  notional: 100m);
+            ChaserProbe.RecordOrder(isBuy: false, notional: 40m);
+            ChaserProbe.RecordOrder(isBuy: false, notional: 60m);
+            ChaserProbe.RecordSuppressed(isBuy: true);
+            ChaserProbe.RecordSuppressed(isBuy: false);
+
+            var d = ChaserProbe.Drain();
+            Assert.Equal(1, d.buyOrders);
+            Assert.Equal(2, d.sellOrders);
+            Assert.Equal(1, d.buySuppressed);
+            Assert.Equal(1, d.sellSuppressed);
+            Assert.Equal(100.0, d.buyNotional);
+            Assert.Equal(100.0, d.sellNotional);          // 40 + 60
+            Assert.Equal(0.0, d.netNotional);             // buy − sell (drift discriminator)
+            Assert.Equal(200.0, d.grossNotional);         // buy + sell (volume discriminator)
+
+            // Drain reset: a second drain is empty.
+            var empty = ChaserProbe.Drain();
+            Assert.Equal(0, empty.buyOrders);
+            Assert.Equal(0.0, empty.grossNotional);
+        }
+        finally { ChaserProbe.Configure(false); }
+    }
+
+    [Fact]
+    public void ChaserProbe_disabled_is_noop()
+    {
+        ChaserProbe.Configure(false);
+        ChaserProbe.RecordOrder(true, 999m);
+        ChaserProbe.RecordSuppressed(false);
+        var d = ChaserProbe.Drain();
+        Assert.Equal(0, d.buyOrders);
+        Assert.Equal(0, d.sellOrders);
+        Assert.Equal(0.0, d.grossNotional);
+    }
 }
