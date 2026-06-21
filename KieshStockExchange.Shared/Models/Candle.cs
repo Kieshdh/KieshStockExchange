@@ -223,10 +223,22 @@ public class Candle : IValidatable
             throw new ArgumentException("Tick time is outside candle time range.");
         NoteTransactionId(tick.TransactionId);
 
-        var price = tick.Price;
-        if (price > High) High = price;
-        if (price < Low) Low = price;
-        Close = price;
+        // §bounce: when the trade carries a bounce-free reference (mid/micro), the candle is built off
+        // it instead of the last-trade price. The bar is seeded (NewCandle) with Open from the prior
+        // last-trade close, so on the FIRST mid trade we re-anchor Open=High=Low to the mid series too,
+        // otherwise a seed above the mid range would break the Low<=Open<=High invariant. Gated on
+        // MidPrice.HasValue so the off arm (px == tick.Price) is byte-identical to the legacy branch.
+        var px = tick.MidPrice ?? tick.Price;
+        if (tick.MidPrice.HasValue && TradeCount == 0)
+        {
+            Open = px; High = px; Low = px;
+        }
+        else
+        {
+            if (px > High) High = px;
+            if (px < Low) Low = px;
+        }
+        Close = px;
 
         Volume += tick.Quantity;
         TradeCount += 1;

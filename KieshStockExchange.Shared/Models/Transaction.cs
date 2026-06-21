@@ -94,6 +94,13 @@ public class Transaction : IValidatable
         }
     }
 
+    // §bounce: bounce-free reference price (mid / micro) sampled from the book at trade time,
+    // when Bots:BounceReference is on. Null = off / one-sided book ⇒ consumers fall back to the
+    // last-trade Price (byte-identical). NOT used for any cash figure — TotalAmount stays on Price,
+    // so conservation is unaffected. Carried through to the persisted Transactions row purely as a
+    // bounce-free reference series for the realism scorer and the app candle close.
+    public decimal? MidPrice { get; set; }
+
     public CurrencyType CurrencyType { get; set; } = CurrencyType.USD;
     public string Currency
     {

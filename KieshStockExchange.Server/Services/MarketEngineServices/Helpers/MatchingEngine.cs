@@ -59,6 +59,19 @@ public sealed class MatchingEngine : IMatchingEngine
         // Incremented after each fill so a multi-fill taker shows the price-level depth walked.
         int levelIdx = 0;
 
+        // §bounce lever (a): capture a bounce-free reference price (mid/micro) ONCE on taker arrival,
+        // BEFORE any fill consumes the touch, and hold it constant for every fill of this taker. A
+        // multi-level sweep walks down the book, so a per-fill mid would drift across fills and
+        // re-introduce the very zig-zag we remove — the pre-first-fill touch is the correct Roll
+        // reference. Null (flag off / one-sided book) ⇒ Transaction.MidPrice stays null ⇒ downstream
+        // is byte-identical to the last-trade behaviour. PeekBest*(null) reads the book's touch
+        // without self-exclusion: the mid is a property of the book, not of who is taking.
+        decimal? bounceRef = null;
+        if (MidReference.Mode != MidRefMode.Off)
+            bounceRef = MidReference.Compute(
+                book.PeekBestBuy(null)?.Price, book.PeekBestSell(null)?.Price,
+                book.PeekBestQty(buySide: true), book.PeekBestQty(buySide: false));
+
         while (taker.IsOpen && taker.RemainingQuantity > 0)
         {
             ct.ThrowIfCancellationRequested();
@@ -91,8 +104,9 @@ public sealed class MatchingEngine : IMatchingEngine
             // Snapshot maker state before mutation so we can undo if settlement fails
             var makerOriginalFilled = bestOpposite.AmountFilled;
 
-            // Build an in-memory transaction (not persisted yet)
-            fills.Add(CreateTransaction(taker, bestOpposite, qty));
+            // Build an in-memory transaction (not persisted yet). bounceRef is the same captured
+            // pre-sweep reference for every fill of this taker (null when the flag is off).
+            fills.Add(CreateTransaction(taker, bestOpposite, qty, bounceRef));
 
             // Per-fill log with taker/maker/trade-price context
             if (DebugMode && (!DebugUserId.HasValue || taker.UserId == DebugUserId.Value))
@@ -196,16 +210,17 @@ public sealed class MatchingEngine : IMatchingEngine
         return taker.IsBuyOrder ? maker.Price <= limit : maker.Price >= limit;
     }
 
-    private static Transaction CreateTransaction(Order taker, Order maker, int quantity) => new Transaction
+    private static Transaction CreateTransaction(Order taker, Order maker, int quantity, decimal? midPrice = null) => new Transaction
     {
         StockId = taker.StockId,
         BuyOrderId = taker.IsBuyOrder ? taker.OrderId : maker.OrderId,
         SellOrderId = taker.IsBuyOrder ? maker.OrderId : taker.OrderId,
         BuyerId = taker.IsBuyOrder ? taker.UserId : maker.UserId,
         SellerId = taker.IsBuyOrder ? maker.UserId : taker.UserId,
-        Price = maker.Price, // Trade at maker's price
+        Price = maker.Price, // Trade at maker's price (the cash price — conservation chokepoint)
         Quantity = quantity,
         CurrencyType = taker.CurrencyType,
+        MidPrice = midPrice,  // §bounce: bounce-free reference (mid/micro), null when flag off
     };
     #endregion
 }

@@ -1414,7 +1414,9 @@ internal sealed class AiBotDecisionService
             limitPrice = SnapToRoundNumber(limitPrice, _roundSnapSpread,
                 _roundSnapSpread > 0m ? ctx.Decimal01(user.AiUserId) : 0m);
 
-        return CurrencyHelper.RoundMoney(limitPrice, currency);
+        // §bounce lever (b): the printed/resting limit price uses the finer price-quote grid
+        // (RoundPrice). Dial 0 ⇒ identical to RoundMoney. Cash/reservation stay on RoundMoney.
+        return CurrencyHelper.RoundPrice(limitPrice, currency);
     }
 
     private async Task<decimal?> GetMidPriceAsync(int stockId, CurrencyType currency, CancellationToken ct)

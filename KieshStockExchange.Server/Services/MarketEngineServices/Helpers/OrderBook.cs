@@ -334,6 +334,23 @@ public sealed class OrderBook
 
     public Order? PeekBestBuy(int? userId = null) => PeekBest(_buyBook, userId);
     public Order? PeekBestSell(int? userId = null) => PeekBest(_sellBook, userId);
+
+    /// <summary>
+    /// Total resting quantity at the BEST price level on one side (0 if the side is empty). Reads the
+    /// pre-aggregated per-level total under the lock — no allocation. Used by the §bounce micro-price
+    /// reference (size-weighting the touch); distinct from <see cref="SumQuantity"/> (whole-side depth).
+    /// </summary>
+    public long PeekBestQty(bool buySide)
+    {
+        lock (_gate)
+        {
+            var side = buySide ? _buyBook : _sellBook;
+            if (side.Count == 0) return 0L;
+            var bestPrice = side.First().Key;
+            var qtyMap = buySide ? _buyQtyByPrice : _sellQtyByPrice;
+            return qtyMap.TryGetValue(bestPrice, out var q) ? q : 0L;
+        }
+    }
     #endregion
 
     #region Admin Methods

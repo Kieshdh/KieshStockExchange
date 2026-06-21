@@ -21,7 +21,7 @@ public sealed partial class PgDBService
 
     private const string TransactionCols = @"
         ""TransactionId"",""StockId"",""BuyOrderId"",""SellOrderId"",""BuyerId"",""SellerId"",
-        ""Quantity"",""Price"",""Currency"",""Timestamp""";
+        ""Quantity"",""Price"",""MidPrice"",""Currency"",""Timestamp""";
 
     #region Order operations
     public async Task<List<Order>> GetOrdersAsync(CancellationToken ct = default)
@@ -410,8 +410,8 @@ public sealed partial class PgDBService
         var row = TransactionMapper.ToRow(transaction);
         row.TransactionId = await c.ExecuteScalarAsync<int>(@"
             INSERT INTO ""Transactions"" (""StockId"",""BuyOrderId"",""SellOrderId"",""BuyerId"",""SellerId"",
-                                          ""Quantity"",""Price"",""Currency"",""Timestamp"")
-            VALUES (@StockId,@BuyOrderId,@SellOrderId,@BuyerId,@SellerId,@Quantity,@Price,@Currency,@Timestamp)
+                                          ""Quantity"",""Price"",""MidPrice"",""Currency"",""Timestamp"")
+            VALUES (@StockId,@BuyOrderId,@SellOrderId,@BuyerId,@SellerId,@Quantity,@Price,@MidPrice,@Currency,@Timestamp)
             RETURNING ""TransactionId""", row);
         transaction.TransactionId = row.TransactionId;
     }
@@ -424,7 +424,7 @@ public sealed partial class PgDBService
             UPDATE ""Transactions"" SET
               ""StockId"" = @StockId, ""BuyOrderId"" = @BuyOrderId, ""SellOrderId"" = @SellOrderId,
               ""BuyerId"" = @BuyerId, ""SellerId"" = @SellerId, ""Quantity"" = @Quantity,
-              ""Price"" = @Price, ""Currency"" = @Currency, ""Timestamp"" = @Timestamp
+              ""Price"" = @Price, ""MidPrice"" = @MidPrice, ""Currency"" = @Currency, ""Timestamp"" = @Timestamp
             WHERE ""TransactionId"" = @TransactionId", TransactionMapper.ToRow(transaction));
     }
 
@@ -594,7 +594,7 @@ public sealed partial class PgDBService
 
         var sql = new StringBuilder(@"
             INSERT INTO ""Transactions"" (""StockId"",""BuyOrderId"",""SellOrderId"",""BuyerId"",""SellerId"",
-                                          ""Quantity"",""Price"",""Currency"",""Timestamp"")
+                                          ""Quantity"",""Price"",""MidPrice"",""Currency"",""Timestamp"")
             VALUES ", capacity: 256 + txs.Count * 80);
         var p = new DynamicParameters();
         for (int i = 0; i < txs.Count; i++)
@@ -607,6 +607,7 @@ public sealed partial class PgDBService
                .Append(",@SellerId_").Append(i)
                .Append(",@Quantity_").Append(i)
                .Append(",@Price_").Append(i)
+               .Append(",@MidPrice_").Append(i)
                .Append(",@Currency_").Append(i)
                .Append(",@Timestamp_").Append(i)
                .Append(')');
@@ -619,6 +620,7 @@ public sealed partial class PgDBService
             p.Add($"SellerId_{i}",    r.SellerId);
             p.Add($"Quantity_{i}",    r.Quantity);
             p.Add($"Price_{i}",       r.Price);
+            p.Add($"MidPrice_{i}",    r.MidPrice);
             p.Add($"Currency_{i}",    r.Currency);
             p.Add($"Timestamp_{i}",   r.Timestamp);
         }

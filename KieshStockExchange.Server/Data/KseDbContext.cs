@@ -107,6 +107,9 @@ public sealed class KseDbContext : DbContext
             b.HasKey(x => x.TransactionId);
             b.Property(x => x.TransactionId).ValueGeneratedOnAdd();
             b.Property(x => x.Price).HasColumnType(Money);
+            // §bounce: nullable bounce-free reference price. Money type matches the migration's
+            // numeric(20,10) so startup Migrate() sees model==DB (no PendingModelChangesWarning).
+            b.Property(x => x.MidPrice).HasColumnType(Money);
             b.Property(x => x.Timestamp).HasColumnType(TimestampTz);
             b.HasIndex(x => new { x.StockId, x.Currency, x.Timestamp })
              .HasDatabaseName("IX_Tx_Stock_Curr_Time");

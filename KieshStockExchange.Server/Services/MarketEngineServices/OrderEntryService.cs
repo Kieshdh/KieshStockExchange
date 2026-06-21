@@ -804,7 +804,10 @@ public sealed class OrderEntryService : IOrderEntryService
             UserId = userId,
             StockId = stockId,
             Quantity = quantity,
-            Price = CurrencyHelper.RoundMoney(price, currency),
+            // §bounce lever (b): the order's quoted price normalizes on the finer price-quote grid
+            // (RoundPrice; dial 0 ⇒ RoundMoney). BuyBudget above stays RoundMoney (it is cash). The
+            // reservation hold is RoundMoney(price*qty), so finer price decimals don't leak cash.
+            Price = CurrencyHelper.RoundPrice(price, currency),
             SlippagePercent = slippagePercent,
             BuyBudget = budget,
             CurrencyType = currency,

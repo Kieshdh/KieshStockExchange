@@ -19,14 +19,33 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------- DB ----------
+def _has_midprice_column(db):
+    """§bounce: probe once whether Transactions.MidPrice exists (pre-migration / OFF DBs won't have it)."""
+    sql = ("SELECT 1 FROM information_schema.columns "
+           "WHERE table_name='Transactions' AND column_name='MidPrice' LIMIT 1;")
+    out = subprocess.run(["docker", "exec", "-i", PG, "psql", "-U", "kse", "-d", db, "-tAc", sql],
+                         capture_output=True, text=True)
+    return out.returncode == 0 and out.stdout.strip() == "1"
+
+
 def load_candles(db, since_epoch, bucket):
+    # §bounce (Roll 1984): score the candle CLOSE on the bounce-free reference (mid/micro) when the
+    # column is present, falling back to last-trade Price when it is absent (OFF/pre-migration DB) or
+    # NULL (off arm) — byte-identical in that case. O/H/L stay on the real trade tape (mid on High/Low
+    # would compress the range and delete genuine wicks). c_last is always the last-trade close, kept
+    # alongside purely for the transparency readout (mid vs last-trade ret_acf), so the metric is never
+    # silently swapped.
+    has_mid = _has_midprice_column(db)
+    close_expr = 'COALESCE(t."MidPrice", t."Price")' if has_mid else 't."Price"'
+    print(f"[load_candles] close source = {'COALESCE(MidPrice,Price)' if has_mid else 'Price (no MidPrice column)'}")
     sql = (
         'SELECT t."StockId", '
         f'floor(extract(epoch from t."Timestamp")/{bucket})*{bucket} AS b, '
         '(array_agg(t."Price" ORDER BY t."Timestamp" ASC))[1]  AS o, '
         'max(t."Price") AS h, min(t."Price") AS l, '
-        '(array_agg(t."Price" ORDER BY t."Timestamp" DESC))[1] AS c, '
-        'sum(t."Quantity") AS vol, count(*) AS trades '
+        f'(array_agg({close_expr} ORDER BY t."Timestamp" DESC))[1] AS c, '
+        'sum(t."Quantity") AS vol, count(*) AS trades, '
+        '(array_agg(t."Price" ORDER BY t."Timestamp" DESC))[1] AS c_last '
         'FROM "Transactions" t '
         'JOIN "StockListings" sl ON sl."StockId"=t."StockId" '
         '  AND sl."Currency"=t."Currency" AND sl."IsPrimary"=true '
@@ -40,12 +59,13 @@ def load_candles(db, since_epoch, bucket):
     series = defaultdict(list)
     for ln in out.stdout.splitlines()[1:]:
         p = ln.split(",")
-        if len(p) < 8:
+        if len(p) < 9:
             continue
         sid = int(p[0])
         o, h, l, c = float(p[2]), float(p[3]), float(p[4]), float(p[5])
         vol, trades = float(p[6]), int(p[7])
-        series[sid].append((o, h, l, c, vol, trades))
+        c_last = float(p[8])
+        series[sid].append((o, h, l, c, vol, trades, c_last))
     return series
 
 
@@ -132,12 +152,13 @@ def stock_metrics(candles):
     if len(candles) < 30:
         return None
     closes = [c[3] for c in candles]
+    closes_last = [c[6] for c in candles]   # §bounce: last-trade close, for the transparency readout
     rng = []
     body_ratio = []
     has_wick = 0
     flat = 0
     vols = []
-    for o, h, l, c, vol, _t in candles:
+    for o, h, l, c, vol, _t, _cl in candles:
         if o <= 0: continue
         rng_pct = (h - l) / o
         rng.append(rng_pct)
@@ -153,6 +174,7 @@ def stock_metrics(candles):
 
     rets = returns(closes)
     abs_rets = [abs(r) for r in rets]
+    rets_last = returns(closes_last)   # §bounce: last-trade returns for the side-by-side ret_acf readout
     n = len(rng)
 
     return {
@@ -168,8 +190,11 @@ def stock_metrics(candles):
         "n_returns": len(rets),
         "return_skew": skewness(rets) if rets else None,
         "return_kurt_excess": excess_kurtosis(rets) if rets else None,
-        # Linear unpredictability — should be ~0
+        # Linear unpredictability — should be ~0. ret_acf_lag1 is the Roll-corrected (mid-close) metric
+        # that feeds the composite; ret_acf_lag1_lasttrade is the old last-trade headline, reported
+        # alongside (NOT scored) so the bounce-removal is transparent, not a silent goalpost move.
         "ret_acf_lag1": acf(rets, 1),
+        "ret_acf_lag1_lasttrade": acf(rets_last, 1),
         "ret_acf_lag5": acf(rets, 5),
         # Volatility clustering — should decay slowly
         "absret_acf_lag1": acf(abs_rets, 1),
@@ -344,6 +369,16 @@ def main():
         score_str = f"{scores[k]*100:>6.1f}%"
         print(f"  {k:<22} {tgt_str:>9} {actual_str:>10} {score_str:>7}  {notes.get(k,'')}")
 
+    print()
+    # §bounce transparency: show the Roll-corrected (mid-close) ret_acf the composite uses next to the
+    # old last-trade headline. When BounceReference is off (or the column is absent) these are equal.
+    lt_vals = [m["ret_acf_lag1_lasttrade"] for m in all_metrics if m.get("ret_acf_lag1_lasttrade") is not None]
+    lt_acf = sum(lt_vals) / len(lt_vals) if lt_vals else None
+    mid_acf = agg.get("ret_acf_lag1")
+    lt_str = f"{lt_acf:>7.3f}" if lt_acf is not None else "    n/a"
+    mid_str = f"{mid_acf:>7.3f}" if mid_acf is not None else "    n/a"
+    print(f"  ret_acf_lag1: last-trade CLOSE = {lt_str}   |   mid CLOSE (scored) = {mid_str}")
+    print(f"  (cross-check VWAP-AC via scripts/bounce_diag.py; mid-CLOSE should converge toward VWAP-AC)")
     print()
     print(f"  Composite realism score:  {composite:>5.1f} / 100")
     print()

@@ -411,7 +411,8 @@ public sealed class OrderExecutionService : IOrderExecutionService
             var trigger = _marketData.Quotes.TryGetValue((order.StockId, order.CurrencyType), out var q) && q.LastPrice > 0m
                 ? q.LastPrice
                 : await _marketData.GetLastPriceAsync(order.StockId, order.CurrencyType, ct).ConfigureAwait(false);
-            if (trigger > 0m) order.Price = CurrencyHelper.RoundMoney(trigger, order.CurrencyType);
+            // §bounce lever (b): trigger-flip quote on the finer price grid (dial 0 ⇒ RoundMoney).
+            if (trigger > 0m) order.Price = CurrencyHelper.RoundPrice(trigger, order.CurrencyType);
         }
 
         await _db.UpdateOrder(order, ct).ConfigureAwait(false); // persist the flip; reservation already held

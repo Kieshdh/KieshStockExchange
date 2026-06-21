@@ -52,6 +52,13 @@ KieshStockExchange.Services.MarketEngineServices.MatchSymmetryProbe.Configure(bu
 // Attributes the matcher-level sell-skew to the specific upstream surface.
 KieshStockExchange.Services.BackgroundServices.Helpers.BotDecisionProbe.Configure(builder.Configuration);
 
+// §bounce lever (a): bounce-free candle-close reference (Bots:BounceReference = off|mid|micro,
+// default off ⇒ byte-identical). §bounce lever (b): finer price-quote tick (Bots:PriceTickDecimals,
+// default 0 ⇒ RoundPrice ≡ RoundMoney). Both read once at startup; neither touches cash/conservation.
+KieshStockExchange.Services.MarketEngineServices.MidReference.Configure(builder.Configuration);
+KieshStockExchange.Helpers.CurrencyHelper.PriceTickExtraDecimals =
+    builder.Configuration.GetValue("Bots:PriceTickDecimals", 0);
+
 // 7a-3 — Serilog reads its sinks from the "Serilog" config section: console in
 // dev, a rolling daily file (logs/server-.log, 7-day retention) everywhere, and
 // a Warning-only JSON file in Production (see appsettings.Production.json).

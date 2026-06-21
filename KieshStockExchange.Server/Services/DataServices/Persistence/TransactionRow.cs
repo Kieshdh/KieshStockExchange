@@ -27,6 +27,10 @@ public class TransactionRow
 
     [Column("Price")] public decimal Price { get; set; }
 
+    // §bounce: nullable bounce-free reference price (mid/micro) captured at trade time. Null when
+    // the flag is off ⇒ scorer/candle fall back to Price. See Transaction.MidPrice.
+    [Column("MidPrice")] public decimal? MidPrice { get; set; }
+
     [Indexed(Name = "IX_Tx_Stock_Curr_Time", Order = 2)]
     [Column("Currency")] public string Currency { get; set; } = nameof(CurrencyType.USD);
 
@@ -46,6 +50,7 @@ public static class TransactionMapper
         SellerId = r.SellerId,
         Quantity = r.Quantity,
         Price = r.Price,
+        MidPrice = r.MidPrice,
         Currency = r.Currency,
         Timestamp = r.Timestamp,
     };
@@ -60,6 +65,7 @@ public static class TransactionMapper
         SellerId = t.SellerId,
         Quantity = t.Quantity,
         Price = t.Price,
+        MidPrice = t.MidPrice,
         Currency = t.Currency,
         Timestamp = t.Timestamp,
     };

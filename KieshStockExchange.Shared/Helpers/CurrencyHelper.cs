@@ -195,6 +195,26 @@ public static class CurrencyHelper
         MidpointRounding mode = MidpointRounding.AwayFromZero)
         => Math.Round(amount, DecimalPlaces(currency), mode);
 
+    /// <summary>
+    /// §bounce lever (b): extra decimal places for PRICE-QUOTE rounding only (never cash). Set once
+    /// at startup from Bots:PriceTickDecimals. 0 ⇒ <see cref="RoundPrice"/> ≡ <see cref="RoundMoney"/>
+    /// (byte-identical off). Clamped to [0,8] when applied.
+    /// </summary>
+    public static int PriceTickExtraDecimals { get; set; }
+
+    /// <summary>
+    /// Rounds a QUOTED/PRINTED price to a finer grid than cash when <see cref="PriceTickExtraDecimals"/> &gt; 0.
+    /// MUST NOT be used for any cash / notional / reservation / budget figure — those stay on
+    /// <see cref="RoundMoney"/> so that every cash amount is RoundMoney(price*qty) and conservation holds
+    /// regardless of how many decimals the price carries. With the dial at 0 this is exactly RoundMoney.
+    /// </summary>
+    public static decimal RoundPrice(decimal amount, CurrencyType currency,
+        MidpointRounding mode = MidpointRounding.AwayFromZero)
+    {
+        var extra = PriceTickExtraDecimals < 0 ? 0 : (PriceTickExtraDecimals > 8 ? 8 : PriceTickExtraDecimals);
+        return Math.Round(amount, DecimalPlaces(currency) + extra, mode);
+    }
+
     /// <summary> Rounded <c>unitPrice * quantity</c>. Returns 0 for non-positive quantity. </summary>
     public static decimal Notional(decimal unitPrice, int quantity, CurrencyType currency,
         MidpointRounding mode = MidpointRounding.AwayFromZero)
