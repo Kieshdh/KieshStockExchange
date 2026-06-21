@@ -23,10 +23,14 @@ the soaks):
 - **NOT the value-band veto / static fundamental:** `AnchorTracksShock=true` (anchor target follows the shock, so
   the band moves with it) did NOT reduce the drift (S3b still −2.24%/90m). And shocks-with-anchor-tracking but
   chaser-OFF (S3a) drift ~baseline (−0.94%) — so the drift is the CHASER's trading, ~−1.3%/90m of it.
-- **Most likely cause = suppression asymmetry:** chase-BUYS require CASH (suppressed when a bot's cash runs low —
-  the v1 `ChaserProbe` shows `suppressed` ≈ `orders`), while chase-SELLS require SHARES (the bot population is
-  net-long, so shares are ~always available). Net realized chase flow leans SELL over the run → persistent
-  down-drift, independent of the requested dose.
+- **ROOT CAUSE CONFIRMED (code inspection, not just hypothesis) = the POSITION-ROOM asymmetry.** In
+  `AiBotDecisionService.ComputeOrderQuantityAsync` (~L1469-1483): a BUY's qty is capped by
+  `roomValue = PerPositionMaxPrc·portfolio − currentHolding` (how much MORE of the position you may hold), but a
+  SELL has **no symmetric cap** — only `AvailableQuantity` (shares held). The bot population is net-LONG, so
+  chase-SELLS into down-shocks run free while chase-BUYS into up-shocks hit the `PerPositionMax` room ceiling →
+  realized chase flow leans SELL → persistent down-drift, **independent of dose, cash, and the value-band veto**
+  (cash ruled out by a 30m-vs-15m injection A/B = no change; veto ruled out by `AnchorTracksShock=true` = no change).
+  This is the exact site v2 must symmetrize.
 
 ## Scope (the fix) — make the chase flow drift-NEUTRAL, keep the ret_acf mechanism
 Make the realized buy/sell chase notional balanced (net ≈ 0 over any window) so the chaser adds no directional
