@@ -30,7 +30,10 @@ short-window noise; finer-tick `PriceTickDecimals` was a confirmed dud — coars
   — drift-neutral + CK=0 + tightens the down-tail, but doesn't touch the fleet reaction loop. It only moves ret_acf
   *jointly with the chaser* (chaser+MM: ret_acf improves + clustering preserved 0.10→0.17 — the only lever that
   moved ret_acf AND kept clustering — BUT drags in the chaser's drift + over-corrects). Net: no clean bakeable
-  flow win alone.
+  flow win alone. **Re-confirmed 2026-06-22 (cranked-skew test, paired 29-min screen):** cranking `SkewBps` 20→150
+  (the Expansionist's "inventory-skew makes MM a drift-free flow lever" dissent) left flow/VWAP ret_acf flat
+  (−0.188→−0.162, Δ+0.026 = within noise), drift flat (+0.05%→+0.18%), CK/CONS=0 — inventory-skew is **not** a flow
+  lever. The MM tool is safe at high skew; it is simply ret_acf-inert. Dissent closed.
   - **MM perf learnings (for whoever activates it):** an always-on maker on the COMMIT-bound single-loop engine
     must be LOW-CHURN. cohort 40 → loop-choke (12% trades); cohort 8 + default RequoteThresholdBps=5 → still 27%
     (cancel-replace churn saturates DB round-trips, round-trips/order 2.95 vs 0.7, scaler throttles fleet);
