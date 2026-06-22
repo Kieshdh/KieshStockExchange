@@ -30,10 +30,14 @@ short-window noise; finer-tick `PriceTickDecimals` was a confirmed dud — coars
   — drift-neutral + CK=0 + tightens the down-tail, but doesn't touch the fleet reaction loop. It only moves ret_acf
   *jointly with the chaser* (chaser+MM: ret_acf improves + clustering preserved 0.10→0.17 — the only lever that
   moved ret_acf AND kept clustering — BUT drags in the chaser's drift + over-corrects). Net: no clean bakeable
-  flow win alone. **Re-confirmed 2026-06-22 (cranked-skew test, paired 29-min screen):** cranking `SkewBps` 20→150
-  (the Expansionist's "inventory-skew makes MM a drift-free flow lever" dissent) left flow/VWAP ret_acf flat
-  (−0.188→−0.162, Δ+0.026 = within noise), drift flat (+0.05%→+0.18%), CK/CONS=0 — inventory-skew is **not** a flow
-  lever. The MM tool is safe at high skew; it is simply ret_acf-inert. Dissent closed.
+  flow win alone. **Re-confirmed 2026-06-22 (cranked-skew test, full 45m paired A/B, both instruments):** cranking
+  `SkewBps` 20→150 (the Expansionist's "inventory-skew makes MM a drift-free flow lever" dissent) is doubly refuted —
+  (1) NOT a clean flow lever: bounce_diag VWAP −0.187→−0.174 (Δ+0.013, null), r4 mid-CLOSE −0.268→−0.214 (Δ+0.054,
+  small + instrument-inconsistent), and it REGRESSES clustering (r4 absret_lag1 0.109→0.063, lag20 +0.032→−0.069 —
+  the MM's two-sided quoting smooths vol); (2) NOT drift-free: avg drift −0.10%→−0.42%/45m (ON declines monotonically
+  +0.23→−0.42; MM bids absorb the net-long pop's chase-sells = more realized sell flow). CK/CONS/ERR=0 both arms,
+  trades 509k vs 463k (ON 91% — mild MM load, healthy at RequoteThresholdBps=50). **Net: cranked skew is mildly
+  HARMFUL (clustering↓, drift↑) for no clean ret_acf gain — strictly worse than default MM. Dissent closed.**
   - **MM perf learnings (for whoever activates it):** an always-on maker on the COMMIT-bound single-loop engine
     must be LOW-CHURN. cohort 40 → loop-choke (12% trades); cohort 8 + default RequoteThresholdBps=5 → still 27%
     (cancel-replace churn saturates DB round-trips, round-trips/order 2.95 vs 0.7, scaler throttles fleet);
