@@ -2,7 +2,11 @@ using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Models;
 
-public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4, Arbitrage = 5 }
+// MarketMaker (0) is the legacy taker-side label whose bots run the normal decision path with the
+// fair-weather quoting in AiBotDecisionService (Bots:MarketMakerQuoting). MarketMakerHouse (6) is the
+// dedicated all-weather two-sided resting-liquidity cohort — seeded SEPARATELY from the random fleet and
+// driven by MarketMakerDecisionService, exactly like the Arbitrage (5) house cohort.
+public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4, Arbitrage = 5, MarketMakerHouse = 6 }
 
 public class AIUser : IValidatable
 {

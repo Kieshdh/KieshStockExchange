@@ -126,6 +126,21 @@ ARB_DECISION_INTERVAL     = (2, 5)             # seconds between arbitrage decis
 ARB_SEED_BALANCE_USD      = 2_000_000.0
 ARB_SEED_BALANCE_EUR      = 1_800_000.0
 
+# ───────────────────── §mm-cohort: all-weather market-maker cohort ─────────────────────
+# A small fixed cohort of AiStrategy.MarketMakerHouse (=6) bots, generated SEPARATELY from the
+# random fleet (STRATEGY_CHOICES stays 0-4). They continuously post two-sided resting LIMIT quotes
+# around a one-sided-book-surviving reference, self-fund (no cash injection), and cover the whole
+# board in their home currency. DEFAULT SIZE 0 ⇒ no strategy-6 bots are seeded ⇒ byte-identical to
+# today; set > 0 to seed the cohort for an MM A/B bake (then toggle Bots:MarketMaker:Enabled).
+MARKET_MAKER_COHORT_SIZE  = 0
+
+# Per-bot draw ranges (jittered so the cohort isn't identical). MaxInventoryPerStock IS the hard
+# two-sided position cap the quote math clamps against; the seed balance funds bids + §F14 short
+# collateral. Single home currency (USD), flat initial holdings, fast refresh cadence.
+MM_MAX_INVENTORY_RANGE    = (200, 800)         # MaxInventoryPerStock (shares), the |inventory| cap
+MM_DECISION_INTERVAL      = (1, 2)             # seconds between quote refreshes
+MM_SEED_BALANCE_USD       = 5_000_000.0
+
 # The platform house account: reserved UserId (server reads Platform:HouseUserId, default 20002),
 # Identity + dual-currency Holding, NO Profile (so it is never a bot / never in the fleet). Seeded
 # generously in BOTH currencies so it always has inventory to settle conversions (a depleted house
@@ -470,6 +485,11 @@ def _validate() -> None:
         raise ValueError(f"ARBITRAGE_COHORT_SIZE={ARBITRAGE_COHORT_SIZE} must be ≥ 0")
     if 5 in STRATEGY_CHOICES:
         raise ValueError("STRATEGY_CHOICES must NOT include 5 (Arbitrage) — the cohort is generated separately.")
+    # §mm-cohort: the market-maker cohort (strategy 6) is also generated separately from the random fleet.
+    if MARKET_MAKER_COHORT_SIZE < 0:
+        raise ValueError(f"MARKET_MAKER_COHORT_SIZE={MARKET_MAKER_COHORT_SIZE} must be ≥ 0")
+    if 6 in STRATEGY_CHOICES:
+        raise ValueError("STRATEGY_CHOICES must NOT include 6 (MarketMakerHouse) — the cohort is generated separately.")
 
     # Sentiment-dynamics §: strategy weights must sum to 1, key only the non-arbitrage strategies, and the
     # lateness skew must be positive.

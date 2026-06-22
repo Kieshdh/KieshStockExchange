@@ -57,6 +57,8 @@ internal sealed class BotCashInjector
             if (!ai.IsEnabled) continue;
             // §3.7 the arbitrage cohort is self-funding — never inject cash into it.
             if (ai.Strategy == AiStrategy.Arbitrage) continue;
+            // §mm-cohort: the house market-maker cohort is self-funded too (seeded once) — never top it up.
+            if (ai.Strategy == AiStrategy.MarketMakerHouse) continue;
             if (ai.CashInjectionFrequencyPrc <= 0m) continue;
 
             if (_ctx.Decimal01(ai.AiUserId) >= ai.CashInjectionFrequencyPrc) continue;

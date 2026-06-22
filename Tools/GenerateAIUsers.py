@@ -11,6 +11,7 @@ from Config import (
     FX_BASE_RATES, LISTING_PRICE_JITTER,
     ARBITRAGE_COHORT_SIZE, HOUSE_USER_ID_OFFSET,
     HOUSE_SEED_BALANCE_USD, HOUSE_SEED_BALANCE_EUR,
+    MARKET_MAKER_COHORT_SIZE,
 )
 from Person import Person, fake
 from ExcelLayout import *
@@ -124,6 +125,18 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
         sheets["Holding"].append(bot.ToHoldingList())
         sheets["Profile"].append(bot.ToProfileList())
     print(f"✅ Appended {ARBITRAGE_COHORT_SIZE} arbitrage bots (UserIds {cohort_start}–{cohort_start + ARBITRAGE_COHORT_SIZE - 1}).")
+
+    # §mm-cohort: market-maker cohort (strategy=6), generated separately from the random fleet. Single
+    # home-currency seed, cash-injection disabled, full-board watchlist. DEFAULT SIZE 0 ⇒ nothing appended
+    # ⇒ byte-identical seed; set MARKET_MAKER_COHORT_SIZE > 0 to seed the cohort for an MM bake.
+    mm_start = cohort_start + ARBITRAGE_COHORT_SIZE
+    for i in range(MARKET_MAKER_COHORT_SIZE):
+        bot = Person.make_market_maker(mm_start + i)
+        sheets["Identity"].append(bot.ToIdentityList())
+        sheets["Holding"].append(bot.ToHoldingList())
+        sheets["Profile"].append(bot.ToProfileList())
+    if MARKET_MAKER_COHORT_SIZE > 0:
+        print(f"✅ Appended {MARKET_MAKER_COHORT_SIZE} market-maker bots (UserIds {mm_start}–{mm_start + MARKET_MAKER_COHORT_SIZE - 1}).")
 
 
     # Apply dark theme and autofit columns (skipped in fast mode — purely cosmetic, the slowest step).

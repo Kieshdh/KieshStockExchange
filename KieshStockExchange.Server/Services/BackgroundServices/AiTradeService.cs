@@ -195,6 +195,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly BotCashInjector      _injector;
     private readonly ArbitrageDecisionService _arbitrage; // §3.7 cohort runs OUT of the normal path
     private readonly bool                 _arbitrageEnabled; // §3.7 Bots:Arbitrage:Enabled kill-switch
+    private readonly MarketMakerDecisionService _marketMaker; // §mm-cohort all-weather two-sided maker (OUT of normal path)
+    private readonly bool                 _marketMakerEnabled; // §mm-cohort Bots:MarketMaker:Enabled master gate (default off)
     private readonly FxDeskTelemetry      _fxDesk;        // §3.7 session conversion data (reset on Start)
     private readonly int                  _houseUserId;   // §3.7 platform FX-desk account (warm-loaded)
     #endregion
@@ -439,6 +441,23 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         conversionSkewBand: _configuration.GetValue("Bots:Arbitrage:ConversionSkewBand", 0.15m),
                         // STRETCH (unbaked): batch the arb cohort's round-trip legs into 2 passes/tick.
                         batchLegs: _configuration.GetValue("Bots:Arbitrage:BatchLegs", false));
+        // §mm-cohort: all-weather two-sided resting-liquidity cohort (AiStrategy.MarketMakerHouse). Dedicated
+        // decision path, fully outside the normal sentiment/anchor/veto/injection flow. Default OFF + (with no
+        // strategy-6 bots seeded) byte-identical. Posts limit quotes around a one-sided-book-surviving reference.
+        _marketMakerEnabled = _configuration.GetValue("Bots:MarketMaker:Enabled", false);
+        MarketMakerProbe.Configure(_configuration.GetValue("Bots:MarketMaker:Probe", false));
+        var mmCfg = new MmConfig(
+            Enabled:             _marketMakerEnabled,
+            HalfSpreadBps:       _configuration.GetValue("Bots:MarketMaker:HalfSpreadBps", 15m),
+            QuoteSize:           _configuration.GetValue("Bots:MarketMaker:QuoteSize", 5),
+            SkewBps:             _configuration.GetValue("Bots:MarketMaker:SkewBps", 20m),
+            RequoteThresholdBps: _configuration.GetValue("Bots:MarketMaker:RequoteThresholdBps", 5m),
+            MaxCashFrac:         _configuration.GetValue("Bots:MarketMaker:MaxCashFrac", 0.5m),
+            PriceJitterBps:      _configuration.GetValue("Bots:MarketMaker:PriceJitterBps", 2m),
+            OneSidedWidenMult:   _configuration.GetValue("Bots:MarketMaker:OneSidedWidenMult", 2.0m),
+            UseMicro:            _configuration.GetValue("Bots:MarketMaker:UseMicro", false));
+        _marketMaker = new MarketMakerDecisionService(entry, books, accounts, stocks,
+                        new SeparatorLogger<MarketMakerDecisionService>(loggerFactory, loggerOptions), mmCfg);
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
                         distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m),
@@ -843,6 +862,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     await _arbitrage.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
                 var tArb = Stopwatch.GetTimestamp();
 
+                // §mm-cohort: the market-maker cohort's quoting pass, after the arbitrage pass and outside the
+                // matcher's locked region (its limit orders own their own gates and settle through the same
+                // engine, so ConservationProbe/ReservationAuditor cover them). Gated by Bots:MarketMaker:Enabled.
+                if (_marketMakerEnabled)
+                    await _marketMaker.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
+
                 // Round 2 §0006c: drain the end-of-tick coordinator queue when
                 // Bots:Advanced:BatchCoordinator is on. No-op when off — the per-event On*Async
                 // already ran synchronously inline. Failure is logged + recovered per-event so
@@ -1231,6 +1256,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             // §3.7 arbitrage bots never enter the normal decision flow (sentiment / anchor / veto /
             // advanced / injection). They run in their own pass via _arbitrage.RunAsync.
             if (user.Strategy == AiStrategy.Arbitrage) continue;
+            // §mm-cohort: the house market-maker cohort (strategy 6) likewise runs only via _marketMaker.RunAsync.
+            // Dead branch until strategy-6 bots are seeded, so this is byte-identical when the cohort is absent.
+            if (user.Strategy == AiStrategy.MarketMakerHouse) continue;
 
             // Spontaneous burst: rare chance (~0.2%/tick) of entering a focused session.
             var burstActive = _ctx.BurstEndTimes.TryGetValue(user.AiUserId, out var burstEnd) && now < burstEnd;
@@ -1590,6 +1618,17 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     "buyNotional={Bn:0.00} sellNotional={Sn:0.00} netNotional={Net:0.00} grossNotional={Gross:0.00}",
                     buyOrders, sellOrders, buySupp, sellSupp, buyNotional, sellNotional, netNotional, grossNotional);
             }
+            if (MarketMakerProbe.Enabled)
+            {
+                var (bidOrders, askOrders, bidShares, askShares, bidNotional, askNotional) = MarketMakerProbe.Drain();
+                // §mm-cohort smoking-gun: net bot inventory should DRAIN (net selling) on a one-sided book and
+                // FLATTEN once the MM cohort absorbs/supplies. mmNet is the cohort's own (skew should keep it ~0).
+                var (mmNet, netBot) = SumBotInventory();
+                _logger.LogInformation(
+                    "MM bidOrders={Bo} askOrders={Ao} bidShares={Bsh} askShares={Ash} " +
+                    "bidNotional={Bn:0.00} askNotional={An:0.00} mmNetInventory={MmNet} netBotInventory={NetBot}",
+                    bidOrders, askOrders, bidShares, askShares, bidNotional, askNotional, mmNet, netBot);
+            }
             _nextSentimentLogTime = now + _sentimentLogInterval;
         }
         if (now >= _nextCashInjectionTime)
@@ -1597,6 +1636,24 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             await _injector.RunAsync(ct).ConfigureAwait(false);
             _nextCashInjectionTime = now + _cashInjectionInterval;
         }
+    }
+
+    // §mm-cohort: point-in-time signed-share sums for the MarketMakerProbe log — (cohort MM net, fleet-wide net).
+    // Walks the per-user stock index against the in-memory accounts cache; called only at the sentiment-log
+    // interval, so the O(bots×stocks) walk is off the per-tick hot path.
+    private (long MmNet, long NetBot) SumBotInventory()
+    {
+        long mmNet = 0, netBot = 0;
+        foreach (var user in _ctx.AiUsersByAiUserId.Values)
+        {
+            if (!_ctx.StocksByUser.TryGetValue(user.UserId, out var stocks)) continue;
+            long userNet = 0;
+            foreach (var sid in stocks)
+                userNet += _accounts.GetPosition(user.UserId, sid)?.Quantity ?? 0;
+            netBot += userNet;
+            if (user.Strategy == AiStrategy.MarketMakerHouse) mmNet += userNet;
+        }
+        return (mmNet, netBot);
     }
 
     // Price-memory anchors §: case-insensitive enum parse for the appsettings key.

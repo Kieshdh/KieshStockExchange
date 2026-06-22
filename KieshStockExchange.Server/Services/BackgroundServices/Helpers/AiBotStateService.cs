@@ -145,6 +145,9 @@ internal sealed class AiBotStateService
             // it's a small fixed set and disabling it would break cross-listing parity. It also
             // doesn't count against the cap so it never crowds out the random fleet's budget.
             if (user.Strategy == AiStrategy.Arbitrage) { user.IsEnabled = true; continue; }
+            // §mm-cohort: the house market-maker cohort is a small fixed liquidity floor — always on, and not
+            // counted against the cap so it never crowds out the random fleet's budget (mirrors arbitrage).
+            if (user.Strategy == AiStrategy.MarketMakerHouse) { user.IsEnabled = true; continue; }
 
             bool active = !cap.HasValue || enabled < cap.Value;
             user.IsEnabled = active;

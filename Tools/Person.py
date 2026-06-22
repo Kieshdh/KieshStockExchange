@@ -401,5 +401,33 @@ class Person:
         p.conversion_cadence_seconds = random.randint(*ARB_CONVERSION_CADENCE)
         return p
 
+    @classmethod
+    def make_market_maker(cls, user_id: int) -> "Person":
+        """§mm-cohort: build one all-weather market-maker bot (AiStrategy.MarketMakerHouse=6). Generated
+        separately from the random fleet so STRATEGY_CHOICES never yields strategy 6. Self-funded single
+        home-currency (USD), flat holdings, full-board watchlist; MaxInventoryPerStock is the hard
+        two-sided position cap the server-side quote math clamps against."""
+        p = cls()                               # fills every Profile field with valid values
+        p.user_id = user_id                     # explicit id (the auto-assigned one is discarded)
+        p.strategy = 6                          # AiStrategy.MarketMakerHouse
+        p.home_currency = "USD"
+        p.interval_seconds = int(max(1, random.randint(*MM_DECISION_INTERVAL)))
+
+        # Self-funding: no cash injection, single-currency cash, flat (no initial share holdings).
+        p.cash_injection_frequency_prc = 0.0
+        p.cash_injection_amount_prc = 0.0
+        p.balance = MM_SEED_BALANCE_USD
+        p.balance_secondary = 0.0
+        p.holdings = {}
+
+        # Cover the whole board in the home currency — an all-weather maker quotes every listed stock.
+        p.watchlist_csv = ",".join(str(sid) for sid in sorted(STOCKS))
+
+        # MaxInventoryPerStock is the live cap; the arbitrage-only knobs stay 0 (unused for strategy 6).
+        p.min_arbitrage_rate_prc = 0.0
+        p.max_inventory_per_stock = random.randint(*MM_MAX_INVENTORY_RANGE)
+        p.conversion_cadence_seconds = 0
+        return p
+
     def __repr__(self):
         return (f"Person({self.username!r}, Aggressive={self.aggressive:.2f}, balance=${self.balance:.2f})")
