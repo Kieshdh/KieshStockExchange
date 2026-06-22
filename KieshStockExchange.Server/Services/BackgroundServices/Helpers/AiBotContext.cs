@@ -79,6 +79,15 @@ internal sealed class AiBotContext
     // implicated as the genuine 1-min mean-reversion driver. NOT cleared per tick; cleared on ClearAll.
     internal readonly Dictionary<(int userId, CurrencyType ccy), decimal> DirectionalLag = new();
 
+    // §perceived-price desync (Bots:PerceivedPriceDesync): per-(userId, stockId, currency) PERCEIVED PRICE EWMAs —
+    // a fast and a slow one — that each bot reacts to instead of the shared live price / shared sentiment slope.
+    // The smoothing rate is dispersed per bot by BOTH Lateness AND a salted hash of AiUserId, so even same-Lateness,
+    // same-tick bots perceive different prices — breaking the cohort lockstep that DirectionalReactionLag (keyed on
+    // Lateness only) could not. Loop-thread-only ⇒ plain Dictionary (mirrors DirectionalLag). NOT cleared per tick;
+    // cleared on ClearAll. Empty (and never touched) when the flag is off.
+    internal readonly Dictionary<(int userId, int stockId, CurrencyType ccy), decimal> PerceivedFast = new();
+    internal readonly Dictionary<(int userId, int stockId, CurrencyType ccy), decimal> PerceivedSlow = new();
+
     // §impact-decouple B (Bots:ImpactDecoupleHold): per-(userId, currency) sample-and-hold of the combined
     // directional stance plus the tick it was last changed. A bot may change its stance at most once per the
     // hold window, so it cannot fade its own move within the minute it caused (the HARD refractory the soft
@@ -396,6 +405,8 @@ internal sealed class AiBotContext
         Stances.Clear();
         AnchorTiltLag.Clear();
         DirectionalLag.Clear();
+        PerceivedFast.Clear();
+        PerceivedSlow.Clear();
         ReactionRefPrices.Clear();
         ReactionRefUpdatedUtc.Clear();
         ReactionHold.Clear();
@@ -435,5 +446,55 @@ internal sealed class AiBotContext
         store[key] = next;
         return next;
     }
+    #endregion
+
+    #region Perceived-price desync (§PerceivedPriceDesync)
+    /// <summary>
+    /// §perceived-price desync: advance this bot's fast &amp; slow perceived-price EWMAs toward <paramref name="live"/>
+    /// and return the two EWMA-gap slopes (live − perceived)/perceived — a per-bot stand-in for the SHARED sentiment
+    /// slope. The smoothing alpha is dispersed per bot by Lateness AND a salted hash of <paramref name="aiUserId"/>
+    /// (distinct <paramref name="saltFast"/>/<paramref name="saltSlow"/>), so the cohort's perceptions fan out across
+    /// the [min,max] band instead of moving in lockstep. Seeds at <paramref name="live"/> on first sight (no startup
+    /// transient ⇒ first-call slope is exactly 0). The dict key uses <paramref name="userId"/> (mirroring DirectionalLag);
+    /// the dispersion hashes <paramref name="aiUserId"/> (mirroring the salted chaser/stagger cohorts). Pure/deterministic
+    /// — NO RNG, NO clock. Callers invoke this ONLY when the flag is on, so the flag-off path is byte-identical.
+    /// </summary>
+    internal (decimal dsFast, decimal dsSlow) PerceivedSlope(int userId, int aiUserId, int stockId, CurrencyType ccy,
+        decimal live, decimal lateness, int saltFast, int saltSlow, decimal minAlpha, decimal maxAlpha)
+    {
+        var key = (userId, stockId, ccy);
+        var aFast = PerceivedAlpha(lateness, aiUserId, saltFast, minAlpha, maxAlpha);
+        var aSlow = PerceivedAlpha(lateness, aiUserId, saltSlow, minAlpha, maxAlpha);
+        var pFast = PerceivedStep(PerceivedFast.TryGetValue(key, out var pf) ? pf : live, live, aFast);
+        var pSlow = PerceivedStep(PerceivedSlow.TryGetValue(key, out var ps) ? ps : live, live, aSlow);
+        PerceivedFast[key] = pFast;
+        PerceivedSlow[key] = pSlow;
+        var dsFast = pFast > 0m ? (live - pFast) / pFast : 0m;
+        var dsSlow = pSlow > 0m ? (live - pSlow) / pSlow : 0m;
+        return (dsFast, dsSlow);
+    }
+
+    /// <summary>
+    /// §perceived-price desync: per-bot EWMA alpha, dispersed by Lateness AND a salted id hash. For a fixed bot the
+    /// alpha is monotone-decreasing in Lateness (L=0 ⇒ fastest, near maxAlpha; L=1 ⇒ slowest, near minAlpha); the
+    /// salted hash spreads same-Lateness bots across the band so the cohort never reacts in lockstep. Always returns
+    /// a value in [minAlpha, maxAlpha]. Pure (uses <see cref="BotMath.HashUnit01(int)"/>) — call-order independent, no RNG.
+    /// </summary>
+    internal static decimal PerceivedAlpha(decimal lateness, int aiUserId, int salt, decimal minAlpha, decimal maxAlpha)
+    {
+        var L = Clamp01(lateness);
+        // Equal-weight blend of the per-bot disposition (Lateness) with a salted hash. Higher slowness ⇒ smaller
+        // alpha. The blend keeps alpha monotone in L for any fixed bot while guaranteeing same-L bots disperse.
+        var h = (decimal)BotMath.HashUnit01(aiUserId ^ salt);
+        var slowness = 0.5m * L + 0.5m * h;                  // [0,1]
+        return maxAlpha - slowness * (maxAlpha - minAlpha);
+    }
+
+    /// <summary>
+    /// §perceived-price desync: one EWMA step toward <paramref name="live"/>. The caller seeds <paramref name="prev"/>
+    /// at <paramref name="live"/> on first sight, so the first step returns live (no opening jolt). Pure, RNG-free.
+    /// </summary>
+    internal static decimal PerceivedStep(decimal prev, decimal live, decimal alpha)
+        => prev + alpha * (live - prev);
     #endregion
 }

@@ -572,6 +572,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         directionalReactionLag:    _configuration.GetValue("Bots:DirectionalReactionLag", false),
                         dirLagMinAlpha:            _configuration.GetValue("Bots:DirLagMinAlpha", 0.05m),
                         dirLagMaxAlpha:            _configuration.GetValue("Bots:DirLagMaxAlpha", 0.30m),
+                        // §perceived-price desync: per-bot perceived-price slope (supersedes DirectionalReactionLag).
+                        perceivedPriceDesync:      _configuration.GetValue("Bots:PerceivedPriceDesync", false),
+                        perceivedMinAlpha:         _configuration.GetValue("Bots:PerceivedPriceMinAlpha", 0.05m),
+                        perceivedMaxAlpha:         _configuration.GetValue("Bots:PerceivedPriceMaxAlpha", 0.45m),
+                        perceivedSlopeScaleFast:   _configuration.GetValue("Bots:PerceivedSlopeScaleFast", 0.01m),
+                        perceivedSlopeScaleSlow:   _configuration.GetValue("Bots:PerceivedSlopeScaleSlow", 0.02m),
                         // §impact-decouple B: hard per-bot refractory on the directional stance. Default off.
                         reactionHold:              _configuration.GetValue("Bots:ImpactDecoupleHold", false),
                         reactionHoldWindowSec:     _configuration.GetValue("Bots:ImpactDecoupleHoldWindowSec", 90.0),
@@ -616,6 +622,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // Microstructure bounce arm marker: lets an A/B soak operator confirm OFF (0) vs ON from the log.
         _logger.LogInformation("CONFIGCHECK TouchTighten touchTighten={TouchTighten} (absent ⇒ 0 ⇒ byte-identical)",
             _configuration.GetValue("Bots:TouchTightenPrc", 0m));
+        // §perceived-price desync arm marker: confirm OFF vs ON + the resolved alphas/scales from the log alone.
+        _logger.LogInformation(
+            "CONFIGCHECK PerceivedPriceDesync on={On} minAlpha={Min} maxAlpha={Max} scaleFast={Sf} scaleSlow={Ss} " +
+            "(off ⇒ byte-identical; supersedes DirectionalReactionLag — do not co-enable)",
+            _configuration.GetValue("Bots:PerceivedPriceDesync", false),
+            _configuration.GetValue("Bots:PerceivedPriceMinAlpha", 0.05m),
+            _configuration.GetValue("Bots:PerceivedPriceMaxAlpha", 0.45m),
+            _configuration.GetValue("Bots:PerceivedSlopeScaleFast", 0.01m),
+            _configuration.GetValue("Bots:PerceivedSlopeScaleSlow", 0.02m));
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
         // §stagger: deterministic per-bot tick-phase scheduling. Default off ⇒ byte-identical;

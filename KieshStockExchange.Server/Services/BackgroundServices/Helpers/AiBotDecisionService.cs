@@ -188,6 +188,20 @@ internal sealed class AiBotDecisionService
     private readonly bool _reactionHold;
     private readonly long _reactionHoldWindowTicks;   // (long)(HoldWindowSec * TimeSpan.TicksPerSecond); 0 ⇒ off
 
+    // §perceived-price desync: each bot reacts to its OWN fast/slow perceived-price EWMA (Lateness + salted-hash
+    // dispersed) instead of the SHARED sentiment slope — breaking the cohort lockstep that pins ret_acf_lag1. The
+    // cleaner "what price does the bot even SEE" version of DirectionalReactionLag: when on, it SUPERSEDES that flag
+    // (its tilt-lag is skipped) and is NOT meant to be co-enabled with it / the ImpactDecouple* flags. The slope is
+    // measured as the EWMA gap (live − perceived)/perceived, scaled by its own Tanh scales (the perceived-return gap
+    // is a different unit from the sentiment slope). Default off ⇒ byte-identical.
+    private readonly bool    _perceivedDesync;
+    private readonly decimal _perceivedMinAlpha;       // EWMA alpha for the slowest bots
+    private readonly decimal _perceivedMaxAlpha;       // EWMA alpha for the fastest bots
+    private readonly decimal _perceivedSlopeScaleFast; // Tanh scale for the per-bot FAST perceived slope
+    private readonly decimal _perceivedSlopeScaleSlow; // Tanh scale for the per-bot SLOW perceived slope
+    private const int PerceivedSaltFast = 0x70E1;      // distinct from ChaserSalt 0x5A17 / ChaserCadenceSalt 0x3B9F
+    private const int PerceivedSaltSlow = 0x1D2B;
+
     // §exogenous-information chaser cohort: a salted, per-(bot,shock) hash-selected slice of eligible bots
     // (non-MM) adds strength·tanh(shock/scale) to the directional accumulator, supplying persistent 1-min
     // directional flow INTO the bounded news shock. Strength is the smooth primary ACF dial; Fraction is a
@@ -338,6 +352,12 @@ internal sealed class AiBotDecisionService
         bool directionalReactionLag = false,
         decimal dirLagMinAlpha = 0.05m,
         decimal dirLagMaxAlpha = 0.30m,
+        // §perceived-price desync (supersedes DirectionalReactionLag). Default off ⇒ byte-identical.
+        bool perceivedPriceDesync = false,
+        decimal perceivedMinAlpha = 0.05m,
+        decimal perceivedMaxAlpha = 0.45m,
+        decimal perceivedSlopeScaleFast = 0.01m,
+        decimal perceivedSlopeScaleSlow = 0.02m,
         // Taker-symmetry: fraction of protective triggers routed to buy-stops. 0 ⇒ byte-identical sell-only.
         decimal buyStopFraction = 0m,
         // §impact-decouple B: hard per-bot refractory on the directional stance. Default off ⇒ byte-identical.
@@ -455,6 +475,13 @@ internal sealed class AiBotDecisionService
         _directionalReactionLag    = directionalReactionLag;
         _dirLagMinAlpha            = dirLagMinAlpha < 0m ? 0m : (dirLagMinAlpha > 1m ? 1m : dirLagMinAlpha);
         _dirLagMaxAlpha            = dirLagMaxAlpha < _dirLagMinAlpha ? _dirLagMinAlpha : (dirLagMaxAlpha > 1m ? 1m : dirLagMaxAlpha);
+        // §perceived-price desync: alphas use the same band-clamp shape as the directional/anchor lags; scales
+        // floored to their defaults if mis-set (≤0) so a bad config can't divide-by-zero in DirectionalBias's Tanh.
+        _perceivedDesync           = perceivedPriceDesync;
+        _perceivedMinAlpha         = perceivedMinAlpha < 0m ? 0m : (perceivedMinAlpha > 1m ? 1m : perceivedMinAlpha);
+        _perceivedMaxAlpha         = perceivedMaxAlpha < _perceivedMinAlpha ? _perceivedMinAlpha : (perceivedMaxAlpha > 1m ? 1m : perceivedMaxAlpha);
+        _perceivedSlopeScaleFast   = perceivedSlopeScaleFast <= 0m ? 0.01m : perceivedSlopeScaleFast;
+        _perceivedSlopeScaleSlow   = perceivedSlopeScaleSlow <= 0m ? 0.02m : perceivedSlopeScaleSlow;
         // §impact-decouple B: precompute the hold window in ticks once (guard ≤0 ⇒ off / no-op in HeldDirectional).
         _reactionHold              = reactionHold;
         _reactionHoldWindowTicks   = reactionHoldWindowSec > 0.0 ? (long)(reactionHoldWindowSec * TimeSpan.TicksPerSecond) : 0L;
@@ -1042,9 +1069,20 @@ internal sealed class AiBotDecisionService
             var s   = ClampSigned(AverageWatchlistSharedSentiment(user), 1m);
             var dsF = AverageWatchlistSlope(user, fast: true);
             var dsS = AverageWatchlistSlope(user, fast: false);
+            var slopeScaleFast = _slopeScaleFast;
+            var slopeScaleSlow = _slopeScaleSlow;
+            // §perceived-price desync: replace the SHARED sentiment slope with THIS bot's own salt+Lateness-dispersed
+            // perceived-price slope, so the cohort stops feeding DirectionalBias the same lockstep slope each tick.
+            // Its own Tanh scales apply (the perceived-return gap is a different unit). Off ⇒ shared slope unchanged.
+            if (_perceivedDesync)
+            {
+                (dsF, dsS) = AveragePerceivedSlope(ctx, user, currency);
+                slopeScaleFast = _perceivedSlopeScaleFast;
+                slopeScaleSlow = _perceivedSlopeScaleSlow;
+            }
             directional = DirectionalBias(user.Strategy, s, dsF, dsS, user.Lateness,
                 _momentumConviction, _scalperConviction, _reversionConviction, _reversalConviction,
-                _marketMakerLean, _slopeScaleFast, _slopeScaleSlow);
+                _marketMakerLean, slopeScaleFast, slopeScaleSlow);
         }
         else
         {
@@ -1079,7 +1117,9 @@ internal sealed class AiBotDecisionService
         // #1: per-bot Lateness lag on the fast directional/sentiment reaction (per-(bot,ccy) EWMA,
         // persists across ticks). Staggers the cohort's slope reaction so the synchronized next-minute
         // overcorrection — the genuine ~−0.31 mean-reversion the bounce diagnostic isolated — is smeared.
-        if (_directionalReactionLag)
+        // §perceived-price desync supersedes the tilt-lag: when on, the desync already dispersed the reaction at the
+        // PRICE level above, so skip the (cohort-uniform) output-tilt EWMA to avoid double-lagging / co-enabling.
+        if (_directionalReactionLag && !_perceivedDesync)
             directional = ctx.LaggedDirectional(user.UserId, currency, directional, user.Lateness,
                 _dirLagMinAlpha, _dirLagMaxAlpha);
 
@@ -1771,6 +1811,27 @@ internal sealed class AiBotDecisionService
         int count = 0;
         foreach (var sid in user.Watchlist) { sum += _sentiment.GetSentimentSlope(sid, fast); count++; }
         return count > 0 ? sum / count : 0m;
+    }
+
+    // §perceived-price desync: this bot's OWN (fast, slow) slope, averaged over its eligible watchlist — each derived
+    // from a per-(bot,stock) perceived-price EWMA whose rate is dispersed by Lateness + a salted id hash, so the
+    // cohort fans out. Reads the same SmoothedPrices series the shared slope path perceives (fallback to the raw
+    // StockPrices last quote). Pure/RNG-free; advances the bot's perceived-price state for this decision.
+    private (decimal dsFast, decimal dsSlow) AveragePerceivedSlope(AiBotContext ctx, AIUser user, CurrencyType currency)
+    {
+        var watch = EligibleWatchlist(ctx, user, currency);
+        decimal sumF = 0m, sumS = 0m; int count = 0;
+        foreach (var sid in watch)
+        {
+            var key = (sid, currency);
+            decimal live = ctx.SmoothedPrices.TryGetValue(key, out var sp) && sp > 0m ? sp
+                         : ctx.StockPrices.TryGetValue(key, out var lp) && lp > 0m ? lp : 0m;
+            if (live <= 0m) continue;
+            var (dsF, dsS) = ctx.PerceivedSlope(user.UserId, user.AiUserId, sid, currency, live, user.Lateness,
+                PerceivedSaltFast, PerceivedSaltSlow, _perceivedMinAlpha, _perceivedMaxAlpha);
+            sumF += dsF; sumS += dsS; count++;
+        }
+        return count > 0 ? (sumF / count, sumS / count) : (0m, 0m);
     }
 
     /// <summary>§direct-flow chaser: the resolved chase target — the watchlist stock to chase and its signed shock.</summary>
