@@ -41,6 +41,24 @@ state / dup SignalR). 4. Bad/empty/whitespace creds → clean validation. 5. Reg
 3. **ChartViewModel same anti-pattern** on stock switch (`_ = _transactions.RefreshAsync`). Fixed:
    `SafeBackgroundTxRefresh`. Sweep confirmed all other `_ = …RefreshAsync()` sites already guard. Commit `8c33fac`.
 
+## Wave-10 re-run fixes — client-test batch 1 (2026-06-23, client repointed to localhost:5000)
+From Kiesh's live client test. All client-side; MAUI build clean (0 errors). Detail + root causes in `docs/CLIENT_TEST_FIXES.md`.
+- **I1 — candle chart didn't move with the live price** (only updated on candle close). `OnPriceUpdatedAsync` now
+  synthesizes the forming candle from the live price each tick; `UpsertCandle` dedups by bucket so the closed candle
+  replaces it on close. Commit `82f4cf1`. ⚠️ **eyeball this on the chart** — it's the one fix not runtime-verified.
+- **I2 — market page price laggy** (5s poll). Poll 5s→1s; push-driven update still sub-second. `e2ff631`.
+- **I3 — EUR order book rows showed `$`**. `LevelRow.Update` refreshes currency on reused rows. `e2ff631`.
+- **I4 — market table not sortable**. Tappable Symbol/Name/Change/Volume headers + ▲/▼ indicator, default Volume-desc.
+  `abd2969`. (Marketcap column = separate DB feature, in progress.)
+- **I5 — Top Losers/Gainers duplicated a stock** (USD+EUR listings). `TrendingService` dedupes by stock. `e2ff631`.
+- **I6 — Gainers/Losers ignored the USD/EUR/Watchlist tab**. Now currency/watchlist-scoped. `e2ff631`.
+- **I7 — portfolio allocation circle blank on an empty account**. Faint placeholder ring at zero equity (cash +
+  holdings already render real slices). `abd2969`.
+- **I8 — bot dashboard showed 20000/20000**. "Active / Max" now binds to actual `OnlineBots`, not the scaler cap. `e2ff631`.
+
+In progress (not in this batch): marketcap column + 20k-total-bots (one DB/seed feature: `SharesOutstanding` + house
+holds the rounding remainder + a share-conservation test); arbitrage/FxRate effectiveness (S1, harvesting the RC soak).
+
 ## Notes
 - App did NOT crash on any of the above — all were handled/observed; fixes remove debug-output noise toward
   the item-44 zero-noise baseline.
