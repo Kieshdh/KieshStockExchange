@@ -406,9 +406,59 @@ public partial class ChartViewModel : StockAwareViewModel
     protected override Task OnPriceUpdatedAsync(int? stockId, CurrencyType currency,
         decimal price, DateTime? updatedAt, CancellationToken ct)
     {
-        // Keep the live price line fresh between closed-candle ticks
+        // §live-candle: the server streams only CLOSED candles, so between closes the newest bar never
+        // moved (only the price line did). Synthesize/extend the in-progress (forming) bucket from the
+        // live price so the last candle tracks the market tick-by-tick. UpsertCandle keys on the bucket,
+        // so the server's authoritative closed candle replaces this on close and repeated ticks
+        // replace it in place — no duplicates.
+        TrySyncLiveCandle(stockId, currency, price, updatedAt);
         RequestRedraw();
         return Task.CompletedTask;
+    }
+
+    // Build/extend the forming candle for the current bucket from a live price tick. Heavily guarded:
+    // a synthesis failure must never break the chart, so it falls back to the price-line-only redraw.
+    private void TrySyncLiveCandle(int? stockId, CurrencyType currency, decimal price, DateTime? updatedAt)
+    {
+        try
+        {
+            if (price <= 0m || Key is not { } key) return;
+            if (stockId is not int sid || sid != key.StockId || currency != key.Currency) return;
+            int secs = (int)key.Res;
+            if (secs <= 0) return;
+
+            var openTime = TimeHelper.FloorToBucketUtc(updatedAt ?? TimeHelper.NowUtc(), TimeSpan.FromSeconds(secs));
+
+            void Apply()
+            {
+                // Preserve Open + extend High/Low from this bucket's existing forming candle (if any).
+                decimal open = price, high = price, low = price;
+                long vol = 0; int trades = 0;
+                if (_candleBuffer.Count > 0 && _candleBuffer[^1].OpenTime == openTime
+                    && _candleBuffer[^1].StockId == sid && _candleBuffer[^1].CurrencyType == key.Currency)
+                {
+                    var cur = _candleBuffer[^1];
+                    open = cur.Open;
+                    high = Math.Max(cur.High, price);
+                    low  = Math.Min(cur.Low, price);
+                    vol = cur.Volume; trades = cur.TradeCount;
+                }
+                var candle = new Candle
+                {
+                    StockId = sid, CurrencyType = key.Currency, BucketSeconds = secs, OpenTime = openTime,
+                    Open = open, High = high, Low = low, Close = price, Volume = vol, TradeCount = trades,
+                };
+                UpsertCandle(_candleBuffer, candle);
+                SyncLatestCandle();
+            }
+
+            if (MainThread.IsMainThread) Apply();
+            else MainThread.BeginInvokeOnMainThread(Apply);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Live-candle sync skipped.");
+        }
     }
 
     protected override void Dispose(bool disposing)
