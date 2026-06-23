@@ -18,8 +18,6 @@ public sealed class PortfolioAllocationDrawable : IDrawable
 
     public void Draw(ICanvas canvas, RectF dirtyRect)
     {
-        if (_slices.Count == 0) return;
-
         var side = Math.Min(dirtyRect.Width, dirtyRect.Height);
         var cx = dirtyRect.Center.X;
         var cy = dirtyRect.Center.Y;
@@ -28,13 +26,22 @@ public sealed class PortfolioAllocationDrawable : IDrawable
         var ringWidth = outerRadius - innerRadius;
         var midRadius = (outerRadius + innerRadius) / 2f;
 
+        canvas.StrokeLineCap = LineCap.Butt;
+        canvas.StrokeSize = ringWidth;
+
+        // Empty state (fresh / zero-equity account): draw a faint placeholder ring so the
+        // card reads as "nothing to allocate yet" instead of a blank, broken-looking square.
+        if (_slices.Count == 0)
+        {
+            canvas.StrokeColor = Color.FromRgba(128, 128, 128, 45);
+            canvas.DrawCircle(cx, cy, midRadius);
+            return;
+        }
+
         // MAUI angles: 0° = east, 90° = north, counterclockwise positive.
         // Start the donut at 12 o'clock and walk clockwise so the visual
         // order matches the legend (top-down, largest first).
         double startAngle = 90;
-
-        canvas.StrokeLineCap = LineCap.Butt;
-        canvas.StrokeSize = ringWidth;
 
         for (int i = 0; i < _slices.Count; i++)
         {

@@ -54,6 +54,29 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     public bool IsEurTabActive => !ShowWatchlistOnly && FilterCurrency == CurrencyType.EUR;
     public bool IsWatchlistTabActive => ShowWatchlistOnly;
 
+    // Market-table column sort. Default: Volume, descending (biggest first) — the table
+    // opens "ordered by volume"; column headers re-sort on tap with a ▲/▼ indicator.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SymbolHeader))]
+    [NotifyPropertyChangedFor(nameof(NameHeader))]
+    [NotifyPropertyChangedFor(nameof(ChangeHeader))]
+    [NotifyPropertyChangedFor(nameof(VolumeHeader))]
+    private MarketSortColumn _sortColumn = MarketSortColumn.Volume;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SymbolHeader))]
+    [NotifyPropertyChangedFor(nameof(NameHeader))]
+    [NotifyPropertyChangedFor(nameof(ChangeHeader))]
+    [NotifyPropertyChangedFor(nameof(VolumeHeader))]
+    private bool _sortDescending = true;
+
+    public string SymbolHeader => "SYMBOL" + SortArrow(MarketSortColumn.Symbol);
+    public string NameHeader   => "NAME"   + SortArrow(MarketSortColumn.Name);
+    public string ChangeHeader => "CHANGE" + SortArrow(MarketSortColumn.Change);
+    public string VolumeHeader => "VOLUME" + SortArrow(MarketSortColumn.Volume);
+    private string SortArrow(MarketSortColumn col) =>
+        SortColumn == col ? (SortDescending ? "  ▼" : "  ▲") : string.Empty;
+
     public IReadOnlyList<CurrencyType> AvailableCurrencies { get; } =
         new[] { CurrencyType.USD, CurrencyType.EUR };
 
@@ -470,7 +493,43 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
                 }
             }
         }
+        SortDesired(desired);
         SyncRows(FilteredStocks, desired);
+    }
+
+    // Order the filtered rows by the active column/direction; ties break on symbol.
+    private void SortDesired(List<MarketRow> rows)
+    {
+        int dir = SortDescending ? -1 : 1;
+        rows.Sort((a, b) =>
+        {
+            int c = (SortColumn switch
+            {
+                MarketSortColumn.Name   => string.Compare(a.CompanyName, b.CompanyName, StringComparison.OrdinalIgnoreCase),
+                MarketSortColumn.Change => a.ChangePct.CompareTo(b.ChangePct),
+                MarketSortColumn.Volume => a.DollarVolume.CompareTo(b.DollarVolume),
+                _                       => string.Compare(a.Symbol, b.Symbol, StringComparison.OrdinalIgnoreCase),
+            }) * dir;
+            return c != 0 ? c : string.Compare(a.Symbol, b.Symbol, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    // Column-header tap: same column toggles direction; a new column sorts by it
+    // (numeric columns default to descending, text to ascending). Re-applies + page-resets.
+    [RelayCommand]
+    private void SortBy(string? column)
+    {
+        if (!Enum.TryParse<MarketSortColumn>(column, ignoreCase: true, out var col)) return;
+        if (col == SortColumn)
+            SortDescending = !SortDescending;
+        else
+        {
+            SortColumn = col;
+            SortDescending = col is MarketSortColumn.Change or MarketSortColumn.Volume;
+        }
+        ApplyFilter();
+        PageNumber = 0;
+        RebuildPagedStocks();
     }
     #endregion
 
@@ -552,6 +611,9 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     }
 }
 
+/// <summary>Sortable columns on the market table.</summary>
+public enum MarketSortColumn { Symbol, Name, Change, Volume }
+
 /// <summary> Row bound by the All-Stocks table. Identity is (StockId, Currency). </summary>
 public partial class MarketRow : ObservableObject
 {
@@ -574,6 +636,10 @@ public partial class MarketRow : ObservableObject
 
     [ObservableProperty] private string _dollarVolumeDisplay = "-";
 
+    // Numeric session $-volume, kept beside the display string as the sort key for
+    // the Volume column (not bound to the UI).
+    public decimal DollarVolume { get; set; }
+
     [ObservableProperty] private bool _isWatched;
 
     public bool IsBullish => ChangePct > 0m;
@@ -589,6 +655,7 @@ public partial class MarketRow : ObservableObject
         ChangePct           = q.ChangePct,
         ChangePctDisplay    = q.ChangePctDisplay,
         DollarVolumeDisplay = q.DollarVolumeDisplay,
+        DollarVolume        = q.DollarVolume,
         TradeCommand        = tradeCommand,
         ToggleWatchCommand  = toggleWatchCommand,
         IsWatched           = isWatched,
@@ -600,5 +667,6 @@ public partial class MarketRow : ObservableObject
         ChangePct            = q.ChangePct;
         ChangePctDisplay     = q.ChangePctDisplay;
         DollarVolumeDisplay  = q.DollarVolumeDisplay;
+        DollarVolume         = q.DollarVolume;
     }
 }

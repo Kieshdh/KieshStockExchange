@@ -301,25 +301,41 @@
                            Style="{StaticResource TableHeaderLabelStyle}"
                            WidthRequest="28" />
                     <Label Grid.Column="1"
-                           Text="SYMBOL"
+                           Text="{Binding SymbolHeader}"
                            Style="{StaticResource TableHeaderLabelStyle}"
-                           HorizontalTextAlignment="Start" />
+                           HorizontalTextAlignment="Start">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SortByCommand}" CommandParameter="Symbol" />
+                        </Label.GestureRecognizers>
+                    </Label>
                     <Label Grid.Column="2"
-                           Text="NAME"
+                           Text="{Binding NameHeader}"
                            Style="{StaticResource TableHeaderLabelStyle}"
-                           HorizontalTextAlignment="Start" />
+                           HorizontalTextAlignment="Start">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SortByCommand}" CommandParameter="Name" />
+                        </Label.GestureRecognizers>
+                    </Label>
                     <Label Grid.Column="3"
                            Text="LAST"
                            Style="{StaticResource TableHeaderLabelStyle}"
                            HorizontalTextAlignment="End" />
                     <Label Grid.Column="4"
-                           Text="CHANGE"
+                           Text="{Binding ChangeHeader}"
                            Style="{StaticResource TableHeaderLabelStyle}"
-                           HorizontalTextAlignment="End" />
+                           HorizontalTextAlignment="End">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SortByCommand}" CommandParameter="Change" />
+                        </Label.GestureRecognizers>
+                    </Label>
                     <Label Grid.Column="5"
-                           Text="VOLUME"
+                           Text="{Binding VolumeHeader}"
                            Style="{StaticResource TableHeaderLabelStyle}"
-                           HorizontalTextAlignment="End" />
+                           HorizontalTextAlignment="End">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding SortByCommand}" CommandParameter="Volume" />
+                        </Label.GestureRecognizers>
+                    </Label>
                     <Label Grid.Column="6"
                            Text=""
                            Style="{StaticResource TableHeaderLabelStyle}"
