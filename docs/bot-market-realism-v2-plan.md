@@ -1,5 +1,12 @@
 # Plan: make the bot market move and breathe like a real one
 
+> **⚠️ SUPERSEDED (2026-06-23).** This 5-pillar plan was the original framing. The realism goal was ultimately met
+> via a *different* route — the bid-ask-bounce fix (`BounceReference=mid`, baked, CLOSE ret_acf −0.43→−0.17) plus
+> anchors / sentiment-dynamics tuning / staggering, with chaser·MM·desync shipped default-off as tools. The residual
+> "flow" mean-reversion is concluded **structural**. The pillars below (A1 inertia, herding, activity field, etc.) were
+> NOT implemented as written and are **parked future-round ideas**, not open blockers. Current state +
+> remaining-issues live in **`docs/PROJECT_STATUS.md`** and `docs/REALISM_RETACF_CLOSEOUT.md`.
+
 **Status:** design, not implemented. Companion to `docs/bot-market-realism.md` (direction realism
 shipped: fat tails, news shocks, MM quoting) and `docs/bot-variable-volume.md` (the activity-field
 volume spec). This plan unifies the *root-cause* fix for the flat, directional chart and sequences
