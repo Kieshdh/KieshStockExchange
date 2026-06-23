@@ -46,13 +46,36 @@ short-window noise; finer-tick `PriceTickDecimals` was a confirmed dud — coars
     (deferred `CancelOrdersBatchAsync`). Activation: set `MARKET_MAKER_COHORT_SIZE>0` in Tools + reseed + flip
     `Enabled=true` + use the healthy params above.
 
-## The structural ceiling + the next root-cause lever
+## The structural ceiling + the desync root-cause lever (TESTED — sub-gate, default-off)
 The 72% is the **fleet reaction loop**: ~20k bots read the SAME shared price each tick and each nudge toward it →
 synchronized mechanical 1-min mean-reversion, by construction. Flow band-aids (chaser/MM) *mask* it (and cost
 drift); they don't remove it. 25+ config experiments + the chaser + the MM all failed to bake a clean flow win.
-**Next root-cause lever (council First-Principles):** desync the per-bot price reads (per-bot stale/offset price)
-so bots stop reacting to the same tick — directly tests whether *synchronicity* is the −0.43. Handoff:
-`docs/ultraplan-prompt-desync-price-reads.md`.
+
+### ❌ NO-BAKE, shipped default-off — `Bots:PerceivedPriceDesync` (the deepest root-cause lever; `9b440d9`, 2026-06-23)
+The council's First-Principles pick, delivered by ultraplan: each bot reacts to its OWN fast+slow perceived-price
+EWMA (dispersed per bot by `Lateness` + a salted `AiUserId` hash) instead of the shared live price / sentiment
+slope — directly attacking the *synchronicity*. Pure/RNG-free, default-off byte-identical, supersedes
+`DirectionalReactionLag`, no `/Tools` touch, 274/274 tests (8 new determinism). **It is the CLEANEST lever the arc
+produced — drift-free AND clustering-safe AND direction-correct (every prior flow lever traded one for another).
+But it is too WEAK to pull the flow ret_acf into band at safe dials:**
+- **R1 (45m @default MaxAlpha0.45):** looked great — VWAP −0.160→−0.096, r4-mid −0.195→−0.089 (both in-band). **Noise.**
+- **R2 (2h confirm, the reliable window):** the win SHRANK to noise-floor — VWAP −0.204→**−0.179** (Δ+0.025, at the
+  ±0.03–0.04 floor, NOT in band); r4-mid −0.191→−0.183 (Δ+0.008, flat). Clustering PRESERVED both instruments
+  (bounce_diag absret 0.163→0.142; r4 0.209→0.251 *improved*), drift EQUAL (−1.28 vs −1.34%/2h), CK=0, walls fine,
+  composite 66.5→75.7. The R1 in-band win AND its clustering scare were BOTH 45m noise.
+- **R3 (council-gated bounded sweep, 45m):** stronger dials did NOT amplify — Cell A (2× strength, scales 0.005/0.01)
+  VWAP −0.183; Cell B (wider dispersion, MaxAlpha 0.65) VWAP −0.190 — both in the same −0.18/−0.19 cluster as default
+  and OFF. (r4-mid showed −0.13/−0.14 in-band, but that's the noisy 45m instrument that already evaporated in R1.)
+  Gate (VWAP ≤−0.15, both instruments agree) not met → council's pre-registered hard-stop → ship default-off.
+
+**CONCLUSION: the 72% flow half is STRUCTURAL at safe dials, confirmed by the deepest root-cause lever.** Breaking
+the shared-price synchronicity (desync) moves the flow ret_acf in the right direction but only by a noise-floor
+amount; pushing the dials harder doesn't amplify it (it asymptotes ~−0.18) without risking overshoot-past-0
+(random walk = worse). Activation if ever wanted: `Bots:PerceivedPriceDesync=true` + restart (cleanest tool; the
+default 0.45/0.01/0.02 cell is the validated clean point). **The ret_acf arc is closed: the user-visible headline
+CLOSE ret_acf is −0.17 (bounce-mid, in the real range); the residual flow/VWAP sub-component (~−0.18) is one
+noise-width outside a fuzzy band, on a measure the chart doesn't surface, and is not worth chasing further.**
+Handoff that produced this: `docs/ultraplan-prompt-desync-price-reads.md`.
 
 **Caveat (council Contrarian):** the two ret_acf instruments (r4 16-stock vs bounce_diag 50-stock) can disagree by
 ~0.2 on noisy/short arms — bake decisions need the 2h-window, both-instruments-agree standard the bounce-mid win
