@@ -19,25 +19,25 @@ public partial class BotDashboardViewModel : BaseViewModel, IDisposable
     #region Live status fields
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private int _loadedBots;
-    [ObservableProperty] private int _onlineBots;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BotCapDisplay))]
+    private int _onlineBots;
     [ObservableProperty] private long _tickCount;
     [ObservableProperty] private long _tradesPlaced;
     [ObservableProperty] private long _failures;
     [ObservableProperty] private string _lastTradeText = "—";
     [ObservableProperty] private string _uptimeText = "—";
     [ObservableProperty] private string _statusText = "Stopped";
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(BotCapDisplay))]
-    private int? _activeBotCap;
+    [ObservableProperty] private int? _activeBotCap;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(BotCapDisplay))]
     private int? _maxBotCap;
 
-    // Locale-aware thousand-separated "active / max". The MultiBinding in
-    // XAML would have to wrap N0 around an int? that may be null; cleaner
-    // to format both halves here once.
+    // "online / max" — the ACTUAL online bot count (matches the activity chart's active
+    // series) over the configured cap. Previously showed ActiveBotCap (the scaler's
+    // throttle target), which reads 20000/20000 even while far fewer bots are trading.
     public string BotCapDisplay =>
-        $"{(ActiveBotCap is { } a ? a.ToString("N0") : "—")} / {(MaxBotCap is { } m ? m.ToString("N0") : "∞")}";
+        $"{OnlineBots:N0} / {(MaxBotCap is { } m ? m.ToString("N0") : "∞")}";
     [ObservableProperty] private string _maxBotCapText = string.Empty;
     [ObservableProperty] private int _minBotCap;
     [ObservableProperty] private string _minBotCapText = string.Empty;

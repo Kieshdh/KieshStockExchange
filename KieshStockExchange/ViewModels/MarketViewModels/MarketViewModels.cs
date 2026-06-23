@@ -86,7 +86,10 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     private IDispatcherTimer? _pollTimer;
     private bool _disposed;
 
-    public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(5);
+    // 1s matches the order-book refresh tempo; the push-driven OnQuoteUpdated still
+    // sweeps in sub-second when quotes arrive — this is the fallback floor so rows
+    // for non-actively-traded stocks don't sit stale for 5s.
+    public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(1);
 
     public MarketViewModel(
         ILogger<MarketViewModel> logger,
@@ -112,6 +115,7 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
 
         _filterCurrency = _session.BaseCurrency;
         _watchlist.Changed += OnWatchlistChanged;
+        SyncTrendingFilter();
     }
 
     // Cold-start used to show an empty grid until the 5s timer ticked. By
@@ -308,13 +312,24 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
     partial void OnFilterCurrencyChanged(CurrencyType value)
     {
         ResetRowMap();
+        SyncTrendingFilter();
         _ = RefreshAsync();
     }
 
     partial void OnShowWatchlistOnlyChanged(bool value)
     {
         ResetRowMap();
+        SyncTrendingFilter();
         _ = RefreshAsync();
+    }
+
+    // Scope the Top Gainers/Losers/Most-Active panel to the active tab — a specific
+    // currency (USD/EUR) or the watchlist. Without this the movers are global and show
+    // the same stock once per currency listing (the duplicate-META symptom).
+    private void SyncTrendingFilter()
+    {
+        Trending.Currency = FilterCurrency;
+        Trending.WatchlistFilter = ShowWatchlistOnly ? _watchlist.GetStockIds().ToHashSet() : null;
     }
 
     private void OnWatchlistChanged(object? sender, EventArgs e)
@@ -332,6 +347,8 @@ public partial class MarketViewModel : BaseViewModel, IDisposable
 
             if (ShowWatchlistOnly)
             {
+                SyncTrendingFilter();
+                _ = Trending.RecomputeMoversAsync();
                 Poll();
                 ApplyFilter();
                 RebuildPagedStocks();

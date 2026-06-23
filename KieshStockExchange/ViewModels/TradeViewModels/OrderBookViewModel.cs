@@ -320,7 +320,7 @@ public partial class OrderBookViewModel : StockAwareViewModel
             bool isBest = i == bestVisible;
 
             if (i < target.Count)
-                target[i].Update(level.Price, level.Quantity, cumulatives[srcIdx], depthRatio, isBest);
+                target[i].Update(level.Price, level.Quantity, cumulatives[srcIdx], depthRatio, isBest, currency);
             else
                 target.Add(new LevelRow(level.Price, level.Quantity, cumulatives[srcIdx],
                                         depthRatio, isBest, currency, side));
@@ -435,13 +435,14 @@ public partial class LevelRow : ObservableObject
     }
 
     public void Update(decimal price, int quantity, int cumulative,
-                       double depthRatio, bool isBestLevel)
+                       double depthRatio, bool isBestLevel, CurrencyType currency)
     {
         Quantity = quantity;
         CumQuantity = cumulative;
         Price = price;
         DepthRatio = depthRatio;
         IsBestLevel = isBestLevel;
+        Currency = currency;   // rows persist across stock switches — refresh currency so a EUR book never renders $.
         OnPropertyChanged(nameof(PriceDisplay));
     }
 

@@ -48,6 +48,11 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
 
     public CurrencyType Currency { get; set; } = CurrencyType.USD;
 
+    // Active-tab filter for the movers panel: when non-null, restrict to these stock ids
+    // (the watchlist tab, which can span currencies); when null, restrict to Currency.
+    // Set by the Market VM on tab change; read on the recompute thread (reference-atomic).
+    public ISet<int>? WatchlistFilter { get; set; }
+
     public TrendingService(IDispatcher dispatcher, ILogger<TrendingService> logger,
         IDataBaseService db, IMarketDataService market)
     {
@@ -85,7 +90,14 @@ public sealed partial class TrendingService : ObservableObject, ITrendingService
         // thread; capturing live references in the dispatch lambda would
         // produce wrong-thread PropertyChanged propagation through MoverRow's
         // setters once the UI thread reads them. Records are by-value frozen.
-        var snap = _market.Quotes.Values.ToList();
+        // Scope to the active tab (watchlist ids, else the selected currency) and dedupe to
+        // one listing per stock — a stock listed in both USD and EUR otherwise appears twice.
+        var watch = WatchlistFilter;
+        var snap = _market.Quotes.Values
+            .Where(q => watch != null ? watch.Contains(q.StockId) : q.Currency == Currency)
+            .GroupBy(q => q.StockId)
+            .Select(g => g.OrderBy(q => q.Currency).First())
+            .ToList();
 
         var gainers = snap.Where(q => q.Open > 0m && q.ChangePct > 0m)
             .OrderByDescending(q => q.ChangePct).Take(MaxMovers)
