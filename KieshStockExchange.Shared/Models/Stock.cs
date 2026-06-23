@@ -30,6 +30,16 @@ public class Stock : IValidatable
         set => _companyName = value?.Trim() ?? string.Empty;
     }
 
+    // Total shares issued for this company (currency-agnostic — one pool across all currency listings).
+    // Set at seed time; the conservation invariant is Σ(Position.Quantity over all holders) == SharesOutstanding.
+    // Used for marketcap (= price × SharesOutstanding).
+    private int _sharesOutstanding = 0;
+    public int SharesOutstanding
+    {
+        get => _sharesOutstanding;
+        set => _sharesOutstanding = value < 0 ? 0 : value;
+    }
+
     // Listing currency moved to StockListing (cross-listing support). Callers
     // that still need "the currency" of a stock go through IStockService
     // (TryGetCurrency returns the primary listing).
