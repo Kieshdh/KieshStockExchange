@@ -36,8 +36,10 @@ Single source of truth for "what's done vs what's left," compiled from a full sw
    already approved; the biggest unrealized perf win.
 3. **EUR seed-bot rebalancing → `/Tools` task** — `GenerateAIUsers.py` currency/watchlist rebalance + reseed (fixes thin
    EUR books cheaply vs structural sharding).
-4. **UI tests #131–140 (WAVE10 sections F–J)** — admin dashboard, notifications, adversarial battery, connection
-   resilience, baseline sign-off + clean-run item 44. **← your manual desktop pass (in progress).**
+4. **UI tests #131–140 (WAVE10) — full A–J clean run** (NOT just F–J). Testing was paused mid-stream after 3 defects
+   were found in the A–E range and FIXED (`26bbd17`/`359e3f4`/`8c33fac`); the doc's resume plan is a clean re-run from
+   section A, and all of #131–140 are still `pending`. Item 44 = one full clean pass, zero debug noise. **← your manual
+   desktop pass.** (A–E should come up clean now that the 3 fixes are in the build.)
 
 ---
 
