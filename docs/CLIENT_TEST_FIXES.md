@@ -31,11 +31,18 @@ preserve model invariants + conservation (CK=0); multi-table writes via `RunInTr
 | **I8** | Bot dashboard | Always starts "20000/20000" though the chart shows fewer bots trading. | Count shows the configured max, not the live scaler `ActiveBotCap` (ramps up over ~1min). | VM — bind to live active count + true total. | researching (agent C) |
 
 ### B) Soak / measurement (separate from the UI round)
-- **S1 — Arbitrage effectiveness + FxRate stability.** Kiesh: arb traders not active enough; wants both-currency
-  prices ≈ FxRate; wants the **FxRate rate-of-change** shown so he can decide how much to damp it; open to
-  increasing arb trade size / portfolio for tighter parity. **Plan:** harvest the CURRENTLY-RUNNING RC soak
-  (`kse_rc`, ~19:45) for (a) per-stock cross-currency price parity vs FxRate, (b) FxRate RoC over time → present for
-  the tuning decision. Then tune arb size and/or FxRate damping. *(No separate soak needed for the measurement.)*
+- **S1 — Arbitrage effectiveness + FxRate stability — HARVESTED (RC soak `kse_rc`, 2h).**
+  - **FxRate (EUR/USD) swings too much** (the real issue): range 1.0545–1.0959 = 3.84% of base 1.08; std ~1.0%; max
+    ±2.37% from base; per-min |Δ| mean 0.248% / max 0.550%. Real EUR/USD moves ~0.25%/DAY → this is ~50–100× too hot.
+  - **Cross-currency PARITY is actually GOOD** (arb IS effective): EUR/USD price ratio across 20 dual-listed stocks
+    = 0.9345 ± 0.74%, vs ideal 1/FxRate = 0.9285 → only ~0.6% systematic offset (≈ the 0.1%-each-way ConvertSpread).
+    FX desk actively converting + capturing spread. So Kiesh's "arb not active enough" doesn't hold — parity is tight;
+    the *FxRate jumping* is what makes prices look unaligned. **No arb-size change needed.**
+  - **Knob:** `FxRateService.cs` AR(1) walker (mirror `Tools/Config.py` FX_*): `Amplitude=0.005` (per-step noise = the
+    volatility), `Alpha=0.92` (mean-rev), `RateBand=0.20` (clamp ±20%, too loose). **Recommend Amplitude→0.0015 (~3×
+    damp) + RateBand→0.05**; config + server-restart, NO reseed. AWAITING Kiesh's chosen damping number (Q3).
+  - **Bounce-mid DEPLOY BASELINE (bonus from this soak):** CLOSE ret_acf −0.41 / mid −0.20, clustering 0.15, drift
+    −1.39%/2h (in budget), CK=0/CONS=0 throughout, 781k trades. The pre-deploy reference for the prod cutover.
 
 ### C) Tools / seed (attended — explicitly authorized by Kiesh)
 - **T1 — 20,000 bots TOTAL (not 20k + arb + house + MM on top).** Cohorts (arb, house, MM) should be a SLICE of the
