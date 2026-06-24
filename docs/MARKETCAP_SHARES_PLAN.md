@@ -17,10 +17,15 @@ runtime-verify (the client marketcap column). Best executed in one pass, ideally
   same StockId → same share pool.
 - `Stock` has no shares field today. House (seed) starts with **0 shares**. Arbitrage cohort starts with **0 shares**.
 - `ConservationProbe` already asserts per-batch net share delta = 0 per stock (no creation/destruction in trading).
-- ⚠️ **House/arb ids are computed from `NUM_PEOPLE`** (`house_id = NUM_PEOPLE + HOUSE_USER_ID_OFFSET` = 20002 today)
-  and referenced in **5 server files** (AiTradeService, AiBotStateService, BotEconomyTelemetry, UserPortfolioService,
-  FxDeskTelemetry). Changing `NUM_PEOPLE` 20000→19995 shifts house→19997 + arb→19998..20002. **Verify those 5 refs
-  read the id from config (offset), not a hard-coded 20002, before reseeding** — else they break.
+- ✅ **id-shift VERIFIED SAFE (Explore audit 2026-06-24) — collapses to ONE mandatory config line, NO code changes.**
+  `NUM_PEOPLE` 20000→19995 shifts house 20002→**19997** and arb [20003..20007]→**[19998..20002]**. Server resolves the
+  house id from config (`Platform:HouseUserId` — AiTradeService:286, UserPortfolioService:45, passed into
+  BotEconomyTelemetry) and identifies arb bots by the **`AiStrategy.Arbitrage` enum, not an id range** (AiBotStateService
+  + FxDeskTelemetry never touch the house id). So no C# changes. **MANDATORY paired edit:**
+  `KieshStockExchange.Server/appsettings.json` `Platform:HouseUserId` 20002→**19997**, applied *atomically with the
+  reseed* — ⚠️ after the shift id 20002 is an ARB BOT, so a missed update points house-logic (FX desk / remainder) at a
+  trading bot. (Literals `20001` DebugUserId / `20000` MaxBotCap-default / BotEconomyTelemetry `20002` param-default are
+  all debug-only or config-overridden — safe.) Client `Resources/Raw/appsettings.json` has no HouseUserId key.
 
 ## Build steps
 ### 1. Server model (additive, safe)
@@ -33,6 +38,8 @@ runtime-verify (the client marketcap column). Best executed in one pass, ideally
 
 ### 2. `/Tools` seed-gen
 - `GenerateAIUsers.py`: `NUM_PEOPLE = 19995` (→ 19,995 normal + 5 arb = 20,000 bots; house separate).
+- ⚠️ **PAIRED (mandatory, the ONLY server edit):** `KieshStockExchange.Server/appsettings.json` `Platform:HouseUserId`
+  20002→**19997** — change atomically with the reseed (else house-logic targets arb bot 20002). Verified 2026-06-24.
 - After all bot+arb holdings are generated, per stock: `bot_total = Σ holdings`; pick a **round target ≥ bot_total**
   (e.g. round up to a clean 100k/1M); `SharesOutstanding[sid] = round_target`; **house holding[sid] = round_target −
   bot_total** (house absorbs the remainder → Σ all holdings == SharesOutstanding exactly).
