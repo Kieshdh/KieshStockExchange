@@ -354,7 +354,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // §exogenous-information: anchor target tracks the news shock when validated-safe.
                         exogShock:        exogAnchorTracks ? (Func<int, double>)_news.GetShock : null,
                         anyShockActive:   exogAnchorTracks ? (Func<bool>)(() => _news.AnyActive) : null,
-                        shockCap:         (decimal)exogCap);
+                        shockCap:         (decimal)exogCap,
+                        // §co-movement: a SHARED market-factor shift composed onto each stock's anchor target
+                        // (read-time) so all fundamentals co-move ⇒ the value-anchor pulls stocks together
+                        // (cross-stock correlation). Lazily reads _sentiment (assigned just below) ⇒ null-safe;
+                        // returns 0 when CoMovement is disabled ⇒ byte-identical.
+                        coMoveShift:      sid => _sentiment?.CoMoveShift(sid) ?? 0.0,
+                        coMoveShiftCap:   _configuration.GetValue("Bots:Sentiment:CoMovement:ShiftCap", 0.08m));
         // Sentiment-dynamics §: the master flag gates BOTH the EWMA slope (here) and the directional phase
         // model (in AiBotDecisionService). Off ⇒ no slope compute and byte-identical decisions.
         var sentimentDynamics = _configuration.GetValue("Bots:SentimentDynamics:Enabled", false);

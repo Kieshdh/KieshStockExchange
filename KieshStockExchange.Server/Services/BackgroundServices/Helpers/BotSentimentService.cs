@@ -328,11 +328,6 @@ internal sealed class BotSentimentService
                 sum += _regimeStrength * rg;
             }
 
-            // §co-movement: add the SHARED market factor scaled by this stock's beta, so every stock
-            // co-moves (positive cross-stock correlation, the gap). Off ⇒ no term ⇒ byte-identical.
-            if (_coMoveEnabled && _coMoveStrength > 0.0)
-                sum += _coMoveStrength * BetaOf(sid) * _coMoveFactor;
-
             _combined[sid] = (decimal)sum;
 
             // Sentiment-dynamics §: two-timescale EWMA of the slope (sign = trend direction, magnitude =
@@ -390,6 +385,13 @@ internal sealed class BotSentimentService
     // runtime-only (a reseed isn't required to change the dispersion). spread 0 ⇒ exactly 1.0 for every stock.
     internal static double CoMoveBeta(int stockId, double betaSpread)
         => Math.Max(0.05, 1.0 + betaSpread * (2.0 * BotMath.HashUnit01(stockId) - 1.0));
+
+    // §co-movement: the shared market-factor FRACTIONAL shift for a stock = Strength × beta × factor.
+    // Consumed by FundamentalService to co-move the per-stock ANCHOR TARGETS together (the channel the
+    // value-anchor SUPPORTS — a market-wide repricing — vs the sentiment tilt it DAMPS). 0 when disabled
+    // ⇒ FundamentalService's composition is byte-identical off. (The bounded walk + beta still live here.)
+    internal double CoMoveShift(int stockId)
+        => _coMoveEnabled ? _coMoveStrength * BetaOf(stockId) * _coMoveFactor : 0.0;
 
     // §price-reaction (#2): signed dead-band — zero within ±band, pass only the excess beyond it.
     internal static double Deadband(double x, double band)

@@ -41,6 +41,13 @@ internal sealed class FundamentalService
     private readonly decimal            _shockCap;
     private const double ShockFloorEpsilon = 1e-6; // near-rest decay dust ⇒ return legacy value (byte-identical)
 
+    // §co-movement: a SHARED market-factor fractional shift (Strength×beta×factor, supplied by
+    // BotSentimentService) composed onto the anchor TARGET at read time so all stocks' fundamentals move
+    // together → the value-anchor pulls them in lockstep → cross-stock co-movement. Read-time only (OU/RNG
+    // stream untouched). Null ⇒ no composition ⇒ byte-identical. _coMoveShiftCap = extra excursion headroom.
+    private readonly Func<int, double>? _coMoveShift;
+    private readonly decimal            _coMoveShiftCap;
+
     private readonly Dictionary<(int, CurrencyType), decimal> _seed = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _current = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _sigmaMult = new();
@@ -51,7 +58,8 @@ internal sealed class FundamentalService
     internal FundamentalService(IStockService stocks, StockProfileService profiles,
         ILogger<FundamentalService> logger, bool enabled = true, decimal band = 0.12m,
         double theta = 0.02, double sigma = 0.004, double driftIntervalSec = 60.0,
-        Func<int, double>? exogShock = null, Func<bool>? anyShockActive = null, decimal shockCap = 0m)
+        Func<int, double>? exogShock = null, Func<bool>? anyShockActive = null, decimal shockCap = 0m,
+        Func<int, double>? coMoveShift = null, decimal coMoveShiftCap = 0m)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -64,6 +72,8 @@ internal sealed class FundamentalService
         _exogShock = exogShock;
         _anyShockActive = anyShockActive;
         _shockCap = Math.Max(0m, shockCap);
+        _coMoveShift = coMoveShift;
+        _coMoveShiftCap = Math.Max(0m, coMoveShiftCap);
     }
 
     /// <summary>Seed every (stock,currency) fundamental at its listing seed price and arm the clock.</summary>
@@ -130,16 +140,27 @@ internal sealed class FundamentalService
         var key = (stockId, currency);
         if (_enabled && _current.TryGetValue(key, out var f))
         {
-            // No shock wired, or a global fast-path says none is live ⇒ legacy OU value.
-            if (_exogShock is null || (_anyShockActive is not null && !_anyShockActive())) return f;
-            double shock = _exogShock(stockId);
-            if (Math.Abs(shock) < ShockFloorEpsilon) return f; // near-rest ⇒ byte-identical to legacy
+            // Compose, at READ time only, the live news shock and/or the shared co-movement shift onto the
+            // OU value f (the OU walk + RNG stream stay untouched ⇒ identical on AND off). Each composition
+            // is skipped when its source is unwired/at-rest, so the all-off path returns f unchanged —
+            // byte-identical to the legacy engine.
+            decimal target = f;
+            if (_exogShock is not null && (_anyShockActive is null || _anyShockActive()))
+            {
+                double shock = _exogShock(stockId);
+                if (Math.Abs(shock) >= ShockFloorEpsilon) target *= (1m + (decimal)shock);
+            }
+            if (_coMoveShift is not null)
+            {
+                double cm = _coMoveShift(stockId);
+                if (cm != 0.0) target *= (1m + (decimal)cm);    // shared market-factor shift ⇒ stocks co-move
+            }
+            if (target == f) return f;                          // nothing composed ⇒ legacy OU value
             var seed = _seed[key];
-            var moved = f * (1m + (decimal)shock);             // decimal multiply (no decimal→double round-trip)
-            var span = _band + _shockCap;
+            var span = _band + _shockCap + _coMoveShiftCap;      // total allowed excursion from seed
             var lo = seed * (1m - span);
             var hi = seed * (1m + span);
-            return moved < lo ? lo : moved > hi ? hi : moved;
+            return target < lo ? lo : target > hi ? hi : target;
         }
         return _seed.TryGetValue(key, out var s) ? s : 0m;
     }
