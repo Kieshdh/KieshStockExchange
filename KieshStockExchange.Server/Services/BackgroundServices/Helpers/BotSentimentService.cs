@@ -135,6 +135,22 @@ internal sealed class BotSentimentService
     private readonly double _regimeStrength;
     private readonly Dictionary<int, double> _regime = new();
     private Random _regimeRng = new(RngSeed ^ 0x2A2A);
+
+    // §co-movement: a SHARED (single) bounded random walk — the "market factor" — that EVERY stock loads
+    // onto via a deterministic per-stock beta, so the cohort CO-MOVES (positive cross-stock return
+    // correlation, which is ~0 today = 50 independent universes). Sibling of RegimeDrift: same cubic
+    // soft-wall, but ONE walk shared across all stocks (not per-stock independent), scaled per stock by
+    // beta. Dedicated RNG drawn ONLY when enabled ⇒ off path byte-identical. Beta is a pure hash of
+    // stockId (no reseed) cached on first use, ~1.0 ± spread, clamped positive.
+    private readonly bool   _coMoveEnabled;
+    private readonly double _coMoveStepSigma;
+    private readonly double _coMoveCap;
+    private readonly double _coMoveSoftWallK;
+    private readonly double _coMoveStrength;
+    private readonly double _coMoveBetaSpread;
+    private double _coMoveFactor;
+    private Random _coMoveRng = new(RngSeed ^ 0x5C5C);
+    private readonly Dictionary<int, double> _coMoveBeta = new();
     #endregion
 
     #region Services and Constructor
@@ -158,6 +174,9 @@ internal sealed class BotSentimentService
         double slowRingDamp = 1.0,
         bool regimeEnabled = false, double regimeStepSigma = 0.03, double regimeCap = 0.5,
         double regimeSoftWallK = 0.1, double regimeStrength = 1.0,
+        // §co-movement: shared market-factor walk + per-stock beta dispersion. Default off ⇒ byte-identical.
+        bool coMoveEnabled = false, double coMoveStepSigma = 0.03, double coMoveCap = 0.4,
+        double coMoveSoftWallK = 0.1, double coMoveStrength = 0.5, double coMoveBetaSpread = 0.4,
         // §impact-decouple A: optional >1-min-decoupled return for the price-reaction term. Null ⇒ byte-identical.
         Func<int, double>? reactionReturn = null)
     {
@@ -195,6 +214,13 @@ internal sealed class BotSentimentService
         _regimeCap       = Math.Max(0.0, regimeCap);
         _regimeSoftWallK = Math.Max(0.0, regimeSoftWallK);
         _regimeStrength  = Math.Max(0.0, regimeStrength);
+
+        _coMoveEnabled    = coMoveEnabled;
+        _coMoveStepSigma  = Math.Max(0.0, coMoveStepSigma);
+        _coMoveCap        = Math.Max(0.0, coMoveCap);
+        _coMoveSoftWallK  = Math.Max(0.0, coMoveSoftWallK);
+        _coMoveStrength   = Math.Max(0.0, coMoveStrength);
+        _coMoveBetaSpread = Math.Max(0.0, coMoveBetaSpread);
 
         _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
@@ -245,6 +271,15 @@ internal sealed class BotSentimentService
             _globalSum += _global[k];
         }
 
+        // §co-movement: advance the single SHARED market-factor walk once per tick (per-stock loading
+        // applied in the combine loop below). Same cubic soft-wall as RegimeDrift; dedicated RNG, drawn
+        // ONLY when enabled ⇒ flag-off leaves the value AND every other RNG sequence untouched.
+        if (_coMoveEnabled && _coMoveCap > 0.0)
+        {
+            double cstep = (_coMoveRng.NextDouble() * 2.0 - 1.0) * Sqrt3 * _coMoveStepSigma * Math.Sqrt(dt);
+            _coMoveFactor = RegimeStep(_coMoveFactor, cstep, _coMoveCap, _coMoveSoftWallK);
+        }
+
         if (_newsEvents) StepShocks();
 
         // Per-stock rings + combined cache.
@@ -293,6 +328,11 @@ internal sealed class BotSentimentService
                 sum += _regimeStrength * rg;
             }
 
+            // §co-movement: add the SHARED market factor scaled by this stock's beta, so every stock
+            // co-moves (positive cross-stock correlation, the gap). Off ⇒ no term ⇒ byte-identical.
+            if (_coMoveEnabled && _coMoveStrength > 0.0)
+                sum += _coMoveStrength * BetaOf(sid) * _coMoveFactor;
+
             _combined[sid] = (decimal)sum;
 
             // Sentiment-dynamics §: two-timescale EWMA of the slope (sign = trend direction, magnitude =
@@ -333,6 +373,23 @@ internal sealed class BotSentimentService
     // Pure ⇒ unit-testable.
     internal static double RegimeStep(double prev, double step, double cap, double softWallK)
         => BotMath.SoftWallStep(prev, step, cap, softWallK); // shared cubic soft-wall (same math ⇒ byte-identical)
+
+    // §co-movement: deterministic per-stock loading (beta) on the shared market factor — a stable hash of
+    // stockId mapped to ~1.0 ± spread, clamped positive so co-movement stays positive with realistic beta
+    // dispersion (a few low-beta names, most near 1, a few high). Pure (no RNG, no reseed); cached on first use.
+    private double BetaOf(int stockId)
+    {
+        if (_coMoveBeta.TryGetValue(stockId, out var b)) return b;
+        b = CoMoveBeta(stockId, _coMoveBetaSpread);
+        _coMoveBeta[stockId] = b;
+        return b;
+    }
+
+    // §co-movement: pure beta computation (extracted for unit tests) — a stable stockId hash mapped to
+    // 1.0 ± spread and clamped positive. No RNG, no reseed ⇒ deterministic, call-order-independent, and
+    // runtime-only (a reseed isn't required to change the dispersion). spread 0 ⇒ exactly 1.0 for every stock.
+    internal static double CoMoveBeta(int stockId, double betaSpread)
+        => Math.Max(0.05, 1.0 + betaSpread * (2.0 * BotMath.HashUnit01(stockId) - 1.0));
 
     // §price-reaction (#2): signed dead-band — zero within ±band, pass only the excess beyond it.
     internal static double Deadband(double x, double band)
@@ -422,6 +479,7 @@ internal sealed class BotSentimentService
         tpl.Append("Sentiment @ {").Append(args.Count).Append('}');
         args.Add(now.ToLocalTime().ToString("HH:mm:ss"));
         tpl.Append(" Global="); Num((decimal)_globalSum);
+        if (_coMoveEnabled) { tpl.Append(" Mkt="); Num((decimal)_coMoveFactor); }
         tpl.Append(" |\n");
 
         int onThisLine = 0;
@@ -473,6 +531,9 @@ internal sealed class BotSentimentService
         _cumRetFast.Clear();
         _regime.Clear();
         _regimeRng = new Random(RngSeed ^ 0x2A2A);
+        _coMoveFactor = 0.0;
+        _coMoveRng = new Random(RngSeed ^ 0x5C5C);
+        _coMoveBeta.Clear();
         lock (_samples) _samples.Clear();
 
         _globalSum = 0.0;

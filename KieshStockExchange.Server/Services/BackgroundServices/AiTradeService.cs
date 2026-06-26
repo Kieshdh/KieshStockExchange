@@ -402,6 +402,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         regimeCap:               _configuration.GetValue("Bots:Sentiment:RegimeDrift:Cap", 0.5),
                         regimeSoftWallK:         _configuration.GetValue("Bots:Sentiment:RegimeDrift:SoftWallK", 0.1),
                         regimeStrength:          _configuration.GetValue("Bots:Sentiment:RegimeDrift:Strength", 1.0),
+                        // §co-movement: one SHARED market-factor walk + per-stock beta dispersion ⇒ cross-stock
+                        // co-movement (corr ~0 today). Default off ⇒ byte-identical. Sibling of RegimeDrift.
+                        coMoveEnabled:           _configuration.GetValue("Bots:Sentiment:CoMovement:Enabled", false),
+                        coMoveStepSigma:         _configuration.GetValue("Bots:Sentiment:CoMovement:StepSigma", 0.03),
+                        coMoveCap:               _configuration.GetValue("Bots:Sentiment:CoMovement:Cap", 0.4),
+                        coMoveSoftWallK:         _configuration.GetValue("Bots:Sentiment:CoMovement:SoftWallK", 0.1),
+                        coMoveStrength:          _configuration.GetValue("Bots:Sentiment:CoMovement:Strength", 0.5),
+                        coMoveBetaSpread:        _configuration.GetValue("Bots:Sentiment:CoMovement:BetaSpread", 0.4),
                         // §impact-decouple A: wire the >1-min-decoupled return ONLY when the flag is on; null ⇒
                         // the price-reaction term uses the legacy ~1s return ⇒ byte-identical.
                         reactionReturn:          _reactionRef ? ReactionReturnForSentiment : (Func<int, double>?)null);
