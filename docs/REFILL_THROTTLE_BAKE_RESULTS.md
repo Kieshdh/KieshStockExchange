@@ -34,14 +34,17 @@ drift artifact the lever's bounded design was meant to avoid.
   is *perceptual*. Judge realism by **eyeball + range-efficiency**, not ret_acf.
 - Sharp dissent (Outsider/First-Principles): every lever **adds liquidity or slows refill — none removes the wall**, and
   every aggressor **slices to avoid impact**. The one cheap untried test = a **non-slicing whale** (`Jumps:MaxSlices=1`).
-  Run as a config-only spike (in flight at writing).
+  **RESULT: also absorbed** (`kse_w_off` sliced vs `kse_w_on` non-slicing, 30m) — non-slicing realizes the same ~0.1%
+  and produces SMALLER excursions (+12.5% vs ~19%): a single order hits the 12% slippage cap while the book is deeper
+  than any one order; it only adds a sharp revert-y wick. Confirms the last untried mechanism class is absorbed too.
 
 ## The mechanism-class map (why the ceiling is structural)
 Every class of intervention at the bot-decision layer has now been tried or closely anticipated, and the fast-refilling
 book absorbs them all:
 | class | lever | result |
 |---|---|---|
-| push harder (take liquidity) | chaser, fat-tail jump | absorbed (jump 7%-target → ~0% realized) |
+| push harder, sliced | chaser, fat-tail jump (6-50 slices) | absorbed (jump 7%-target → ~0% realized) |
+| push harder, non-slicing | whale (`MaxSlices=1`) | absorbed (slippage-capped; book deeper than one order; smaller moves) |
 | add resting liquidity | market-maker cohort | inert / choked engine at scale |
 | correlate across stocks | shared market factor | null (6 soaks, structurally unreachable) |
 | loosen the price cap | adaptive anchor | null (cap was never the binding constraint) |
