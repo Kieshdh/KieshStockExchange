@@ -28,6 +28,8 @@ internal sealed class BotPriceMemoryService
     // the EWMA or the day-window accumulator.
     private const double MinDtSec = 0.05;
     private const double MaxDtSec = 60.0;
+    // §adaptive liveliness-log cadence (~ the soak sampler's 10-min interval). RNG-free.
+    private const double AnchorLogIntervalSec = 600.0;
 
     private readonly IStockService _stocks;
     private readonly ILogger<BotPriceMemoryService> _logger;
@@ -39,11 +41,19 @@ internal sealed class BotPriceMemoryService
     private readonly DayBoundaryMode _boundary;
     private readonly decimal _maxDailyDrift;
     private readonly int     _windowDays;
+    // §adaptive (path-dependent) anchor: a faster traded-price EWMA whose clamped value the overheat
+    // cap re-centers on, so a genuine move re-rates the level and sticks. Independent half-life from
+    // _recent so RecentAnchor's pull is untouched.
+    private readonly bool    _adaptiveEnabled;
+    private readonly double  _fastHalfLifeSec;
+    private readonly decimal _adaptiveBlendWeight;
+    private readonly decimal _maxTotalExcursion;
 
     // Per-(stock,currency) state. Plain Dictionary<> — single loop-thread mutator, same pattern
     // as FundamentalService._current / BotSentimentService._combined.
     private readonly Dictionary<(int, CurrencyType), decimal> _seed = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _recent = new();
+    private readonly Dictionary<(int, CurrencyType), decimal> _fast = new(); // §adaptive fast EWMA
     private readonly Dictionary<(int, CurrencyType), decimal> _daySumPriceDt = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _daySumDt = new();
     // §weighted-week: rolling history of the last WindowDays daily TWAPs. Queue head = oldest,
@@ -54,6 +64,7 @@ internal sealed class BotPriceMemoryService
     private bool _havePrev;
     private DateTime _lastTickUtc = DateTime.MaxValue; // MaxValue = inert until Reset
     private DateTime _windowStartUtc = DateTime.MaxValue;
+    private DateTime _lastAnchorLogUtc = DateTime.MinValue; // §adaptive liveliness-log throttle
 
     internal BotPriceMemoryService(IStockService stocks, ILogger<BotPriceMemoryService> logger,
         Func<(int, CurrencyType), decimal> priceLookup,
@@ -61,7 +72,11 @@ internal sealed class BotPriceMemoryService
         double halfLifeSec = 1800.0, double dayLengthHours = 24.0,
         DayBoundaryMode boundary = DayBoundaryMode.ServiceStart,
         decimal maxDailyDrift = 0.50m,
-        int windowDays = 1)
+        int windowDays = 1,
+        bool adaptiveEnabled = false,
+        double fastHalfLifeSec = 900.0,
+        decimal adaptiveBlendWeight = 0.5m,
+        decimal maxTotalExcursion = 0.35m)
     {
         _stocks      = stocks      ?? throw new ArgumentNullException(nameof(stocks));
         _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
@@ -75,6 +90,10 @@ internal sealed class BotPriceMemoryService
         _maxDailyDrift = Math.Clamp(maxDailyDrift, 0m, 0.99m);
         _boundary     = boundary;
         _windowDays   = Math.Max(1, windowDays);
+        _adaptiveEnabled     = adaptiveEnabled;
+        _fastHalfLifeSec     = Math.Max(MinDtSec, fastHalfLifeSec);
+        _adaptiveBlendWeight = Math.Clamp(adaptiveBlendWeight, 0m, 1m);
+        _maxTotalExcursion   = Math.Clamp(maxTotalExcursion, 0m, 0.99m);
     }
 
     /// <summary>
@@ -87,10 +106,12 @@ internal sealed class BotPriceMemoryService
     {
         _seed.Clear();
         _recent.Clear();
+        _fast.Clear();
         _daySumPriceDt.Clear();
         _daySumDt.Clear();
         _dayHistory.Clear();
         _havePrev = false;
+        _lastAnchorLogUtc = DateTime.MinValue;
 
         foreach (var sid in _stocks.ById.Keys)
         {
@@ -134,9 +155,26 @@ internal sealed class BotPriceMemoryService
             else
                 _recent[key] = price;
 
+            // §adaptive fast EWMA of the traded price — separate, shorter half-life than _recent.
+            // Same seed-fallback warmup. Only when adaptive is on (off ⇒ _fast stays empty).
+            if (_adaptiveEnabled)
+            {
+                if (_fast.TryGetValue(key, out var prevFast) && prevFast > 0m)
+                    _fast[key] = EwmaStep(prevFast, price, dt, _fastHalfLifeSec);
+                else
+                    _fast[key] = price;
+            }
+
             // Day-TWAP accumulator: ∑ price·dt and ∑ dt across the in-progress window.
             _daySumPriceDt[key] = (_daySumPriceDt.TryGetValue(key, out var s) ? s : 0m) + price * (decimal)dt;
             _daySumDt[key]      = (_daySumDt.TryGetValue(key, out var t) ? t : 0m) + (decimal)dt;
+        }
+
+        // §adaptive liveliness: periodic compact summary so a soak confirms the anchor tracks.
+        if (_adaptiveEnabled && (now - _lastAnchorLogUtc).TotalSeconds >= AnchorLogIntervalSec)
+        {
+            _lastAnchorLogUtc = now;
+            LogAdaptiveLiveliness();
         }
 
         // Day rotation check — at most one rotation per Tick. Missed days (loop paused) are
@@ -197,6 +235,59 @@ internal sealed class BotPriceMemoryService
         if (!_havePrev || !_dayHistory.TryGetValue(key, out var history) || history.Count == 0) return seed;
         var raw = WeightedAverage(history, _windowDays, seed);
         return ClampToBand(raw, seed, _maxDailyDrift);
+    }
+
+    /// <summary>True when the adaptive (path-dependent) anchor is active.</summary>
+    internal bool AdaptiveEnabled => _adaptiveEnabled;
+
+    /// <summary>Hard total-excursion-from-seed bound for the runaway guard (fraction).</summary>
+    internal decimal MaxTotalExcursion => _maxTotalExcursion;
+
+    /// <summary>
+    /// §adaptive anchor: the level the overheat cap re-centers on. Re-rates toward the fast
+    /// traded-price EWMA by BlendWeight while staying hard-clamped to seed × [1 ± MaxTotalExcursion],
+    /// so a real move re-rates the level yet can never walk away from the original seed. Returns the
+    /// seed exactly when adaptive is off or no fast observation exists (byte-identical fallback).
+    /// </summary>
+    internal decimal GetAdaptiveAnchor(int stockId, CurrencyType currency)
+    {
+        var key = (stockId, currency);
+        if (!_seed.TryGetValue(key, out var seed) || seed <= 0m) return 0m;
+        if (!_adaptiveEnabled || !_fast.TryGetValue(key, out var fast) || fast <= 0m) return seed;
+        return AdaptiveAnchorValue(seed, fast, _adaptiveBlendWeight, _maxTotalExcursion);
+    }
+
+    /// <summary>
+    /// §adaptive anchor math (pure, RNG-free → unit-testable, mirrors EwmaStep/WeightedAverage):
+    /// blend seed→clamp(fast, seed±MaxTotalExcursion) by <paramref name="blendWeight"/>. Weight 0 =
+    /// pure seed (today's CapFromSeed); 1 = fully track the clamped fast EWMA. The result is always
+    /// inside seed × [1 ± maxTotalExcursion] because both endpoints are.
+    /// </summary>
+    internal static decimal AdaptiveAnchorValue(decimal seed, decimal fast, decimal blendWeight, decimal maxTotalExcursion)
+    {
+        if (seed <= 0m) return 0m;
+        if (fast <= 0m) return seed;
+        var clampedFast = ClampToBand(fast, seed, maxTotalExcursion);
+        var w = Math.Clamp(blendWeight, 0m, 1m);
+        return seed + w * (clampedFast - seed);
+    }
+
+    // §adaptive liveliness: compact periodic summary so a soak can confirm the moving anchor is
+    // tracking price away from seed (and never escaping the band). Debug-level, RNG-free.
+    private void LogAdaptiveLiveliness()
+    {
+        int n = 0; decimal sumAbs = 0m, maxAbs = 0m;
+        foreach (var key in _seed.Keys)
+        {
+            if (!_seed.TryGetValue(key, out var seed) || seed <= 0m) continue;
+            var a = GetAdaptiveAnchor(key.Item1, key.Item2);
+            if (a <= 0m) continue;
+            var rel = Math.Abs(a / seed - 1m);
+            sumAbs += rel; if (rel > maxAbs) maxAbs = rel; n++;
+        }
+        if (n > 0)
+            _logger.LogDebug("AdaptiveAnchor liveliness: {N} stocks, mean |anchor/seed-1|={Mean:P2}, max={Max:P2}, band=±{Band:P0}.",
+                n, sumAbs / n, maxAbs, _maxTotalExcursion);
     }
 
     /// <summary>

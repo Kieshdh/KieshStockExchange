@@ -233,6 +233,11 @@ internal sealed class AiBotDecisionService
     // daily TWAP) so the hard ceiling never ratchets up with the anchor. Anchor PULL still uses
     // Fundamental() — only the hard veto changes target.
     private readonly bool    _capFromSeed;
+    // §adaptive anchor: when on, the overheat cap re-centers on the moving anchor
+    // (BotPriceMemoryService.GetAdaptiveAnchor) instead of the fixed seed, and a separate
+    // total-excursion-from-seed veto (_maxTotalExcursion) is the provably-binding runaway guard.
+    private readonly bool    _adaptiveAnchor;
+    private readonly decimal _maxTotalExcursion;
     // §patch 0001: per-tick memoization of pure-function reads (Fundamental, SeedPrice,
     // IsOverBand, GetMidPrice, watchlist aggregators, ComputeCommitted). When on, the per-tick
     // caches on AiBotContext are read on every call; cleared at the top of each tick by
@@ -320,6 +325,7 @@ internal sealed class AiBotDecisionService
         decimal recentAnchorStrength = 0.35m, decimal recentAnchorScale = 0.04m,
         bool multiplicativeDirectional = false, decimal diversityGain = 1.5m,
         bool capFromSeed = false,
+        bool adaptiveAnchor = false, decimal maxTotalExcursion = 0.35m,
         // §patch 0001: per-tick memoization (Fundamental/SeedPrice/IsOverBand/etc). Pure
         // function-result cache scoped to one bot-loop tick. Default on; off is byte-identical.
         bool memoizeTickValues = true,
@@ -452,6 +458,8 @@ internal sealed class AiBotDecisionService
         _multiplicativeDirectional = multiplicativeDirectional;
         _diversityGain             = Math.Max(0m, diversityGain);
         _capFromSeed               = capFromSeed;
+        _adaptiveAnchor            = adaptiveAnchor;
+        _maxTotalExcursion         = Math.Clamp(maxTotalExcursion, 0m, 0.99m);
         _memoizeTickValues         = memoizeTickValues;
         _bracketFlip               = bracketFlip;
         _inventoryBias             = inventoryBias;
@@ -1721,7 +1729,12 @@ internal sealed class AiBotDecisionService
         // a daily anchor that drifts up re-centers the cap window each rotation, producing a
         // multi-day compounding ratchet. Anchor PULL (in MakeBuyDecisionAsync) still uses
         // Fundamental() so it tracks the recent regime — only the hard ceiling is anchored to seed.
-        var anchor = _capFromSeed ? SeedPrice(stockId, currency, ctx) : Fundamental(stockId, currency, ctx);
+        // §adaptive: re-center the cap on the moving anchor (clamped to the seed band) so a genuine
+        // move re-rates the level and sticks, instead of snapping back to the fixed seed. Off ⇒ the
+        // legacy seed/Fundamental source, byte-identical.
+        var anchor = _adaptiveAnchor ? _priceMemory.GetAdaptiveAnchor(stockId, currency)
+                   : _capFromSeed     ? SeedPrice(stockId, currency, ctx)
+                                      : Fundamental(stockId, currency, ctx);
         if (anchor <= 0m) { if (_memoizeTickValues) cache[(stockId, currency)] = false; return false; }
 
         // §patch 0002: read the price from ctx.StockPrices directly (sync hit-path). On miss, the next
@@ -1738,6 +1751,18 @@ internal sealed class AiBotDecisionService
         if (_absoluteCapMax > 0m && cap > _absoluteCapMax) cap = _absoluteCapMax;
         var dev = (mkt - anchor) / anchor;
         var result = isBuy ? dev > cap : dev < -cap;
+        // §adaptive runaway guard: the moving anchor can re-rate intraday, but the TOTAL excursion
+        // from the original seed is hard-bounded — a provably-binding veto so the market can't walk
+        // to infinity even as the cap window follows price. Independent of the re-centered cap above.
+        if (!result && _adaptiveAnchor)
+        {
+            var seed = SeedPrice(stockId, currency, ctx);
+            if (seed > 0m)
+            {
+                var seedDev = (mkt - seed) / seed;
+                result = isBuy ? seedDev > _maxTotalExcursion : seedDev < -_maxTotalExcursion;
+            }
+        }
         if (_memoizeTickValues) cache[(stockId, currency)] = result;
         return result;
     }

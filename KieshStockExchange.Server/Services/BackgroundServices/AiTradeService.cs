@@ -372,16 +372,21 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // Tick short-circuits at the top and the service is observationally inert.
         var useDailyAnchor          = _configuration.GetValue("Bots:ValueAnchor:UsePreviousDayAverage", false);
         var recentAnchorEnabled     = _configuration.GetValue("Bots:RecentAnchor:Enabled", false);
+        var adaptiveAnchorEnabled   = _configuration.GetValue("Bots:ValueAnchor:Adaptive:Enabled", false);
         var multiplicativeDirection = _configuration.GetValue("Bots:DirectionalPressure:Multiplicative", false);
         _priceMemory = new BotPriceMemoryService(stocks,
                         new SeparatorLogger<BotPriceMemoryService>(loggerFactory, loggerOptions),
                         priceLookup:    key => _ctx.SmoothedPrices.TryGetValue(key, out var p) ? p : 0m,
-                        anyConsumer:    useDailyAnchor || recentAnchorEnabled,
+                        anyConsumer:    useDailyAnchor || recentAnchorEnabled || adaptiveAnchorEnabled,
                         halfLifeSec:    _configuration.GetValue("Bots:RecentAnchor:HalfLifeSec", 1800.0),
                         dayLengthHours: _configuration.GetValue("Bots:ValueAnchor:DayLengthHours", 24.0),
                         boundary:       ParseDayBoundary(_configuration.GetValue("Bots:ValueAnchor:DayBoundaryMode", "ServiceStart")),
                         maxDailyDrift:  _configuration.GetValue("Bots:ValueAnchor:MaxDailyDrift", 0.50m),
-                        windowDays:     _configuration.GetValue("Bots:ValueAnchor:WindowDays", 1));
+                        windowDays:     _configuration.GetValue("Bots:ValueAnchor:WindowDays", 1),
+                        adaptiveEnabled:     adaptiveAnchorEnabled,
+                        fastHalfLifeSec:     _configuration.GetValue("Bots:ValueAnchor:Adaptive:FastHalfLifeSec", 900.0),
+                        adaptiveBlendWeight: _configuration.GetValue("Bots:ValueAnchor:Adaptive:BlendWeight", 0.5m),
+                        maxTotalExcursion:   _configuration.GetValue("Bots:ValueAnchor:Adaptive:MaxTotalExcursion", 0.35m));
         _sentiment = new BotSentimentService(stocks, _profiles, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
                         newsEvents:              _configuration.GetValue("Bots:NewsEvents", true),
                         shockMeanIntervalHours:  _configuration.GetValue("Bots:ShockMeanIntervalHours", 6.0),
@@ -584,6 +589,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         diversityGain:             _configuration.GetValue("Bots:DirectionalPressure:DiversityGain", 1.5m),
                         // §cap-from-seed: hard veto measures vs seed instead of Fundamental() when on.
                         capFromSeed:               _configuration.GetValue("Bots:ValueAnchor:CapFromSeed", false),
+                        // §adaptive (path-dependent) anchor: cap re-centers on the moving anchor; a
+                        // separate total-excursion-from-seed veto is the runaway guard. Default off.
+                        adaptiveAnchor:            adaptiveAnchorEnabled,
+                        maxTotalExcursion:         _configuration.GetValue("Bots:ValueAnchor:Adaptive:MaxTotalExcursion", 0.35m),
                         // Round 2 §0007 (Path 2): bracket-flip eligibility. R3 §0006 retired the
                         // intermediate Path-1 `bracketRoundTrip` flag (legacy-config warning below).
                         bracketFlip:               _configuration.GetValue("Bots:Advanced:BracketFlip", false),
