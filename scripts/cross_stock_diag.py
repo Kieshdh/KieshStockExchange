@@ -112,6 +112,59 @@ def corr_and_loadings(ret):
     return corrs, loadings
 
 
+def load_ohlcv(path):
+    """Full OHLCV rows per stock, for range-efficiency (bodies vs wicks) + volume concentration."""
+    with open(path, newline="", encoding="utf-8") as fh:
+        lines = [ln for ln in fh if not ln.lstrip().startswith("#")]
+    rdr = csv.DictReader(lines)
+    cols = {c.lower(): c for c in (rdr.fieldnames or [])}
+    def pick(*names):
+        for n in names:
+            if n in cols:
+                return cols[n]
+        return None
+    cs = pick("stockid", "stock_id", "sid")
+    co, ch, cl, cc = pick("open"), pick("high"), pick("low"), pick("close")
+    cv = pick("volume", "vol")
+    rows = []
+    if not (cs and co and ch and cl and cc):
+        return rows
+    for r in rdr:
+        try:
+            rows.append((str(r[cs]).strip(), float(r[co]), float(r[ch]), float(r[cl]),
+                         float(r[cc]), float(r[cv]) if cv else 0.0))
+        except (ValueError, KeyError, TypeError):
+            continue
+    return rows
+
+
+def body_volume_report(path):
+    rows = load_ohlcv(path)
+    if not rows:
+        return
+    effs, vol_by_stock = [], {}
+    for sid, o, h, l, c, v in rows:
+        if h > l:
+            effs.append(abs(c - o) / (h - l))
+        vol_by_stock[sid] = vol_by_stock.get(sid, 0.0) + v
+    if effs:
+        print("RANGE-EFFICIENCY |close-open|/(high-low) (bodies vs wicks; higher = stickier, less wick):")
+        print("  mean=%.3f  median=%.3f   (real equity ~0.3-0.5; ~0.1-0.2 = wick-dominated)"
+              % (statistics.mean(effs), statistics.median(effs)))
+    vols = sorted((v for v in vol_by_stock.values()), reverse=True)
+    tot = sum(vols)
+    if tot > 0 and len(vols) >= 5:
+        n = len(vols)
+        top5 = sum(vols[:5]) / tot
+        mean_v = tot / n
+        stale = sum(1 for v in vols if v < 0.05 * mean_v)
+        asc = sorted(vols)
+        gini = sum((2 * (i + 1) - n - 1) * x for i, x in enumerate(asc)) / (n * tot)
+        print("VOLUME CONCENTRATION (variable volume on movers; cure staleness):")
+        print("  stocks=%d  top5-share=%.2f  gini=%.3f  stale(<5%%-of-mean)=%d   (higher gini/top5 = more concentrated)"
+              % (n, top5, gini, stale))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", required=True)
@@ -153,6 +206,8 @@ def main():
         kurts.sort()
         print("EXCESS KURTOSIS 1-min returns (real ~+3..+8; 0=Gaussian): mean=%+.2f median=%+.2f p90=%+.2f"
               % (statistics.mean(kurts), statistics.median(kurts), kurts[len(kurts)*9//10]))
+
+    body_volume_report(args.csv)
 
 
 if __name__ == "__main__":
