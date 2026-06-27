@@ -197,6 +197,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly bool                 _arbitrageEnabled; // §3.7 Bots:Arbitrage:Enabled kill-switch
     private readonly MarketMakerDecisionService _marketMaker; // §mm-cohort all-weather two-sided maker (OUT of normal path)
     private readonly bool                 _marketMakerEnabled; // §mm-cohort Bots:MarketMaker:Enabled master gate (default off)
+    private readonly JumpService          _jump;               // §fat-tail jumps rare realized price-jump lever (OUT of normal path)
+    private readonly bool                 _jumpEnabled;        // §fat-tail jumps Bots:Jumps:Enabled master gate (default off)
+    private readonly int                  _jumpAggressorUserId; // §fat-tail jumps dedicated house aggressor account (warm-loaded)
     private readonly FxDeskTelemetry      _fxDesk;        // §3.7 session conversion data (reset on Start)
     private readonly int                  _houseUserId;   // §3.7 platform FX-desk account (warm-loaded)
     #endregion
@@ -472,6 +475,27 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             UseMicro:            _configuration.GetValue("Bots:MarketMaker:UseMicro", false));
         _marketMaker = new MarketMakerDecisionService(entry, books, accounts, stocks,
                         new SeparatorLogger<MarketMakerDecisionService>(loggerFactory, loggerOptions), mmCfg);
+        // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
+        // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
+        // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/
+        // anchor/veto/injection flow (like the MM/arbitrage cohorts). Default OFF ⇒ no RNG drawn, byte-identical.
+        _jumpEnabled         = _configuration.GetValue("Bots:Jumps:Enabled", false);
+        JumpsProbe.Configure(_configuration.GetValue("Bots:Jumps:Probe", false));
+        _jumpAggressorUserId = _configuration.GetValue("Bots:Jumps:AggressorUserId", 20100);
+        var jumpSource = new RandomJumpSource(stocks,
+                        meanIntervalHours: _configuration.GetValue("Bots:Jumps:MeanIntervalHours", 2.0),
+                        minPct:            _configuration.GetValue("Bots:Jumps:MinPct", 0.02),
+                        maxPct:            _configuration.GetValue("Bots:Jumps:MaxPct", 0.05),
+                        magnitudeExponent: _configuration.GetValue("Bots:Jumps:MagnitudeExponent", 1.5));
+        _jump = new JumpService(entry, books, accounts, stocks,
+                        new SeparatorLogger<JumpService>(loggerFactory, loggerOptions), jumpSource,
+                        enabled:           _jumpEnabled,
+                        aggressorUserId:   _jumpAggressorUserId,
+                        maxSlices:         _configuration.GetValue("Bots:Jumps:MaxSlices", 6),
+                        slippagePct:       _configuration.GetValue("Bots:Jumps:SlippagePct", 12.0m),
+                        aftershockBuckets: _configuration.GetValue("Bots:Jumps:AftershockBuckets", 4),
+                        aftershockDecay:   _configuration.GetValue("Bots:Jumps:AftershockDecay", 0.5),
+                        driftGuardPct:     _configuration.GetValue("Bots:Jumps:DriftGuardPct", 0.10));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
                         distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m),
@@ -826,6 +850,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _activity.Reset(TimeHelper.NowUtc());  // §Pillar B: open neutral (field ≡ baseline/1)
         _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
         _news.Reset(TimeHelper.NowUtc()); // §exogenous-information: clear shocks + reseed source (inert when off)
+        _jump.Reset(TimeHelper.NowUtc()); // §fat-tail jumps: clear aftershocks + reseed source (inert when off)
         _priceMemory.Reset(TimeHelper.NowUtc()); // re-seed EWMA + day window; inert until Tick if anyConsumer=false
         _fxDesk.Reset();  // §3.7: fresh per-session FX-desk conversion tallies
 
@@ -857,6 +882,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // §3.7 warm the platform house account too so convert-spread crediting and the value-drain
         // telemetry read its USD/EUR funds from the cache without a cold DB hit.
         botUserIds.Add(_houseUserId);
+        // §fat-tail jumps: warm the dedicated aggressor account too (not in the fleet, like the house) so its
+        // cash/inventory reads from the cache without a cold DB hit. Only when the lever is enabled.
+        if (_jumpEnabled && _jumpAggressorUserId > 0) botUserIds.Add(_jumpAggressorUserId);
         if (botUserIds.Count > 0)
             await _accounts.EnsureLoadedAsync(botUserIds, ct).ConfigureAwait(false);
 
@@ -896,6 +924,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 // engine, so ConservationProbe/ReservationAuditor cover them). Gated by Bots:MarketMaker:Enabled.
                 if (_marketMakerEnabled)
                     await _marketMaker.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
+
+                // §fat-tail jumps: rare realized price-jump pass, AFTER the MM pass (so it walks the freshest
+                // two-sided book) and outside the matcher's locked region (its marketable orders own their own
+                // gates and settle through the same engine, so ConservationProbe/ReservationAuditor cover them).
+                // Gated by Bots:Jumps:Enabled ⇒ a single bool check when off (byte-identical).
+                if (_jumpEnabled)
+                    await _jump.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
 
                 // Round 2 §0006c: drain the end-of-tick coordinator queue when
                 // Bots:Advanced:BatchCoordinator is on. No-op when off — the per-event On*Async
@@ -1657,6 +1692,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     "MM bidOrders={Bo} askOrders={Ao} bidShares={Bsh} askShares={Ash} " +
                     "bidNotional={Bn:0.00} askNotional={An:0.00} mmNetInventory={MmNet} netBotInventory={NetBot}",
                     bidOrders, askOrders, bidShares, askShares, bidNotional, askNotional, mmNet, netBot);
+            }
+            if (JumpsProbe.Enabled)
+            {
+                // §fat-tail jumps liveliness: fired>0 in the first ~1 min catches the inert-flag trap; meanPct
+                // confirms events reach target magnitude; net≈0 confirms the per-event-random sign stays drift-neutral.
+                var (fired, suppressed, meanPct, buyEv, sellEv, net, gross, aftershocks) = JumpsProbe.Drain();
+                _logger.LogInformation(
+                    "JUMP fired={F} suppressed={S} meanPct={M:0.000} buy={B} sell={Se} " +
+                    "net={N:0.00} gross={G:0.00} aftershocks={A}",
+                    fired, suppressed, meanPct, buyEv, sellEv, net, gross, aftershocks);
             }
             _nextSentimentLogTime = now + _sentimentLogInterval;
         }

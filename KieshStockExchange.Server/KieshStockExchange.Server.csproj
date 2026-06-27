@@ -41,6 +41,8 @@
        test project so the conservation-critical bracket-TP acceptance branch can be unit-tested. -->
   <ItemGroup>
     <InternalsVisibleTo Include="KieshStockExchange.Tests" />
+    <!-- Let Moq's DynamicProxy mock internal interfaces (e.g. IJumpSource) in tests. -->
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 
 </Project>

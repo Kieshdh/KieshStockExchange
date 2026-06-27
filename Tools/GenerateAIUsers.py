@@ -12,6 +12,9 @@ from Config import (
     ARBITRAGE_COHORT_SIZE, HOUSE_USER_ID_OFFSET,
     HOUSE_SEED_BALANCE_USD, HOUSE_SEED_BALANCE_EUR,
     MARKET_MAKER_COHORT_SIZE,
+    JUMP_AGGRESSOR_USER_ID_OFFSET,
+    JUMP_AGGRESSOR_SEED_BALANCE_USD, JUMP_AGGRESSOR_SEED_BALANCE_EUR,
+    JUMP_AGGRESSOR_SEED_SHARES,
 )
 from Person import Person, fake
 from ExcelLayout import *
@@ -137,6 +140,17 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
         sheets["Profile"].append(bot.ToProfileList())
     if MARKET_MAKER_COHORT_SIZE > 0:
         print(f"✅ Appended {MARKET_MAKER_COHORT_SIZE} market-maker bots (UserIds {mm_start}–{mm_start + MARKET_MAKER_COHORT_SIZE - 1}).")
+
+    # §fat-tail jumps: dedicated aggressor account — Identity + Holding (cash + per-stock share float),
+    # NO Profile (never a bot / never in the fleet). Reserved at NUM_PEOPLE + JUMP_AGGRESSOR_USER_ID_OFFSET
+    # (default 20100), appended LAST so it shifts NO existing UserId ⇒ byte-identical-off. JumpService reads
+    # its UserId from Bots:Jumps:AggressorUserId. Inert until Bots:Jumps:Enabled.
+    jump_id = num_people + JUMP_AGGRESSOR_USER_ID_OFFSET
+    sheets["Identity"].append([jump_id, "jumpdesk", "Jump Aggressor", "jumpdesk@kse.local", "1990-01-01", False])
+    sheets["Holding"].append([jump_id, JUMP_AGGRESSOR_SEED_BALANCE_USD]
+                             + [JUMP_AGGRESSOR_SEED_SHARES for _ in STOCKS]
+                             + [JUMP_AGGRESSOR_SEED_BALANCE_EUR])
+    print(f"✅ Appended jump aggressor account (UserId {jump_id}, username 'jumpdesk').")
 
 
     # Apply dark theme and autofit columns (skipped in fast mode — purely cosmetic, the slowest step).

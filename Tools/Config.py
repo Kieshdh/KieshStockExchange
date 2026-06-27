@@ -149,6 +149,19 @@ HOUSE_USER_ID_OFFSET      = 2                  # UserId = NUM_PEOPLE + 2 (admin 
 HOUSE_SEED_BALANCE_USD    = 50_000_000.0
 HOUSE_SEED_BALANCE_EUR    = 45_000_000.0
 
+# ─────────────────────── §fat-tail jumps: dedicated aggressor account ───────────────────────
+# A reserved, non-bot account (Identity + Holding, NO Profile ⇒ never in the fleet / never decides /
+# never cash-injected or pruned) that JumpService fires marketable orders from to realize rare price
+# JUMPS (server reads Bots:Jumps:AggressorUserId, default 20100). Reserved at a FIXED offset well above
+# the arbitrage/MM cohorts so it never collides regardless of cohort size, and appended LAST so it shifts
+# no existing UserId ⇒ byte-identical-off (the account is inert until Bots:Jumps:Enabled). Seeded large in
+# cash AND a per-stock share float so BOTH buy and sell jump legs are always fundable (the FX-desk house
+# 20002 holds zero shares, so it can't sell — hence this separate account).
+JUMP_AGGRESSOR_USER_ID_OFFSET = 100              # UserId = NUM_PEOPLE + 100 (default 20100)
+JUMP_AGGRESSOR_SEED_BALANCE_USD = 50_000_000.0
+JUMP_AGGRESSOR_SEED_BALANCE_EUR = 45_000_000.0
+JUMP_AGGRESSOR_SEED_SHARES      = 200_000         # per-stock share float (funds sell legs)
+
 # ─────────────────────────── Distribution tunables ───────────────────────────
 
 # Aggressiveness (_trade_properties): skew>1 biases towards conservative bots.
