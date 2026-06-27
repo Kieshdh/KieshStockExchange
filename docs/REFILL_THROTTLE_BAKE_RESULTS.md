@@ -68,6 +68,24 @@ already metrically realistic** (range-eff 0.44 in the real 0.3-0.5 band; clean h
 **Autonomous (unblocked):** per-currency sharding / config-level perf to protect the 20k cap (the user's hard constraint);
 this closeout; tooling.
 
+## Breaking the ceiling — core-engine options (YOUR decision; all violate "no core rewrite")
+The whole arc is now the "clear reason" a core change would need. If you want genuinely stickier moves beyond the
+metrically-real baseline, the only remaining paths are at the matching/book layer — ordered by risk:
+1. **Accept the ceiling + ship bounce-mid (RECOMMENDED).** The chart is already metrically realistic (range-eff 0.44,
+   clean held trends); the residual is strong 1-min mean-reversion, which is *partly* what real markets do. Lowest risk,
+   highest certainty, immediate user-visible win. Everything else is speculative + risks CK/perf/drift.
+2. **Per-stock liquidity-regime (refill-intensity) at the engine level** (Expansionist's "platform"): the book models a
+   per-stock replenishment intensity so some names run thin/volatile. Could unlock vol-clustering/fat-tails too. Medium
+   risk (new engine state, perf-tunable-to-validate-locally, must keep CK=0). Would need an ultraplan + prod soak.
+3. **Engine-level belief-revision cancel-the-wall** (Outsider): on a confirmed mover the engine cancels a fraction of
+   existing resting orders on the resisting side. Highest risk — it's the open-loop "remove the wall" the refill-throttle
+   was designed to avoid; the maximal-skip run already showed it produces an asymmetric-drift artifact, not a clean win.
+4. **Fewer, larger quoters** (less LLN averaging): structurally reduce independent quoters so size moves the book — but
+   this fights the 20k-bot goal directly. Not recommended.
+**My recommendation: (1).** The market is realistic by every metric; deploy the one clean win (bounce-mid) and treat the
+ret_acf residual as the documented structural floor. Pursue (2) only if you decide stickier-than-real is a hard product
+requirement worth an engine change.
+
 ## Tools shipped default-off this arc (all validated, all reusable)
 adaptive anchor (`57a898a`), refill-throttle (`4718725`/`ac48171`), fat-tail jump (`da89c29`/`52a7ec0`), cross-stock
 co-movement (`b92df6a`), perceived-price desync (`9b440d9`), chaser v1/v2, MM cohort, impact-decouple (`9d360e2`).
