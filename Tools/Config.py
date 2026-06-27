@@ -152,12 +152,14 @@ HOUSE_SEED_BALANCE_EUR    = 45_000_000.0
 # ─────────────────────── §fat-tail jumps: dedicated aggressor account ───────────────────────
 # A reserved, non-bot account (Identity + Holding, NO Profile ⇒ never in the fleet / never decides /
 # never cash-injected or pruned) that JumpService fires marketable orders from to realize rare price
-# JUMPS (server reads Bots:Jumps:AggressorUserId, default 20100). Reserved at a FIXED offset well above
-# the arbitrage/MM cohorts so it never collides regardless of cohort size, and appended LAST so it shifts
-# no existing UserId ⇒ byte-identical-off (the account is inert until Bots:Jumps:Enabled). Seeded large in
-# cash AND a per-stock share float so BOTH buy and sell jump legs are always fundable (the FX-desk house
-# 20002 holds zero shares, so it can't sell — hence this separate account).
-JUMP_AGGRESSOR_USER_ID_OFFSET = 100              # UserId = NUM_PEOPLE + 100 (default 20100)
+# JUMPS (server reads Bots:Jumps:AggressorUserId). Appended LAST so it shifts no existing UserId.
+# ⚠️ MUST be the NEXT SEQUENTIAL id after all cohorts: the DB seeder (PgDBService.CreateUser) AUTO-
+# INCREMENTS UserId (INSERT ... RETURNING), so a GAPPED id (e.g. NUM_PEOPLE+100) makes the DB-assigned id
+# differ from the User object's id ⇒ "UserId is immutable" seed CRASH. Computed from the cohort sizes so it
+# stays sequential as they change; the server's Bots:Jumps:AggressorUserId must equal NUM_PEOPLE + this.
+# Seeded large in cash AND a per-stock share float so BOTH buy and sell jump legs are fundable (the FX-desk
+# house 20002 holds zero shares, so it can't sell — hence this separate account).
+JUMP_AGGRESSOR_USER_ID_OFFSET = HOUSE_USER_ID_OFFSET + 1 + ARBITRAGE_COHORT_SIZE + MARKET_MAKER_COHORT_SIZE  # =8 ⇒ id NUM_PEOPLE+8 (20008)
 JUMP_AGGRESSOR_SEED_BALANCE_USD = 50_000_000.0
 JUMP_AGGRESSOR_SEED_BALANCE_EUR = 45_000_000.0
 JUMP_AGGRESSOR_SEED_SHARES      = 200_000         # per-stock share float (funds sell legs)

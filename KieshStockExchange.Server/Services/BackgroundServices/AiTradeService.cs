@@ -481,7 +481,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // anchor/veto/injection flow (like the MM/arbitrage cohorts). Default OFF ⇒ no RNG drawn, byte-identical.
         _jumpEnabled         = _configuration.GetValue("Bots:Jumps:Enabled", false);
         JumpsProbe.Configure(_configuration.GetValue("Bots:Jumps:Probe", false));
-        _jumpAggressorUserId = _configuration.GetValue("Bots:Jumps:AggressorUserId", 20100);
+        _jumpAggressorUserId = _configuration.GetValue("Bots:Jumps:AggressorUserId", 20008);
         var jumpSource = new RandomJumpSource(stocks,
                         meanIntervalHours: _configuration.GetValue("Bots:Jumps:MeanIntervalHours", 2.0),
                         minPct:            _configuration.GetValue("Bots:Jumps:MinPct", 0.02),

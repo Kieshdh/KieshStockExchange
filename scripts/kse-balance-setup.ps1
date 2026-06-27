@@ -1,5 +1,7 @@
 # One-time: build a pristine, zero-trade seeded template (kse_soak_seed) for fast per-run resets.
-$ErrorActionPreference = "Stop"
+# Continue (not Stop): docker psql emits benign NOTICEs on stderr (e.g. "database does not exist, skipping")
+# which Stop turns into a terminating error; the critical steps below have explicit throws / $LASTEXITCODE checks.
+$ErrorActionPreference = "Continue"
 $root = "C:\Users\kjden\source\repos\Kieshdh\KieshStockExchange"
 $exe  = "$root\KieshStockExchange.Server\bin\Debug\net9.0\KieshStockExchange.Server.exe"
 $pg   = "kieshstockexchange-postgres-1"
