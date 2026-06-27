@@ -3,6 +3,20 @@
 Single source of truth for "what's done vs what's left," compiled from a full sweep of `docs/` + the plan files.
 **Realism is parked ("mostly fine for now").** The big near-term item is the **bounce-mid prod deploy** (deploy-ready).
 
+## 🔄 2026-06-27 UPDATE (autonomous session)
+- **Realism arc DEFINITIVELY CLOSED.** Two more headline levers (cloud-ultraplan-built) validated → **NO-BAKE**: adaptive
+  (path-dependent) value-anchor (`57a898a`) and refill-throttle (`4718725`/`ac48171`). With them, **every mechanism class**
+  is now proven absorbed by the fast-refilling book: push-sliced / push-non-slicing / add-liquidity / correlate /
+  loosen-cap / throttle-reposts / remove-wall / move-anchor. The ceiling (`ret_acf≈−0.43` flow MR) is **structural at the
+  bot-decision layer** — only a core matching-engine change could break it. Full map + core-engine options (recommend:
+  accept ceiling + ship bounce-mid) in **`REFILL_THROTTLE_BAKE_RESULTS.md`**. Council 5/5.
+- **Bounce-mid deploy now 2h-CK-VALIDATED locally (de-risked):** exact prod config soaked 2h → CK=0/CONS=0/ERR=0 (1.54M
+  trades), drift −0.28%/2h, clustering 0.123, range-eff 0.415; post-deploy prod chart realistic (`logs/predeploy_prodchart_5min.png`).
+  Branch is **43 commits ahead of origin/master, clean FF**, BounceReference=mid, all new levers default-off. Still item #1 below.
+- **Perf 20k cap RE-VERIFIED healthy** after the 43 commits: local plateau 8650 (up from ~1870), round-trips/order 0.208, CK=0.
+- New default-off tools this round (all validated, reusable): adaptive anchor, refill-throttle, fat-tail jump
+  (`da89c29`/`52a7ec0`), cross-stock co-movement (`b92df6a`), perceived-price desync (`9b440d9`).
+
 ---
 
 ## ✅ DONE + SHIPPED + TESTED (no action)
