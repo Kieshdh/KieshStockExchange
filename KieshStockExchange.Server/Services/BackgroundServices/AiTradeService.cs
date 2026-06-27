@@ -1736,6 +1736,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     "net={N:0.00} gross={G:0.00} aftershocks={A}",
                     fired, suppressed, meanPct, buyEv, sellEv, net, gross, aftershocks);
             }
+            if (RefillThrottleProbe.Enabled)
+            {
+                // §refill-throttle liveliness: widen/skips>0 in the first ~1 min confirms the gate ARMED on a
+                // mover (the inert-flag trap that sank a prior lever); resistBuy/resistSell should stay balanced
+                // (a one-sided lean would inject drift, the BuyStopFraction symptom).
+                var (widen, skips, skipDraws, buySkips, sellSkips) = RefillThrottleProbe.Drain();
+                _logger.LogInformation(
+                    "REFILL widen={W} skips={Sk} skipDraws={Sd} resistBuy={Rb} resistSell={Rs}",
+                    widen, skips, skipDraws, buySkips, sellSkips);
+            }
             _nextSentimentLogTime = now + _sentimentLogInterval;
         }
         if (now >= _nextCashInjectionTime)
