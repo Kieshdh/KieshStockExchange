@@ -574,6 +574,19 @@ internal sealed class AiBotDecisionService
         if (IsBuyOrder(type) && IsOverBand(ctx, stockId, currency, isBuy: true)) return null;
         if (IsSellOrder(type) && IsOverBand(ctx, stockId, currency, isBuy: false)) return null;
 
+        // §refill-throttle (Bots:RefillThrottle) skip-repost: on a confirmed mover a resisting-side resting
+        // LIMIT is the wall the move pushes into. With probability SkipRepostProb, don't re-post it this tick
+        // so the wall thins and the mid can move. Gated to resting limits (not chase / market / slippage); the
+        // seeded draw is taken LAST and ONLY when the gate is enabled and the order resists ⇒ flag-off
+        // byte-identical. Returns BEFORE any price/qty compute or reservation, so nothing is stranded.
+        if (!isChase && !IsTrueMarketOrder(type) && !IsSlippageOrder(type)
+            && ctx.RefillShouldSkip(stockId, currency, IsBuyOrder(type),
+                                    () => ctx.Decimal01(user.AiUserId)))
+        {
+            RefillThrottleProbe.RecordSkip(IsBuyOrder(type));
+            return null;
+        }
+
         var price    = await ComputeOrderPriceAsync(ctx, user, type, stockId, currency, ct).ConfigureAwait(false);
         // §direct-flow chaser: a slippage order with Price 0 (no live market price) fails validation and would
         // silently drop — count it as a suppressed chase rather than a phantom no-op.
@@ -1451,6 +1464,13 @@ internal sealed class AiBotDecisionService
             catch (OperationCanceledException) { throw; }
             catch { /* defensive: book lookup or sum failed — keep original offset */ }
         }
+
+        // §refill-throttle (Bots:RefillThrottle): on a confirmed mover, widen the RESISTING side's offset so
+        // the wall the move is pushing into stops instantly reforming at the old level. Applied AFTER the
+        // liquidity-aware tilt (which re-clamps offset) so it isn't undone, then re-clamped to the tier band.
+        // Factor is 1.0 (no-op) unless the gate is enabled AND this order resists the move ⇒ byte-identical
+        // when off; pure math, no RNG.
+        offset = Math.Min(maxOff, offset * ctx.RefillWidenFactor(stockId, currency, IsBuyOrder(type)));
 
         var limitPrice = IsBuyOrder(type) ? anchor * (1m - offset) : anchor * (1m + offset);
 

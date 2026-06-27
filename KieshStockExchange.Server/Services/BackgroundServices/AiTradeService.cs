@@ -282,6 +282,30 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _ctx       = new AiBotContext(accounts,
                         personalSentiment: _configuration.GetValue("Bots:PersonalSentiment", true),
                         reactionRef:       _reactionRef);
+        // §refill-throttle (Bots:RefillThrottle): the mover-response refill lever. Build the gate ONLY when
+        // enabled, so the context holds a null gate by default and every call site is byte-identical and
+        // draw-free when off. Bot-decision layer only (no engine change); CK-safe by construction.
+        RefillThrottleProbe.Configure(_configuration.GetValue("Bots:RefillThrottle:Probe", false));
+        if (_configuration.GetValue("Bots:RefillThrottle:Enabled", false))
+        {
+            var rtSrcName = _configuration.GetValue("Bots:RefillThrottle:Signal:Source", "RealizedReturnFast");
+            if (!Enum.TryParse<RefillThrottleGate.SignalSource>(rtSrcName, ignoreCase: true, out var rtSrc))
+            {
+                rtSrc = RefillThrottleGate.SignalSource.RealizedReturnFast;
+                _logger.LogWarning("Bots:RefillThrottle:Signal:Source '{Src}' unrecognized — using RealizedReturnFast.", rtSrcName);
+            }
+            _ctx.RefillGate = new RefillThrottleGate(new RefillThrottleGate.Settings
+            {
+                Enabled            = true,
+                Source             = rtSrc,
+                ThresholdArm       = _configuration.GetValue("Bots:RefillThrottle:Signal:ThresholdArm", 0m),
+                ThresholdDisarm    = _configuration.GetValue("Bots:RefillThrottle:Signal:ThresholdDisarm", 0m),
+                MaxEventMovePct    = _configuration.GetValue("Bots:RefillThrottle:Control:MaxEventMovePct", 0m),
+                RearmCooldownTicks = _configuration.GetValue("Bots:RefillThrottle:Control:RearmCooldownTicks", 0L),
+                OffsetWidenMult    = _configuration.GetValue("Bots:RefillThrottle:OffsetWiden:Mult", 0m),
+                SkipRepostProb     = _configuration.GetValue("Bots:RefillThrottle:SkipRepost:Prob", 0m),
+            });
+        }
         _stats     = new BotStatsLogger(new SeparatorLogger<BotStatsLogger>(loggerFactory, loggerOptions));
         _failures  = new BotFailureTracker(stocks, new SeparatorLogger<BotFailureTracker>(loggerFactory, loggerOptions));
         _auditor   = new ReservationAuditor(accounts, ledger, new SeparatorLogger<ReservationAuditor>(loggerFactory, loggerOptions),

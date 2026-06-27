@@ -132,6 +132,13 @@ internal sealed class AiBotContext
     internal readonly Dictionary<(int userId, CurrencyType), (decimal longNotional, decimal shortNotional)>
         WatchlistInventoryNotionalCache = new();
 
+    // §refill-throttle (Bots:RefillThrottle): the mover-response gate. Non-null ONLY when the lever is
+    // enabled (assigned from AiTradeService), so every refill-throttle call site is byte-identical and
+    // draw-free when off. The per-tick cache memoizes the gate's (sign,intensity) per stock so the first
+    // acting bot on a stock advances the control loop once and the rest read it — mirrors MidPriceCache.
+    internal RefillThrottleGate? RefillGate;
+    internal readonly Dictionary<int, (sbyte sign, decimal intensity)> RefillGateCache = new();
+
     internal void ClearTickCaches()
     {
         OverBandBuyCache.Clear(); OverBandSellCache.Clear();
@@ -141,6 +148,7 @@ internal sealed class AiBotContext
         WatchlistValueGapCache.Clear(); WatchlistRecentGapCache.Clear();
         WatchlistSharedSentimentCache.Clear(); WatchlistSlopeCache.Clear();
         WatchlistInventoryNotionalCache.Clear();
+        RefillGateCache.Clear();
     }
 
     // §patch 0003: per-(bot, tick) eligible-watchlist cache. Today every advanced builder
@@ -184,6 +192,54 @@ internal sealed class AiBotContext
             h = h * 31 + date.Day;
             return h & int.MaxValue;
         }
+    }
+    #endregion
+
+    #region Refill throttle (§refill-throttle)
+    /// <summary>
+    /// Advance + read the per-stock mover gate for this tick: (sign ∈ {-1,0,+1}, intensity ∈ [0,1]).
+    /// (0,0) when the lever is off. Cached per tick — the first acting bot on a stock advances the control
+    /// loop, the rest read the cache. Signal = fill-derived realized return (cur-prev)/prev (non-circular,
+    /// self-extinguishing), read from the loop-thread price caches; no RNG, no wall-clock.
+    /// </summary>
+    internal (sbyte sign, decimal intensity) MoverGate(int stockId, CurrencyType currency)
+    {
+        if (RefillGate is not { } gate) return ((sbyte)0, 0m);
+        if (RefillGateCache.TryGetValue(stockId, out var hit)) return hit;
+
+        var key = (stockId, currency);
+        decimal cur  = StockPrices.TryGetValue(key, out var c) ? c : 0m;
+        decimal prev = PreviousPrices.TryGetValue(key, out var p) ? p : 0m;
+        decimal signal = (cur > 0m && prev > 0m) ? (cur - prev) / prev : 0m; // RealizedReturnFast (default source)
+        decimal price  = cur > 0m ? cur : prev;
+
+        var result = gate.Step(stockId, signal, price, TickId);
+        RefillGateCache[stockId] = result;
+        return result;
+    }
+
+    /// <summary>Resisting-side offset multiplier for a limit order (1.0 = no-op / lever off). Pure math, no RNG.</summary>
+    internal decimal RefillWidenFactor(int stockId, CurrencyType currency, bool isBuy)
+    {
+        if (RefillGate is not { } gate) return 1m;
+        var (sign, intensity) = MoverGate(stockId, currency);
+        decimal factor = gate.WidenFactor(isBuy, sign, intensity);
+        if (factor != 1m) RefillThrottleProbe.RecordWiden();
+        return factor;
+    }
+
+    /// <summary>
+    /// True when a resisting-side resting limit should be SKIPPED (not re-posted) this tick. The seeded
+    /// <paramref name="draw"/> is invoked LAST and ONLY when the gate is enabled, skip-repost is configured,
+    /// and the order resists the move ⇒ the flag-off draw stream is byte-identical.
+    /// </summary>
+    internal bool RefillShouldSkip(int stockId, CurrencyType currency, bool isBuy, Func<decimal> draw)
+    {
+        if (RefillGate is not { } gate || !gate.SkipRepostEnabled) return false;
+        var (sign, _) = MoverGate(stockId, currency);
+        if (!RefillThrottleGate.ResistsMove(isBuy, sign)) return false;
+        RefillThrottleProbe.RecordSkipDraw();
+        return draw() < gate.Config.SkipRepostProb;
     }
     #endregion
 
