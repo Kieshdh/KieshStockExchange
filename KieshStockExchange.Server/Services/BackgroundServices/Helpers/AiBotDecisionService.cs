@@ -85,6 +85,9 @@ internal sealed class AiBotDecisionService
     // price is a driftless momentum walk with no pull back to value, so it wanders unbounded. Strength
     // is the max buy/sell-probability tilt; Scale is the deviation fraction at which the tilt saturates.
     private readonly decimal _valueAnchorStrength;
+    // §dip-buy: deploy idle cash on dips — buyProb += strength × dip-depth(value-gap) × excess-cash. The demand side the
+    // net-long, cash-hoarding fleet lacks; neutralises the down-drift WITHOUT the anchor's move-killing spring. 0 = off.
+    private readonly decimal _dipBuyStrength;
     private readonly decimal _valueAnchorScale;
     private readonly bool    _valueTargetSelection; // concentrate the anchor via stock selection (destabilizing at high gain)
     private readonly decimal _overheatCap;          // refuse to buy above / sell below fundamental by more than this (0 = off)
@@ -295,6 +298,7 @@ internal sealed class AiBotDecisionService
         decimal limitOffsetMult = 1m, decimal maxOpenOrdersMult = 1m,
         decimal distanceMult = 1m, decimal marketProbMult = 1m,
         decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
+        decimal dipBuyStrength = 0m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal absoluteCapMax = 0m,
         bool geometricBand = false,
@@ -404,6 +408,7 @@ internal sealed class AiBotDecisionService
         _distanceMult       = distanceMult <= 0m ? 1m : distanceMult;
         _marketProbMult     = marketProbMult <= 0m ? 1m : marketProbMult;
         _valueAnchorStrength = Math.Max(0m, valueAnchorStrength);
+        _dipBuyStrength      = Math.Max(0m, dipBuyStrength);
         _valueAnchorScale    = valueAnchorScale <= 0m ? 0.15m : valueAnchorScale;
         _valueTargetSelection = valueTargetSelection;
         _overheatCap        = Math.Max(0m, overheatCap);
@@ -1175,12 +1180,16 @@ internal sealed class AiBotDecisionService
         // restoring force that keeps price bounded — never damped by the role split. The gap is
         // NOT clamped at ±Scale so the pull keeps growing past saturation (deeper deviation ⇒
         // stronger pull). The final Clamp01 on buyProb is the hard ceiling.
+        // §value-gap vs the fundamental anchor (>0 ⇒ price below anchor = a dip). Drives BOTH the anchor tilt and the
+        // dip-buy cash-deployment; computed once (both gate on it) so the per-tick watchlist scan stays single.
+        var rawValueGap = (_valueAnchorStrength > 0m || _dipBuyStrength > 0m)
+            ? AverageWatchlistValueGap(ctx, user, currency) : 0m;
         var anchorTilt = 0m;
         if (_valueAnchorStrength > 0m)
         {
             // R5 §C: dead-band the raw deviation (fraction of price) before scaling — inside the band the
             // anchor exerts zero pull (price wanders freely, ret_acf→0 there); only the excess corrects.
-            var gap = ApplyAnchorDeadband(AverageWatchlistValueGap(ctx, user, currency)) / _valueAnchorScale;
+            var gap = ApplyAnchorDeadband(rawValueGap) / _valueAnchorScale;
             anchorTilt = gap * _valueAnchorStrength;
         }
 
@@ -1208,6 +1217,13 @@ internal sealed class AiBotDecisionService
         // BuyProbHybrid collapses literal-byte-for-byte to today's additive line 607.
         var buyProb = BuyProbHybrid(homeostatic, directional, noiseFactor, herdTilt, anchorTilt,
             _multiplicativeDirectional, _diversityGain);
+
+        // §dip-buy: deploy idle cash on DIPS. The fleet hoards cash (injected faster than it deploys) and only ever
+        // sells to rebalance its net-long inventory → a one-way down-drift with no demand side. A bot BELOW its anchor
+        // holding spare cash BUYS the dip = the missing two-sided support (neutralises drift without the anchor's
+        // move-killing spring). Dip-gated (no up-side pressure) + self-limiting (spends the cash).
+        if (_dipBuyStrength > 0m)
+            buyProb = Clamp01(buyProb + DipBuyTilt(rawValueGap, cashPrc, user.MaxCashReservePrc, _dipBuyStrength));
 
         // 3. Strategy-aware market-order probability (scaled by the global MarketProbMult ⇒ more takers/volume)
         var effectiveUseMarket = Math.Min(1m, user.UseMarketProb * _marketProbMult);
@@ -2319,6 +2335,15 @@ internal sealed class AiBotDecisionService
     /// toward the band midpoint (== seed cash% after the §8 recenter, so the rest-point is the seed) and the
     /// hard walls still force buy/sell at the edges. Pure &amp; RNG-free → unit-testable.
     /// </summary>
+    // §dip-buy tilt: buy-prob boost = strength × dip-depth × excess-cash. Pure ⇒ unit-testable. Returns 0 unless the bot
+    // is BELOW its anchor (rawValueGap>0 = a dip) AND holds cash above MaxCashReserve (excess to deploy). Caller clamps.
+    internal static decimal DipBuyTilt(decimal rawValueGap, decimal cashPrc, decimal maxReserve, decimal strength)
+    {
+        if (strength <= 0m || rawValueGap <= 0m || maxReserve >= 1m) return 0m;
+        var cashExcess = Math.Max(0m, (cashPrc - maxReserve) / (1m - maxReserve));
+        return cashExcess <= 0m ? 0m : strength * rawValueGap * cashExcess;
+    }
+
     internal static decimal CashHomeostasis(decimal buyBias, decimal cashPrc,
         decimal minReserve, decimal maxReserve,
         bool continuous, decimal maxShift, decimal edgeBuy, decimal edgeSell)

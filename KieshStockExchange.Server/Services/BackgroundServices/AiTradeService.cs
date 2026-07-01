@@ -548,6 +548,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         maxOpenOrdersMult:  _configuration.GetValue("Bots:Liquidity:MaxOpenMult", 1m),
                         valueAnchorStrength: _configuration.GetValue("Bots:ValueAnchor:Strength", 0m),
                         valueAnchorScale:    _configuration.GetValue("Bots:ValueAnchor:Scale", 0.15m),
+                        dipBuyStrength:      _configuration.GetValue("Bots:DipBuyStrength", 0m),
                         valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
                         overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),
                         absoluteCapMax:      _configuration.GetValue("Bots:ValueAnchor:AbsoluteCapMax", 0m),
