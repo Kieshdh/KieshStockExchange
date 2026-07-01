@@ -91,6 +91,9 @@ internal sealed class AiBotDecisionService
     // Defensive ceiling on the effective per-stock cap (after OverheatCapMult and AnchorFastSlack).
     // 0 = no clamp. Guarantees the absolute-deviation promise regardless of personality multipliers.
     private readonly decimal _absoluteCapMax;
+    // §geometric price-bands: interpret the caps as log-symmetric (buy>anchor×F, sell<anchor/F, F=1+cap) not linear
+    // (±cap). Off ⇒ byte-identical. Fixes "200%" to the intended ×3 up / ÷3 down (a linear −cap floor goes negative).
+    private readonly bool _geometricBand;
     private readonly decimal _marketSlippagePrc;    // low cap on every market order's slippage so none sweeps far
 
     // §P6 balancing: tiered-limit selection probabilities (Far = remainder), low slippage cap applied to
@@ -294,6 +297,7 @@ internal sealed class AiBotDecisionService
         decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal absoluteCapMax = 0m,
+        bool geometricBand = false,
         decimal marketSlippagePrc = 0.003m,
         decimal tierCloseProb = 0.6m, decimal tierMidProb = 0.3m,
         decimal stopSlippagePct = 0.3m, decimal maxSweepFractionOfDepth = 0.25m,
@@ -404,6 +408,7 @@ internal sealed class AiBotDecisionService
         _valueTargetSelection = valueTargetSelection;
         _overheatCap        = Math.Max(0m, overheatCap);
         _absoluteCapMax     = Math.Max(0m, absoluteCapMax);
+        _geometricBand      = geometricBand;
         _marketSlippagePrc  = marketSlippagePrc <= 0m ? 0.003m : marketSlippagePrc;
         _tierCloseProb      = Clamp01(tierCloseProb);
         _tierMidProb        = Clamp01(tierMidProb);
@@ -1769,8 +1774,15 @@ internal sealed class AiBotDecisionService
         var cap = _overheatCap * _profiles.Get(stockId).OverheatCapMult * (1m + _anchorFastSlack);
         // Defensive ceiling: guarantees the absolute-deviation promise even when personality mult + slack stack high.
         if (_absoluteCapMax > 0m && cap > _absoluteCapMax) cap = _absoluteCapMax;
-        var dev = (mkt - anchor) / anchor;
-        var result = isBuy ? dev > cap : dev < -cap;
+        // §geometric bands: buy>anchor×F / sell<anchor/F (F=1+cap), log-symmetric so a "200%" cap = ×3 up / ÷3 down.
+        bool result;
+        if (_geometricBand)
+            result = PriceBandMath.IsOver(mkt, anchor, PriceBandMath.Factor(cap), isBuy);
+        else
+        {
+            var dev = (mkt - anchor) / anchor;
+            result = isBuy ? dev > cap : dev < -cap;
+        }
         // §adaptive runaway guard: the moving anchor can re-rate intraday, but the TOTAL excursion
         // from the original seed is hard-bounded — a provably-binding veto so the market can't walk
         // to infinity even as the cap window follows price. Independent of the re-centered cap above.
@@ -1779,8 +1791,9 @@ internal sealed class AiBotDecisionService
             var seed = SeedPrice(stockId, currency, ctx);
             if (seed > 0m)
             {
-                var seedDev = (mkt - seed) / seed;
-                result = isBuy ? seedDev > _maxTotalExcursion : seedDev < -_maxTotalExcursion;
+                result = _geometricBand
+                    ? PriceBandMath.IsOver(mkt, seed, PriceBandMath.Factor(_maxTotalExcursion), isBuy)
+                    : (isBuy ? (mkt - seed) / seed > _maxTotalExcursion : (mkt - seed) / seed < -_maxTotalExcursion);
             }
         }
         if (_memoizeTickValues) cache[(stockId, currency)] = result;
