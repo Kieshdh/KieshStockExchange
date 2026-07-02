@@ -278,6 +278,12 @@ internal sealed class AiBotDecisionService
     // byte-identical to round 2.
     private readonly decimal _inventoryBiasShortMult;
 
+    // §bear-short: sentiment-responsive short participation. Bullish sentiment funds sharp up-moves via
+    // abundant cash, but a flat bearish bot can only no-op (no inventory to sell) ⇒ down-moves stay gradual
+    // (up-move ~2.5× down per move). When >0, the advanced-kind roll gets an extra short bucket sized
+    // _bearShortStrength × watchlist-bearishness — symmetric sell-side ammo. 0 ⇒ off, no read, byte-identical.
+    private readonly decimal _bearShortStrength;
+
     // R4 §0009 Stage 4 — Option D: liquidity-aware limit-offset asymmetry. When on, the limit
     // offset for a non-MM limit order is tilted by the book imbalance so that placing into the
     // thick side gets pushed further from mid (less aggressive, doesn't add to the wall) while
@@ -348,6 +354,8 @@ internal sealed class AiBotDecisionService
         // to round 2. Set higher (suggest 2.5) to make heavy-short detection easier to trigger,
         // increasing the symmetric short→LongBracket pull that round-2 found too weak.
         decimal inventoryBiasShortMult = 1m,
+        // §bear-short: sentiment-responsive short boost. 0 ⇒ off (byte-identical).
+        decimal bearShortStrength = 0m,
         // R4 §0009 Stage 4 — Option D: liquidity-aware limit-offset asymmetry. Default off
         // (gain = 0 ⇒ no adjustment). When on, the limit offset is tilted by book imbalance.
         bool liquidityAwarePlacement = false,
@@ -475,6 +483,7 @@ internal sealed class AiBotDecisionService
         _inventoryBias             = inventoryBias;
         _inventoryBiasThresholdPrc = Math.Max(0m, inventoryBiasThresholdPrc);
         _inventoryBiasShortMult    = Math.Max(1m, inventoryBiasShortMult);
+        _bearShortStrength         = Math.Max(0m, bearShortStrength);
         // R4 §0009 Stage 4 — Option D: clamp gain to [0, 1] so the offset multiplier stays in [0, 2].
         _liquidityAwarePlacement   = liquidityAwarePlacement;
         _liquidityAwareGain        = liquidityAwareGain < 0m ? 0m : (liquidityAwareGain > 1m ? 1m : liquidityAwareGain);
@@ -665,9 +674,17 @@ internal sealed class AiBotDecisionService
         var probs = new AdvProbsSnapshot(user);
         decimal advProb = probs.StopProb + probs.TrailingProb + probs.ShortProb
                         + probs.LongBracketProb + probs.ShortBracketProb;
-        if (advProb <= 0m) return null;
+        // §bear-short: append a sentiment-driven short bucket AFTER the existing kinds so their cumulative
+        // thresholds (the r→kind map) stay byte-identical when off. bearishness ∈ [0,1] = the negative part of
+        // the bot's watchlist sentiment; the extra bucket width = _bearShortStrength × bearishness. No sentiment
+        // read (and no bucket) when off ⇒ flag-off byte-identical, incl. the r-draw gate below.
+        decimal bearBoost = _bearShortStrength > 0m
+            ? BearShortBoost(_bearShortStrength, AverageWatchlistSentiment(ctx, user, currency))
+            : 0m;
+        decimal advTotal = advProb + bearBoost;
+        if (advTotal <= 0m) return null;
         decimal r = ctx.Decimal01(user.AiUserId);   // single seeded roll: gate + kind selection
-        if (r >= advProb) return null;
+        if (r >= advTotal) return null;
 
         // Cumulative kind pick from the same roll (no extra draw). A builder that can't find an eligible
         // stock returns null → the caller falls through to a normal plain order this tick.
@@ -705,21 +722,28 @@ internal sealed class AiBotDecisionService
             return dec;
         }
         // r in the ShortBracket bucket — same inversion logic for the symmetric half.
-        bool isShortKind = true;
-        int biasShort = 0;
-        if (_inventoryBias && _inventoryBiasThresholdPrc > 0m)
+        c += probs.ShortBracketProb;
+        if (r < c)
         {
-            biasShort = ComputeInventoryBias(ctx, user, currency);
-            if (biasShort < 0) isShortKind = false;   // heavy short → flip to LongBracket
+            bool isShortKind = true;
+            int biasShort = 0;
+            if (_inventoryBias && _inventoryBiasThresholdPrc > 0m)
+            {
+                biasShort = ComputeInventoryBias(ctx, user, currency);
+                if (biasShort < 0) isShortKind = false;   // heavy short → flip to LongBracket
+            }
+            // R4 §0009 Stage 2: probe the inversion decision (kindPre=1 ShortBracket bucket).
+            BotDecisionProbe.RecordAdvancedIntent(user.AiUserId, (int)user.Strategy,
+                kindPre: 1, bias: biasShort, kindPost: isShortKind ? 1 : 0);
+            var decShort = await BuildBracketAsync(ctx, user, currency, isShort: isShortKind, ct).ConfigureAwait(false);
+            BotDecisionProbe.RecordAdvancedResult(user.AiUserId, (int)user.Strategy,
+                kindPost: isShortKind ? 1 : 0, qty: decShort?.Quantity ?? 0,
+                flipQty: decShort?.FlipQuantity ?? 0, success: decShort is not null);
+            return decShort;
         }
-        // R4 §0009 Stage 2: probe the inversion decision (kindPre=1 ShortBracket bucket).
-        BotDecisionProbe.RecordAdvancedIntent(user.AiUserId, (int)user.Strategy,
-            kindPre: 1, bias: biasShort, kindPost: isShortKind ? 1 : 0);
-        var decShort = await BuildBracketAsync(ctx, user, currency, isShort: isShortKind, ct).ConfigureAwait(false);
-        BotDecisionProbe.RecordAdvancedResult(user.AiUserId, (int)user.Strategy,
-            kindPost: isShortKind ? 1 : 0, qty: decShort?.Quantity ?? 0,
-            flipQty: decShort?.FlipQuantity ?? 0, success: decShort is not null);
-        return decShort;
+        // §bear-short tail bucket: r in [advProb, advTotal) ⇒ a sentiment-driven flat short open (the sell-side
+        // ammo). Unreachable when _bearShortStrength == 0 (advTotal == advProb), so flag-off is byte-identical.
+        return await BuildShortOpenAsync(ctx, user, currency, ct).ConfigureAwait(false);
     }
 
     // Round 2 §0011 (E1): inventory bias direction.
@@ -2343,6 +2367,11 @@ internal sealed class AiBotDecisionService
         var cashExcess = Math.Max(0m, (cashPrc - maxReserve) / (1m - maxReserve));
         return cashExcess <= 0m ? 0m : strength * rawValueGap * cashExcess;
     }
+
+    // §bear-short boost: extra advanced-short bucket width = strength × bearishness, where bearishness is the
+    // NEGATIVE part of the watchlist sentiment clamped to [0,1]. Pure ⇒ unit-testable. 0 when off or non-bearish.
+    internal static decimal BearShortBoost(decimal strength, decimal watchlistSentiment)
+        => strength <= 0m ? 0m : strength * Math.Clamp(-watchlistSentiment, 0m, 1m);
 
     internal static decimal CashHomeostasis(decimal buyBias, decimal cashPrc,
         decimal minReserve, decimal maxReserve,
