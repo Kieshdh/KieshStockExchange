@@ -26,6 +26,14 @@ public interface IOrderExecutionService
     Task<IReadOnlyList<OrderResult>> ArmStopBatchAsync(
         IReadOnlyList<Order> orders, CancellationToken ct = default);
 
+    /// <summary>§A1b: arm many BUY stop orders in one engine pass — the cash mirror of
+    /// <see cref="ArmStopBatchAsync"/>. FUND pre-reserve (qty × limit) under the per-user fund
+    /// gate, then ONE tx bulk-inserting the Pending rows + persisting the touched Fund
+    /// reservations. Sell-stops are rejected (use <see cref="ArmStopBatchAsync"/>). One result per
+    /// submitted order in the same order; the caller registers successes with the trigger watcher.</summary>
+    Task<IReadOnlyList<OrderResult>> ArmStopBuyBatchAsync(
+        IReadOnlyList<Order> orders, CancellationToken ct = default);
+
     /// <summary>Round 2 §0005: batched bracket placement — the bot fleet's per-tick bracket
     /// cohort. Collapses N×CreateOrder (parents) + N×CreateOrder (per-leg) round-trips into ONE
     /// bulk parent insert + ONE bulk child insert, then runs the per-parent match+settle pass

@@ -363,6 +363,15 @@ public sealed class OrderEntryService : IOrderEntryService
         for (int i = 0; i < requests.Count; i++)
         {
             var r = requests[i];
+            if (r.Kind == StopArmKind.StopMarketBuy)
+            {
+                // Mis-route guard: StopMarketBuy shares the StopArmKind enum but reserves cash, not
+                // shares — it must go through ArmStopBuyBatchAsync. Fail loudly instead of letting the
+                // else branch below silently build a byte-wrong sell-stop.
+                results[i] = OrderResultFactory.InvalidParams(
+                    "ArmStopSellBatchAsync handles sell-stops only; route StopMarketBuy to ArmStopBuyBatchAsync.");
+                continue;
+            }
             var (order, error) = r.Kind == StopArmKind.TrailingStopSell
                 ? await BuildTrailingStopOrderAsync(r.UserId, r.StockId, r.Quantity, r.TrailOffset,
                     r.TrailIsPercent, buyBudget: null, buyOrder: false, r.Currency, ct).ConfigureAwait(false)
@@ -382,6 +391,60 @@ public sealed class OrderEntryService : IOrderEntryService
         for (int i = 0; i < built.Count; i++) orders.Add(built[i].order);
 
         var engineResults = await _engine.ArmStopBatchAsync(orders, ct).ConfigureAwait(false);
+
+        for (int i = 0; i < built.Count; i++)
+        {
+            var (idx, order) = built[i];
+            var result = engineResults[i];
+            results[idx] = result;
+            if (result.PlacedSuccessfully) _stopWatcher.Arm(order);
+        }
+        return results;
+    }
+
+    // §A1b: batch-arm the bot fleet's BUY-stops. Builds each as a stop-LIMIT buy with
+    // limitPrice = StopPrice × 1.005 — byte-identical to the per-order PlaceStopLimitBuyOrderAsync
+    // route (AiTradeService.cs:1355) — hands the list to the engine's ArmStopBuyBatchAsync (FUND
+    // pre-reserve under the fund gate + one bulk-insert tx), then arms the trigger watcher for every
+    // success. Arms the SAME Order instances handed to the engine: OrderId is stamped onto them by
+    // InsertAllAsync and they are _registry.Register-ed in-engine, so _stopWatcher.Arm sees a real
+    // OrderId (it silently drops OrderId<=0 instances).
+    public async Task<IReadOnlyList<OrderResult>> ArmStopBuyBatchAsync(
+        IReadOnlyList<StopArmRequest> requests, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (requests is null || requests.Count == 0) return Array.Empty<OrderResult>();
+
+        var results = new OrderResult[requests.Count];
+        var built = new List<(int index, Order order)>(requests.Count);
+        for (int i = 0; i < requests.Count; i++)
+        {
+            var r = requests[i];
+            if (r.Kind != StopArmKind.StopMarketBuy)
+            {
+                results[i] = OrderResultFactory.InvalidParams(
+                    "ArmStopBuyBatchAsync handles StopMarketBuy only; route sell-stops to ArmStopSellBatchAsync.");
+                continue;
+            }
+            // Carry the RAW decision StopPrice into the ×1.005 markup so the reservation base matches
+            // the per-order path exactly (BuildStopOrderAsync re-rounds idempotently).
+            var limitPrice = CurrencyHelper.RoundMoney(r.StopPrice * 1.005m, r.Currency);
+            var (order, error) = await BuildStopOrderAsync(r.UserId, r.StockId, r.Quantity, r.StopPrice,
+                limitPrice, buyBudget: null, slippagePct: null, r.Currency,
+                buyOrder: true, limitStop: true, ct).ConfigureAwait(false);
+            if (error is not null || order is null)
+            {
+                results[i] = error ?? OrderResultFactory.InvalidParams("Failed to build buy-stop order.");
+                continue;
+            }
+            built.Add((i, order));
+        }
+        if (built.Count == 0) return results;
+
+        var orders = new List<Order>(built.Count);
+        for (int i = 0; i < built.Count; i++) orders.Add(built[i].order);
+
+        var engineResults = await _engine.ArmStopBuyBatchAsync(orders, ct).ConfigureAwait(false);
 
         for (int i = 0; i < built.Count; i++)
         {

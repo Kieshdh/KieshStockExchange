@@ -3,7 +3,7 @@ using KieshStockExchange.Helpers;
 namespace KieshStockExchange.Services.MarketEngineServices.Interfaces;
 
 /// <summary>§A1a: which arm shape a batched protective-stop request takes.</summary>
-public enum StopArmKind { StopMarketSell, TrailingStopSell }
+public enum StopArmKind { StopMarketSell, TrailingStopSell, StopMarketBuy }
 
 /// <summary>
 /// §A1a: one protective-stop arm request for

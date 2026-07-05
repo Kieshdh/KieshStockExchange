@@ -1848,6 +1848,202 @@ public sealed class OrderExecutionService : IOrderExecutionService
         return results;
     }
 
+    // §A1b: batch the bot fleet's per-tick BUY-stop arms. The cash mirror of ArmStopBatchAsync:
+    // buy-stops are placed as stop-LIMIT buys and reserve qty × limit via
+    // ReservationMath.InitialBuyReservation — exactly the amount the per-order ArmStopAsync →
+    // OrderSettler.SettleAsync buy branch and the plain batch's Phase 1.6 hold. Same skeleton
+    // (validate → reserve → one bulk-insert tx → register/notify) as ArmStopBatchAsync; only the
+    // reserve phase differs (Fund not Position).
+    //
+    // GATED (this is the deliberate divergence from the sell batch): a Fund is per-(user,currency)
+    // and is mutated OFF the bot-loop thread — under the fund gate — by TradeSettler via the
+    // StopTriggerWatcher promotion drain loop and maker-fills against a bot's resting buy. An
+    // UNgated ReserveFunds here would interleave with those non-atomic gated Consume/UnreserveFunds
+    // calls (Fund.cs) → lost update → CK_Funds / reconcile phantom. So the reserve loop runs inside
+    // AcquireUserGatesAsync(fundKeys, none) — one batched multi-gate acquire per tick; keys are
+    // globally sorted inside AccountsCache so there is no AB/BA deadlock. (The sell batch stays
+    // ungated because a Position is per-(user,stock) — a far narrower collision surface.)
+    public async Task<IReadOnlyList<OrderResult>> ArmStopBuyBatchAsync(
+        IReadOnlyList<Order> orders, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (orders is null || orders.Count == 0) return Array.Empty<OrderResult>();
+
+        // Phase 1: structural validation — no DB calls.
+        var results = new OrderResult[orders.Count];
+        var validOrders = new List<(int index, Order order)>(orders.Count);
+        for (int i = 0; i < orders.Count; i++)
+        {
+            var o = orders[i];
+            var err = _validator.ValidateNew(o);
+            if (err != null) { results[i] = err; continue; }
+            if (!o.IsStopOrder)
+            {
+                results[i] = OrderResultFactory.InvalidParams("ArmStopBuyBatchAsync requires stop orders.");
+                continue;
+            }
+            if (!o.IsBuyOrder)
+            {
+                results[i] = OrderResultFactory.InvalidParams(
+                    "ArmStopBuyBatchAsync handles buy-stops only; arm sell-stops via ArmStopBatchAsync.");
+                continue;
+            }
+            o.Arm(); // Status = Pending before the bulk insert (mirrors ArmStopAsync)
+            validOrders.Add((i, o));
+        }
+        if (validOrders.Count == 0) return results;
+
+        var scope = new TradeBatchScope();
+        var touchedFunds = new Dictionary<(int UserId, CurrencyType Ccy), Fund>();
+
+        // Distinct (UserId, Ccy) fund keys → EnsureLoaded + gate the reserve loop.
+        var fundKeySet = new HashSet<(int UserId, CurrencyType Ccy)>();
+        var buyerIds = new HashSet<int>();
+        for (int i = 0; i < validOrders.Count; i++)
+        {
+            var o = validOrders[i].order;
+            fundKeySet.Add((o.UserId, o.CurrencyType));
+            buyerIds.Add(o.UserId);
+        }
+        var buyerIdList = new List<int>(buyerIds);
+        await _accounts.EnsureLoadedAsync(buyerIdList, ct).ConfigureAwait(false);
+
+        var fundKeys = new List<(int UserId, CurrencyType Ccy)>(fundKeySet);
+        await using var gates = await _accounts.AcquireUserGatesAsync(
+            fundKeys, Array.Empty<(int, int)>(), ct).ConfigureAwait(false);
+
+        // Phase 1.5: pre-flight fund check + reserve in the in-memory cache. Same checks, mutations,
+        // and ledger amount tuples as the plain batch's Phase 1.6 buyer pre-flight (:760-818); only
+        // the reason label differs ("ArmBuyBatch:Reserve") so the CSV can attribute buy-stop arms.
+        HashSet<int>? rejected = null;
+        for (int i = 0; i < validOrders.Count; i++)
+        {
+            var (idx, order) = validOrders[i];
+            var fund = _accounts.GetFund(order.UserId, order.CurrencyType);
+            var reservation = ReservationMath.InitialBuyReservation(order);
+            if (fund is null)
+            {
+                results[idx] = OrderResultFactory.InsufficientFunds(
+                    $"Insufficient funds for buy-stop (user {order.UserId}, {order.CurrencyType}): no fund row.");
+                rejected ??= new HashSet<int>();
+                rejected.Add(idx);
+                continue;
+            }
+            if (reservation <= 0m)
+            {
+                results[idx] = OrderResultFactory.InsufficientFunds(
+                    $"Insufficient funds for buy-stop (user {order.UserId}, {order.CurrencyType}): " +
+                    $"computed reservation is {reservation} (price={order.Price}, qty={order.Quantity}).");
+                rejected ??= new HashSet<int>();
+                rejected.Add(idx);
+                continue;
+            }
+            if (fund.AvailableBalance < reservation)
+            {
+                results[idx] = OrderResultFactory.InsufficientFunds(
+                    $"Insufficient funds for buy-stop (user {order.UserId}, {order.CurrencyType}): " +
+                    $"needs {reservation}, available {fund.AvailableBalance} " +
+                    $"(Total={fund.TotalBalance}, Reserved={fund.ReservedBalance}).");
+                rejected ??= new HashSet<int>();
+                rejected.Add(idx);
+                continue;
+            }
+
+            // Snapshot the Fund (Total, Reserved) on FIRST TOUCH so RestoreCacheSnapshots can undo on
+            // rollback — matches the tuple order TradeBatchScope.FundSnapshots stores/replays
+            // (:794-796). The ContainsKey guard is essential for a same-user, multi-buy-stop cohort:
+            // the second reserve must NOT overwrite the pre-cohort snapshot.
+            var fundKey = (order.UserId, order.CurrencyType);
+            if (!scope.FundSnapshots.ContainsKey(fundKey))
+                scope.FundSnapshots[fundKey] = (fund.TotalBalance, fund.ReservedBalance);
+
+            var resBefore = fund.ReservedBalance;
+            var totBefore = fund.TotalBalance;
+            try { fund.ReserveFunds(reservation); }
+            catch (ArgumentException)
+            {
+                results[idx] = OrderResultFactory.InsufficientFunds(
+                    $"Insufficient funds for buy-stop (user {order.UserId}, {order.CurrencyType}): " +
+                    $"race on ReserveFunds, needs {reservation}, available {fund.AvailableBalance} " +
+                    $"(Total={fund.TotalBalance}, Reserved={fund.ReservedBalance}).");
+                rejected ??= new HashSet<int>();
+                rejected.Add(idx);
+                continue;
+            }
+            var orderBuyBefore = order.CurrentBuyReservation;
+            order.TakeBuyReservation(reservation);
+            _ledger.LogFund(order.UserId, order.CurrencyType, order.OrderId,
+                "ArmBuyBatch:Reserve", reservation, resBefore, fund.ReservedBalance,
+                totBefore, fund.TotalBalance);
+            _ledger.LogOrder(order.UserId, order.OrderId, "ArmBuyBatch:Reserve",
+                reservation, orderBuyBefore, order.CurrentBuyReservation,
+                order.CurrentSellReservedQty, order.CurrentSellReservedQty);
+            touchedFunds[fundKey] = fund;
+        }
+
+        if (rejected is not null)
+        {
+            int write = 0;
+            for (int read = 0; read < validOrders.Count; read++)
+                if (!rejected.Contains(validOrders[read].index))
+                    validOrders[write++] = validOrders[read];
+            validOrders.RemoveRange(write, validOrders.Count - write);
+            if (validOrders.Count == 0)
+            {
+                _settlement.RestoreCacheSnapshots(new Dictionary<int, Order>(), scope);
+                return results;
+            }
+        }
+
+        // Keep the caller's ascending-aiUserId order so InsertAllAsync assigns OrderIds in that
+        // order (arms never match, so arming order is otherwise externally immaterial).
+        var orderList = new List<Order>(validOrders.Count);
+        for (int i = 0; i < validOrders.Count; i++) orderList.Add(validOrders[i].order);
+
+        // Phase 2: ONE short tx — bulk-insert the Pending rows and persist the touched Fund
+        // reservations so DB-backed views match cache. On failure restore the Phase 1.5 cache
+        // reservations and fail every survivor.
+        try
+        {
+            await using var armTx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await _db.InsertAllAsync(orderList, ct).ConfigureAwait(false);
+                if (touchedFunds.Count > 0)
+                    await _db.UpdateAllAsync(touchedFunds.Values, ct).ConfigureAwait(false);
+                await armTx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await armTx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ArmStopBuyBatchAsync: bulk arm insert failed");
+            _settlement.RestoreCacheSnapshots(new Dictionary<int, Order>(), scope);
+            for (int i = 0; i < validOrders.Count; i++)
+                results[validOrders[i].index] = OrderResultFactory.OperationFailed(
+                    $"Bulk arm insert failed: {ex.Message}");
+            return results;
+        }
+
+        // Post-commit: register canonical instances (OrderIds assigned by InsertAllAsync), stamp
+        // successes (empty trades — an arm never fills), and fire one coalesced cache notify.
+        var affectedUsers = new HashSet<int>(validOrders.Count);
+        for (int i = 0; i < validOrders.Count; i++)
+        {
+            var (idx, order) = validOrders[i];
+            _registry.Register(order);
+            affectedUsers.Add(order.UserId);
+            results[idx] = OrderResultFactory.Success(order, new List<Transaction>());
+        }
+        _orderCache.NotifyOrdersMutated(affectedUsers);
+
+        return results;
+    }
+
     // Round 2 §0005: batched bracket placement. The bot fleet's per-tick bracket cohort can be
     // dozens-to-hundreds of placements per tick at 20k-bot soak scale; the per-order
     // PlaceBracketAsync path issues one DB round-trip for the parent's CreateOrder, then one

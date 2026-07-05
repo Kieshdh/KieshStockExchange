@@ -218,6 +218,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly bool _advancedEnabled;       // §P6a master switch (default off)
     private readonly bool _batchArms;             // §A1a batch the stop/trailing arm route (default off)
     private readonly bool _bracketBatch;          // Round 2 §0005 batch the bracket + market-short routes (default off)
+    private readonly bool _batchBuyStops;         // §A1b batch the buy-stop fund-reserve arm route (default off)
     private readonly double _smoothedPriceHalfLifeSec; // 0 ⇒ legacy fixed α=0.15 EWMA; >0 ⇒ time-based half-life
     // §impact-decouple A: the >1-min reaction reference EWMA (maintained in OnQuoteUpdated). Default off.
     private readonly bool   _reactionRef;
@@ -793,6 +794,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGovScale", 1000000000m));
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
+        _batchBuyStops      = _configuration.GetValue("Bots:Advanced:BatchBuyStops", false);
         // §stagger: deterministic per-bot tick-phase scheduling. Default off ⇒ byte-identical;
         // Slots is the per-tick load-cut factor N (only ~1/N of bots are due to act per tick).
         _staggerEnabled     = _configuration.GetValue("Bots:Staggering:Enabled", false);
@@ -1134,11 +1136,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     {
         advanced.Sort((a, b) => a.user.AiUserId.CompareTo(b.user.AiUserId));
 
-        if (_batchArms || _bracketBatch)
+        if (_batchArms || _bracketBatch || _batchBuyStops)
         {
             var armSells = new List<(AIUser user, BotAdvancedDecision dec)>();
             var brackets = new List<(AIUser user, BotAdvancedDecision dec)>();
             var shorts   = new List<(AIUser user, BotAdvancedDecision dec)>();
+            var buyStops = new List<(AIUser user, BotAdvancedDecision dec)>();
             var rest     = new List<(AIUser user, BotAdvancedDecision dec)>();
             foreach (var item in advanced)
             {
@@ -1155,6 +1158,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     case BotAdvancedKind.ShortOpen:
                         if (_bracketBatch) shorts.Add(item); else rest.Add(item);
                         break;
+                    case BotAdvancedKind.StopMarketBuy:
+                        if (_batchBuyStops) buyStops.Add(item); else rest.Add(item);
+                        break;
                     default:
                         rest.Add(item);
                         break;
@@ -1165,6 +1171,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             if (brackets.Count > 0 && !await SubmitBracketBatchAsync(brackets, ct).ConfigureAwait(false))
                 return;
             if (shorts.Count > 0 && !await SubmitMarketShortBatchAsync(shorts, ct).ConfigureAwait(false))
+                return;
+            if (buyStops.Count > 0 && !await SubmitBuyStopBatchAsync(buyStops, ct).ConfigureAwait(false))
                 return;
             await SubmitAdvancedPerOrderAsync(rest, ct).ConfigureAwait(false);
             return;
@@ -1333,6 +1341,46 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 Interlocked.Increment(ref _failuresThisSession);
             }
         }
+        return true;
+    }
+
+    // §A1b: submit the tick's buy-stop cohort in one batched entry call. Mirrors SubmitArmBatchAsync
+    // but routes StopMarketBuy (cash-reserve) through ArmStopBuyBatchAsync. Uses the shared
+    // ApplyAdvancedResult bookkeeping. Returns false when shutdown was requested mid-call.
+    private async Task<bool> SubmitBuyStopBatchAsync(
+        List<(AIUser user, BotAdvancedDecision dec)> buyStops, CancellationToken ct)
+    {
+        var requests = new List<StopArmRequest>(buyStops.Count);
+        foreach (var (user, d) in buyStops)
+            requests.Add(new StopArmRequest(
+                user.UserId, d.StockId, d.Quantity, d.Currency,
+                StopArmKind.StopMarketBuy,
+                d.StopPrice, StopSlippagePct: null, TrailOffset: 0m, TrailIsPercent: false));
+
+        IReadOnlyList<OrderResult> results;
+        try
+        {
+            results = await _entry.ArmStopBuyBatchAsync(requests, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogInformation("Bot loop stop requested mid-advanced on tick {Tick}; skipping remaining.", _tickCount);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Batched buy-stop submit failed for {Count} decision(s) on tick {Tick}",
+                buyStops.Count, _tickCount);
+            foreach (var (user, _) in buyStops)
+            {
+                user.RecordError();
+                Interlocked.Increment(ref _failuresThisSession);
+            }
+            return true;
+        }
+
+        for (int i = 0; i < buyStops.Count; i++)
+            ApplyAdvancedResult(buyStops[i].user, buyStops[i].dec, results[i]);
         return true;
     }
 
