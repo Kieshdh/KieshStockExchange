@@ -59,6 +59,10 @@ KieshStockExchange.Services.MarketEngineServices.MidReference.Configure(builder.
 KieshStockExchange.Helpers.CurrencyHelper.PriceTickExtraDecimals =
     builder.Configuration.GetValue("Bots:PriceTickDecimals", 0);
 
+// FX realism (Bots:Fx:* — damp the AR(1) mid-rate walker toward a mean-reverting bounded walk at
+// ~1% intraday vol). Defaults = the historical consts ⇒ byte-identical when the section is absent.
+KieshStockExchange.Services.MarketDataServices.FxRateService.Configure(builder.Configuration);
+
 // 7a-3 — Serilog reads its sinks from the "Serilog" config section: console in
 // dev, a rolling daily file (logs/server-.log, 7-day retention) everywhere, and
 // a Warning-only JSON file in Production (see appsettings.Production.json).

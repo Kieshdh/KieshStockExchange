@@ -1,5 +1,6 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.Services.MarketDataServices;
@@ -7,14 +8,16 @@ namespace KieshStockExchange.Services.MarketDataServices;
 /// <summary> AR(1) mid-rate walker with a fixed spread. Deterministic across runs. </summary>
 public sealed class FxRateService : IFxRateService
 {
-    #region Tunables (mirror Tools/Config.py FX_* constants)
+    #region Tunables (defaults mirror Tools/Config.py FX_* constants; flip via Bots:Fx:* — see Configure)
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(60);
 
-    // x_new = Alpha*x_old + (1-Alpha)*base + Amplitude*base*U(-1,+1)
-    private const decimal Alpha = 0.92m;
-    private const decimal Amplitude = 0.005m;
-    private const decimal ConvertSpread = 0.001m;  // 0.2% round-trip
-    private const decimal RateBand = 0.20m;        // clamp to base ± 20%
+    // x_new = Alpha*x_old + (1-Alpha)*base + Amplitude*base*U(-1,+1), clamped to base*(1 +/- RateBand).
+    // Defaults reproduce the historical consts byte-for-byte when Bots:Fx:* is unset. Damped arm =
+    // higher Alpha (smoother/more random-walk) + lower Amplitude (less volatile) + tighter RateBand.
+    private static decimal _alpha = 0.92m;
+    private static decimal _amplitude = 0.005m;
+    private static decimal _convertSpread = 0.001m;  // 0.2% round-trip
+    private static decimal _rateBand = 0.20m;        // clamp to base +/- this fraction
     private const int RngSeed = 47;
     #endregion
 
@@ -42,6 +45,31 @@ public sealed class FxRateService : IFxRateService
         Reset();
     }
 
+    #region Config (Bots:Fx:* — read once at startup, before the singleton is built)
+    /// <summary>
+    /// Wired from server startup (Program.cs). Reads Bots:Fx:Alpha/Amplitude/ConvertSpread/RateBand;
+    /// defaults = the historical constants ⇒ byte-identical when the section is absent. Raising Alpha
+    /// smooths the wander (more random-walk), lowering Amplitude cuts per-tick vol, a tighter RateBand
+    /// narrows the bound — together a mean-reverting bounded walk at ~1% intraday vol.
+    /// </summary>
+    public static void Configure(IConfiguration config)
+    {
+        _alpha = config.GetValue("Bots:Fx:Alpha", _alpha);
+        _amplitude = config.GetValue("Bots:Fx:Amplitude", _amplitude);
+        _convertSpread = config.GetValue("Bots:Fx:ConvertSpread", _convertSpread);
+        _rateBand = config.GetValue("Bots:Fx:RateBand", _rateBand);
+    }
+
+    /// <summary>Test seam — set the tunables without IConfiguration. Reset to defaults in teardown.</summary>
+    public static void ConfigureForTests(decimal alpha, decimal amplitude, decimal convertSpread, decimal rateBand)
+    {
+        _alpha = alpha;
+        _amplitude = amplitude;
+        _convertSpread = convertSpread;
+        _rateBand = rateBand;
+    }
+    #endregion
+
     #region Public API
     public decimal GetMidRate(CurrencyType from, CurrencyType to)
     {
@@ -55,7 +83,7 @@ public sealed class FxRateService : IFxRateService
     public (decimal Bid, decimal Ask) GetBidAsk(CurrencyType from, CurrencyType to)
     {
         var mid = GetMidRate(from, to);
-        return (mid * (1m - ConvertSpread), mid * (1m + ConvertSpread));
+        return (mid * (1m - _convertSpread), mid * (1m + _convertSpread));
     }
 
     public void Reset()
@@ -99,10 +127,10 @@ public sealed class FxRateService : IFxRateService
     private decimal StepAr1(decimal prev, decimal baseMid)
     {
         var noise = (decimal)(_rng.NextDouble() * 2.0 - 1.0);
-        var raw = Alpha * prev + (1m - Alpha) * baseMid + Amplitude * baseMid * noise;
+        var raw = _alpha * prev + (1m - _alpha) * baseMid + _amplitude * baseMid * noise;
 
-        var lo = baseMid * (1m - RateBand);
-        var hi = baseMid * (1m + RateBand);
+        var lo = baseMid * (1m - _rateBand);
+        var hi = baseMid * (1m + _rateBand);
         if (raw < lo) raw = lo;
         if (raw > hi) raw = hi;
         return raw;
