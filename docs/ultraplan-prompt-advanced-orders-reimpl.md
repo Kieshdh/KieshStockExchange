@@ -19,6 +19,24 @@ cap ~2,300 → ~3,000–3,350). Conservation (CK=0) is sacrosanct; keep it flag-
 - **Why `BracketBatch` (off) didn't help + isn't the fix:** short-opens are MARKET orders — their cost is the match+settle group-tx, not the entry-insert,
   so batching the entry is spent (prior finding). The residual short-open cost is genuinely in the match+settle path.
 
+## ★★ FINAL-REVIEW HARDENING (2nd council, code-verified — READ BEFORE the section below; it CORRECTS it)
+- **Buy-stops are NOT "mirror sell-stops" — this is the most likely stall + CK trap.** `StopMarketBuy` (in `SubmitAdvancedPerOrderAsync`, ~AiTradeService.cs:1355)
+  actually places a stop-LIMIT buy (`PlaceStopLimitBuyOrderAsync` → `ArmStopOrderAsync` → `engine.ArmStopAsync`) that reserves **CASH, not shares**.
+  `OrderExecutionService.ArmStopBatchAsync` (~:1716) explicitly REJECTS buy-side because the cash-reservation logic differs fundamentally from the sell-stop
+  share-reservation path. ⇒ build a SEPARATE **`ArmStopBuyBatchAsync` with a FUND-reserve pre-flight** (+ the `limitPrice = stopPrice × 1.005` computation +
+  a direction-sanity check). Pattern-matching `ArmStopSellBatchAsync` directly → a CONSERVATION VIOLATION.
+- **Short-opens: the ENTRY-batch ALREADY EXISTS** — `OrderEntryService.PlaceMarketShortBatchAsync` (~:659), wired via `SubmitMarketShortBatchAsync` (~:1224) →
+  `engine.PlaceMarketShortBatchAsync` (~:678), gated behind `BracketBatch` (the measured "no-win": it batches ENTRY-inserts, but the per-short cost is the
+  MATCH+SETTLE). ⇒ **the real work is inside `OrderExecutionService.PlaceMarketShortBatchAsync`: amortize the MATCH+SETTLE into ONE group-tx with per-order
+  savepoints** (do NOT go looking in OrderEntryService). ⚠️ COLLATERAL-ATOMICITY TRAP (Contrarian): the short-collateral reservation write MUST be visible to the
+  sell's gate check WITHIN the same savepoint scope, or two short-arms in one batch each pass the gate on STALE reserved-quantity → phantom oversell → double
+  collateral liability, invisible to CK. Restructure to check-then-reserve inside the savepoint; do NOT naively share a commit group with plain orders.
+- **★ SEQUENCE + SCOPE (final-council reconciliation): do A's CHEAP, CK-safe half FIRST, DEFER the hard half.** Slice 1 = the buy-stop fund-reserve batch
+  (+ optional sorted price-ladder for `StopTriggerWatcher`) — a standalone `BatchBuyStops`-flagged commit, CK-soak (15m, CK=0), then A/B the `adv` ms at a 5-10%
+  buy-stop population. Slice 2 (SEPARATE commit) = the short-open match+settle group-tx, CK-soak on a short-heavy fleet. **Ship the two slices as SEPARATE commits**
+  (co-mingling makes a CK failure un-attributable). **DEFER Slice 2 until Ultraplan B's SPARSE ACTIVATION is measured** — sparse cuts arm-volume 80-90%, which may
+  make the CK-risky short-open settlement rewrite unnecessary. Slice 1 (cheap) also de-noises Ultraplan B's Phase-0 profiler baseline, so land + bake it first.
+
 ## What the ultraplan must design (the re-implementation)
 1. **Buy-stops (StopMarketBuy) — extend the entry-batching.** These are armed triggers (entry-insert, like sell-stops) but are NOT covered by `BatchArms`.
    Route them through the same batched-arm engine path (`ArmStopBatchAsync` / a StopMarketBuy analogue): one share/fund pre-reserve loop + one bulk INSERT +

@@ -14,6 +14,26 @@ direction below is settled; your job is the deep code investigation + the concre
 - **This plan (B) = everything else:** the Phase-0 profiler · arb event-triggering · **sparse activation (the big lever → 20k, + a realism improvement)** ·
   the batch/match/commit path · persistence-decouple (optional) · **the MEMORY / GC section (below).**
 
+## ★★ FINAL-REVIEW HARDENING (2nd council — this REORDERS the phases below + adds hard constraints)
+- **★ SPARSE ACTIVATION IS THE THESIS — promote it to Phase 1 (was Phase 2).** It is the ROOT fix, not one lever among many: (a) it attacks the LLN-flattening
+  the whole realism arc fought — `imbalance ≈ f·2δ` is N-INDEPENDENT, so 20k SYNCHRONOUS bots average to a flat tape and no buyProb/anchor knob escapes it;
+  heterogeneous, STRATIFIED wake-horizons (HFT-cohort every tick / swing every minutes / position every hours) cut AND stratify the effective N = real
+  trader-horizon diversity; (b) it cuts batch+adv+arb+decision cost proportional to active bots (the cap side-effect → 20k, maybe 50k); (c) it enables
+  FASTER-THAN-REALTIME soaks (fewer active bots/tick → shorter ticks → drive the sim clock faster → compress a sim-day from 24h toward ~20 min — the arc's chronic
+  soak bottleneck) WITHOUT Phase 3's crash-window risk. **⇒ GATE IT ON REALISM (primary metric) + cap (secondary).** ⚠️ DESIGN CONSTRAINT (Contrarian, load-bearing):
+  use STRATIFIED cohorts with a SAME-TICK-COHORT FLOOR — ret_acf(lag-1) depends on same-tick correlated volume, so uniform desync STRUCTURALLY weakens momentum
+  autocorrelation (a full-scorecard A/B only CONFIRMS the damage; the floor must be a DESIGN input up front). Sequence it AFTER Ultraplan A's cheap buy-stop batch
+  (so the Phase-0 baseline is adv-noise-free), but BEFORE A's hard short-open rewrite (sparse may moot it).
+- **Arb event-trigger needs a SNAPSHOT-CONSISTENCY constraint** — "fire only when a spread precondition exists" requires a COHERENT multi-leg price read (all legs at
+  one snapshot); per-stock prices update independently, so a STALE leg shows a phantom spread → arb fires → one leg fills, others move → a REAL loss out of the house
+  account, invisible to CK (the house is the counterparty). Specify the snapshot rule; a blind every-N-ticks gate is NOT safe.
+- **Phase 3 = SELECTIVE non-audit write deferral, NOT DB removal (DEMOTED further).** The DB is LOAD-BEARING BY DESIGN — this is a LIVE TRADING GAME (real users watch
+  live prices, execute against bot orders, hold persistent portfolios that must survive restart), not a pure sim. Distinguish **AUDIT-CRITICAL writes** (order fills,
+  balance mutations — ALWAYS persist) from **SPECULATIVE/HEARTBEAT writes** (idle-bot state, arb price-checks — defer: write on STATE-CHANGE, not every heartbeat).
+  Sparse activation likely RETIRES Phase 3's necessity for the research-harness goal (fewer wakes → fewer writes), so keep Phase 3 optional.
+- **Phase 0 profiler MUST log at Information level (or a dedicated structured metric), NOT Debug** — Debug is off in prod, so a Debug profiler yields no real-load data
+  and the implementer re-implements before any Phase 1 decision.
+
 ## ★ MEMORY / GC (a SECONDARY cap lever — measured 2026-07-05; fold into this plan, low priority vs sparse activation)
 Per-bot memory ≈ ~0.5 MB/bot; ~2 GB at 20k = NOT a RAM ceiling — but the per-bot object churn is a GC-pressure source that inflates tick-time (→ lower cap).
 KEY: the multi-timescale sentiment + price rings are PER-STOCK (shared, ~50 KB) — NOT per-bot; not a problem. The per-bot bulk is heap-allocated CLASS objects:
