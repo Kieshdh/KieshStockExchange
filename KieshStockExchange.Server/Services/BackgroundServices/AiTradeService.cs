@@ -217,8 +217,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly int  _maxAdvancedPerTick;   // §P6a cap on entry-route submissions per tick
     private readonly bool _advancedEnabled;       // §P6a master switch (default off)
     private readonly bool _batchArms;             // §A1a batch the stop/trailing arm route (default off)
-    private readonly bool _bracketBatch;          // Round 2 §0005 batch the bracket + market-short routes (default off)
+    private readonly bool _bracketBatch;          // Round 2 §0005 batch the bracket route (default off)
     private readonly bool _batchBuyStops;         // §A1b batch the buy-stop fund-reserve arm route (default off)
+    private readonly bool _batchShortOpens;       // Slice 2 batch the flat market-short-open match+settle route (default off)
     private readonly double _smoothedPriceHalfLifeSec; // 0 ⇒ legacy fixed α=0.15 EWMA; >0 ⇒ time-based half-life
     // §impact-decouple A: the >1-min reaction reference EWMA (maintained in OnQuoteUpdated). Default off.
     private readonly bool   _reactionRef;
@@ -795,6 +796,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
         _batchBuyStops      = _configuration.GetValue("Bots:Advanced:BatchBuyStops", false);
+        _batchShortOpens    = _configuration.GetValue("Bots:Advanced:BatchShortOpens", false);
         // §stagger: deterministic per-bot tick-phase scheduling. Default off ⇒ byte-identical;
         // Slots is the per-tick load-cut factor N (only ~1/N of bots are due to act per tick).
         _staggerEnabled     = _configuration.GetValue("Bots:Staggering:Enabled", false);
@@ -1136,7 +1138,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     {
         advanced.Sort((a, b) => a.user.AiUserId.CompareTo(b.user.AiUserId));
 
-        if (_batchArms || _bracketBatch || _batchBuyStops)
+        if (_batchArms || _bracketBatch || _batchBuyStops || _batchShortOpens)
         {
             var armSells = new List<(AIUser user, BotAdvancedDecision dec)>();
             var brackets = new List<(AIUser user, BotAdvancedDecision dec)>();
@@ -1156,7 +1158,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         if (_bracketBatch) brackets.Add(item); else rest.Add(item);
                         break;
                     case BotAdvancedKind.ShortOpen:
-                        if (_bracketBatch) shorts.Add(item); else rest.Add(item);
+                        // Slice 2: flat market-short opens batch under their own dedicated flag,
+                        // decoupled from BracketBatch (which now covers brackets only).
+                        if (_batchShortOpens) shorts.Add(item); else rest.Add(item);
                         break;
                     case BotAdvancedKind.StopMarketBuy:
                         if (_batchBuyStops) buyStops.Add(item); else rest.Add(item);

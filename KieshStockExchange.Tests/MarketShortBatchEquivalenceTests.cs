@@ -16,15 +16,24 @@ using Moq;
 namespace KieshStockExchange.Tests;
 
 /// <summary>
-/// Round 2 §0005 equivalence tests for <see cref="OrderExecutionService.PlaceMarketShortBatchAsync"/>.
-/// The batched flat-only market-short route is a structural cohort entry point that loops the proven
-/// per-order PlaceAndMatchAsync; this pins that the wrapper preserves it exactly — one result per
-/// order in submission order, identical persisted rows + reservation ledger tuples, partial failure
-/// isolated to the bad order, and the cohort matched in submission order (ascending aiUserId).
+/// Slice 2 equivalence tests for <see cref="OrderExecutionService.PlaceMarketShortBatchAsync"/>.
+/// The batched route amortises the flat-market-short cohort's match+settle into one group tx per
+/// (stockId,currency) (per-order savepoints), instead of the old per-order MATCH+SETTLE loop. This
+/// pins that the route preserves per-order semantics: one result per order in submission order,
+/// identical persisted rows + reservation-ledger tuples, partial failure isolated to the bad order,
+/// and the cohort matched in submission order (ascending aiUserId). Exercised with BOTH group-commit
+/// off (one root tx per group) and on (one root tx per currency shard, each group a savepoint).
 ///
-/// Matching is stubbed to return no fills (no resting liquidity), so the comparison is route-vs-route
-/// at the placement/reservation boundary — robust to short-open settlement semantics because BOTH
-/// worlds hit the same behaviour. Fill-level short-collateral conservation is the soak's job.
+/// Sellers are FLAT (Quantity 0): a flat market short reserves NOTHING at placement in either route
+/// (collateral is a FILL-time event), so with the matcher stubbed to no fills the comparison is
+/// route-vs-route at the placement boundary and both worlds hit identical behaviour. NOTE: this file
+/// deliberately does NOT drive real fills — the covered-sell seeding it used to carry only made the
+/// OLD thin-loop batched world match because that world was itself per-order; the real group-tx route
+/// skips placement reservation, so a covered-sell fixture would (correctly) diverge here. Fill-level
+/// short-collateral conservation + the F1 same-user-buyer+seller divergence are covered by the
+/// conservation soak (short-heavy fleet, watch CK_Positions/CK_Funds + the reconcile WARN + the F1
+/// probe) and by the fill-producing fixture in the plan's Verification (a), which needs a real
+/// MatchingEngine + a persistent book seeded with a resting buy maker.
 /// </summary>
 public class MarketShortBatchEquivalenceTests
 {
@@ -71,7 +80,7 @@ public class MarketShortBatchEquivalenceTests
         public readonly List<int> MatchedOrderIds = new();
     }
 
-    private static World NewWorld()
+    private static World NewWorld(bool groupCommit = false)
     {
         var w = new World();
         var funds = new Dictionary<int, Fund>();
@@ -90,9 +99,11 @@ public class MarketShortBatchEquivalenceTests
         {
             if (!positions.TryGetValue(userId, out var p))
             {
-                // Seed inventory so each sell reserves shares and settles deterministically; the
-                // flat-short collateral path is settlement-level and is covered by the soak, not here.
-                p = new Position { UserId = userId, StockId = StockId, Quantity = 100 };
+                // FLAT sellers: a flat market short reserves nothing at placement in either route, so
+                // both the per-order and the batched world behave identically at the placement boundary
+                // (the batched group-tx route skips Phase 1.5; the per-order route's OrderSettler takes
+                // the short-open branch which also reserves nothing until fill).
+                p = new Position { UserId = userId, StockId = StockId, Quantity = 0 };
                 positions[userId] = p;
             }
             return p;
@@ -121,6 +132,11 @@ public class MarketShortBatchEquivalenceTests
           .ReturnsAsync((int id, CancellationToken _) => byId.TryGetValue(id, out var o) ? o : null);
         db.Setup(d => d.BeginTransactionAsync(It.IsAny<CancellationToken>()))
           .ReturnsAsync(new Mock<ITransaction>().Object);
+        // §group-commit ON: the currency shard wraps its groups in RunInTransactionAsync; faithfully
+        // invoke the action so the per-group (savepoint) path runs. Durability/coalescing is covered
+        // by GroupCommitCrashTests; here the oracle is row + ledger + match-order identity.
+        db.Setup(d => d.RunInTransactionAsync(It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+          .Returns<Func<CancellationToken, Task>, CancellationToken>((action, ct) => action(ct));
 
         var registry = new OrderRegistry();
         w.Ledger = new RecordingLedger();
@@ -153,6 +169,12 @@ public class MarketShortBatchEquivalenceTests
 
         var config = new Mock<IConfiguration>();
         config.Setup(c => c.GetSection(It.IsAny<string>())).Returns(Mock.Of<IConfigurationSection>());
+        if (groupCommit)
+        {
+            var onSection = new Mock<IConfigurationSection>();
+            onSection.Setup(s => s.Value).Returns("true");
+            config.Setup(c => c.GetSection("Db:GroupCommit:Enabled")).Returns(onSection.Object);
+        }
 
         w.Engine = new OrderExecutionService(
             db.Object,
@@ -182,19 +204,22 @@ public class MarketShortBatchEquivalenceTests
         => rows.OrderBy(r => r.Quantity).ThenBy(r => r.Price).ThenBy(r => (int)r.Side)
             .ThenBy(r => r.Status).ToList();
 
-    [Fact]
-    public async Task Batched_short_matches_per_order_results_rows_and_ledger()
+    [Theory]
+    [InlineData(false)]  // batched: one root tx per (stockId,currency) group
+    [InlineData(true)]   // batched: one root tx per currency shard, each group a savepoint
+    public async Task Batched_short_matches_per_order_results_rows_and_ledger(bool groupCommit)
     {
-        var a = NewWorld();
-        var b = NewWorld();
+        var a = NewWorld();                          // per-order reference (dispatch-path agnostic)
+        var b = NewWorld(groupCommit: groupCommit);  // batched route under test
 
-        // World A: per-order PlaceAndMatchAsync (what PlaceTrueMarketSellOrderAsync resolves to).
+        // World A: per-order PlaceAndMatchAsync (the flat-short per-order path).
         var ra1 = await a.Engine.PlaceAndMatchAsync(ShortSell(userId: 1));
         var ra2 = await a.Engine.PlaceAndMatchAsync(ShortSell(userId: 2));
 
-        // World B: the same two short opens through the batch route.
+        // World B: the same two flat short opens through the batch route.
         var rb = await b.Engine.PlaceMarketShortBatchAsync(new[] { ShortSell(userId: 1), ShortSell(userId: 2) });
 
+        Assert.Equal(2, rb.Count);
         Assert.Equal(ra1.PlacedSuccessfully, rb[0].PlacedSuccessfully);
         Assert.Equal(ra2.PlacedSuccessfully, rb[1].PlacedSuccessfully);
 

@@ -2155,26 +2155,168 @@ public sealed class OrderExecutionService : IOrderExecutionService
         return results;
     }
 
-    // Round 2 §0005: batched flat-only market-short opens. Sequential per-order because each
-    // short open allocates a position row and short collateral the next order in the cohort
-    // may depend on — but the validation + book-touch sequence is consolidated. The per-order
-    // semantics match PlaceTrueMarketSellOrderAsync exactly; this is a structural shim that
-    // gives the BracketBatch flag an authoritative cohort entry point.
+    // Slice 2: batched flat market-short opens. Mirrors PlaceAndMatchBatchAsync's Phase 2/3/4
+    // EXACTLY, minus Phase 1.5/1.6: a flat market short reserves NOTHING at placement — its cash
+    // collateral is reserved at FILL inside the group tx by TradeSettler's isShortFill branch,
+    // under the seller's fund+position gate that RunGroupTxAsync already acquires. Every gate
+    // user gets BOTH the (user,currency) fund key AND the (user,stockId) position key — do NOT
+    // drop the position gate for shorts "because they hold no shares"; it is what serialises two
+    // shorts on the same seller/stock and guards ApplyDelta/TakeShortCollateral.
+    //
+    // This route is deliberately a ~40-line DUPLICATE of the plain batch's tail, NOT a shared
+    // helper: PlaceAndMatchBatchAsync's Phase 1.5 rejects flat sellers ("no position row") before
+    // they can match, so shorts cannot ride the plain method; and keeping the always-on plain
+    // method literally unedited is the byte-identical-off guarantee. Do not "DRY" these together.
     public async Task<IReadOnlyList<OrderResult>> PlaceMarketShortBatchAsync(
         IReadOnlyList<Order> orders, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         if (orders is null || orders.Count == 0) return Array.Empty<OrderResult>();
 
+        // Phase 1: structural validation — no DB calls.
         var results = new OrderResult[orders.Count];
+        var validOrders = new List<(int index, Order order)>(orders.Count);
         for (int i = 0; i < orders.Count; i++)
         {
-            var o = orders[i];
-            var validationError = _validator.ValidateNew(o);
-            if (validationError != null) { results[i] = validationError; continue; }
-            results[i] = await PlaceAndMatchAsync(o, ct).ConfigureAwait(false);
+            var err = _validator.ValidateNew(orders[i]);
+            if (err != null) results[i] = err;
+            else validOrders.Add((i, orders[i]));
         }
+        if (validOrders.Count == 0) return results;
+
+        // NO Phase 1.5 (share reserve) — shorts hold no shares.
+        // NO Phase 1.6 (fund reserve) — short collateral is reserved at fill, not placement.
+        // The scope only ever collects the settle-pass snapshots taken inside the group tx.
+        var scope = new TradeBatchScope();
+
+        var orderList = new List<Order>(validOrders.Count);
+        for (int i = 0; i < validOrders.Count; i++) orderList.Add(validOrders[i].order);
+
+        // Group by (stockId, currency) up-front so each group's tx scope is known.
+        var groups = new Dictionary<(int, CurrencyType), List<(int index, Order order)>>();
+        for (int i = 0; i < validOrders.Count; i++)
+        {
+            var vo = validOrders[i];
+            var key = (vo.order.StockId, vo.order.CurrencyType);
+            if (!groups.TryGetValue(key, out var list))
+            {
+                list = new List<(int, Order)>();
+                groups[key] = list;
+            }
+            list.Add(vo);
+        }
+
+        // Phase 2: short tx — bulk-insert so each order has its AutoIncrement OrderId before any
+        // matcher runs. No Phase 1.5/1.6 reservations exist to release on failure, so the
+        // RestoreCacheSnapshots call over the empty scope is a harmless no-op kept for symmetry.
+        try
+        {
+            await using var phase2Tx = await _db.BeginTransactionAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await _db.InsertAllAsync(orderList, ct).ConfigureAwait(false);
+                await phase2Tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                await phase2Tx.RollbackAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+
+            for (int i = 0; i < orderList.Count; i++)
+                _registry.Register(orderList[i]);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PlaceMarketShortBatchAsync: Phase 2 InsertAllAsync failed");
+            _settlement.RestoreCacheSnapshots(new Dictionary<int, Order>(), scope);
+            for (int i = 0; i < validOrders.Count; i++)
+                results[validOrders[i].index] = OrderResultFactory.OperationFailed(
+                    $"Bulk insert failed: {ex.Message}");
+            return results;
+        }
+
+        // Phase 3: one root tx per group (default) or one root tx per currency shard
+        // (group-commit), each group a savepoint. Reused VERBATIM from PlaceAndMatchBatchAsync —
+        // the runners are generic over groups and add no short-specific branch.
+        List<Transaction>[] groupResults;
+        if (!_groupCommit)
+        {
+            var groupTasks = new List<Task<List<Transaction>>>(groups.Count);
+            foreach (var kv in groups)
+            {
+                var (stockId, currency) = kv.Key;
+                var groupItems = kv.Value;
+                groupTasks.Add(RunGroupWithRecoveryAsync(stockId, currency, groupItems, results, ct));
+            }
+            groupResults = await Task.WhenAll(groupTasks).ConfigureAwait(false);
+        }
+        else
+        {
+            groupResults = await RunGroupCommitShardsAsync(groups, results, ct).ConfigureAwait(false);
+        }
+
+        var allFills = new List<Transaction>();
+        for (int i = 0; i < groupResults.Length; i++)
+            if (groupResults[i].Count > 0) allFills.AddRange(groupResults[i]);
+
+        // Slice 2 / F1: measure whether the contention-only short-classification divergence is
+        // reachable in the fleet (log-and-count, no behaviour change).
+        ProbeF1SameUserBuyerSeller(allFills);
+
+        // Phase 4: cross-group coalesced tick/fill publish outside all locks (per-group
+        // NotifyOrdersMutated already fired inside RunGroupTxAsync). FireBracketHooksAsync runs
+        // UNCONDITIONALLY (it early-returns on empty) so a bracket child promoted by a short fill
+        // still arms — keep it outside the count guard.
+        if (allFills.Count > 0)
+        {
+            await _marketData.OnTicksAsync(allFills, ct).ConfigureAwait(false);
+            await _notifications.OnFillsAsync(allFills, ct).ConfigureAwait(false);
+        }
+
+        await FireBracketHooksAsync(allFills, ct).ConfigureAwait(false);
+
         return results;
+    }
+
+    // Slice 2 / F1 probe (log-and-count, NO behaviour change). A flat market short is classified
+    // off a pre-batch position snapshot in TradeSettler.isShortFill, which — unlike isFlipFill —
+    // has no post-ApplyDelta live-Quantity guard. If a cohort short-seller ALSO owns a resting
+    // buy on the same book that another cohort short fills, that user appears as both a buyer and
+    // a seller within one (stockId,currency) group. Depending on the intra-group fill order this
+    // either commits fine (the buyer-side lift settles after the short) or trips the pre-write CK
+    // scan and rolls the whole group back (a batched-vs-per-order divergence, never a money leak).
+    // This counts the PRECONDITION on committed groups so a short-heavy soak can establish whether
+    // it is reachable; the rolled-back ordering surfaces separately as a FindInvariantViolation CK
+    // ERROR. If this ever fires we harden isShortFill + segregate these users to the per-order path
+    // (plan Slice 2 §3). Grouped by (StockId, CurrencyType) to match the engine's group key.
+    private void ProbeF1SameUserBuyerSeller(List<Transaction> fills)
+    {
+        if (fills.Count == 0) return;
+        var byGroup = new Dictionary<(int, CurrencyType), (HashSet<int> Buyers, HashSet<int> Sellers)>();
+        for (int i = 0; i < fills.Count; i++)
+        {
+            var t = fills[i];
+            var key = (t.StockId, t.CurrencyType);
+            if (!byGroup.TryGetValue(key, out var sets))
+            {
+                sets = (new HashSet<int>(), new HashSet<int>());
+                byGroup[key] = sets;
+            }
+            sets.Buyers.Add(t.BuyerId);
+            sets.Sellers.Add(t.SellerId);
+        }
+        foreach (var kv in byGroup)
+        {
+            foreach (var uid in kv.Value.Buyers)
+            {
+                if (!kv.Value.Sellers.Contains(uid)) continue;
+                _logger.LogWarning(
+                    "F1: same-user buyer+seller in short group (userId {UserId}, stockId {StockId}, {Currency}) " +
+                    "— short-classification divergence precondition reached; see Slice 2 §3.",
+                    uid, kv.Key.Item1, kv.Key.Item2);
+            }
+        }
     }
     #endregion
 

@@ -44,10 +44,11 @@ public interface IOrderExecutionService
         IReadOnlyList<(Order Parent, Order? Sl, IReadOnlyList<Order> Tps)> triples,
         CancellationToken ct = default);
 
-    /// <summary>Round 2 §0005: batched flat-only market-short open. Collapses the cohort's
-    /// CreateOrder round-trips; per-order collateral reserve + match still runs sequentially
-    /// because each short opens a position row that subsequent orders may read. Identical
-    /// per-result semantics to <see cref="PlaceAndMatchAsync"/> on a single market sell.</summary>
+    /// <summary>Slice 2: batched flat market-short opens. Amortises the cohort's match+settle
+    /// into one root tx per (stockId,currency) shard with per-order savepoints (mirrors the plain
+    /// batch's group-tx). Shorts reserve nothing at placement — collateral is reserved at fill
+    /// inside the group tx under the seller's fund+position gate. Identical per-result semantics to
+    /// <see cref="PlaceAndMatchAsync"/> on a single flat market sell.</summary>
     Task<IReadOnlyList<OrderResult>> PlaceMarketShortBatchAsync(
         IReadOnlyList<Order> orders, CancellationToken ct = default);
 
