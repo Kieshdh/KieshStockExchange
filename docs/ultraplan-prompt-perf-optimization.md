@@ -1,8 +1,28 @@
-# Ultraplan prompt — restore 20k-bot throughput (perf regression)
+# Ultraplan B — engine perf: restore 20k-bot throughput (EXCLUDING advanced orders)
 
 **For the cloud ultraplan. Produce a PHASED implementation plan (with per-phase gates, expected cap gain, and risk), NOT a blind rewrite.
-Phase 0 (profiling) is mandatory and gates everything after it.** Council-driven (5/5 + chairman synthesis, 2026-07-05) — the strategic
+Phase 0 (profiling) is mandatory and gates everything after it.** Council-driven (two 5/5 councils + chairman, 2026-07-05) — the strategic
 direction below is settled; your job is the deep code investigation + the concrete plan.
+
+## ★★ SCOPE — this is ULTRAPLAN B of two (advanced orders is a SEPARATE plan)
+- **Advanced orders → `docs/ultraplan-prompt-advanced-orders-reimpl.md` (Ultraplan A).** A deep-dive CORRECTED the review council's premise: the ~200 ms
+  `adv` phase is NOT a per-tick scan (the stop scan is already event-driven + cheap in `StopTriggerWatcher`) — it's the ARMING (a sequential Postgres commit
+  per non-batched arm). `BatchArms` already batches sell-stops; the residual (short-opens' match+settle, buy-stops' entry) needs a settlement-batching
+  re-impl. That's Ultraplan A, worth ~30-45% cap. **Do NOT plan advanced orders here.**
+- **Config easy-wins are SPENT** — `BatchArms` baked; `BracketBatch` + `BatchLegs` (arb) both tested = no-win (arb/short-opens are match+settle orders, so
+  batching-the-entry is spent). So arb needs EVENT-triggering (below), not a batch flag.
+- **This plan (B) = everything else:** the Phase-0 profiler · arb event-triggering · **sparse activation (the big lever → 20k, + a realism improvement)** ·
+  the batch/match/commit path · persistence-decouple (optional) · **the MEMORY / GC section (below).**
+
+## ★ MEMORY / GC (a SECONDARY cap lever — measured 2026-07-05; fold into this plan, low priority vs sparse activation)
+Per-bot memory ≈ ~0.5 MB/bot; ~2 GB at 20k = NOT a RAM ceiling — but the per-bot object churn is a GC-pressure source that inflates tick-time (→ lower cap).
+KEY: the multi-timescale sentiment + price rings are PER-STOCK (shared, ~50 KB) — NOT per-bot; not a problem. The per-bot bulk is heap-allocated CLASS objects:
+`AccountsCache` **Position** (20k×50 stocks ≈ 1M objects, ~250 MB — the biggest) + **Order** objects (~120 MB) + **AIUser** (~40 MB) + the scalar per-bot
+Dictionaries (Pressures/Stances/lags — ~5-8 MB of dict-entry tax). **Candidates (GC-locality wins, weigh vs risk):** (1) a Position **column-store** (parallel
+`decimal[] Quantity/Reserved/…` indexed by a compact user×stock index instead of 1M ref-typed objects) — biggest GC win, but Position is ref-passed + mutated
+across services (needs ref-passing discipline). (2) scalar per-bot Dictionaries → **parallel arrays** by compact bot index. (3) `OpenOrders` nested per-bot dicts
+→ one flat `Dictionary<(userId,orderId),Order>`. (4) **`PerceivedPriceDesync` (default-off) would add ~64 MB (2M entries) if enabled — PRUNE it** (it's already
+on the prune list). All are default-safe / behavior-neutral if done right. Gate on GC-time measurement (is Gen2 actually stalling the loop?) before the deep column-store.
 
 ## ★ MEASURED (2026-07-05, local base-config profiling soak, 15 min, recovered machine — use these, not the stale bake numbers)
 Ran the current **base config** (prod Stage-1 realism, NO ship/co-fire levers) and mined the existing `BotPhase` instrumentation:
