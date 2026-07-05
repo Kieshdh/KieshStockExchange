@@ -112,6 +112,28 @@ def corr_and_loadings(ret):
     return corrs, loadings
 
 
+def pairwise_by_sector(ret, nsec):
+    """Split pairwise return correlations into INTRA-sector (same stockId%nsec) vs CROSS-sector.
+    Sector pulses should lift INTRA clearly above CROSS = the real-market signature. This within-arm
+    contrast is far less window-noise-sensitive than absolute corr (both groups share the same window)."""
+    sids = sorted(ret)
+    intra, cross = [], []
+    for a in range(len(sids)):
+        for b in range(a + 1, len(sids)):
+            sa, sb = sids[a], sids[b]
+            try:
+                same = (int(sa) % nsec) == (int(sb) % nsec)  # MUST match the engine: sector = stockId % SectorCount
+            except ValueError:
+                continue  # non-numeric stock id ⇒ sector undefined ⇒ skip (metric is engine-id-based)
+            ra, rb = ret[sa], ret[sb]
+            common = sorted(set(ra) & set(rb))
+            if len(common) >= 8:
+                c = pearson([ra[i] for i in common], [rb[i] for i in common])
+                if c is not None:
+                    (intra if same else cross).append(c)
+    return intra, cross
+
+
 def load_ohlcv(path):
     """Full OHLCV rows per stock, for range-efficiency (bodies vs wicks) + volume concentration."""
     with open(path, newline="", encoding="utf-8") as fh:
@@ -170,6 +192,8 @@ def main():
     ap.add_argument("--csv", required=True)
     ap.add_argument("--currency", default="USD")
     ap.add_argument("--horizons", default="1,5")
+    ap.add_argument("--sectors", type=int, default=0,
+                    help="if >0, also report INTRA- vs CROSS-sector corr with sector = stockId %% N (set N = the engine SectorCount)")
     args = ap.parse_args()
     horizons = [int(h) for h in args.horizons.split(",") if h.strip()]
 
@@ -199,6 +223,17 @@ def main():
                   % (h, len(corrs), statistics.mean(corrs), statistics.median(corrs),
                      corrs[len(corrs)//10], corrs[len(corrs)*9//10],
                      statistics.mean(loadings) if loadings else float("nan")))
+
+    if args.sectors and args.sectors > 1:
+        print()
+        print("INTRA vs CROSS-SECTOR CORRELATION (sector = stockId %% %d; a sector pulse should lift INTRA clearly above CROSS):"
+              % args.sectors)
+        for h in horizons:
+            intra, cross = pairwise_by_sector(returns_at(closes, times, h), args.sectors)
+            mi = statistics.mean(intra) if intra else float("nan")
+            mc = statistics.mean(cross) if cross else float("nan")
+            print("  h=%2dmin  intra(n=%4d) mean=%+.3f   cross(n=%4d) mean=%+.3f   intra-minus-cross=%+.3f"
+                  % (h, len(intra), mi, len(cross), mc, mi - mc))
     # kurtosis on 1-bucket returns
     r1 = returns_at(closes, times, 1)
     kurts = [k for s in sorted(r1) if (k := excess_kurt(list(r1[s].values()))) is not None]
