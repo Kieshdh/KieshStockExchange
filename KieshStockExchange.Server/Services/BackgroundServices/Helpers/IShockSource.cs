@@ -28,6 +28,11 @@ internal interface IShockSource
     /// or 0 if none fired this tick. Drives the global co-fire burst (all co-firers act same-tick, same-sign). A
     /// source with no global stream returns 0 always ⇒ co-fire inert.</summary>
     int LastGlobalSign { get; }
+
+    /// <summary>The sector (0..SectorCount−1) a global pulse was scoped to in the most recent <see cref="Poll"/>,
+    /// or −1 for a market-wide pulse / no pulse. Restricts the co-fire cohort to one sector ⇒ intra-sector flow. A
+    /// source with no sector scoping returns −1 always ⇒ sector filtering inert.</summary>
+    int LastGlobalSector { get; }
 }
 
 /// <summary>
@@ -50,13 +55,21 @@ internal sealed class RandomShockSource : IShockSource
     private readonly double _maxMag;
     private readonly double _exp;
     private readonly double _globalFraction; // 0 ⇒ per-stock-only (byte-identical); >0 ⇒ a shared market-wide stream
+    private readonly int _sectorCount;       // 1 ⇒ no sectors (byte-identical); >1 ⇒ a global pulse may scope to one sector
+    private readonly double _sectorFraction; // 0 ⇒ every global pulse market-wide (byte-identical); else the fraction scoped to a sector
+
+    // §sector-exog: dedicated RNG, drawn ONLY when a global pulse fires AND sectors are enabled ⇒ the global stream stays untouched off.
+    private const int SectorRngSeed = GlobalRngSeed ^ 0x2C;
 
     private Random _rng = new(RngSeed);
     private Random _globalRng = new(GlobalRngSeed);
+    private Random _sectorRng = new(SectorRngSeed);
     private int _lastGlobalSign; // ±1 when a global impulse fired this Poll, else 0 — the co-fire signal.
+    private int _lastGlobalSector = -1; // 0..N−1 = a global pulse scoped to that sector; −1 = market-wide / none.
 
     internal RandomShockSource(IStockService stocks, double meanIntervalMinutes,
-        double minMagnitude, double maxMagnitude, double magnitudeExponent, double globalFraction = 0.0)
+        double minMagnitude, double maxMagnitude, double magnitudeExponent, double globalFraction = 0.0,
+        int sectorCount = 1, double sectorFraction = 0.0)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _meanIntervalSec = Math.Max(0.01, meanIntervalMinutes) * 60.0; // floor avoids div-by-zero, allows fine calibration
@@ -64,16 +77,22 @@ internal sealed class RandomShockSource : IShockSource
         _maxMag = Math.Max(_minMag, maxMagnitude);
         _exp    = Math.Max(1.0, magnitudeExponent);
         _globalFraction = Math.Clamp(globalFraction, 0.0, 1.0);
+        _sectorCount = Math.Max(1, sectorCount);
+        _sectorFraction = Math.Clamp(sectorFraction, 0.0, 1.0);
     }
 
-    public void Reset() { _rng = new Random(RngSeed); _globalRng = new Random(GlobalRngSeed); _lastGlobalSign = 0; }
+    public void Reset() { _rng = new Random(RngSeed); _globalRng = new Random(GlobalRngSeed); _sectorRng = new Random(SectorRngSeed); _lastGlobalSign = 0; _lastGlobalSector = -1; }
 
     /// <inheritdoc/>
     public int LastGlobalSign => _lastGlobalSign;
 
+    /// <inheritdoc/>
+    public int LastGlobalSector => _lastGlobalSector;
+
     public IEnumerable<ShockImpulse> Poll(long simTick, double dt)
     {
         _lastGlobalSign = 0; // cleared each Poll; set below only if the global stream fires this tick.
+        _lastGlobalSector = -1; // cleared each Poll; set below only if a global pulse scopes to a sector.
         // Rate-based arrival probability per stock for the elapsed (clamped) dt — loop-rate independent.
         double p = 1.0 - Math.Exp(-dt / _meanIntervalSec);
         List<ShockImpulse>? impulses = null;
@@ -97,8 +116,15 @@ internal sealed class RandomShockSource : IShockSource
                 double mag  = BotMath.DrawMagnitude(_globalRng, _minMag, _maxMag, _exp); // draw 3: shared magnitude
                 double signed = sign * mag;
                 _lastGlobalSign = sign > 0.0 ? 1 : -1; // co-fire signal: the shared direction for this tick.
+                // §sector pulse: a fraction of global pulses hit ONE sector only ⇒ intra-sector correlated flow. Off ⇒ −1 ⇒ market-wide.
+                int sector = -1;
+                if (_sectorCount > 1 && _sectorFraction > 0.0 && _sectorRng.NextDouble() < _sectorFraction)
+                    sector = _sectorRng.Next(_sectorCount);
+                _lastGlobalSector = sector;
                 impulses ??= new List<ShockImpulse>();
-                foreach (var sid in _stocks.ById.Keys) impulses.Add(new ShockImpulse(sid, signed));
+                foreach (var sid in _stocks.ById.Keys)
+                    if (sector < 0 || sid % _sectorCount == sector) // market-wide (−1) hits all; a sector pulse hits its sector only
+                        impulses.Add(new ShockImpulse(sid, signed));
             }
         }
 

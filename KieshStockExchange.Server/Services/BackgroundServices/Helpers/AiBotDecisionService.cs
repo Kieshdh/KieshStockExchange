@@ -282,6 +282,8 @@ internal sealed class AiBotDecisionService
     private readonly double             _globalCoFireNotionalFrac;
     private readonly Func<int>?         _globalCoFireSignOf;   // ±1 on a market-wide pulse tick, else 0
     private readonly Func<int>?         _globalPulseIdOf;      // monotonic id per global pulse (cohort + spread key)
+    private readonly Func<int>?         _globalCoFireSectorOf; // sector (0..N−1) a pulse scoped to, else −1 (market-wide)
+    private readonly int                _sectorCount;          // 1 ⇒ no sector filtering (byte-identical)
     // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
@@ -455,6 +457,7 @@ internal sealed class AiBotDecisionService
         Func<int, double>? shockOf = null, Func<int, int>? shockIdOf = null, Func<bool>? anyShockActive = null,
         bool globalCoFire = false, double globalCoFireFraction = 0.0, double globalCoFireNotionalFrac = 0.0,
         Func<int>? globalCoFireSignOf = null, Func<int>? globalPulseIdOf = null,
+        Func<int>? globalCoFireSectorOf = null, int sectorCount = 1,
         // §reaction-persistence split: two-clock reaction/persistence + taker coupling. reactionTauSec is
         // RESERVED (read + logged in AiTradeService, not wired in v1 — the AR(1) already filters tick noise).
         // All default-off/neutral ⇒ byte-identical.
@@ -621,6 +624,8 @@ internal sealed class AiBotDecisionService
         _globalCoFireNotionalFrac  = Math.Max(0.0, globalCoFireNotionalFrac);
         _globalCoFireSignOf        = globalCoFireSignOf;
         _globalPulseIdOf           = globalPulseIdOf;
+        _globalCoFireSectorOf      = globalCoFireSectorOf;
+        _sectorCount               = Math.Max(1, sectorCount);
     }
     #endregion
 
@@ -663,7 +668,8 @@ internal sealed class AiBotDecisionService
                 int pulseId = _globalPulseIdOf();
                 if (IsChaser(user.AiUserId, pulseId, _globalCoFireFraction, GlobalCoFireSalt))
                 {
-                    int pick = CoFireSelect(ctx, user, currency, pulseId);
+                    int sector = _globalCoFireSectorOf?.Invoke() ?? -1; // −1 = market-wide; ≥0 = restrict the pick to that sector
+                    int pick = CoFireSelect(ctx, user, currency, pulseId, sector);
                     if (pick > 0)
                     {
                         var seedPv = ctx.SeedPortfolioValue(user.UserId, currency, (s, c) => SeedPrice(s, c, ctx));
@@ -2175,12 +2181,18 @@ internal sealed class AiBotDecisionService
                            user.AiUserId, _chaserFraction, ChaserSalt, 0.0);
 
     /// <summary>§global co-fire: the watchlist stock this co-firer pushes on a pulse — a hash-SPREAD slot keyed on the
-    /// pulse id (each pulse reshuffles) so the cohort distributes across ALL stocks, not the single argmax name the
-    /// per-stock chaser picks. Pure &amp; RNG-free.</summary>
-    private int CoFireSelect(AiBotContext ctx, AIUser user, CurrencyType currency, int pulseId)
+    /// pulse id (each pulse reshuffles) so the cohort distributes across the eligible stocks, not the single argmax name
+    /// the per-stock chaser picks. A sector-scoped pulse (<paramref name="sector"/> ≥ 0) restricts the spread to that
+    /// sector's stocks ⇒ intra-sector correlated flow. Pure &amp; RNG-free.</summary>
+    private int CoFireSelect(AiBotContext ctx, AIUser user, CurrencyType currency, int pulseId, int sector)
     {
         var wl = EligibleWatchlist(ctx, user, currency);
         if (wl.Length == 0) return 0;
+        if (sector >= 0)                                   // §sector pulse: push ONLY this sector ⇒ intra-sector flow
+        {
+            wl = wl.Where(s => s % _sectorCount == sector).ToArray();
+            if (wl.Length == 0) return 0;                  // holds nothing in the pulsed sector ⇒ sits it out
+        }
         int idx = (int)(BotMath.HashUnit01(user.AiUserId ^ GlobalCoFireSalt, pulseId) * wl.Length);
         return wl[idx < wl.Length ? idx : wl.Length - 1];
     }

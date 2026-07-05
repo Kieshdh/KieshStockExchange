@@ -345,13 +345,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         var exogGlobalCoFire             = _configuration.GetValue("Bots:ExogShock:GlobalCoFire", false);
         var exogGlobalCoFireFraction     = _configuration.GetValue("Bots:ExogShock:GlobalCoFireFraction", 0.0);
         var exogGlobalCoFireNotionalFrac = _configuration.GetValue("Bots:ExogShock:GlobalCoFireNotionalFrac", 0.0);
+        // §sector pulse: a fraction of global pulses scope to ONE sector (stockId % SectorCount) ⇒ intra-sector corr.
+        // SectorCount 1 OR SectorFraction 0 ⇒ every pulse market-wide ⇒ byte-identical.
+        var exogSectorCount    = _configuration.GetValue("Bots:ExogShock:SectorCount", 1);
+        var exogSectorFraction = _configuration.GetValue("Bots:ExogShock:SectorFraction", 0.0);
         var exogSource = new RandomShockSource(stocks,
                         meanIntervalMinutes: _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
                         minMagnitude:        _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
                         maxMagnitude:        _configuration.GetValue("Bots:ExogShock:MaxMagnitude", 0.06),
                         magnitudeExponent:   _configuration.GetValue("Bots:ExogShock:MagnitudeExponent", 1.8),
                         // §global-exog: fraction of shock arrivals that fire MARKET-WIDE (shared → cross-stock corr); 0 ⇒ per-stock-only.
-                        globalFraction:      _configuration.GetValue("Bots:ExogShock:GlobalFraction", 0.0));
+                        globalFraction:      _configuration.GetValue("Bots:ExogShock:GlobalFraction", 0.0),
+                        sectorCount:         exogSectorCount,
+                        sectorFraction:      exogEnabled ? exogSectorFraction : 0.0);
         _news      = new ExogenousShockService(stocks, _profiles,
                         new SeparatorLogger<ExogenousShockService>(loggerFactory, loggerOptions), exogSource,
                         enabled:          exogEnabled,
@@ -707,6 +713,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         globalCoFireNotionalFrac:  exogEnabled ? exogGlobalCoFireNotionalFrac : 0.0,
                         globalCoFireSignOf:        () => _news.GlobalCoFireSign,
                         globalPulseIdOf:           () => _news.GlobalPulseId,
+                        // §sector pulse: restrict a sector-scoped pulse's co-fire cohort to that sector (−1 ⇒ market-wide).
+                        globalCoFireSectorOf:      () => _news.GlobalCoFireSector,
+                        sectorCount:               exogSectorCount,
                         // §reaction-persistence split: two-clock reaction/persistence + taker coupling. Default off ⇒
                         // byte-identical (ReactionTauSec is read + logged below but RESERVED — not wired in v1).
                         reactionPersistence:       _configuration.GetValue("Bots:Imbalance:ReactionPersistence", false),
@@ -747,9 +756,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _configuration.GetValue("Bots:ExogShock:MagnitudeExponent", 1.8));
         _logger.LogInformation(
             "CONFIGCHECK ExogShock GlobalCoFire={Cf} coFireFraction={Cff} coFireNotionalFrac={Cfn} globalFraction={Gf} " +
-            "(needs Enabled + GlobalFraction>0 to fire; off ⇒ byte-identical)",
+            "sectorCount={Sc} sectorFraction={Sf} " +
+            "(needs Enabled + GlobalFraction>0 to fire; SectorCount>1 & SectorFraction>0 ⇒ sector-scoped; off ⇒ byte-identical)",
             exogEnabled && exogGlobalCoFire, exogGlobalCoFireFraction, exogGlobalCoFireNotionalFrac,
-            _configuration.GetValue("Bots:ExogShock:GlobalFraction", 0.0));
+            _configuration.GetValue("Bots:ExogShock:GlobalFraction", 0.0), exogSectorCount, exogSectorFraction);
         // Microstructure bounce arm marker: lets an A/B soak operator confirm OFF (0) vs ON from the log.
         _logger.LogInformation("CONFIGCHECK TouchTighten touchTighten={TouchTighten} (absent ⇒ 0 ⇒ byte-identical)",
             _configuration.GetValue("Bots:TouchTightenPrc", 0m));

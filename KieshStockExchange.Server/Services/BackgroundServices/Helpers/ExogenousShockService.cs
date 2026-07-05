@@ -54,6 +54,7 @@ internal sealed class ExogenousShockService
     private int  _arrivalsSinceLog;
     private long _simTick;
     private int  _globalCoFireSign; // ±1 on the tick a global impulse fires, else 0 (relayed from the source).
+    private int  _globalCoFireSector = -1; // 0..N−1 the sector a global pulse scoped to this tick, else −1 (relayed from the source).
     private int  _globalPulseId;    // monotonic id per global pulse — reshuffles the co-fire cohort + spread.
 
     private DateTime _lastTickUtc = DateTime.MaxValue; // inert until Reset arms the clock
@@ -130,6 +131,7 @@ internal sealed class ExogenousShockService
         // §global co-fire: relay the source's shared-impulse sign for THIS tick so the chaser can fire a
         // simultaneous, same-sign taker burst across all stocks (correlated flow). 0 on non-pulse ticks.
         _globalCoFireSign = _source.LastGlobalSign;
+        _globalCoFireSector = _source.LastGlobalSector; // −1 = market-wide pulse; 0..N−1 = sector-scoped ⇒ chaser restricts to it.
         if (_globalCoFireSign != 0) _globalPulseId++;
 
         _activeCount = _shock.Count;
@@ -145,6 +147,7 @@ internal sealed class ExogenousShockService
         _arrivalsSinceLog = 0;
         _simTick = 0;
         _globalCoFireSign = 0;
+        _globalCoFireSector = -1;
         _globalPulseId = 0;
         _source.Reset();
         lock (_samples) _samples.Clear();
@@ -167,6 +170,10 @@ internal sealed class ExogenousShockService
     /// <summary>±1 when a MARKET-WIDE impulse fired THIS tick (else 0) — the global co-fire signal for the chaser
     /// (all co-firers act same-tick, same-sign ⇒ correlated taker flow). 0 when the service is disabled.</summary>
     internal int GlobalCoFireSign => _enabled ? _globalCoFireSign : 0;
+
+    /// <summary>The sector (0..N−1) THIS tick's global pulse was scoped to, or −1 for market-wide / none — restricts the
+    /// co-fire cohort to one sector ⇒ intra-sector correlated flow. −1 when the service is disabled ⇒ no sector filtering.</summary>
+    internal int GlobalCoFireSector => _enabled ? _globalCoFireSector : -1;
 
     /// <summary>Monotonic id per global pulse — keys the co-fire cohort + per-bot stock spread so each pulse reshuffles.</summary>
     internal int GlobalPulseId => _globalPulseId;

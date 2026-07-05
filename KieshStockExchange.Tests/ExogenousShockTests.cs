@@ -24,9 +24,11 @@ public class ExogenousShockTests
     {
         public List<ShockImpulse> Emit = new();
         public int GlobalSign;  // §global co-fire: the shared-pulse sign the test controls between ticks.
+        public int GlobalSector = -1; // §sector pulse: the pulsed sector the test controls (−1 = market-wide).
         public void Reset() { }
         public IEnumerable<ShockImpulse> Poll(long simTick, double dt) => Emit;
         public int LastGlobalSign => GlobalSign;
+        public int LastGlobalSector => GlobalSector;
     }
 
     private static Mock<IStockService> BuildStocks(params (int sid, decimal seed)[] entries)
@@ -314,5 +316,90 @@ public class ExogenousShockTests
         Drive(svc, 10);
         Assert.Equal(0, svc.GlobalCoFireSign);
         Assert.Equal(0, svc.GlobalPulseId);
+    }
+
+    // ---- §sector pulse: a fraction of global pulses scope to ONE sector (stockId % SectorCount) ----
+
+    [Fact]
+    public void SectorFraction_zero_keeps_pulses_market_wide_and_sector_minus_one()
+    {
+        // SectorFraction 0 ⇒ the sector RNG is never drawn ⇒ the impulse stream is IDENTICAL to the no-sector source,
+        // and every global pulse stays market-wide (LastGlobalSector == −1) = byte-identical off.
+        var stocks = BuildStocks((1, 100m), (2, 50m), (3, 25m), (4, 40m), (5, 30m)).Object;
+        var withSectors = new RandomShockSource(stocks, 0.2, 0.01, 0.06, 1.8, globalFraction: 1.0,
+            sectorCount: 5, sectorFraction: 0.0);
+        var noSectors = new RandomShockSource(stocks, 0.2, 0.01, 0.06, 1.8, globalFraction: 1.0);
+        withSectors.Reset(); noSectors.Reset();
+        for (int t = 1; t <= 3000; t++)
+        {
+            var a = withSectors.Poll(t, 1.0).ToList();
+            var b = noSectors.Poll(t, 1.0).ToList();
+            Assert.Equal(-1, withSectors.LastGlobalSector);  // never sector-scoped ⇒ market-wide
+            Assert.Equal(b.Count, a.Count);                  // byte-identical impulse stream (sector RNG untouched)
+            for (int k = 0; k < a.Count; k++)
+            {
+                Assert.Equal(b[k].StockId, a[k].StockId);
+                Assert.Equal(b[k].SignedMagnitude, a[k].SignedMagnitude);
+            }
+        }
+    }
+
+    [Fact]
+    public void SectorFraction_one_scopes_the_shared_impulse_to_a_single_sector()
+    {
+        // 10 stocks over 5 sectors (sid % 5); every global pulse is sector-scoped ⇒ its shared impulse hits ONLY that
+        // sector's stocks, and LastGlobalSector reports which one.
+        var entries = Enumerable.Range(1, 10).Select(i => (i, (decimal)(10 * i))).ToArray();
+        var stocks = BuildStocks(entries).Object;
+        var src = new RandomShockSource(stocks, 0.2, 0.01, 0.06, 1.8, globalFraction: 1.0,
+            sectorCount: 5, sectorFraction: 1.0);
+        src.Reset();
+        bool sawSectorPulse = false;
+        for (int t = 1; t <= 3000; t++)
+        {
+            var imps = src.Poll(t, 1.0).ToList();
+            int sector = src.LastGlobalSector;
+            Assert.InRange(sector, -1, 4);                   // −1 (none this tick) or a valid sector
+            if (sector < 0) continue;
+            sawSectorPulse = true;
+            // the shared-magnitude group (≥2 stocks with one magnitude) = the global fan-out; all must be in the sector.
+            var shared = imps.GroupBy(i => i.SignedMagnitude)
+                             .FirstOrDefault(g => g.Select(i => i.StockId).Distinct().Count() >= 2);
+            Assert.NotNull(shared);
+            Assert.All(shared!, i => Assert.Equal(sector, i.StockId % 5));
+        }
+        Assert.True(sawSectorPulse, "SectorFraction=1 should fire a sector-scoped pulse within 3000 ticks.");
+    }
+
+    [Fact]
+    public void Service_relays_the_co_fire_sector()
+    {
+        var src = new StepSource();
+        var svc = Build(src);
+        svc.Reset(T0);
+
+        src.GlobalSign = 0; src.GlobalSector = -1; src.Emit = new List<ShockImpulse>();  // no pulse
+        svc.Tick(T0.AddSeconds(1));
+        Assert.Equal(-1, svc.GlobalCoFireSector);
+
+        src.GlobalSign = 1; src.GlobalSector = 3;                                          // a sector-3 pulse
+        src.Emit = new List<ShockImpulse> { new ShockImpulse(3, 0.05), new ShockImpulse(8, 0.05) };
+        svc.Tick(T0.AddSeconds(2));
+        Assert.Equal(3, svc.GlobalCoFireSector);
+
+        src.GlobalSign = 1; src.GlobalSector = -1;                                         // a market-wide pulse
+        src.Emit = new List<ShockImpulse> { new ShockImpulse(1, 0.05), new ShockImpulse(2, 0.05) };
+        svc.Tick(T0.AddSeconds(3));
+        Assert.Equal(-1, svc.GlobalCoFireSector);
+    }
+
+    [Fact]
+    public void Service_disabled_reports_minus_one_sector()
+    {
+        var src = new StepSource { GlobalSign = 1, GlobalSector = 2, Emit = { new ShockImpulse(1, 0.05) } };
+        var svc = Build(src, enabled: false);
+        svc.Reset(T0);
+        Drive(svc, 10);
+        Assert.Equal(-1, svc.GlobalCoFireSector);
     }
 }
