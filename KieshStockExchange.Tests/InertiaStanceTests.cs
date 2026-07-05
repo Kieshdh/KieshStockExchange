@@ -64,4 +64,26 @@ public class InertiaStanceTests
         // Guard against an accidental dependency on the unused baseline head.
         Assert.NotEqual(r0, r1);
     }
+
+    // §sentiment-modulated inertia: pins the pure helper that shrinks the max hold toward minSec as the
+    // |shared sentiment| magnitude (0..1) rises. mag 0 ⇒ maxSec (byte-identical to today); mag 1 ⇒ minSec.
+    [Fact]
+    public void SentimentMaxSec_zero_magnitude_returns_maxSec()
+        => Assert.Equal(600.0, AiBotDecisionService.SentimentModulatedMaxSec(30.0, 600.0, 0.0));
+
+    [Fact]
+    public void SentimentMaxSec_full_magnitude_returns_minSec()
+        => Assert.Equal(30.0, AiBotDecisionService.SentimentModulatedMaxSec(30.0, 600.0, 1.0));
+
+    [Fact]
+    public void SentimentMaxSec_half_magnitude_returns_midpoint()
+        => Assert.Equal(315.0, AiBotDecisionService.SentimentModulatedMaxSec(30.0, 600.0, 0.5));
+
+    [Fact]
+    public void SentimentMaxSec_clamps_negative_to_maxSec()
+        => Assert.Equal(600.0, AiBotDecisionService.SentimentModulatedMaxSec(30.0, 600.0, -0.40));
+
+    [Fact]
+    public void SentimentMaxSec_clamps_above_one_to_minSec()
+        => Assert.Equal(30.0, AiBotDecisionService.SentimentModulatedMaxSec(30.0, 600.0, 1.50));
 }

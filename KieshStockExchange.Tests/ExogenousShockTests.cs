@@ -1,3 +1,4 @@
+using System.Linq;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.BackgroundServices.Helpers;
@@ -22,8 +23,10 @@ public class ExogenousShockTests
     private sealed class StepSource : IShockSource
     {
         public List<ShockImpulse> Emit = new();
+        public int GlobalSign;  // §global co-fire: the shared-pulse sign the test controls between ticks.
         public void Reset() { }
         public IEnumerable<ShockImpulse> Poll(long simTick, double dt) => Emit;
+        public int LastGlobalSign => GlobalSign;
     }
 
     private static Mock<IStockService> BuildStocks(params (int sid, decimal seed)[] entries)
@@ -177,5 +180,139 @@ public class ExogenousShockTests
         var clamped = BuildFund(_ => 5.0, () => true);
         clamped.Reset();
         Assert.Equal(118m, clamped.Get(1, Usd));
+    }
+
+    // ---- §global-exog: shared market-wide shock impulses (cross-stock correlation lever) ----
+
+    private static readonly int[] AllIds = { 1, 2, 3 };
+
+    // A market-wide impulse = one signed magnitude present for EVERY stock the same tick (all equal); per-stock
+    // impulses are independent draws so they (essentially) never collide across all stocks. This detects it.
+    private static bool HasMarketWideImpulse(IEnumerable<ShockImpulse> imps)
+        => imps.GroupBy(i => i.SignedMagnitude)
+               .Any(g => g.Select(i => i.StockId).Distinct().Count() == AllIds.Length);
+
+    [Fact]
+    public void GlobalFraction_zero_never_fires_a_market_wide_impulse()
+    {
+        var stocks = BuildStocks((1, 100m), (2, 50m), (3, 25m)).Object;
+        var src = new RandomShockSource(stocks, meanIntervalMinutes: 0.2, minMagnitude: 0.01,
+            maxMagnitude: 0.06, magnitudeExponent: 1.8, globalFraction: 0.0);
+        src.Reset();
+        for (int t = 1; t <= 3000; t++)
+            Assert.False(HasMarketWideImpulse(src.Poll(t, 1.0))); // per-stock only ⇒ no all-stocks shared magnitude
+    }
+
+    [Fact]
+    public void GlobalFraction_one_fires_the_same_magnitude_to_every_stock()
+    {
+        var stocks = BuildStocks((1, 100m), (2, 50m), (3, 25m)).Object;
+        var src = new RandomShockSource(stocks, meanIntervalMinutes: 0.2, minMagnitude: 0.01,
+            maxMagnitude: 0.06, magnitudeExponent: 1.8, globalFraction: 1.0);
+        src.Reset();
+        bool sawGlobal = false;
+        for (int t = 1; t <= 3000 && !sawGlobal; t++)
+        {
+            var shared = src.Poll(t, 1.0).GroupBy(i => i.SignedMagnitude)
+                            .FirstOrDefault(g => g.Select(i => i.StockId).Distinct().Count() == AllIds.Length);
+            if (shared != null)
+            {
+                sawGlobal = true;
+                Assert.All(shared, i => Assert.Equal(shared.Key, i.SignedMagnitude)); // identical across all stocks
+            }
+        }
+        Assert.True(sawGlobal, "GlobalFraction=1 should fire a market-wide impulse within 3000 ticks.");
+    }
+
+    [Fact]
+    public void GlobalFraction_default_is_zero_and_per_stock_stream_is_deterministic()
+    {
+        // Default ctor arg (no globalFraction) ⇒ per-stock-only; two same-seed sources emit identical sequences
+        // (the dedicated global RNG is never drawn at 0 ⇒ the per-stock RNG stream is untouched = byte-identical).
+        var stocks = BuildStocks((1, 100m), (2, 50m), (3, 25m)).Object;
+        var a = new RandomShockSource(stocks, 0.2, 0.01, 0.06, 1.8);
+        var b = new RandomShockSource(stocks, 0.2, 0.01, 0.06, 1.8);
+        a.Reset(); b.Reset();
+        for (int t = 1; t <= 1500; t++)
+        {
+            var ia = a.Poll(t, 1.0).ToList();
+            var ib = b.Poll(t, 1.0).ToList();
+            Assert.False(HasMarketWideImpulse(ia));
+            Assert.Equal(ia.Count, ib.Count);
+            for (int k = 0; k < ia.Count; k++)
+            {
+                Assert.Equal(ia[k].StockId, ib[k].StockId);
+                Assert.Equal(ia[k].SignedMagnitude, ib[k].SignedMagnitude);
+            }
+        }
+    }
+
+    // ---- §global co-fire: the global-pulse signal that drives the same-tick, same-sign taker burst ----
+
+    [Fact]
+    public void Source_LastGlobalSign_is_zero_when_globalFraction_zero()
+    {
+        var stocks = BuildStocks((1, 100m), (2, 50m), (3, 25m)).Object;
+        var src = new RandomShockSource(stocks, 0.2, 0.01, 0.06, 1.8, globalFraction: 0.0);
+        src.Reset();
+        for (int t = 1; t <= 3000; t++) { src.Poll(t, 1.0).ToList(); Assert.Equal(0, src.LastGlobalSign); }
+    }
+
+    [Fact]
+    public void Source_LastGlobalSign_matches_the_shared_impulse_sign()
+    {
+        var stocks = BuildStocks((1, 100m), (2, 50m), (3, 25m)).Object;
+        var src = new RandomShockSource(stocks, 0.2, 0.01, 0.06, 1.8, globalFraction: 1.0);
+        src.Reset();
+        bool sawGlobal = false;
+        for (int t = 1; t <= 3000 && !sawGlobal; t++)
+        {
+            var imps   = src.Poll(t, 1.0).ToList();
+            var shared = imps.GroupBy(i => i.SignedMagnitude)
+                             .FirstOrDefault(g => g.Select(i => i.StockId).Distinct().Count() == AllIds.Length);
+            if (shared != null)
+            {
+                sawGlobal = true;
+                Assert.Equal(Math.Sign(shared.Key), src.LastGlobalSign); // sign of the shared magnitude
+                Assert.NotEqual(0, src.LastGlobalSign);
+            }
+            else Assert.Equal(0, src.LastGlobalSign); // no market-wide impulse this tick ⇒ signal is 0
+        }
+        Assert.True(sawGlobal, "GlobalFraction=1 should fire a market-wide impulse within 3000 ticks.");
+    }
+
+    [Fact]
+    public void Service_relays_global_sign_and_bumps_pulse_id_on_a_pulse()
+    {
+        var src = new StepSource();
+        var svc = Build(src);
+        svc.Reset(T0);
+
+        src.GlobalSign = 0; src.Emit = new List<ShockImpulse>();          // no pulse
+        svc.Tick(T0.AddSeconds(1));
+        Assert.Equal(0, svc.GlobalCoFireSign);
+        Assert.Equal(0, svc.GlobalPulseId);
+
+        src.GlobalSign = -1;                                              // a market-wide DOWN pulse
+        src.Emit = new List<ShockImpulse> { new ShockImpulse(1, -0.05), new ShockImpulse(2, -0.05) };
+        svc.Tick(T0.AddSeconds(2));
+        Assert.Equal(-1, svc.GlobalCoFireSign);
+        Assert.Equal(1, svc.GlobalPulseId);
+
+        src.GlobalSign = 0; src.Emit = new List<ShockImpulse>();          // pulse over ⇒ sign clears, id holds
+        svc.Tick(T0.AddSeconds(3));
+        Assert.Equal(0, svc.GlobalCoFireSign);
+        Assert.Equal(1, svc.GlobalPulseId);
+    }
+
+    [Fact]
+    public void Service_disabled_never_reports_a_co_fire_sign()
+    {
+        var src = new StepSource { GlobalSign = 1, Emit = { new ShockImpulse(1, 0.05) } };
+        var svc = Build(src, enabled: false);
+        svc.Reset(T0);
+        Drive(svc, 10);
+        Assert.Equal(0, svc.GlobalCoFireSign);
+        Assert.Equal(0, svc.GlobalPulseId);
     }
 }

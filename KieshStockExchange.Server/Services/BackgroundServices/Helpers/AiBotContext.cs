@@ -68,6 +68,15 @@ internal sealed class AiBotContext
     // tick. Keyed by aiUserId, mirroring BurstEndTimes. Empty (and never touched) when the flag is off.
     internal readonly Dictionary<int, (sbyte dir, DateTime until)> Stances = new();
 
+    // §reaction-persistence split: per-bot CONTINUOUS directional pressure (a slowly-decaying AR(1) memory) plus
+    // its per-bot last-update tick for the time-based decay. Replaces the §A1 blindness stance with a two-clock
+    // model — a FAST reaction feeds `Pressures`, which decays over a per-bot half-life (minutes) to carry trend +
+    // correlation. Loop-thread-only ⇒ plain Dictionary (mirrors Stances; NOT written by OnQuoteUpdated, so it must
+    // stay non-concurrent — contrast ReactionRefPrices above). Keyed by aiUserId (the decision granularity: one
+    // ChooseOrderType call per bot per tick in its home currency). Empty (never touched) when the flag is off.
+    internal readonly Dictionary<int, decimal>  Pressures           = new();
+    internal readonly Dictionary<int, long>     PressureUpdatedTicks = new();
+
     // R5 §B: per-(userId, currency) PERCEIVED anchor tilt (EWMA). A bot's slowly-updating view of the
     // true anchor tilt — staggered by its Lateness so the cohort's correction spreads across minutes
     // instead of snapping back in lockstep. NOT cleared per tick (it's persistent state); cleared only
@@ -266,6 +275,54 @@ internal sealed class AiBotContext
     }
     #endregion
 
+    #region Reaction/persistence split (§reaction-persistence)
+    /// <summary>
+    /// §reaction-persistence: advance and return the bot's continuous directional PRESSURE — an AR(1) memory
+    /// <c>pressure = keep·pressure + (1−keep)·fresh</c> with a TIME-based keep <c>0.5^(dt/halfLife)</c> off the
+    /// deterministic tick clock <paramref name="nowTicks"/> (NOT wall-clock, so a flag-on run is reproducible).
+    /// FIRST sight seeds pressure 0 (neutral — no first-decision taker) and records the tick, returning 0. Δt≤0 or
+    /// halfLife≤0 ⇒ keep 1 ⇒ no change. Pure / RNG-FREE — it advances no seeded draw, so callers gate it on the
+    /// flag only and the OFF path is byte-identical. Keyed by aiUserId (one decision per bot per tick).
+    /// </summary>
+    internal decimal UpdatePressure(int aiUserId, decimal fresh, long nowTicks, double halfLifeSec)
+    {
+        if (!PressureUpdatedTicks.TryGetValue(aiUserId, out var lastTicks))
+        {
+            PressureUpdatedTicks[aiUserId] = nowTicks;
+            Pressures[aiUserId] = 0m;
+            return 0m;
+        }
+
+        double dt = (nowTicks - lastTicks) / (double)TimeSpan.TicksPerSecond;
+        PressureUpdatedTicks[aiUserId] = nowTicks;
+        decimal prev = Pressures.TryGetValue(aiUserId, out var pv) ? pv : 0m;
+        decimal keep = (decimal)BotMath.HalfLifeKeep(dt, halfLifeSec);
+        decimal next = keep * prev + (1m - keep) * fresh;
+        Pressures[aiUserId] = next;
+        return next;
+    }
+
+    /// <summary>
+    /// §reaction-persistence TAKER override: whether persistent pressure should CROSS THE SPREAD, and the resolved
+    /// side. The seeded <paramref name="draw"/> is invoked LAST and ONLY when <paramref name="enabled"/> and
+    /// <c>|pressure| ≥ threshold</c> (mirrors the trend-taker gate) ⇒ the flag-off / below-threshold draw stream is
+    /// byte-identical. Delegates the probability to AiBotDecisionService.TrendTakerDecision (reuse). Pure aside from
+    /// the single draw.
+    /// </summary>
+    internal bool PressureTakerOverride(bool enabled, decimal pressure, decimal threshold, decimal effectiveGain,
+        Func<decimal> draw, out bool isMarket, out bool isBuy)
+    {
+        isMarket = false;
+        isBuy    = false;
+        if (!enabled || Math.Abs(pressure) < threshold) return false;
+        var (over, mkt, buy) = AiBotDecisionService.TrendTakerDecision(
+            pressure, effectiveGain, contrarian: false, draw(), threshold);
+        isMarket = mkt;
+        isBuy    = buy;
+        return over;
+    }
+    #endregion
+
     #region Personal sentiment
     // Idiosyncratic per-(bot,stock) mood added on top of the shared market sentiment.
     // Stateless and pure (hash-based) so it scales to all bots × watchlists with no
@@ -459,6 +516,8 @@ internal sealed class AiBotContext
         SmoothedPriceUpdatedUtc.Clear();
         BurstEndTimes.Clear();
         Stances.Clear();
+        Pressures.Clear();
+        PressureUpdatedTicks.Clear();
         AnchorTiltLag.Clear();
         DirectionalLag.Clear();
         PerceivedFast.Clear();

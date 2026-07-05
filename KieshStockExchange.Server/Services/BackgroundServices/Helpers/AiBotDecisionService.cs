@@ -89,6 +89,12 @@ internal sealed class AiBotDecisionService
     // net-long, cash-hoarding fleet lacks; neutralises the down-drift WITHOUT the anchor's move-killing spring. 0 = off.
     private readonly decimal _dipBuyStrength;
     private readonly decimal _valueAnchorScale;
+    // §elastic anchor: nonlinear soft-wall — zero pull within ±Deadband, then a superlinear (Power>1) restoring
+    // force, so small + multi-day moves survive (no per-tick snap-back) but big deviations are bounded (sell-driver
+    // up / buy-driver down). Elastic=false ⇒ the linear path below, byte-identical.
+    private readonly bool    _anchorElastic;
+    private readonly decimal _anchorElasticDeadband;
+    private readonly decimal _anchorElasticPower;
     private readonly bool    _valueTargetSelection; // concentrate the anchor via stock selection (destabilizing at high gain)
     private readonly decimal _overheatCap;          // refuse to buy above / sell below fundamental by more than this (0 = off)
     // Defensive ceiling on the effective per-stock cap (after OverheatCapMult and AnchorFastSlack).
@@ -129,12 +135,42 @@ internal sealed class AiBotDecisionService
     private readonly bool    _inertia;
     private readonly double  _inertiaMinSec, _inertiaMaxSec;
     private readonly decimal _inertiaLeak;
+    // §sentiment-modulated inertia: when on, a strong |shared sentiment| shrinks the max hold toward MinSec so
+    // the whole fleet re-decides fast + together during shared-sentiment periods (for cross-stock correlation).
+    private readonly bool    _inertiaSentimentModulated;
+    // §reaction-persistence split: two independent clocks — a FAST reaction (per decision, never blind) feeds a
+    // slowly-decaying per-bot PRESSURE (AR(1), per-bot half-life minutes) that carries trend + correlation, and a
+    // TAKER override crosses the spread so persistent conviction isn't absorbed. SUPERSEDES the §A1 inertia clamp
+    // + the reaction/hold levers when on. `fresh` is conviction-only (excludes the anchor/homeostatic/dip restoring
+    // forces) plus an explicit SHARED term (the cross-stock channel). All default-off/neutral ⇒ byte-identical.
+    private readonly bool    _reactionPersistence;
+    private readonly double  _rpPersistMinSec, _rpPersistMaxSec;
+    private readonly decimal _rpWLocal, _rpWShared;
+    private readonly decimal _rpLeak;
+    private readonly bool    _rpTakerCoupling;
+    private readonly decimal _rpTakerThreshold;
+    private readonly decimal _rpTakerGain;
+    private readonly decimal _rpTakerGovScale;   // value-gap taper of the taker gain (runaway governor); huge ⇒ ~no taper
     // §A2 herding
     private readonly bool    _herding;
     private readonly decimal _followerFraction, _herdTilt;
     // §A3 momentum dominance (follower-scoped trend > reversion)
     private readonly bool    _momentumDominance;
     private readonly decimal _momentumStrength;
+    // §trend-follower (chartist cohort): a hash-selected fraction CHASE recent price momentum → the positive
+    // short-term autocorrelation that nets the value-investors' bounce toward realistic ~0. ContrarianFraction
+    // fades instead; a per-bot strength stagger keeps the herd from moving in lockstep. Positive feedback —
+    // bounded by momentumSignal's ±1 clamp + the ×3 elastic band. All-default 0 ⇒ byte-identical.
+    private readonly bool    _trendFollowerEnabled;
+    private readonly decimal _trendCohortFraction;
+    private readonly decimal _trendStrength;
+    private readonly decimal _trendContrarianFraction;
+    private readonly bool    _trendTakerCoupling;
+    private readonly decimal _trendTakerThreshold;
+    // §shared-factor taker chase (cross-stock correlation): the same taker-flow idea on the SHARED global signal —
+    // when it is strong, cohort members across ALL stocks aggress the same direction at once ⇒ fleet-wide correlated
+    // flow. Weight 0 ⇒ off ⇒ byte-identical.
+    private readonly decimal _trendSharedChaseWeight;
     // §A4 role split (flatten noise cohort directionally)
     private readonly bool    _roleSplit;
     private readonly decimal _noiseDamp;
@@ -214,9 +250,19 @@ internal sealed class AiBotDecisionService
     // coarse cohort-size cap. Default strength/fraction 0 ⇒ no tilt ⇒ byte-identical. ChaserSalt keeps this
     // cohort independent of the RegimeDrift IsFollower split.
     private const int ChaserSalt = 0x5A17;
+    // §trend-follower cohort salts: membership, contrarian-split, and per-bot strength stagger — each a distinct
+    // salt so the three draws are independent (and independent of the RegimeDrift/chaser cohorts).
+    private const int TrendSalt           = 0x7A3D;
+    private const int TrendContrarianSalt = 0x3C9E;
+    private const int TrendStaggerSalt    = 0x1B57;
+    // §reaction-persistence: distinct salt for the per-bot persistence half-life draw (call-order-independent
+    // HashUnit01, advances no RNG), so the persistence clock is uncorrelated with any cohort membership / cadence.
+    private const int PersistHalfLifeSalt = 0x2F6B;
     // §chaser-v2: a distinct salt for the cadence duty-cycle so a bot's "due window" is independent of its
     // chase-cohort membership (which keys on ChaserSalt).
     private const int ChaserCadenceSalt = 0x3B9F;
+    // §global co-fire: distinct salt so the co-fire cohort + per-bot stock spread are independent of the chaser cohort.
+    private const int GlobalCoFireSalt = 0x6D2B;
     private readonly double _chaserFraction;
     private readonly double _chaserNotionalFrac;     // §direct-flow chaser: primary dial (0 ⇒ off, byte-identical)
     private readonly double _chaserMaxNotionalFrac;  // §direct-flow chaser: per-order notional cap (frac of seed PV)
@@ -230,6 +276,12 @@ internal sealed class AiBotDecisionService
     private readonly Func<int, double>? _shockOf;
     private readonly Func<int, int>?    _shockIdOf;
     private readonly Func<bool>?        _anyShockActive;
+    // §global co-fire: same-tick, same-sign taker burst across all stocks on a market-wide pulse (correlated flow).
+    private readonly bool               _globalCoFire;
+    private readonly double             _globalCoFireFraction;
+    private readonly double             _globalCoFireNotionalFrac;
+    private readonly Func<int>?         _globalCoFireSignOf;   // ±1 on a market-wide pulse tick, else 0
+    private readonly Func<int>?         _globalPulseIdOf;      // monotonic id per global pulse (cohort + spread key)
     // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
@@ -304,6 +356,12 @@ internal sealed class AiBotDecisionService
         decimal limitOffsetMult = 1m, decimal maxOpenOrdersMult = 1m,
         decimal distanceMult = 1m, decimal marketProbMult = 1m,
         decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
+        bool anchorElastic = false, decimal anchorElasticDeadband = 0.20m, decimal anchorElasticPower = 3.0m,
+        // §trend-follower (chartist) cohort; all-default 0 ⇒ no tilt ⇒ byte-identical.
+        bool trendFollowerEnabled = false, decimal trendCohortFraction = 0m,
+        decimal trendStrength = 0m, decimal trendContrarianFraction = 0.2m,
+        bool trendTakerCoupling = false, decimal trendTakerThreshold = 0.05m,
+        decimal trendSharedChaseWeight = 0m,
         decimal dipBuyStrength = 0m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal absoluteCapMax = 0m,
@@ -318,6 +376,8 @@ internal sealed class AiBotDecisionService
         decimal sentimentMaxBias = 0.20m,
         bool inertia = false, double inertiaMinSec = 30.0, double inertiaMaxSec = 600.0,
         decimal inertiaLeak = 0.10m,
+        // §sentiment-modulated inertia: shorten the hold when |shared sentiment| is high. Default off ⇒ byte-identical.
+        bool inertiaSentimentModulated = false,
         bool herding = false, decimal followerFraction = 0.25m, decimal herdTilt = 0.10m,
         bool momentumDominance = false, decimal momentumStrength = 0m,
         bool roleSplit = false, decimal noiseDamp = 1.0m,
@@ -392,7 +452,20 @@ internal sealed class AiBotDecisionService
         // §chaser-v2 ratio-fix co-dials + per-bot chase cadence; all default 0 ⇒ byte-identical.
         double chaserSellSymFrac = 0.0, double chaserBuyRoomRelaxFrac = 0.0, int chaserIntervalTicks = 0,
         double exogCap = 0.06,
-        Func<int, double>? shockOf = null, Func<int, int>? shockIdOf = null, Func<bool>? anyShockActive = null)
+        Func<int, double>? shockOf = null, Func<int, int>? shockIdOf = null, Func<bool>? anyShockActive = null,
+        bool globalCoFire = false, double globalCoFireFraction = 0.0, double globalCoFireNotionalFrac = 0.0,
+        Func<int>? globalCoFireSignOf = null, Func<int>? globalPulseIdOf = null,
+        // §reaction-persistence split: two-clock reaction/persistence + taker coupling. reactionTauSec is
+        // RESERVED (read + logged in AiTradeService, not wired in v1 — the AR(1) already filters tick noise).
+        // All default-off/neutral ⇒ byte-identical.
+        bool reactionPersistence = false,
+        double persistMinSec = 300.0, double persistMaxSec = 1200.0,
+        decimal reactionWLocal = 1.0m, decimal reactionWShared = 0.7m,
+        decimal reactionLeak = 0.10m,
+        bool reactionTakerCoupling = false,
+        decimal reactionTakerThreshold = 0.15m,
+        decimal reactionTakerGain = 1.0m,
+        decimal reactionTakerGovScale = 1000000000m)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -418,6 +491,16 @@ internal sealed class AiBotDecisionService
         _valueAnchorStrength = Math.Max(0m, valueAnchorStrength);
         _dipBuyStrength      = Math.Max(0m, dipBuyStrength);
         _valueAnchorScale    = valueAnchorScale <= 0m ? 0.15m : valueAnchorScale;
+        _anchorElastic         = anchorElastic;
+        _anchorElasticDeadband = anchorElasticDeadband < 0m ? 0m : anchorElasticDeadband;
+        _anchorElasticPower    = anchorElasticPower <= 0m ? 1m : anchorElasticPower;
+        _trendFollowerEnabled    = trendFollowerEnabled;
+        _trendCohortFraction     = Clamp01(trendCohortFraction);
+        _trendStrength           = Math.Max(0m, trendStrength);
+        _trendContrarianFraction = Clamp01(trendContrarianFraction);
+        _trendTakerCoupling      = trendTakerCoupling;
+        _trendTakerThreshold     = Math.Max(0m, trendTakerThreshold);
+        _trendSharedChaseWeight  = Math.Max(0m, trendSharedChaseWeight);
         _valueTargetSelection = valueTargetSelection;
         _overheatCap        = Math.Max(0m, overheatCap);
         _absoluteCapMax     = Math.Max(0m, absoluteCapMax);
@@ -440,6 +523,17 @@ internal sealed class AiBotDecisionService
         _inertiaMinSec      = Math.Max(1.0, inertiaMinSec);
         _inertiaMaxSec      = Math.Max(_inertiaMinSec, inertiaMaxSec);
         _inertiaLeak        = Clamp01(inertiaLeak);
+        _inertiaSentimentModulated = inertiaSentimentModulated;
+        _reactionPersistence = reactionPersistence;
+        _rpPersistMinSec    = Math.Max(1.0, persistMinSec);
+        _rpPersistMaxSec    = Math.Max(_rpPersistMinSec, persistMaxSec);
+        _rpWLocal           = reactionWLocal;
+        _rpWShared          = reactionWShared;
+        _rpLeak             = Clamp01(reactionLeak);
+        _rpTakerCoupling    = reactionTakerCoupling;
+        _rpTakerThreshold   = Math.Max(0m, reactionTakerThreshold);
+        _rpTakerGain        = Math.Max(0m, reactionTakerGain);
+        _rpTakerGovScale    = reactionTakerGovScale;
         _herding            = herding;
         _followerFraction   = Clamp01(followerFraction);
         _herdTilt           = Math.Max(0m, herdTilt);
@@ -522,6 +616,11 @@ internal sealed class AiBotDecisionService
         _shockOf                   = shockOf;
         _shockIdOf                 = shockIdOf;
         _anyShockActive            = anyShockActive;
+        _globalCoFire              = globalCoFire;
+        _globalCoFireFraction      = Math.Clamp(globalCoFireFraction, 0.0, 1.0);
+        _globalCoFireNotionalFrac  = Math.Max(0.0, globalCoFireNotionalFrac);
+        _globalCoFireSignOf        = globalCoFireSignOf;
+        _globalPulseIdOf           = globalPulseIdOf;
     }
     #endregion
 
@@ -549,10 +648,40 @@ internal sealed class AiBotDecisionService
         // short-circuits on _chaserNotionalFrac==0 BEFORE _anyShockActive(), so OFF is byte-identical; resolved
         // here, ABOVE the first RNG draw (ChooseOrderType), so the OFF/non-chase draw stream is unperturbed.
         int chaseStockId = 0; OrderType chaseType = default; decimal chaseNotionalCap = 0m;
+        // §global co-fire: on the tick a MARKET-WIDE pulse fires, a co-fire cohort submits ONE SAME-SIGN marketable
+        // order on a hash-SPREAD watchlist stock — a simultaneous, correlated taker burst across all stocks (which the
+        // slow shared sentiment ring cannot make: it's absorbed). The three dilution fixes the plan review called for:
+        // same-TICK (no cadence), same-SIGN (the pulse sign), and SPREAD (hash slot, not the argmax name). Draw-free
+        // (0 RNG). Short-circuits on _globalCoFireNotionalFrac==0 BEFORE the sign read ⇒ OFF byte-identical; and it
+        // takes precedence over the per-stock chaser (which is gated on chaseStockId==0 below).
+        if (_globalCoFireNotionalFrac > 0.0 && _globalCoFireFraction > 0.0 && _globalCoFire
+            && _globalCoFireSignOf is not null && _globalPulseIdOf is not null)
+        {
+            int gsign = _globalCoFireSignOf();
+            if (gsign != 0)
+            {
+                int pulseId = _globalPulseIdOf();
+                if (IsChaser(user.AiUserId, pulseId, _globalCoFireFraction, GlobalCoFireSalt))
+                {
+                    int pick = CoFireSelect(ctx, user, currency, pulseId);
+                    if (pick > 0)
+                    {
+                        var seedPv = ctx.SeedPortfolioValue(user.UserId, currency, (s, c) => SeedPrice(s, c, ctx));
+                        var capN   = (decimal)_globalCoFireNotionalFrac * seedPv;
+                        if (capN > 0m)
+                        {
+                            chaseStockId     = pick;
+                            chaseType        = gsign > 0 ? OrderType.SlippageMarketBuy : OrderType.SlippageMarketSell;
+                            chaseNotionalCap = capN;
+                        }
+                    }
+                }
+            }
+        }
         // §chaser-v2 cadence: ChaseCadenceDue gates this bot to ≤1 chase per IntervalTicks window. IntervalTicks≤1
         // ⇒ always due (no-op), so OFF stays byte-identical and a cadence skip just falls through to the normal
         // (non-chase) decision below. Pure hash on (aiUserId, tickId) ⇒ 0 RNG draws, no wall-clock.
-        if (_chaserNotionalFrac > 0.0 && _chaserFraction > 0.0 &&
+        if (chaseStockId == 0 && _chaserNotionalFrac > 0.0 && _chaserFraction > 0.0 &&
             ChaseCadenceDue(user.AiUserId, ctx.TickId, _chaserIntervalTicks, ChaserCadenceSalt) &&
             _shockOf is not null && _shockIdOf is not null && _anyShockActive is not null && _anyShockActive())
         {
@@ -1129,7 +1258,9 @@ internal sealed class AiBotDecisionService
             // §perceived-price desync: replace the SHARED sentiment slope with THIS bot's own salt+Lateness-dispersed
             // perceived-price slope, so the cohort stops feeding DirectionalBias the same lockstep slope each tick.
             // Its own Tanh scales apply (the perceived-return gap is a different unit). Off ⇒ shared slope unchanged.
-            if (_perceivedDesync)
+            // §reaction-persistence supersedes the reaction levers (do not co-enable — the RP AR(1) is the reaction/
+            // persistence mechanism; letting these also reshape `directional` would double-drive it).
+            if (_perceivedDesync && !_reactionPersistence)
             {
                 (dsF, dsS) = AveragePerceivedSlope(ctx, user, currency);
                 slopeScaleFast = _perceivedSlopeScaleFast;
@@ -1169,12 +1300,25 @@ internal sealed class AiBotDecisionService
             directional += sentimentClamped * _sentimentMaxBias;
         }
 
+        // §trend-follower: a hash-selected chartist cohort CHASES recent price momentum (momentumSignal ±5%→±1),
+        // adding the positive short-term autocorrelation that nets the value bounce toward realistic ~0. A
+        // ContrarianFraction fades instead + a per-bot strength stagger (0.5-1.5×) keeps the herd from moving in
+        // lockstep. Bounded by momentumSignal's ±1 clamp; the ×3 elastic band stays the runaway backstop. Off (or
+        // strength/fraction 0) ⇒ the block is skipped ⇒ `directional` byte-identical.
+        if (_trendFollowerEnabled && _trendStrength > 0m &&
+            IsTrendFollower(user.AiUserId, (double)_trendCohortFraction, TrendSalt))
+        {
+            var contrarian = BotMath.HashUnit01(user.AiUserId ^ TrendContrarianSalt) < (double)_trendContrarianFraction;
+            var staggerMul = 0.5m + (decimal)BotMath.HashUnit01(user.AiUserId ^ TrendStaggerSalt);
+            directional += TrendFollowTilt(momentumSignal, _trendStrength, staggerMul, contrarian);
+        }
+
         // #1: per-bot Lateness lag on the fast directional/sentiment reaction (per-(bot,ccy) EWMA,
         // persists across ticks). Staggers the cohort's slope reaction so the synchronized next-minute
         // overcorrection — the genuine ~−0.31 mean-reversion the bounce diagnostic isolated — is smeared.
         // §perceived-price desync supersedes the tilt-lag: when on, the desync already dispersed the reaction at the
         // PRICE level above, so skip the (cohort-uniform) output-tilt EWMA to avoid double-lagging / co-enabling.
-        if (_directionalReactionLag && !_perceivedDesync)
+        if (_directionalReactionLag && !_perceivedDesync && !_reactionPersistence)
             directional = ctx.LaggedDirectional(user.UserId, currency, directional, user.Lateness,
                 _dirLagMinAlpha, _dirLagMaxAlpha);
 
@@ -1182,7 +1326,7 @@ internal sealed class AiBotDecisionService
         // window so the bot cannot reverse it within the minute it acted (kills the 1-min self-fade without
         // the soft lag's residual every-tick response). Applied before role-split/herd/anchor and before the
         // §taker aggression term reads |directional| (so a held stance also freezes that, by design).
-        if (_reactionHold)
+        if (_reactionHold && !_reactionPersistence)
             directional = ctx.HeldDirectional(user.UserId, currency, directional,
                 ctx.TickNowTicks, _reactionHoldWindowTicks);
 
@@ -1211,10 +1355,18 @@ internal sealed class AiBotDecisionService
         var anchorTilt = 0m;
         if (_valueAnchorStrength > 0m)
         {
-            // R5 §C: dead-band the raw deviation (fraction of price) before scaling — inside the band the
-            // anchor exerts zero pull (price wanders freely, ret_acf→0 there); only the excess corrects.
-            var gap = ApplyAnchorDeadband(rawValueGap) / _valueAnchorScale;
-            anchorTilt = gap * _valueAnchorStrength;
+            if (_anchorElastic)
+                // §elastic band: zero pull within ±Deadband, then a superlinear soft-wall — small + multi-day moves
+                // survive (no per-tick snap-back that pins ret_acf ≈ −0.43), big deviations pulled back hard.
+                anchorTilt = ElasticAnchorTilt(rawValueGap, _anchorElasticDeadband, _valueAnchorScale,
+                    _valueAnchorStrength, _anchorElasticPower);
+            else
+            {
+                // R5 §C: dead-band the raw deviation (fraction of price) before scaling — inside the band the
+                // anchor exerts zero pull (price wanders freely, ret_acf→0 there); only the excess corrects.
+                var gap = ApplyAnchorDeadband(rawValueGap) / _valueAnchorScale;
+                anchorTilt = gap * _valueAnchorStrength;
+            }
         }
 
         // MEDIUM-TERM mean-reversion: pull back toward the per-stock recent EWMA so a stock that
@@ -1280,16 +1432,42 @@ internal sealed class AiBotDecisionService
             }
         }
 
+        // §reaction-persistence: the bot's current directional PRESSURE (0 unless the lever is on and the bot is
+        // non-MM). Read again by the taker override below the isBuy/isMarket draws.
+        decimal pressure = 0m;
+
         // §A1 inertia: hold a persistent directional STANCE across ticks instead of re-rolling buy/sell
         // every tick — this is the Cont–Bouchaud ingredient that stops tick-to-tick self-cancellation
         // (the LLN flat-chart root cause). On a fresh/expired stance RollOrHoldStance consumes exactly two
         // seeded draws (side, duration) in a fixed order; while a stance holds it draws nothing. Called
         // ONLY when the flag is on, so the flag-off draw sequence is byte-identical. The isBuy draw below is
         // still consumed (keeping isMarket + all downstream draws in position) — do not optimize it away.
-        if (_inertia && notMM)
+        // §reaction-persistence SUPERSEDES this clamp (mirrors PerceivedPriceDesync superseding the tilt-lag).
+        if (_inertia && !_reactionPersistence && notMM)
         {
-            var dir = ctx.RollOrHoldStance(user.AiUserId, buyProb, TimeHelper.NowUtc(), _inertiaMinSec, _inertiaMaxSec);
+            // §sentiment-modulated inertia: a strong |shared sentiment| shrinks the effective max hold toward
+            // MinSec so the fleet re-decides fast + together (cross-stock correlation). Off ⇒ effMaxSec ==
+            // _inertiaMaxSec ⇒ identical args to RollOrHoldStance ⇒ same draw ⇒ byte-identical.
+            var effMaxSec = _inertiaSentimentModulated
+                ? SentimentModulatedMaxSec(_inertiaMinSec, _inertiaMaxSec, (double)Math.Abs(_sentiment.GlobalSignal()))
+                : _inertiaMaxSec;
+            var dir = ctx.RollOrHoldStance(user.AiUserId, buyProb, TimeHelper.NowUtc(), _inertiaMinSec, effMaxSec);
             buyProb = dir > 0 ? Math.Max(buyProb, 1m - _inertiaLeak) : Math.Min(buyProb, _inertiaLeak);
+        }
+
+        // §reaction-persistence split (supersedes §A1 inertia): a FAST reaction signal (recomputed every decision,
+        // never blind) feeds a slowly-decaying per-bot PRESSURE (AR(1), per-bot half-life 5–20 min) that carries
+        // trend + correlation. `fresh` is conviction-only — `directional` (momentum + sentiment + trend, the fast
+        // price-derived term) plus an explicit SHARED term (GlobalSignal — the cross-stock channel) — and EXCLUDES
+        // the anchor/homeostatic/dip restoring forces (those stay in buyProb as absorbed limit tilts). The tilt
+        // writes the method-local buyProb ONLY (never stored), so last decision's tilt can't leak into this
+        // decision's fresh (no pressure→buyProb→fresh runaway). Off ⇒ block skipped ⇒ no Pressures touch, no draw.
+        if (_reactionPersistence && notMM)
+        {
+            double  halfLife = PersistHalfLife(user.AiUserId, _rpPersistMinSec, _rpPersistMaxSec);
+            decimal fresh    = ClampSigned(_rpWLocal * directional + _rpWShared * _sentiment.GlobalSignal(), 1m);
+            pressure = ctx.UpdatePressure(user.AiUserId, fresh, ctx.TickNowTicks, halfLife);
+            buyProb  = PressureTilt(buyProb, pressure, _rpLeak);
         }
 
         // 4. Resolve to concrete order type. Bots never place TRUE (uncapped) market orders — every
@@ -1297,6 +1475,57 @@ internal sealed class AiBotDecisionService
         // far and start a cascade.
         var isBuy    = ctx.Decimal01(user.AiUserId) < buyProb;
         var isMarket = ctx.Decimal01(user.AiUserId) < effectiveUseMarket;
+
+        // §trend-follower TAKER COUPLING (phase 1: type + direction). A buyProb tilt is absorbed — the cohort's extra
+        // buying rests as LIMIT orders. Price impact = direction × size × taker-ness, so a strong conviction must CROSS
+        // THE SPREAD (Chiarella-Iori): with prob ∝ strength·|momentum| a member OVERRIDES the order to a slippage-market
+        // taker in the momentum direction (a contrarian member fades). Only takers move price; limits deepen the book.
+        // Gated on TakerCoupling AND above-threshold |momentum| AND membership ⇒ off ⇒ no draw ⇒ byte-identical.
+        // §reaction-persistence supersedes the trend-follower taker overrides (else two taker channels race);
+        // the RP taker below is the sole persistent-conviction channel when the lever is on.
+        if (!_reactionPersistence && _trendFollowerEnabled && _trendTakerCoupling && _trendStrength > 0m &&
+            Math.Abs(momentumSignal) >= _trendTakerThreshold &&
+            IsTrendFollower(user.AiUserId, (double)_trendCohortFraction, TrendSalt))
+        {
+            var takerContrarian = BotMath.HashUnit01(user.AiUserId ^ TrendContrarianSalt) < (double)_trendContrarianFraction;
+            var (over, mkt, buy) = TrendTakerDecision(momentumSignal, _trendStrength, takerContrarian,
+                ctx.Decimal01(user.AiUserId), _trendTakerThreshold);
+            if (over) { isMarket = mkt; isBuy = buy; }
+        }
+
+        // §shared-factor TAKER chase (cross-stock CORRELATION): the same "conviction crosses the spread" idea on the
+        // SHARED global signal (global OU ring + shock, identical for all stocks this tick). When it is strong, cohort
+        // members across ALL stocks aggress the SAME direction at once ⇒ fleet-wide correlated taker flow — the channel
+        // shared *sentiment* can't reach (it tilts buyProb → absorbed by the book) but shared *flow* does. Prefers the
+        // stronger of |global| vs |momentum| so a strong per-stock move still wins. Gated on SharedChaseWeight>0 AND
+        // membership ⇒ off ⇒ no draw ⇒ byte-identical.
+        if (!_reactionPersistence && _trendFollowerEnabled && _trendSharedChaseWeight > 0m &&
+            IsTrendFollower(user.AiUserId, (double)_trendCohortFraction, TrendSalt))
+        {
+            var globalSignal = _sentiment.GlobalSignal();
+            if (Math.Abs(globalSignal) >= _trendTakerThreshold &&
+                Math.Abs(globalSignal) >= Math.Abs(momentumSignal))
+            {
+                var sharedContrarian = BotMath.HashUnit01(user.AiUserId ^ TrendContrarianSalt) < (double)_trendContrarianFraction;
+                var (sOver, sMkt, sBuy) = TrendTakerDecision(globalSignal, _trendSharedChaseWeight, sharedContrarian,
+                    ctx.Decimal01(user.AiUserId), _trendTakerThreshold);
+                if (sOver) { isMarket = sMkt; isBuy = sBuy; }
+            }
+        }
+
+        // §reaction-persistence TAKER override (LAST — the sole taker channel when on): persistent pressure that
+        // CROSSES THE SPREAD (only taker flow moves price; a buyProb tilt is absorbed as limits). Prob =
+        // clamp(effGain·|pressure|), effGain tapered by |valueGap| (proportional runaway governor). The helper
+        // draws ONLY when enabled AND |pressure| ≥ threshold ⇒ flag-off / below-threshold is byte-identical.
+        if (ctx.PressureTakerOverride(
+                _reactionPersistence && _rpTakerCoupling && notMM,
+                pressure, _rpTakerThreshold,
+                ReactionTakerEffectiveGain(_rpTakerGain, rawValueGap, _rpTakerGovScale),
+                () => ctx.Decimal01(user.AiUserId), out var rpMkt, out var rpBuy))
+        {
+            isMarket = rpMkt;
+            isBuy    = rpBuy;
+        }
 
         // R4 §0009 Stage 2: plain-path decision probe. directional * noiseFactor is the masked
         // form that actually contributes to buyProb. Signed inventory notional (long - short)
@@ -1945,6 +2174,17 @@ internal sealed class AiBotDecisionService
         => ChaseSelectCore(EligibleWatchlist(ctx, user, currency), _shockOf!, _shockIdOf!,
                            user.AiUserId, _chaserFraction, ChaserSalt, 0.0);
 
+    /// <summary>§global co-fire: the watchlist stock this co-firer pushes on a pulse — a hash-SPREAD slot keyed on the
+    /// pulse id (each pulse reshuffles) so the cohort distributes across ALL stocks, not the single argmax name the
+    /// per-stock chaser picks. Pure &amp; RNG-free.</summary>
+    private int CoFireSelect(AiBotContext ctx, AIUser user, CurrencyType currency, int pulseId)
+    {
+        var wl = EligibleWatchlist(ctx, user, currency);
+        if (wl.Length == 0) return 0;
+        int idx = (int)(BotMath.HashUnit01(user.AiUserId ^ GlobalCoFireSalt, pulseId) * wl.Length);
+        return wl[idx < wl.Length ? idx : wl.Length - 1];
+    }
+
     /// <summary>
     /// §direct-flow chaser: pure deterministic argmax. Returns the candidate with the greatest |shock| (tie-broken
     /// by LOWEST stockId — cap-saturated shocks frequently tie at ±Cap, so the tie-break must be total and stable),
@@ -2042,6 +2282,74 @@ internal sealed class AiBotDecisionService
         => strength * Math.Tanh(shock / scale);
 
     /// <summary>
+    /// §trend-follower cohort membership — deterministic, RNG-free: a stable per-bot avalanche hash vs the cohort
+    /// fraction, salted independent of the RegimeDrift/chaser cohorts. Reproducible across runs, call-order independent.
+    /// </summary>
+    internal static bool IsTrendFollower(int aiUserId, double fraction, int salt)
+    {
+        if (fraction <= 0.0) return false;
+        if (fraction >= 1.0) return true;
+        return BotMath.HashUnit01(aiUserId ^ salt) < fraction;
+    }
+
+    /// <summary>
+    /// §trend-follower tilt: CHASE (or, for a contrarian cohort member, FADE) recent price momentum. momentumSignal
+    /// is already ±1-bounded (±5% move → ±1), so the tilt is bounded by strength·staggerMul. Pure &amp; RNG-free.
+    /// </summary>
+    internal static decimal TrendFollowTilt(decimal momentumSignal, decimal strength, decimal staggerMul, bool contrarian)
+        => (contrarian ? -1m : 1m) * strength * staggerMul * momentumSignal;
+
+    /// <summary>
+    /// §trend-follower TAKER COUPLING (phase 1): decide whether a member CROSSES THE SPREAD in the momentum direction.
+    /// Below |momentum| &lt; threshold ⇒ no override. Else override with probability p = clamp(strength·|momentum|,0,1)
+    /// (via the passed seeded draw); on fire → (isMarket=true, isBuy = momentum&gt;0), FADED for a contrarian member.
+    /// Pure &amp; deterministic given the draw. Returns (override?, isMarket, isBuy).
+    /// </summary>
+    internal static (bool over, bool isMarket, bool isBuy) TrendTakerDecision(
+        decimal momentumSignal, decimal strength, bool contrarian, decimal draw, decimal threshold)
+    {
+        if (Math.Abs(momentumSignal) < threshold) return (false, false, false);
+        var p = Math.Clamp(strength * Math.Abs(momentumSignal), 0m, 1m);
+        if (draw >= p) return (false, false, false);
+        var chaseUp = momentumSignal > 0m;
+        if (contrarian) chaseUp = !chaseUp;
+        return (true, true, chaseUp);
+    }
+
+    /// <summary>
+    /// §reaction-persistence: per-bot persistence HALF-LIFE (seconds) drawn from [min, max] by a
+    /// call-order-independent salted hash of the aiUserId (advances no RNG). Distinct salt ⇒ the persistence clock
+    /// is uncorrelated with cohort membership / cadence.
+    /// </summary>
+    internal static double PersistHalfLife(int aiUserId, double minSec, double maxSec)
+        => minSec + (maxSec - minSec) * BotMath.HashUnit01(aiUserId ^ PersistHalfLifeSalt);
+
+    /// <summary>
+    /// §reaction-persistence: continuous LEAK-style tilt of buyProb toward the pressure sign — the smooth analog of
+    /// the §A1 inertia clamp. <c>|pressure|=0</c> ⇒ unchanged; <c>|pressure|→1</c> ⇒ saturates toward (1−leak) for a
+    /// buy / leak for a sell. Odd-symmetric about 0.5 (when buyProb=0.5). Pure ⇒ unit-testable.
+    /// </summary>
+    internal static decimal PressureTilt(decimal buyProb, decimal pressure, decimal leak)
+    {
+        decimal mag    = Math.Min(1m, Math.Abs(pressure));
+        decimal target = pressure > 0m ? 1m - leak : leak;
+        return buyProb + mag * (target - buyProb);
+    }
+
+    /// <summary>
+    /// §reaction-persistence: taper the taker gain by displacement from fundamental so the override probability
+    /// FALLS as price extends (loop gain G becomes a decreasing function of |valueGap| ⇒ self-limiting near G≈1,
+    /// reconnecting the value anchor to the price-moving taker channel). GovScale huge (default) ⇒ taper ≈ 1 ⇒
+    /// effGain ≈ TakerGain (neutral). Pure.
+    /// </summary>
+    internal static decimal ReactionTakerEffectiveGain(decimal takerGain, decimal rawValueGap, decimal govScale)
+    {
+        if (govScale <= 0m) return takerGain;
+        decimal taper = 1m - Math.Min(1m, Math.Abs(rawValueGap) / govScale);
+        return takerGain * (taper < 0m ? 0m : taper);
+    }
+
+    /// <summary>
     /// Sentiment-dynamics §: the per-strategy directional bias added to buyProb, a pure deterministic
     /// function of (level s, fast/slow slope ds, per-bot lateness L). Symmetric by construction
     /// (bias(s,ds,…) == −bias(−s,−ds,…)). Replaces the old level-only momentum + sentiment-bias terms.
@@ -2131,6 +2439,20 @@ internal sealed class AiBotDecisionService
         var mag = Math.Abs(gap) - band;
         if (mag <= 0m) return 0m;
         return gap < 0m ? -mag : mag;
+    }
+
+    // §elastic anchor tilt: zero within ±deadband, then strength·sign·(excess/scale)^power. power>1 ⇒ gentle just past
+    // the band (small + multi-day moves survive) but stiff far out (bounds the level = the elastic band + sell-driver).
+    // The caller's Clamp01 on buyProb saturates a very large tilt into a hard buy/no-buy, so far-out deviations are
+    // strongly corrected without unbounded arithmetic.
+    internal static decimal ElasticAnchorTilt(decimal gap, decimal deadband, decimal scale, decimal strength, decimal power)
+    {
+        var excess = AnchorDeadband(gap, deadband);
+        if (excess == 0m) return 0m;
+        var norm = Math.Abs(excess) / (scale <= 0m ? 0.15m : scale);
+        var shaped = (decimal)Math.Pow((double)norm, (double)power);
+        var tilt = strength * shaped;
+        return excess < 0m ? -tilt : tilt;
     }
 
     // Average signed gap to fundamental across the watchlist: (seed − price)/seed. Positive = broadly
@@ -2372,6 +2694,14 @@ internal sealed class AiBotDecisionService
     // NEGATIVE part of the watchlist sentiment clamped to [0,1]. Pure ⇒ unit-testable. 0 when off or non-bearish.
     internal static decimal BearShortBoost(decimal strength, decimal watchlistSentiment)
         => strength <= 0m ? 0m : strength * Math.Clamp(-watchlistSentiment, 0m, 1m);
+
+    /// <summary>§sentiment-modulated inertia: shrink the max hold toward minSec as |shared sentiment| (0..1) rises,
+    /// so a strong shared signal makes the fleet re-decide fast + together. sentimentMag&lt;=0 ⇒ maxSec (unchanged).</summary>
+    internal static double SentimentModulatedMaxSec(double minSec, double maxSec, double sentimentMag)
+    {
+        var m = sentimentMag < 0.0 ? 0.0 : (sentimentMag > 1.0 ? 1.0 : sentimentMag);
+        return minSec + (maxSec - minSec) * (1.0 - m);
+    }
 
     internal static decimal CashHomeostasis(decimal buyBias, decimal cashPrc,
         decimal minReserve, decimal maxReserve,

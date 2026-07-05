@@ -124,6 +124,8 @@ internal sealed class BotSentimentService
 
     // §slow-ring damp: PerStockSigma with SlowRingDamp folded into the slow rings (×1.0 ⇒ identical doubles).
     private readonly double[] _perStockSigmaEff;
+    // §correlation lever: GlobalSigma × GlobalSigmaMult (per-stock mult folds into _perStockSigmaEff above). 1.0 ⇒ identical.
+    private readonly double[] _globalSigmaEff;
 
     // §System A — RegimeDrift: a PERSISTENT common-mode bounded random walk per stock (NOT mean-reverting like
     // the OU rings) so price can TREND/wander for minutes. Bounded by a cubic soft-wall (free in the middle,
@@ -151,6 +153,22 @@ internal sealed class BotSentimentService
     private double _coMoveFactor;
     private Random _coMoveRng = new(RngSeed ^ 0x5C5C);
     private readonly Dictionary<int, double> _coMoveBeta = new();
+
+    // §global-shock: a single MARKET-WIDE decaying shock — the "elevator down + correlation" driver. ONE Poisson
+    // stream for the whole market; on arrival gets a signed magnitude (DownBias ⇒ mostly bearish "crashes", rare
+    // up melt-ups) added to a scalar that decays like the per-stock shocks and is folded into EVERY stock's combined
+    // sentiment ⇒ all stocks move TOGETHER (cross-stock correlation) + turn the fleet bearish at once (⇒ fleet-wide
+    // bear-short = the down-move that a single aggressor can't achieve, since the book absorbs one source). Dedicated
+    // RNG drawn ONLY when enabled ⇒ off leaves the value 0 AND every other RNG sequence untouched (byte-identical).
+    private readonly bool   _globalShockEnabled;
+    private readonly double _globalShockMinMagnitude;
+    private readonly double _globalShockMaxMagnitude;
+    private readonly double _globalShockMagnitudeExponent;
+    private readonly double _globalShockDecayPerTick;
+    private readonly double _globalShockArrivalProbPerTick; // whole-market, per tick
+    private readonly double _globalShockDownBias;           // P(event is bearish); ~0.85 = correlated fear
+    private double _globalShock;
+    private Random _globalShockRng = new(RngSeed ^ 0x6B6B);
     #endregion
 
     #region Services and Constructor
@@ -178,7 +196,15 @@ internal sealed class BotSentimentService
         bool coMoveEnabled = false, double coMoveStepSigma = 0.03, double coMoveCap = 0.4,
         double coMoveSoftWallK = 0.1, double coMoveStrength = 0.5, double coMoveBetaSpread = 0.4,
         // §impact-decouple A: optional >1-min-decoupled return for the price-reaction term. Null ⇒ byte-identical.
-        Func<int, double>? reactionReturn = null)
+        Func<int, double>? reactionReturn = null,
+        // §global-shock: market-wide bearish sentiment event (elevator-down + cross-stock correlation). Off ⇒ byte-identical.
+        bool globalShockEnabled = false, double globalShockMeanIntervalHours = 3.0,
+        decimal globalShockMinMagnitude = 0.3m, decimal globalShockMaxMagnitude = 1.5m,
+        double globalShockMagnitudeExponent = 3.0, decimal globalShockDecayPerTick = 0.999m,
+        double globalShockDownBias = 0.85,
+        // §sentiment-ring amplitude multipliers = the cross-stock CORRELATION lever. Lower per-stock + raise global
+        // ⇒ the shared common-mode dominates the idiosyncratic ⇒ higher cross-stock corr. 1.0/1.0 ⇒ byte-identical.
+        double perStockSigmaMult = 1.0, double globalSigmaMult = 1.0)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -203,11 +229,16 @@ internal sealed class BotSentimentService
         _momTauSec      = Math.Max(MinDtSec, momTauSec);
         _momCap         = Math.Max(0.0, momCap);
 
-        // Fold SlowRingDamp into the slow rings' amplitude once; ×1.0 ⇒ identical doubles (off path untouched).
-        double slowDamp = Math.Max(0.0, slowRingDamp);
+        // Fold SlowRingDamp AND the correlation-lever σ multipliers into the ring amplitudes once; 1.0s ⇒ identical.
+        double slowDamp   = Math.Max(0.0, slowRingDamp);
+        double perStkMult = Math.Max(0.0, perStockSigmaMult);
+        double glbMult    = Math.Max(0.0, globalSigmaMult);
         _perStockSigmaEff = new double[PerStockRings];
         for (int k = 0; k < PerStockRings; k++)
-            _perStockSigmaEff[k] = SlowRingSigma(PerStockSigma[k], PerStockTauSec[k], slowDamp);
+            _perStockSigmaEff[k] = EffectivePerStockSigma(k, slowDamp, perStkMult);
+        _globalSigmaEff = new double[GlobalRings];
+        for (int k = 0; k < GlobalRings; k++)
+            _globalSigmaEff[k] = EffectiveGlobalSigma(k, glbMult);
 
         _regimeEnabled   = regimeEnabled;
         _regimeStepSigma = Math.Max(0.0, regimeStepSigma);
@@ -221,6 +252,14 @@ internal sealed class BotSentimentService
         _coMoveSoftWallK  = Math.Max(0.0, coMoveSoftWallK);
         _coMoveStrength   = Math.Max(0.0, coMoveStrength);
         _coMoveBetaSpread = Math.Max(0.0, coMoveBetaSpread);
+
+        _globalShockEnabled            = globalShockEnabled;
+        _globalShockMinMagnitude       = (double)globalShockMinMagnitude;
+        _globalShockMaxMagnitude       = Math.Max((double)globalShockMinMagnitude, (double)globalShockMaxMagnitude);
+        _globalShockMagnitudeExponent  = Math.Max(1.0, globalShockMagnitudeExponent);
+        _globalShockDecayPerTick       = (double)globalShockDecayPerTick;
+        _globalShockArrivalProbPerTick = 1.0 / (Math.Max(0.0001, globalShockMeanIntervalHours) * 3600.0);
+        _globalShockDownBias           = Math.Clamp(globalShockDownBias, 0.0, 1.0);
 
         _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
@@ -252,7 +291,7 @@ internal sealed class BotSentimentService
         {
             double a = Math.Exp(-dt / GlobalTauSec[k]);
             gAlpha[k] = a;
-            gNoise[k] = GlobalSigma[k] * Math.Sqrt(1.0 - a * a);
+            gNoise[k] = _globalSigmaEff[k] * Math.Sqrt(1.0 - a * a);
         }
         Span<double> sAlpha = stackalloc double[PerStockRings];
         Span<double> sNoise = stackalloc double[PerStockRings];
@@ -281,13 +320,18 @@ internal sealed class BotSentimentService
         }
 
         if (_newsEvents) StepShocks();
+        // §global-shock: advance the single market-wide shock (decay + one whole-market arrival). Gated ⇒ off
+        // draws no RNG here and leaves _globalShock at 0 (the combine below then adds an exact 0.0 = byte-identical).
+        if (_globalShockEnabled) StepGlobalShock();
 
         // Per-stock rings + combined cache.
         foreach (var sid in _stocks.ById.Keys)
         {
             if (!_perStock.TryGetValue(sid, out var ring)) { ring = new double[PerStockRings]; _perStock[sid] = ring; }
             double amp = AmpMult(sid);
-            double sum = _globalSum;
+            // §global-shock rides alongside the global OU ring as a second common-mode term ⇒ every stock gets the
+            // SAME shift (cross-stock correlation). 0 when off ⇒ exact byte-identical (adding 0.0 is exact in IEEE754).
+            double sum = _globalSum + _globalShock;
             for (int k = 0; k < PerStockRings; k++)
             {
                 ring[k] = sAlpha[k] * ring[k] + sNoise[k] * amp * UnitNoise();
@@ -362,6 +406,14 @@ internal sealed class BotSentimentService
     // through unchanged. ×1.0 ⇒ identical double (off path byte-identical). Pure ⇒ unit-testable.
     internal static double SlowRingSigma(double baseSigma, double tauSec, double damp)
         => baseSigma * (tauSec >= SlowRingTauThresholdSec ? damp : 1.0);
+
+    // §correlation lever: effective ring σ = base (× SlowRingDamp for slow per-stock rings) × the config multiplier.
+    // Pure ⇒ unit-testable; mult 1.0 ⇒ identical double (byte-identical off path).
+    internal static double EffectivePerStockSigma(int ring, double slowDamp, double mult)
+        => SlowRingSigma(PerStockSigma[ring], PerStockTauSec[ring], slowDamp) * mult;
+    internal static double EffectiveGlobalSigma(int ring, double mult) => GlobalSigma[ring] * mult;
+    internal static int PerStockRingCount => PerStockRings;
+    internal static int GlobalRingCount   => GlobalRings;
 
     // §System A RegimeDrift: one bounded-random-walk step — add the increment, apply a CUBIC soft-wall
     // (≈0 near the middle so the walk persists/trends, strong near ±cap so it can't escape), then hard-clamp.
@@ -440,11 +492,49 @@ internal sealed class BotSentimentService
     }
 
     /// <summary>
+    /// §global-shock: decay the single market-wide shock, then roll ONE whole-market Poisson arrival. On fire a
+    /// signed magnitude (DownBias ⇒ mostly bearish) is added to the scalar Tick folds into EVERY stock ⇒ a correlated
+    /// market-wide move that turns the whole fleet bearish at once. Uses a DEDICATED RNG so the per-stock ring/shock
+    /// sequences stay untouched. Called only when enabled ⇒ the off path draws nothing here and leaves _globalShock 0.
+    /// </summary>
+    private void StepGlobalShock()
+    {
+        _globalShock = Math.Abs(_globalShock) < ShockFloor ? 0.0 : _globalShock * _globalShockDecayPerTick;
+
+        if (_globalShockRng.NextDouble() >= _globalShockArrivalProbPerTick) return;
+        var delta = GlobalShockDelta(_globalShockRng.NextDouble(), _globalShockRng.NextDouble(),
+            _globalShockMinMagnitude, _globalShockMaxMagnitude, _globalShockMagnitudeExponent, _globalShockDownBias);
+        _globalShock += delta;
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("GLOBAL shock: {Delta:+0.00;-0.00} (accum {Accum:+0.00;-0.00})", delta, _globalShock);
+    }
+
+    // §global-shock: pure signed-magnitude draw — sign from DownBias (signUniform &lt; downBias ⇒ bearish −),
+    // magnitude min + span·U^exp (exp&gt;1 crowds toward the floor: many small, few big), same shape as the per-stock
+    // shock. Extracted so the sign/magnitude logic is unit-testable. Pure ⇒ deterministic, no RNG, no state.
+    internal static double GlobalShockDelta(double signUniform, double magUniform,
+        double min, double max, double exp, double downBias)
+    {
+        double sign = signUniform < downBias ? -1.0 : 1.0;
+        double span = Math.Max(0.0, max - min);
+        double mag  = min + span * Math.Pow(Math.Clamp(magUniform, 0.0, 1.0), Math.Max(1.0, exp));
+        return sign * mag;
+    }
+
+    /// <summary>
     /// Combined sentiment for <paramref name="stockId"/> (per-stock ring + global ring + news
     /// shock), read from the cache Tick maintains. Un-clamped: typically ±1, more during a shock.
     /// </summary>
     internal decimal GetSentiment(int stockId)
         => _combined.TryGetValue(stockId, out var v) ? v : 0m;
+
+    /// <summary>
+    /// The RAW shared common-mode signal this tick = global OU ring sum + global shock, identical for EVERY stock
+    /// (unlike <see cref="GetSentiment"/>, which is the per-stock blend). Sign = shared market direction, magnitude =
+    /// conviction (~±0.2-0.4, more during a global shock). Exposed so the trend-follower can chase it as a fleet-wide
+    /// TAKER → cross-stock correlation (a shared buyProb tilt is book-absorbed; shared taker flow is not). Loop-thread read.
+    /// </summary>
+    internal decimal GlobalSignal() => (decimal)(_globalSum + _globalShock);
 
     /// <summary>
     /// Sentiment-dynamics §: the EWMA slope ds = d(sentiment)/dt for a stock — fast timescale when

@@ -53,6 +53,8 @@ internal sealed class ExogenousShockService
     private int  _activeCount;
     private int  _arrivalsSinceLog;
     private long _simTick;
+    private int  _globalCoFireSign; // ±1 on the tick a global impulse fires, else 0 (relayed from the source).
+    private int  _globalPulseId;    // monotonic id per global pulse — reshuffles the co-fire cohort + spread.
 
     private DateTime _lastTickUtc = DateTime.MaxValue; // inert until Reset arms the clock
     private DateTime _nextLogUtc  = DateTime.MaxValue;
@@ -125,6 +127,11 @@ internal sealed class ExogenousShockService
             }
         }
 
+        // §global co-fire: relay the source's shared-impulse sign for THIS tick so the chaser can fire a
+        // simultaneous, same-sign taker burst across all stocks (correlated flow). 0 on non-pulse ticks.
+        _globalCoFireSign = _source.LastGlobalSign;
+        if (_globalCoFireSign != 0) _globalPulseId++;
+
         _activeCount = _shock.Count;
         if (now >= _nextLogUtc) { LogSummary(now); _nextLogUtc = now + TimeSpan.FromSeconds(60); }
     }
@@ -137,6 +144,8 @@ internal sealed class ExogenousShockService
         _activeCount = 0;
         _arrivalsSinceLog = 0;
         _simTick = 0;
+        _globalCoFireSign = 0;
+        _globalPulseId = 0;
         _source.Reset();
         lock (_samples) _samples.Clear();
         _lastTickUtc = _enabled ? now : DateTime.MaxValue;
@@ -154,6 +163,13 @@ internal sealed class ExogenousShockService
     /// <summary>Monotonic impulse-generation id for a stock (0 when none) — keys the per-shock chaser reshuffle.</summary>
     internal int GetShockId(int stockId)
         => _shockId.TryGetValue(stockId, out var v) ? v : 0;
+
+    /// <summary>±1 when a MARKET-WIDE impulse fired THIS tick (else 0) — the global co-fire signal for the chaser
+    /// (all co-firers act same-tick, same-sign ⇒ correlated taker flow). 0 when the service is disabled.</summary>
+    internal int GlobalCoFireSign => _enabled ? _globalCoFireSign : 0;
+
+    /// <summary>Monotonic id per global pulse — keys the co-fire cohort + per-bot stock spread so each pulse reshuffles.</summary>
+    internal int GlobalPulseId => _globalPulseId;
     #endregion
 
     #region Telemetry

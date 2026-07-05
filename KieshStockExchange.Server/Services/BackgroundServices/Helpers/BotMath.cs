@@ -40,6 +40,16 @@ internal static class BotMath
     }
 
     /// <summary>
+    /// §reaction-persistence: time-based EWMA / AR(1) KEEP weight (weight retained on the OLD value) for an
+    /// elapsed <paramref name="dtSec"/> at a given <paramref name="halfLifeSec"/>: <c>0.5^(dt/halfLife)</c>.
+    /// <c>dt ≤ 0</c> or <c>halfLife ≤ 0</c> ⇒ keep 1 (no update — first sight / clock skew / lever off). Pure ⇒
+    /// unit-testable. Same shape as AiTradeService.TimeEwmaKeep, kept here so the pure bot-math
+    /// helpers don't depend on the owning background service.
+    /// </summary>
+    internal static double HalfLifeKeep(double dtSec, double halfLifeSec)
+        => (halfLifeSec <= 0.0 || dtSec <= 0.0) ? 1.0 : Math.Exp(-0.6931471805599453 * dtSec / halfLifeSec);
+
+    /// <summary>
     /// One bounded-random-walk / accumulator step: add <paramref name="step"/>, apply a CUBIC soft-wall
     /// (≈0 near the middle so the value persists/trends, strong near ±cap so it can't escape), then hard-clamp
     /// to ±cap. <c>cap ≤ 0 ⇒ 0</c>. Pure ⇒ unit-testable. This is the shared shape RegimeDrift and the

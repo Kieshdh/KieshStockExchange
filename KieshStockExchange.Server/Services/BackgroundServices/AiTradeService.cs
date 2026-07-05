@@ -339,11 +339,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         var exogChaserMinIntervalSec   = _configuration.GetValue("Bots:ExogShock:ChaserMinIntervalSec", 0.0);
         var exogChaserIntervalTicks    = exogChaserMinIntervalSec <= 0.0 ? 0
             : (int)Math.Ceiling(exogChaserMinIntervalSec / Math.Max(0.001, TradeInterval.TotalSeconds));
+        // §global co-fire: on a MARKET-WIDE pulse, a cohort fires a SIMULTANEOUS same-sign taker burst spread across
+        // all stocks (correlated flow the slow sentiment ring can't make). Needs GlobalFraction>0 for pulses to exist.
+        // Default off ⇒ byte-identical.
+        var exogGlobalCoFire             = _configuration.GetValue("Bots:ExogShock:GlobalCoFire", false);
+        var exogGlobalCoFireFraction     = _configuration.GetValue("Bots:ExogShock:GlobalCoFireFraction", 0.0);
+        var exogGlobalCoFireNotionalFrac = _configuration.GetValue("Bots:ExogShock:GlobalCoFireNotionalFrac", 0.0);
         var exogSource = new RandomShockSource(stocks,
                         meanIntervalMinutes: _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
                         minMagnitude:        _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
                         maxMagnitude:        _configuration.GetValue("Bots:ExogShock:MaxMagnitude", 0.06),
-                        magnitudeExponent:   _configuration.GetValue("Bots:ExogShock:MagnitudeExponent", 1.8));
+                        magnitudeExponent:   _configuration.GetValue("Bots:ExogShock:MagnitudeExponent", 1.8),
+                        // §global-exog: fraction of shock arrivals that fire MARKET-WIDE (shared → cross-stock corr); 0 ⇒ per-stock-only.
+                        globalFraction:      _configuration.GetValue("Bots:ExogShock:GlobalFraction", 0.0));
         _news      = new ExogenousShockService(stocks, _profiles,
                         new SeparatorLogger<ExogenousShockService>(loggerFactory, loggerOptions), exogSource,
                         enabled:          exogEnabled,
@@ -450,7 +458,20 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         coMoveBetaSpread:        _configuration.GetValue("Bots:Sentiment:CoMovement:BetaSpread", 0.4),
                         // §impact-decouple A: wire the >1-min-decoupled return ONLY when the flag is on; null ⇒
                         // the price-reaction term uses the legacy ~1s return ⇒ byte-identical.
-                        reactionReturn:          _reactionRef ? ReactionReturnForSentiment : (Func<int, double>?)null);
+                        reactionReturn:          _reactionRef ? ReactionReturnForSentiment : (Func<int, double>?)null,
+                        // §global-shock: discrete market-wide BEARISH sentiment event ⇒ correlated crash (elevator-down)
+                        // that turns the whole fleet bearish at once (⇒ fleet-wide bear-short). Enabled=false ⇒
+                        // byte-identical (dedicated RNG, folds an exact 0.0 into every stock).
+                        globalShockEnabled:           _configuration.GetValue("Bots:Sentiment:GlobalShock:Enabled", false),
+                        globalShockMeanIntervalHours: _configuration.GetValue("Bots:Sentiment:GlobalShock:MeanIntervalHours", 3.0),
+                        globalShockMinMagnitude:      _configuration.GetValue("Bots:Sentiment:GlobalShock:MinMagnitude", 0.3m),
+                        globalShockMaxMagnitude:      _configuration.GetValue("Bots:Sentiment:GlobalShock:MaxMagnitude", 1.5m),
+                        globalShockMagnitudeExponent: _configuration.GetValue("Bots:Sentiment:GlobalShock:MagnitudeExponent", 3.0),
+                        globalShockDecayPerTick:      _configuration.GetValue("Bots:Sentiment:GlobalShock:DecayPerTick", 0.999m),
+                        globalShockDownBias:          _configuration.GetValue("Bots:Sentiment:GlobalShock:DownBias", 0.85),
+                        // §correlation lever: scale per-stock (down) + global (up) ring σ ⇒ shared common-mode dominates.
+                        perStockSigmaMult:            _configuration.GetValue("Bots:Sentiment:PerStockSigmaMult", 1.0),
+                        globalSigmaMult:              _configuration.GetValue("Bots:Sentiment:GlobalSigmaMult", 1.0));
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
@@ -548,6 +569,17 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         maxOpenOrdersMult:  _configuration.GetValue("Bots:Liquidity:MaxOpenMult", 1m),
                         valueAnchorStrength: _configuration.GetValue("Bots:ValueAnchor:Strength", 0m),
                         valueAnchorScale:    _configuration.GetValue("Bots:ValueAnchor:Scale", 0.15m),
+                        anchorElastic:         _configuration.GetValue("Bots:ValueAnchor:Elastic", false),
+                        anchorElasticDeadband: _configuration.GetValue("Bots:ValueAnchor:ElasticDeadbandPrc", 0.20m),
+                        anchorElasticPower:    _configuration.GetValue("Bots:ValueAnchor:ElasticPower", 3.0m),
+                        // §trend-follower (chartist) cohort. Enabled=false / fraction 0 ⇒ byte-identical.
+                        trendFollowerEnabled:     _configuration.GetValue("Bots:TrendFollower:Enabled", false),
+                        trendCohortFraction:      _configuration.GetValue("Bots:TrendFollower:CohortFraction", 0m),
+                        trendStrength:            _configuration.GetValue("Bots:TrendFollower:Strength", 0m),
+                        trendContrarianFraction:  _configuration.GetValue("Bots:TrendFollower:ContrarianFraction", 0.2m),
+                        trendTakerCoupling:       _configuration.GetValue("Bots:TrendFollower:TakerCoupling", false),
+                        trendTakerThreshold:      _configuration.GetValue("Bots:TrendFollower:TakerThreshold", 0.05m),
+                        trendSharedChaseWeight:   _configuration.GetValue("Bots:TrendFollower:SharedChaseWeight", 0m),
                         dipBuyStrength:      _configuration.GetValue("Bots:DipBuyStrength", 0m),
                         valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
                         overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),
@@ -575,6 +607,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         inertiaMinSec:       _configuration.GetValue("Bots:Imbalance:Inertia:MinSec", 30.0),
                         inertiaMaxSec:       _configuration.GetValue("Bots:Imbalance:Inertia:MaxSec", 600.0),
                         inertiaLeak:         _configuration.GetValue("Bots:Imbalance:Inertia:Leak", 0.10m),
+                        inertiaSentimentModulated: _configuration.GetValue("Bots:Imbalance:Inertia:SentimentModulated", false),
                         herding:             _configuration.GetValue("Bots:Imbalance:Herding", false),
                         followerFraction:    _configuration.GetValue("Bots:Imbalance:Herding:FollowerFraction", 0.25m),
                         herdTilt:            _configuration.GetValue("Bots:Imbalance:Herding:Tilt", 0.10m),
@@ -667,7 +700,25 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         exogCap:                   exogCap,
                         shockOf:                   _news.GetShock,
                         shockIdOf:                 _news.GetShockId,
-                        anyShockActive:            () => _news.AnyActive);
+                        anyShockActive:            () => _news.AnyActive,
+                        // §global co-fire: same-tick, same-sign taker burst across all stocks on a market-wide pulse.
+                        globalCoFire:              exogEnabled && exogGlobalCoFire,
+                        globalCoFireFraction:      exogEnabled ? exogGlobalCoFireFraction : 0.0,
+                        globalCoFireNotionalFrac:  exogEnabled ? exogGlobalCoFireNotionalFrac : 0.0,
+                        globalCoFireSignOf:        () => _news.GlobalCoFireSign,
+                        globalPulseIdOf:           () => _news.GlobalPulseId,
+                        // §reaction-persistence split: two-clock reaction/persistence + taker coupling. Default off ⇒
+                        // byte-identical (ReactionTauSec is read + logged below but RESERVED — not wired in v1).
+                        reactionPersistence:       _configuration.GetValue("Bots:Imbalance:ReactionPersistence", false),
+                        persistMinSec:             _configuration.GetValue("Bots:Imbalance:ReactionPersistence:PersistMinSec", 300.0),
+                        persistMaxSec:             _configuration.GetValue("Bots:Imbalance:ReactionPersistence:PersistMaxSec", 1200.0),
+                        reactionWLocal:            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:WLocal", 1.0m),
+                        reactionWShared:           _configuration.GetValue("Bots:Imbalance:ReactionPersistence:WShared", 0.7m),
+                        reactionLeak:              _configuration.GetValue("Bots:Imbalance:ReactionPersistence:Leak", 0.10m),
+                        reactionTakerCoupling:     _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerCoupling", false),
+                        reactionTakerThreshold:    _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerThreshold", 0.15m),
+                        reactionTakerGain:         _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGain", 1.0m),
+                        reactionTakerGovScale:     _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGovScale", 1000000000m));
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _logger.LogInformation(
@@ -694,6 +745,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
             _configuration.GetValue("Bots:ExogShock:MaxMagnitude", 0.06),
             _configuration.GetValue("Bots:ExogShock:MagnitudeExponent", 1.8));
+        _logger.LogInformation(
+            "CONFIGCHECK ExogShock GlobalCoFire={Cf} coFireFraction={Cff} coFireNotionalFrac={Cfn} globalFraction={Gf} " +
+            "(needs Enabled + GlobalFraction>0 to fire; off ⇒ byte-identical)",
+            exogEnabled && exogGlobalCoFire, exogGlobalCoFireFraction, exogGlobalCoFireNotionalFrac,
+            _configuration.GetValue("Bots:ExogShock:GlobalFraction", 0.0));
         // Microstructure bounce arm marker: lets an A/B soak operator confirm OFF (0) vs ON from the log.
         _logger.LogInformation("CONFIGCHECK TouchTighten touchTighten={TouchTighten} (absent ⇒ 0 ⇒ byte-identical)",
             _configuration.GetValue("Bots:TouchTightenPrc", 0m));
@@ -706,6 +762,25 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _configuration.GetValue("Bots:PerceivedPriceMaxAlpha", 0.45m),
             _configuration.GetValue("Bots:PerceivedSlopeScaleFast", 0.01m),
             _configuration.GetValue("Bots:PerceivedSlopeScaleSlow", 0.02m));
+        // §reaction-persistence arm marker: confirm OFF vs ON + all resolved knobs from the log alone. Supersedes
+        // the §A1 inertia clamp and the reaction/hold levers when on (do not co-enable). reactionTauSec is RESERVED
+        // (default 0 ⇒ inert) — logged so a future sweep can see it, not wired in v1.
+        _logger.LogInformation(
+            "CONFIGCHECK ReactionPersistence on={On} reactionTauSec={Tau} persistSec=[{Pmin},{Pmax}] " +
+            "wLocal={Wl} wShared={Ws} leak={Leak} takerCoupling={Tc} takerThreshold={Tt} takerGain={Tg} takerGovScale={Tgs} " +
+            "(off ⇒ byte-identical; supersedes Inertia + DirectionalReactionLag + PerceivedPriceDesync + " +
+            "ImpactDecoupleHold + TrendFollower taker/chase — do not co-enable)",
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence", false),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:ReactionTauSec", 0.0),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:PersistMinSec", 300.0),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:PersistMaxSec", 1200.0),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:WLocal", 1.0m),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:WShared", 0.7m),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:Leak", 0.10m),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerCoupling", false),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerThreshold", 0.15m),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGain", 1.0m),
+            _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGovScale", 1000000000m));
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
         // §stagger: deterministic per-bot tick-phase scheduling. Default off ⇒ byte-identical;
