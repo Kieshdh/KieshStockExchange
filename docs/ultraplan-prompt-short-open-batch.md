@@ -1,0 +1,39 @@
+# Ultraplan A — Slice 2: short-open match+settle batching (the ~30–45% adv prize)
+
+**Goal:** eliminate the per-order MATCH+SETTLE transaction for flat market-short opens — the dominant remaining `adv` tick-phase cost now that Slice 1 (buy-stop arm batching) has landed. Amortize the tick's short-open cohort's match+settle into ONE root transaction with per-order savepoints (the same shape the plain-order batch phase already uses), so N short-opens cost ~one commit instead of N. **CK=0 is sacrosanct** — this is the conservation-riskiest perf change in the whole arc; the collateral-atomicity trap below is the specific failure mode. Flag-gated + byte-identical off; preserve seed-determinism (per-bot aiUserId ordering).
+
+## Context — build on this, don't re-derive
+- **Slice 1 is DONE + committed default-off (`e705153`, `Bots:Advanced:BatchBuyStops`).** Buy-stops are *arms* (entry-insert + reserve, no match), so batching them worked like the baked `BatchArms`. **Short-opens are the OTHER half and are HARDER: they immediately match+settle per-order.** This slice is that half.
+- The `adv` tick-phase is ~200 ms (≈**30–45% of the bot cap**; measured: adv-OFF lifts cap ~2,300 → ~3,000–3,350). With buy-stops batched, the residual `adv` cost is dominated by short-opens' per-order match+settle transactions (~5 ms/order, one root tx + WAL flush each).
+- This is Slice 2 of `docs/ultraplan-prompt-advanced-orders-reimpl.md` — read that file's short-open hardening; this prompt focuses it.
+
+## ★ Diagnosis (code-grounded — the entry-batch is a proven dead end, don't repeat it)
+- **The short-open ENTRY-batch ALREADY EXISTS and is a measured NO-WIN.** `OrderEntryService.PlaceMarketShortBatchAsync` (wired via `AiTradeService.SubmitMarketShortBatchAsync` → `OrderExecutionService.PlaceMarketShortBatchAsync`), gated behind `Bots:Advanced:BracketBatch`, batches only the ENTRY-inserts. It gave **zero adv-ms/order drop** because the per-short cost is the **MATCH+SETTLE group transaction**, not the entry insert. **Do NOT go looking in `OrderEntryService`** — the entry side is spent.
+- **The real work is inside `OrderExecutionService.PlaceMarketShortBatchAsync` (the engine method): move the per-order MATCH+SETTLE into ONE root tx with per-order savepoints** — the same group-tx shape the normal plain-order batch phase (`MatchAndSettleAsync` / the batch route that `BatchArms` and the plain batch use) already runs CK-clean. The engine comment notes this needs `SettleOrderAsync`/`MatchAndSettleAsync` refactored to accept a cohort.
+- (Line numbers in the companion doc predate `e705153`, which added ~196 lines to `OrderExecutionService`; re-locate by method name.)
+
+## ★★ CK-safety hardening — READ FIRST (this is where a naive impl leaks money/shares)
+- ⚠️ **COLLATERAL-ATOMICITY TRAP (the specific failure mode).** A short-open reserves SHORT COLLATERAL on the Position. In a batch, each short-arm's collateral reservation MUST be visible to the *next* arm's gate check **within the same savepoint scope** — otherwise two short-arms for the same (user,stock) in one batch each pass the gate on STALE reserved-quantity → **phantom oversell → double collateral liability, invisible to `Conservation` (that probe is fill-based)**. Restructure to **check-then-reserve INSIDE the savepoint**; do NOT naively drop short-opens into a shared commit group without this ordering. The detectors that WILL catch it are `CK_Positions`/`CK_Funds` constraint hits + the `Reservation reconcile:` WARN (lower `Bots:ReservationPhantomWarnThreshold` ~0.5 for the soak, since the auditor self-heals + only WARNs above 5.0), NOT the fill-only `Conservation` probe.
+- **Two design options — the ultraplan should pick one and justify it:**
+  - **(a) Bespoke batched market-short settlement path** — amortize the N short-opens into one root tx with per-order savepoints, mirroring the plain batch's group-tx; collateral check-then-reserve inside each savepoint.
+  - **(b) FOLD short-opens INTO the normal plain-order batch phase** — a short-open is a market-sell-WITH-collateral; can the existing plain-order batch route absorb them so they ride the already-proven group-commit + savepoints, with the collateral reserve done in the same savepoint? **This may be the cleanest "new implementation"** (unify short-opens with the plain market-order path rather than maintain a bespoke advanced route) — but only if the collateral reserve slots cleanly into the plain path's savepoint without perturbing plain orders.
+- **Reuse the proven pattern.** The plain-order batch + `BatchArms` already demonstrate the group-tx + per-order-savepoint + coalesced-notify pattern is CK-clean; mirror it. Note the gate surface: short collateral is per-(user,stock) **Position** (like the sell-stop batch's Position gate), NOT the Fund gate Slice 1's buy-stops needed.
+- **Per-order savepoint isolation:** one short that fails to match/settle (no counterparty liquidity, collateral race) must roll back to its own savepoint and drop from the cohort **without killing the survivors** — same as the plain batch's per-order rollback.
+
+## What the ultraplan must design
+1. The **batched short-open match+settle** (option a or b, chosen + justified): one root tx, per-order savepoints, collateral check-then-reserve inside the savepoint, coalesced settlement + notify.
+2. The **flag** — `Bots:Advanced:BatchShortOpens` (default false, byte-identical off), OR a justified fold under an existing flag. A config flip must revert instantly.
+3. **Invariants preserved:** Σ short-collateral-reservation == `Position.ReservedQuantity`; per-order savepoint rollback; seed-determinism (aiUserId ordering of the arm builders + settle order).
+
+## Constraints + gates
+- **CK=0 HARD gate** — the batched short settlement MUST be conservation-clean. Validate with the conservation soak: `ConservationProbe` + `ReservationAuditor` + `CK_Positions`/`CK_Funds` scans + the money-probe, on a **short-heavy fleet** (`Bots:Advanced:BuyStopFraction` low so protective decisions route to *shorts*, maximizing short-open volume), ≥1 h, `PhaseTimingSeconds>0`.
+- **Flag-gated + byte-identical off** (like `BatchArms`/`BatchBuyStops`).
+- **Seed-determinism** preserved.
+- **Measure** — A/B the `adv` phase ms + the equilibrium cap at scale (`phase_harvest.py`); a two-run A/B (pinned-cap raw commits/sec, then scaler-on steady-state cap) since the scaler's closed loop makes "adv-ms-drop at equal cap" unmeasurable in one run. **Target: `adv` → near-zero, cap → the adv-off ceiling (~+30–45% over the current buy-stop-batched baseline).**
+- **SEPARATE commit** from Slice 1 (co-mingling makes a CK failure un-attributable). Revert = flag flip + process restart (flags are read-once at ctor).
+
+## Key files (re-locate by method name; `e705153` shifted line numbers)
+`OrderExecutionService.PlaceMarketShortBatchAsync` (the match+settle to amortize — the heart of it) · `Settlement/OrderSettler.SettleAsync` (short branch) + `MatchAndSettleAsync` (the group-tx to extend to a cohort) · the plain-order batch phase (the proven group-tx + per-order-savepoint reference to mirror) · `AiTradeService.SubmitMarketShortBatchAsync` + the advanced partition in `SubmitAdvancedAsync` (tick wiring; add the `BatchShortOpens` case) · `AccountsCache` (Position gate + short-collateral reservation) · `AiBotDecisionService.BuildShortOpenAsync` (the decision source; do not change its economics).
+
+## Note for the reviewer panel
+This is the **biggest single perf lever left** (the bulk of the ~30–45% adv prize) **and** the **CK-riskiest** change in the arc. Weight the review toward the collateral-atomicity trap and the check-then-reserve-inside-savepoint ordering; a plausible-but-wrong batching that passes a short soak but leaks collateral under contention is the thing to catch. Prefer option (b) only if it demonstrably rides the plain path's savepoint without perturbing plain-order conservation.
