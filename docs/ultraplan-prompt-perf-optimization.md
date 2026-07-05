@@ -4,6 +4,20 @@
 Phase 0 (profiling) is mandatory and gates everything after it.** Council-driven (two 5/5 councils + chairman, 2026-07-05) — the strategic
 direction below is settled; your job is the deep code investigation + the concrete plan.
 
+## ★★★ KIESH DIRECTION (2026-07-05 — SUPERSEDES the "sparse activation = thesis" framing below)
+**Sparse activation is REJECTED.** It REDUCES active per-stock trading → lower volume → empty candles on low-volume stocks, which VIOLATES the **P2 liveness
+requirement: every stock traded ≥1× per 15 s / very rare empties** (`BOT_MECHANICS.md` §1). The goal is the OPPOSITE — **raise the active-bot ceiling so MORE bots
+trade per stock (denser), not fewer.** (Sparse's LLN / faster-than-realtime benefits are NOT pursued here — the realism ship handles the tape character.)
+⇒ **the cap levers = Ultraplan A (adv) + arb event-trigger + batch/commit + memory GC** — they raise the ceiling WITHOUT cutting active trading. Expect a
+MODERATE gain (not the 20k only sparse reaches), which is fine: denser trading is the goal.
+- **Active count is PERF-LIMITED, not pool-limited.** To run more active bots, raise the perf ceiling. The pool size is a SEPARATE decision:
+  **B (keep MaxBotCap 20k, activate a larger %)** = simplest, no reseed (the 20k pool is only ~11% active) = the DEFAULT; **A (grow MaxBotCap > 20k + activate)** =
+  adds bot diversity, needs a reseed → optional, bundle with the planned reseed. Cutting the 70 trading pairs was REJECTED (council: 286 bots/book adequate; the
+  thinness is EUR-allocation-specific) — so MORE bots, NOT fewer pairs.
+- **CALIBRATE ON PROD.** The activation amount (`ActiveBotCap`/tick) is tuned on PROD (real 20k + real hardware — sustains far more active than the degraded local
+  box) against the empty-15s-candle rate until empties are rare — a prod-attended calibration (like the ship's Gate-0). This plan's job is to raise the ceiling so
+  that calibration has room; it does NOT set the final activation number.
+
 ## ★★ SCOPE — this is ULTRAPLAN B of two (advanced orders is a SEPARATE plan)
 - **Advanced orders → `docs/ultraplan-prompt-advanced-orders-reimpl.md` (Ultraplan A).** A deep-dive CORRECTED the review council's premise: the ~200 ms
   `adv` phase is NOT a per-tick scan (the stop scan is already event-driven + cheap in `StopTriggerWatcher`) — it's the ARMING (a sequential Postgres commit

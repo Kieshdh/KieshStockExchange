@@ -29,6 +29,7 @@ Config VALUES live in `appsettings.json` (`Bots:*`) and the seed `Tools/Config.p
 | | net drift (direction) | ~0 + small premium | POSITIVE + low over a WEEK (intraday can dip on crashes) | 3 |
 | | price runaway | bounded | none (band + cap) | 1 |
 | **Liquidity** | volume / activity | continuous | lively, NOT deadened | 2 |
+| | **per-stock liveness** (no empty candles) | continuous | **every stock traded ≥1× per 15 s** (very rare empties) — raise the ACTIVATION amount (active bots/tick), NOT sparse activation, NOT fewer pairs (70 is fixed); calibrate on PROD | **2** |
 | | taker share | (subsumed by volume + impact) | — | 4 |
 | | spread / book depth | tight liquid / wider thin | realistic / adequate | 4 |
 | **Population** | momentum-amplifier share | significant but takers-IN / limits-OUT | TBD (maybe 47% → 25–30%, reseed) | 3 |
