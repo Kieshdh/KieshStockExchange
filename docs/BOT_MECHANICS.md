@@ -58,9 +58,53 @@ multi-day trend, sector rotation, momentum. **Out-of-scope for a 24/7 sim:** day
 
 ---
 
-## 2. SYSTEMS — mechanism reference  *(FILLED DURING THE LONG-BAKE DOC SWEEP — task #177)*
-Placeholder. Each subsystem gets a compact section: **what it does · config keys · brief why**. Cover: sentiment (rings / RegimeDrift / GlobalShock /
-PriceReaction / CoMovement / SlowRingDamp) · SentimentDynamics slope model + conviction dials · strategy types + seeded mix · order types + limit tiers
-(Close/Mid/Far) · advanced orders (stops / trailing / brackets) · arbitrage + FX desk/house · exogenous shock + news + co-fire · fat-tail jumps ·
-value / recent / fundamental anchors + caps · cash homeostasis + dip-buy + injection · herding / imbalance · market-maker quoting · bear-short ·
-reaction-persistence · FX walker · per-bot SEEDED params (aggression / lateness / cash bands / buy-bias / strategy weights). Reference config keys, not values.
+## 2. SYSTEMS — mechanism reference
+Each entry: **what** · `config keys` (under `Bots:*` unless noted) · *why*. Values + decision history live in `appsettings.json` / the plan log, not here.
+Levers tagged *(off)* are default-off + byte-identical (add exactly 0 when disabled). Per-bot geometry is SEEDED (see 2.9), not in appsettings.
+
+### 2.1 Sentiment — the mood signal each bot reads (`BotSentimentService`)
+- **OU sentiment rings** — every stock sums a stack of mean-reverting AR(1) rings across ~5 per-stock timescales (seconds→hours) plus a shared 3-timescale global/common-mode ring. `Sentiment:PerStockSigmaMult`, `Sentiment:GlobalSigmaMult` (amplitude scalers). *Fast rings → per-stock dispersion; the slow global ring → a shared regime. Corr ≈ shared²/(shared²+idio²), so GlobalSigmaMult↑ / PerStockSigmaMult↓ raises cross-stock correlation.*
+- **RegimeDrift ("System A")** — a per-stock BOUNDED random walk (not mean-reverting), cubic soft-walled near its cap. `Sentiment:RegimeDrift:{Enabled,StepSigma,Cap,SoftWallK,Strength}`. *Gives each stock an independent minutes-long wander; `Strength` is the idiosyncratic denominator of the correlation ratio.*
+- **GlobalShock** *(off)* — a market-wide Poisson shock: a signed, down-biased scalar decays over ticks into every stock. `Sentiment:GlobalShock:{Enabled,MeanIntervalHours,Min/MaxMagnitude,MagnitudeExponent,DecayPerTick,DownBias}`. *Correlated market-wide fear ("elevator down") that per-stock sentiment can't make.*
+- **PriceReaction** *(off)* — contrarian price→sentiment feedback: leaky-integrates each stock's return and pushes sentiment against a sustained move (optional fast-momentum term). `Sentiment:{PriceReaction,ReactStrength,ReactTauSec,ReactDeadband,ReactCap,MomStrength,MomTauSec,MomCap}`. *Bends the linear drift a long-τ ring prints.*
+- **CoMovement** *(off — NULL for corr in the arc)* — one shared bounded walk each stock loads onto via a per-stock beta, shifting the FUNDAMENTAL anchor target (not sentiment). `Sentiment:CoMovement:{Enabled,StepSigma,Cap,SoftWallK,Strength,BetaSpread}`. *Shared repricing via the channel the anchor supports rather than damps.*
+- **SlowRingDamp** — scalar on the SLOW per-stock rings only. `Sentiment:SlowRingDamp` (1.0 = inert). *Attacks slow-ring drift without blunting the fast bounce.*
+
+### 2.2 Decision model — mood → order (`AiBotDecisionService`)
+- **SentimentDynamics slope model** — biases on the two-timescale sentiment SLOPE, not the raw level; each strategy responds with a distinct shape (Scalper→fast slope, TrendFollower→slow slope, MeanReversion→fade + reversal-at-extreme, MM→gentle lean). `SentimentDynamics:{Enabled,SlopeTauFastSec,SlopeTauSlowSec,SlopeScaleFast,SlopeScaleSlow}`. *Decouples buyProb from a static level → trend/reversal/rollover behave differently.*
+- **Conviction dials** — per-strategy amplitudes on the directional bias; `AggressionBoost` converts conviction magnitude into extra TAKER (spread-crossing) share. `SentimentDynamics:{MomentumConviction,ScalperConviction,ReversionConviction,ReversalConviction,MarketMakerLean,AggressionBoost}`. *The directional loop gain + how strongly conviction crosses the spread.*
+
+### 2.3 Strategies & orders
+- **Strategy mix** — seeded population: MarketMaker / TrendFollower / MeanReversion / Random / Scalper (weighted) + a small separate Arbitrage cohort. Seeded (`Tools/Config.py:STRATEGY_WEIGHTS`, `ARBITRAGE_COHORT_SIZE`). *~half the fleet are momentum amplifiers (trend+scalper), the rest dampers — sets the loop gain.*
+- **Order type + limit tiers** — each bot draws market/limit + slippage probabilities; limit orders ladder into Close/Mid/Far tiers at seeded distances. `Tiers:{CloseProb,MidProb}`, `MarketProbMult`, `DecisionDistanceMult` (global distance scaler), `Liquidity:OffsetMult`; tier bands seeded. *Dense Close touch churns; the Far rung is the wall that absorbs stop-sweeps.*
+- **Advanced orders** — protective stop-market sell + a `BuyStopFraction` of buy-stops, trailing stops, short-opens; per-strategy probs seeded. Brackets are seeded-ZERO (removed: SL-cascade + throughput). `Advanced:{Enabled,BuyStopFraction,StopSlippagePct,MaxQty}`; profiles seeded (`ADVANCED_PROFILES`). *Stops add real taker flow; BuyStopFraction symmetrizes up/down taker pressure (no sell-stop-only down-drift).*
+- **Market-maker quoting** — strategy-0 MM bots post two-sided resting quotes on the thinner book side at a half-spread. `MarketMakerQuoting`, `QuoteHalfSpreadPrc`. (A dedicated MM-house cohort `MarketMaker:Enabled` exists but is off/unseeded.) *Two-sided resting liquidity → tight spreads + depth for sweeps.*
+
+### 2.4 Flow persistence — beats the LLN cancellation of 20k independent bots
+- **Herding / Inertia** — Inertia locks a bot's buy/sell side for a seeded multi-minute hold (no re-draws during the hold); Herding gives a follower fraction a common regime tilt. `Imbalance:{Inertia,Inertia:MinSec,Inertia:MaxSec,Inertia:Leak,Herding,Herding:FollowerFraction,Herding:Tilt}`. *Persistent stances create genuine order-flow imbalance instead of averaging to zero.*
+- **Reaction-persistence split** *(off — supersedes Inertia)* — a fast conviction signal feeds a per-bot AR(1) "pressure" with a seeded half-life; a taker override crosses the spread when pressure is high. `Imbalance:ReactionPersistence:{*,PersistMinSec,PersistMaxSec,WLocal,WShared,TakerCoupling}`. *Fast reaction (no lockstep latency) + separately-decaying conviction that STICKS as taker flow.*
+
+### 2.5 Anchors & caps — bound + revert price (`FundamentalService` + anchor tilts)
+- **Value anchor** — tilts buyProb toward the stock's fundamental target ∝ deviation/scale, capped; optional elastic (deadband + superlinear) variant. `ValueAnchor:{Strength,Scale,Elastic,ElasticDeadbandPrc,ElasticPower}`. *Probabilistic restoring force to fair value — bounds drift without hard-capping moves.*
+- **Recent anchor — the damping lever** — mean-reversion tilt toward a recent price EWMA. `RecentAnchor:{Enabled,Strength,Scale,HalfLifeSec}`. *Fades fast excursions so price falls back from the cap instead of pinning — the primary >10%-move damper.*
+- **Fundamental anchor** — the slow OU walk (per stock/currency) the value anchor pulls toward, hard-clamped to seed×[1±Band]. `Fundamental:{Enabled,Band,Theta,Sigma,DriftIntervalSeconds}`; per-stock sigma seeded. *A slowly-moving bounded target → long-horizon liveliness without runaway.*
+- **Price band / caps** — hard veto on orders crossing the anchor by more than the cap; `GeometricBand` makes it log-symmetric (×F up / ÷F down); `CapFromSeed` pins the reference to the immutable seed. `ValueAnchor:{OverheatCap,AbsoluteCapMax,CapFromSeed}`, `GeometricBand`. *The runaway backstop; no order crosses the band in the overheated direction.*
+
+### 2.6 Cash & drift control
+- **Cash homeostasis** — restoring force on buyProb from each bot's cash fraction vs its seeded reserve band (smooth pull + hard edge forces). `CashHomeostasis:{Continuous,MaxShift,EdgeForceBuy,EdgeForceSell}`; bands seeded. *Keeps the fleet solvent + bounds cash-hoard down-drift.*
+- **Dip-buy** — idle cash above the max reserve adds buyProb on dips ∝ depth×excess-cash. `DipBuyStrength`. *The demand side the net-long fleet lacks — cures down-drift without the anchor's spring-back.*
+- **Cash injection** — periodic per-bot cash top-ups (seeded frequency/amount). `CashInjection:IntervalMinutes`; rest seeded. *Sustains buying power over long sessions.*
+- **Bear-short** — appends a sentiment-scaled short-open bucket so flat bearish bots can sell; value-band vetoed. `BearShortStrength` (off in prod). *Sell-side firepower symmetric to the cash-abundant buy side.*
+
+### 2.7 Exogenous flow — the price-MOVING channel (`ExogenousShockService`)
+- **Exogenous shock / news** *(off)* — per-stock Poisson decaying value innovations; a chaser cohort trades INTO them with real marketable orders (`ChaserNotionalFrac` = impact dial; `ChaserStrength/Scale` retired). `ExogShock:{Enabled,MeanIntervalMinutes,DecayHalfLifeSec,Min/MaxMagnitude,MagnitudeExponent,Cap,AnchorTracksShock,ChaserNotionalFrac,ChaserFraction}`. *Directional TAKER volume (not a buyProb tilt) → moves ret_acf toward 0.*
+- **Co-fire — the banked correlation lever** *(off)* — on a market-wide pulse, a cohort fires ONE same-sign marketable order same-tick across hash-spread stocks. `ExogShock:{GlobalFraction,GlobalCoFire,GlobalCoFireFraction,GlobalCoFireNotionalFrac}`. *Simultaneous shared taker burst → 5-10min cross-stock correlation (shared sentiment is book-absorbed; shared flow isn't).*
+- **Sector pulse** *(off)* — a `SectorFraction` of co-fire pulses scope to one sector (stockId % SectorCount); the cohort pushes only that sector. `ExogShock:{SectorCount,SectorFraction}`. *Intra-sector-high / cross-sector-low correlation (sector rotation). [Built 2026-07-05; 45m A/B = null signature at SF0.5 — sentiment swamps it.]*
+- **Fat-tail jumps** *(off)* — a rare per-stock aggressor burst (dedicated account) walks the book to a target %, then aftershock nudges for clustering; never moves the fundamental. `Jumps:{Enabled,MeanIntervalHours,Min/MaxPct,MagnitudeExponent,MaxSlices,SlippagePct,AftershockBuckets,AftershockDecay,DriftGuardPct}`. *Fat 1-min return tails as a bounded tail event, not a level shift.*
+
+### 2.8 FX & arbitrage
+- **Arbitrage + FX house** — a small cohort keeps cross-listed USD/EUR books coupled (buy the cheap book / sell the dear, net-flat), rebalancing its currency mix through the FX desk; the conversion spread accrues to the house account, throttled by a wealth ceiling. `Arbitrage:{Enabled,ValueDrainCeilingPct,ConversionSkewBand,BatchLegs}`, `Platform:HouseUserId`; per-bot params seeded. *Tight cross-currency coupling; the spread funds the pure-profit house.*
+- **FX walker** — AR(1) mean-reverting bounded walk for the EUR/USD mid, clamped to base×(1±RateBand); `ConvertSpread` = the arb-coupling floor + house revenue. `Fx:{Alpha,Amplitude,ConvertSpread,RateBand}` (read once at startup). *A realistic bounded FX rate, not a driftless walk.*
+
+### 2.9 Seeded population (`Tools/`)
+- **Per-bot seeded params** — all per-bot geometry (aggressiveness, decision interval, strategy, lateness/FOMO tail, cash-reserve band, buy-bias, limit tiers, stop distances, advanced-order probs, cash-injection freq/amount) is drawn once by `Tools/Person.py` from `Tools/Config.py` constants into `AIUserData.xlsx`; runtime is nominally ×1.0 so the Excel IS the production geometry. Composing runtime dials: `DecisionDistanceMult`, `MarketProbMult`, `Liquidity:OffsetMult`. *Source of truth = the seed, not appsettings; the pending reseed folds the remaining runtime mults into the Excel (dials→1.0).*
