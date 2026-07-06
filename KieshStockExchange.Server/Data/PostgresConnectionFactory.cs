@@ -29,6 +29,17 @@ public sealed class PostgresConnectionFactory : IDbConnectionFactory, IAsyncDisp
         if (!connectionString.Contains("Pool Size", StringComparison.OrdinalIgnoreCase))
             builder.MaxPoolSize = config.GetValue("Db:MaxPoolSize", 50);
 
+        // Part A: optional relaxed commit durability for the write path, applied as a
+        // libpq startup option (-c synchronous_commit=...) so it costs ZERO per-transaction
+        // round-trips and survives Npgsql's connection reset. Unset/empty => Postgres
+        // default (on) => byte-identical. Accepts on|off|local|remote_write|remote_apply.
+        var syncCommit = config["Db:SynchronousCommit"];
+        if (!string.IsNullOrWhiteSpace(syncCommit))
+        {
+            var prefix = string.IsNullOrEmpty(builder.Options) ? string.Empty : builder.Options + " ";
+            builder.Options = prefix + $"-c synchronous_commit={syncCommit.Trim()}";
+        }
+
         _dataSource = NpgsqlDataSource.Create(builder.ConnectionString);
     }
 

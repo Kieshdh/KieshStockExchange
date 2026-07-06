@@ -722,6 +722,10 @@ internal sealed class TradeSettler
                 t.BuyOrderId, t.SellOrderId, t.Quantity, t.Price, t.TotalAmount);
         }
         await _db.InsertAllAsync(accepted, ct).ConfigureAwait(false);
+        // Part A throughput signal: count settled trades at the durable settle write.
+        // This is the single choke every settle path funnels through (batch/arb/advanced),
+        // so one call covers them all. No-op unless the PhaseTiming diagnostic is on.
+        BackgroundServices.Helpers.EngineCommitMetrics.RecordTrade(accepted.Count);
         await _db.UpdateAllAsync(ordersById.Values, ct).ConfigureAwait(false);
         if (loadedFunds.Count > 0)
             await _db.UpdateAllAsync(loadedFunds, ct).ConfigureAwait(false);

@@ -176,6 +176,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // BotPhase line can report commits/sec + round-trips/order — the commit-bound
     // metrics that transfer to prod (per-tick ms / cap are docker-skew artifacts).
     private long _cmPrevCommits;
+    // Companion snapshot for the settled-trade counter → trades/sec on the BotPhase
+    // line (the throughput signal; commits/sec falls by design under commit coalescing).
+    private long _cmPrevTrades;
 
     private readonly AiBotContext         _ctx;
     private readonly AiBotStateService    _state;
@@ -985,6 +988,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = 0;
         _phPending = _phAdvCount = _phTicks = 0;
         _cmPrevCommits = EngineCommitMetrics.ReadCommits(); // first window measures from loop start
+        _cmPrevTrades = EngineCommitMetrics.ReadTrades();
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
         _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
         _nextSentimentLogTime  = TimeHelper.NowUtc() + _sentimentLogInterval;
@@ -1660,19 +1664,24 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // into one insert via BatchArms, arb is a tiny cohort), matching the {Pend} field.
         long commitsNow  = EngineCommitMetrics.ReadCommits();
         long dCommits    = commitsNow - _cmPrevCommits;
+        long tradesNow   = EngineCommitMetrics.ReadTrades();
+        long dTrades     = tradesNow - _cmPrevTrades;
         double winSec    = _phaseTimingInterval > TimeSpan.Zero ? _phaseTimingInterval.TotalSeconds : n;
         double commitsPerSec   = winSec > 0 ? dCommits / winSec : 0.0;
+        double tradesPerSec    = winSec > 0 ? dTrades / winSec : 0.0;
         double roundTripsPerOrder = _phPending > 0 ? (double)dCommits / _phPending : 0.0;
         _logger.LogInformation(
-            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order)",
+            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order); {Trds:F0} trades ({Tps:F1}/sec)",
             _phTicks, ActiveBotCap?.ToString() ?? "all", tot,
             _phCheckUs / n / k, _phCollectUs / n / k, _phBatchUs / n / k,
             _phAdvUs / n / k, _phArbUs / n / k, _phReconUs / n / k, _phMaintUs / n / k,
             _phPending / n, _phAdvCount / n,
-            (double)dCommits, commitsPerSec, roundTripsPerOrder);
+            (double)dCommits, commitsPerSec, roundTripsPerOrder,
+            (double)dTrades, tradesPerSec);
         _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = _phMaintUs = 0;
         _phPending = _phAdvCount = _phTicks = 0;
         _cmPrevCommits = commitsNow;
+        _cmPrevTrades = tradesNow;
     }
 
     private void OnQuoteUpdated(object? sender, LiveQuote quote)

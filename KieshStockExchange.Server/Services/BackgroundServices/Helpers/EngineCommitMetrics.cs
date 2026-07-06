@@ -23,6 +23,7 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 internal static class EngineCommitMetrics
 {
     private static long _rootCommits;   // each root COMMIT == one fsync round-trip
+    private static long _trades;        // settled Transaction rows this process
 
     /// <summary>True only under the opt-in PhaseTiming diagnostic; default off.</summary>
     internal static bool Enabled;
@@ -35,4 +36,16 @@ internal static class EngineCommitMetrics
     }
 
     internal static long ReadCommits() => Interlocked.Read(ref _rootCommits);
+
+    // Settled trades this process, counted at the durable settle write. Fed to the
+    // BotPhase line as trades/sec — the throughput signal a commit-cadence A/B needs,
+    // since commits/sec falls BY DESIGN under coalescing and can't show whether the
+    // bots admitted by a lighter tick are actually being served. Gated by Enabled, so
+    // it's a single bool check (byte-identical) when the PhaseTiming diagnostic is off.
+    internal static void RecordTrade(long n)
+    {
+        if (Enabled && n > 0) Interlocked.Add(ref _trades, n);
+    }
+
+    internal static long ReadTrades() => Interlocked.Read(ref _trades);
 }
