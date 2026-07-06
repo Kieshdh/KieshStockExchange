@@ -2,6 +2,10 @@
 
 **Goal:** cut the arbitrage tick phase's fixed ~100 ms/tick in the commit-bound, single-threaded bot loop, via a **sequenced set of flag-gated, default-off, byte-identical-off, CK-soak-gated levers** — so every step is freeze-safe (nothing changes until validated + flipped, exactly like the just-shipped buy-stop / short-open batches). Conservation (CK=0) is sacrosanct. Do **not** touch the FX house economics.
 
+## ✅ Phase 0 RESULT (measured 2026-07-06) — the flag-flip is largely SPENT → Phases 1–3 ARE the lever
+A/B (baseline vs `BatchLegs`+`GroupCommit`, 45 min, **CK CLEAN both**): arb-ms/tick **190.8 → 114.7** and commits/sec **24.6 → 21.1**. BUT the two parallel arms settled at **unequal caps (881 vs 628)**, so most of that arb-ms drop is the lever running *thinner books → faster scan*, not the batching — and the tiny commit drop confirms the **leg-batch is largely SPENT** (arb legs span *different* stocks, so group-commit doesn't coalesce them — the arc's prior "batch the entry is spent" finding). A pinned-cap clean confirmation is running to settle the exact commit Δ.
+**⇒ Do NOT lead with the flag-flip.** The real, cap-independent reclaim is **Phase 2 (event-driven scan** — attacks the ~190 ms/tick scan directly**) + Phase 1 (batch the unbatched FX-rebalance `ConvertAsync` commits)**. Design Phases 1–3 with the event-scan as the primary lever; treat the flag-flip as a cheap default-on baseline, not the win.
+
 ## ★ Diagnosis (code-grounded from a sweep — build on this, don't re-derive)
 The `_phArbUs` phase is **EXECUTION-dominated (DB commits), not the in-memory scan.** ~5 arb bots (seeded UserIds 20003–20007, `ExcelSeedService.cs:345-383`), each acting per `DecisionInterval` (default 1 s, `AIUser.cs:53`) does, in `ArbitrageDecisionService.RunAsync` (`:71`, bots iterated ascending AiUserId `:84`):
 1. **Flatten** (`TryFlattenAsync :296`) — loops **all** cross-listed candidates, reads position + both books, market-sells residual inventory.
