@@ -2,12 +2,14 @@
 
 Execution detail for **ROADMAP.md §3** (the final reseed). This is the mechanical checklist; the roadmap has the *why*. **Attended + Kiesh-gated** (prune COMMIT held for OK; fresh RESEED presented at return). `/Tools` change authorized for this pass only. Line numbers are **approximate — re-locate by symbol name** (the buy-stop batch `e705153` shifted some `AiTradeService.cs` lines).
 
-## Order of operations
-1. **Prune** the 5 dead-end levers (Part A — surgical; mind the entanglements).
-2. **Fold** the runtime multipliers into the seed, dials → 1.0 (Part B).
-3. **EUR bot-rebalance** for P2 (Part C — a separate design decision).
-4. **Bake** the locked, converged tuning config (ROADMAP §1 ship bundle).
-5. **Regenerate** `AIUserData.xlsx` (both copies), rebuild, **parity A/B vs the current build**, then reseed.
+## Order of operations — ⚠ REVISED per council 5/5 (2026-07-06): SPLIT the perf bakes OUT of the reseed
+**The perf bakes are config-only + reversible + reseed-INDEPENDENT — ship them FIRST; don't hold the ~4.5× win hostage to the one-way reseed.** Only the multiplier-fold + EUR-bot rebalance genuinely need the reseed (both reshape the population → move together). Bundling everything into one pg_dump-irreversible cutover = un-bisectable (a post-reseed CK/realism break can't be attributed). The reseed is gated ONLY on the realism-config LOCK (Kiesh) + EUR design.
+- **STEP 0 — ship NOW, independent (config-only, reversible):** `Db:SynchronousCommit=off` (the ~4.5× win; live postgres knob + restart; rollback = flip back) + `Bots:Advanced:BatchBuyStops` (+ optionally `SharedScan`). ONE 30-min prod CK gate. **Perf-first is ENABLING** — it lets the post-reseed validation soak run at PROD-SCALE (~18k bots), a far stronger realism+CK validation than a throttled cap.
+- **PARALLEL — scratch, no prod dep, start anytime:** Part A prune (**validate CK on the pruned code ALONE — prune→soak→confirm — so a post-reseed break is attributable; do NOT conflate the code prune with the population redraw**) + Part B multiplier-fold + Part C EUR design + parity-A/B prep.
+- **GATE (Kiesh, the sole human blocker):** LOCK the realism ship-config (freeze it — the parity A/B measures a moving target otherwise). **Lock ALL per-bot multipliers that fold into the seed BEFORE regen** (else a second reseed).
+- **RESEED — last, one-way:** parity A/B on scratch (folded seed + LOCKED config) → **pg_dump prod (only AFTER sc=off is stable on prod AND parity passes)** → nuke+reseed → prod-scale CK+realism validation.
+
+*(Superseded bundled order: 1 prune → 2 fold → 3 EUR → 4 bake → 5 regen+parity+reseed. The bake is now STEP 0, decoupled.)*
 
 ---
 
