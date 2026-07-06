@@ -76,6 +76,28 @@ The freeze-safe P2 cure: a *seed allocation* change (more bots watchlist/trade t
 
 ---
 
+## Part D — PERF-ROUND levers (added 2026-07-06 — ⚠ RECOMMENDATION, Kiesh to confirm keep/bake/prune)
+Parts A–C are realism-only; the 2026-07 perf round added the levers below. **All default-off / byte-identical unless noted.** Perf bakes are CONFIG flips (or code already committed default-off) — they do NOT need the reseed, so they can bundle into the one cutover OR deploy separately/sooner. None gate the reseed.
+
+| Lever | State | Rec |
+|---|---|---|
+| `Db:SynchronousCommit=off` | measured ~4.5× throughput / roundTrips halved, **CK-clean** (1 A/B, decisive) | **BAKE ON** — the big win. Prod durability call: pool-wide relaxed durability = fine for a sim (loss bounded ~200ms, reconstructable). Config-only. Optional ≥3-repeat rigor first. |
+| `Bots:Advanced:BatchBuyStops` | done, 40-min CK soak + 10-case equiv test | **BAKE ON** — clean adv win. |
+| `Bots:Arbitrage:SharedScan` | Phase 2a, byte-identity tested (420/420); A/B measuring now | **KEEP default-off** (modest perf — the arb phase was fsync-bound, not scan-bound; SharedScan is a clean tidy). Flip-on optional/low-priority. |
+| `Db:GroupCommit`, `Bots:Advanced:BatchArms` | already baked (prior rounds) | keep. |
+| `Bots:Advanced:BatchShortOpens` | F1-DEFERRED (council 5/5 = acceptable rare rollback) | **KEEP default-off — do NOT prune** (code + fill-fixture valuable; F1 revisit post-freeze). |
+| `Bots:Arbitrage:BatchLegs` | measured SPENT (no win — legs span different stocks) | **PRUNE candidate** (dead-end) or keep default-off. |
+| `Bots:Arbitrage:{EventDriven,BatchRebalance}` | scaffolding flags only, NOT built (council 5/5: not worth it — no quiet ticks / money-path risk) | **PRUNE the inert flags + comments** (appsettings) or keep as documented-future. |
+| `trades/sec` counter (`EngineCommitMetrics.RecordTrade`) | instrumentation, PhaseTiming-gated | keep (diagnostic). |
+
+**Still OPEN before we can execute (planning, not mechanics):**
+1. **The realism ship-config (Part 4 / "ROADMAP §1 ship bundle") isn't pinned here** — the taker-flow overhaul was mid-flight; the FINAL realism config for prod must be locked (which overhaul levers bake vs stay default-off). Biggest scope question.
+2. **Bake-ON decisions** = Kiesh's calls (sc=off durability, buy-stops, SharedScan).
+3. **Part C (EUR-bots)** design still pending.
+4. **Outstanding validations:** SharedScan A/B (running); the reseed **parity A/B**; a **post-reseed** CK + realism + perf soak (fresh nuke ⇒ its own validation, not the branch numbers).
+
+---
+
 ## Verification (before committing the reseed)
 - `python Tools/GenerateAIUsers.py` → rewrites `AIUserData.xlsx`; **update BOTH copies** (client `KieshStockExchange/Resources/Raw` + server `KieshStockExchange.Server/Resources/Raw`, embedded resources). xlsx is binary + git-excluded — commit deliberately with the reseed.
 - Determinism preserved (Person.py is per-bot `random`-seeded; the fold is a deterministic post-multiply). `Config._validate()` still passes.
