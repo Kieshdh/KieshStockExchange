@@ -49,10 +49,18 @@ internal sealed class ArbitrageDecisionService
     // Flatten + FX rebalance stay per-bot. Default false ⇒ the per-bot sequential path is unchanged.
     private readonly bool _batchLegs;
 
+    // §arb-scan Phase 2a (Bots:Arbitrage:SharedScan): compute each cross-listed stock's gap ONCE per
+    // tick and share it across the cohort (today every arb bot re-scans the same books = ~5× redundant).
+    // INCREMENTALLY self-invalidated: after a bot's legs mutate a stock's books, that stock is dropped so
+    // the next bot recomputes it fresh — reproduces per-bot-fresh reads byte-for-byte (see CollectOppsAsync).
+    private readonly Dictionary<int, Opp?> _gapMap = new();  // stockId -> best pre-threshold opp (null = none)
+    private long _gapMapTick = -1;                           // generation guard vs ctx.TickId
+    private readonly bool _sharedScan;
+
     internal ArbitrageDecisionService(IOrderEntryService entry, IOrderBookEngine books,
         IAccountsCache accounts, IFxRateService fxRates, IUserPortfolioService portfolio,
         IStockService stocks, BotEconomyTelemetry economy, ILogger<ArbitrageDecisionService> logger,
-        decimal conversionSkewBand = 0.15m, bool batchLegs = false)
+        decimal conversionSkewBand = 0.15m, bool batchLegs = false, bool sharedScan = false)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _books     = books     ?? throw new ArgumentNullException(nameof(books));
@@ -64,6 +72,7 @@ internal sealed class ArbitrageDecisionService
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
         _conversionSkewBand = Math.Max(0m, conversionSkewBand);
         _batchLegs = batchLegs;
+        _sharedScan = sharedScan;
     }
     #endregion
 
@@ -73,6 +82,10 @@ internal sealed class ArbitrageDecisionService
         // Snapshot the throttle once per pass: when the cohort + house wealth fraction is over the
         // ceiling, suspend OPENING new round-trips (the lever) but keep flattening held inventory.
         var throttled = _economy.ArbThrottleEngaged;
+
+        // §arb-scan: new tick ⇒ reset the shared gap map (generation guard, not a per-call Clear —
+        // mirrors WatchlistByBot). OFF ⇒ never touched.
+        if (_sharedScan && ctx.TickId != _gapMapTick) { _gapMap.Clear(); _gapMapTick = ctx.TickId; }
 
         // STRETCH: when batching legs, collect each bot's sized round-trip during the per-bot loop
         // (in ascending-aiUserId order) instead of executing it inline; the two batched passes run
@@ -94,7 +107,11 @@ internal sealed class ArbitrageDecisionService
                 // 1) Exit-retry: flatten any residual inventory (from a partial second leg or an
                 //    earlier hold) on whichever book currently bids higher. Always reduces position.
                 foreach (var stockId in candidates)
-                    await TryFlattenAsync(ctx, user, stockId, ct).ConfigureAwait(false);
+                {
+                    var flat = await TryFlattenAsync(ctx, user, stockId, ct).ConfigureAwait(false);
+                    // §arb-scan: a flatten consumed a book ⇒ drop the stock so the next bot rescans it.
+                    if (_sharedScan && flat is { } fs) _gapMap.Remove(fs);
+                }
 
                 // 2) Entry: open a fresh round-trip on the best gap (unless throttled). When batching,
                 //    only SIZE it here and defer execution to the post-loop batched passes.
@@ -107,7 +124,9 @@ internal sealed class ArbitrageDecisionService
                     }
                     else
                     {
-                        await TryRoundTripAsync(ctx, user, candidates, ct).ConfigureAwait(false);
+                        var acted = await TryRoundTripAsync(ctx, user, candidates, ct).ConfigureAwait(false);
+                        // §arb-scan: this bot's legs moved the acted stock ⇒ drop it for the next bot.
+                        if (_sharedScan && acted is { } es) _gapMap.Remove(es);
                     }
                 }
 
@@ -127,7 +146,13 @@ internal sealed class ArbitrageDecisionService
         // sized from each leg1 fill. Preserves the per-round-trip fill dependency while collapsing
         // 2×N transactions into 2 batched passes.
         if (pendingEntries is { Count: > 0 })
+        {
             await ExecuteBatchedEntriesAsync(pendingEntries, ct).ConfigureAwait(false);
+            // §arb-scan: the batched legs moved these stocks (post-loop ⇒ next tick clears anyway; kept
+            // for consistency with the inline path).
+            if (_sharedScan)
+                foreach (var (_, plan) in pendingEntries) _gapMap.Remove(plan.Opp.StockId);
+        }
     }
     #endregion
 
@@ -171,26 +196,48 @@ internal sealed class ArbitrageDecisionService
         return new Opp(stockId, buyCcy, sellCcy, buy.Ask, buy.AskQty, sell.Bid, sell.BidQty, rate);
     }
 
+    // Bot-INDEPENDENT best pre-threshold opp for one stock (depends only on the two book tops + the FX
+    // bid). Null when neither direction profits. Does NOT apply MinArbitrageRatePrc — that is per-bot.
+    private async Task<Opp?> ComputeGap(int stockId, CancellationToken ct)
+    {
+        var usd = await ReadTopAsync(stockId, CurrencyType.USD, ct).ConfigureAwait(false);
+        var eur = await ReadTopAsync(stockId, CurrencyType.EUR, ct).ConfigureAwait(false);
+        if (usd is null || eur is null) return null;
+
+        // Buy USD book / sell EUR book, and the reverse. Keep the better direction per stock.
+        var a = EvaluateDirection(stockId, usd.Value, eur.Value, CurrencyType.USD, CurrencyType.EUR);
+        var b = EvaluateDirection(stockId, eur.Value, usd.Value, CurrencyType.EUR, CurrencyType.USD);
+        return (a, b) switch
+        {
+            ({ } x, { } y) => x.Rate >= y.Rate ? x : y,
+            ({ } x, null)  => x,
+            (null, { } y)  => y,
+            _              => (Opp?)null,
+        };
+    }
+
+    // Per-bot profitable opps in candidate order. SharedScan ON ⇒ read each stock's gap through the
+    // per-tick shared map (first sight computes + caches; a self-invalidated stock recomputes); OFF ⇒
+    // compute fresh per bot (byte-identical to the original). The per-bot threshold is applied here.
     private async Task<List<Opp>> CollectOppsAsync(AIUser user, List<int> candidates, CancellationToken ct)
     {
         var opps = new List<Opp>();
         foreach (var sid in candidates)
         {
-            var usd = await ReadTopAsync(sid, CurrencyType.USD, ct).ConfigureAwait(false);
-            var eur = await ReadTopAsync(sid, CurrencyType.EUR, ct).ConfigureAwait(false);
-            if (usd is null || eur is null) continue;
-
-            // Buy USD book / sell EUR book, and the reverse. Keep the better direction per stock.
-            var a = EvaluateDirection(sid, usd.Value, eur.Value, CurrencyType.USD, CurrencyType.EUR);
-            var b = EvaluateDirection(sid, eur.Value, usd.Value, CurrencyType.EUR, CurrencyType.USD);
-            var best = (a, b) switch
+            Opp? gap;
+            if (_sharedScan)
             {
-                ({ } x, { } y) => x.Rate >= y.Rate ? x : y,
-                ({ } x, null)  => x,
-                (null, { } y)  => y,
-                _              => (Opp?)null,
-            };
-            if (best is { } o && o.Rate >= user.MinArbitrageRatePrc) opps.Add(o);
+                if (!_gapMap.TryGetValue(sid, out gap))
+                {
+                    gap = await ComputeGap(sid, ct).ConfigureAwait(false);
+                    _gapMap[sid] = gap;
+                }
+            }
+            else
+            {
+                gap = await ComputeGap(sid, ct).ConfigureAwait(false);
+            }
+            if (gap is { } o && o.Rate >= user.MinArbitrageRatePrc) opps.Add(o);
         }
         return opps;
     }
@@ -223,17 +270,18 @@ internal sealed class ArbitrageDecisionService
         return new RoundTripPlan(opp, qty, avail);
     }
 
-    private async Task TryRoundTripAsync(AiBotContext ctx, AIUser user, List<int> candidates, CancellationToken ct)
+    // Returns the stockId acted on (for §arb-scan self-invalidation) or null when no plan fired.
+    private async Task<int?> TryRoundTripAsync(AiBotContext ctx, AIUser user, List<int> candidates, CancellationToken ct)
     {
         var plan = await PrepareRoundTripAsync(ctx, user, candidates, ct).ConfigureAwait(false);
-        if (plan is not { } p) return;
+        if (plan is not { } p) return null;
         var opp = p.Opp;
 
         // Leg 1 — market-buy on the cheap book, budget-capped at the bot's available cash.
         var buy = await _entry.PlaceTrueMarketBuyOrderAsync(
             user.UserId, opp.StockId, p.Qty, p.Avail, opp.BuyCcy, ct).ConfigureAwait(false);
         int filled = buy.TotalFilledQuantity;
-        if (filled <= 0) return;
+        if (filled <= 0) return opp.StockId;
         RecordFills(user, buy);
 
         // Leg 2 — market-sell the filled qty on the expensive book, but only the part the engine
@@ -241,11 +289,12 @@ internal sealed class ArbitrageDecisionService
         // bounded inventory and unwound by the next tick's exit-retry.
         var afterBuy = _accounts.GetPosition(user.UserId, opp.StockId);
         int sellable = Math.Min(filled, afterBuy?.AvailableQuantity ?? 0);
-        if (sellable <= 0) return;
+        if (sellable <= 0) return opp.StockId;
 
         var sell = await _entry.PlaceTrueMarketSellOrderAsync(
             user.UserId, opp.StockId, sellable, opp.SellCcy, ct).ConfigureAwait(false);
         RecordFills(user, sell);
+        return opp.StockId;
     }
 
     // STRETCH (Bots:Arbitrage:BatchLegs): execute the collected round-trips as two batched passes.
@@ -293,29 +342,31 @@ internal sealed class ArbitrageDecisionService
 
     // Flatten any leftover position on a cross-listed stock by selling on the higher-bidding book
     // (USD-valued). Bounded, always reduces inventory; clears partial-fill residue and stale holds.
-    private async Task TryFlattenAsync(AiBotContext ctx, AIUser user, int stockId, CancellationToken ct)
+    // Returns the stockId flattened (for §arb-scan self-invalidation) or null when nothing was placed.
+    private async Task<int?> TryFlattenAsync(AiBotContext ctx, AIUser user, int stockId, CancellationToken ct)
     {
         var pos = _accounts.GetPosition(user.UserId, stockId);
         int avail = pos?.AvailableQuantity ?? 0;
-        if (avail <= 0) return;
+        if (avail <= 0) return null;
 
         var usd = await ReadTopAsync(stockId, CurrencyType.USD, ct).ConfigureAwait(false);
         var eur = await ReadTopAsync(stockId, CurrencyType.EUR, ct).ConfigureAwait(false);
 
         decimal usdBidUsd = usd is { } u ? u.Bid : 0m;
         decimal eurBidUsd = eur is { } e ? e.Bid * _fxRates.GetMidRate(CurrencyType.EUR, CurrencyType.USD) : 0m;
-        if (usdBidUsd <= 0m && eurBidUsd <= 0m) return;
+        if (usdBidUsd <= 0m && eurBidUsd <= 0m) return null;
 
         var (ccy, top) = usdBidUsd >= eurBidUsd
             ? (CurrencyType.USD, usd)
             : (CurrencyType.EUR, eur);
-        if (top is null) return;
+        if (top is null) return null;
 
         int qty = Math.Min(avail, top.Value.BidQty);
-        if (qty <= 0) return;
+        if (qty <= 0) return null;
 
         var sell = await _entry.PlaceTrueMarketSellOrderAsync(user.UserId, stockId, qty, ccy, ct).ConfigureAwait(false);
         RecordFills(user, sell);
+        return stockId;
     }
     #endregion
 

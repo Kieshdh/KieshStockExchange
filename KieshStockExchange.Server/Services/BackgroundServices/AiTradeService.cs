@@ -518,7 +518,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         new SeparatorLogger<ArbitrageDecisionService>(loggerFactory, loggerOptions),
                         conversionSkewBand: _configuration.GetValue("Bots:Arbitrage:ConversionSkewBand", 0.15m),
                         // STRETCH (unbaked): batch the arb cohort's round-trip legs into 2 passes/tick.
-                        batchLegs: _configuration.GetValue("Bots:Arbitrage:BatchLegs", false));
+                        batchLegs: _configuration.GetValue("Bots:Arbitrage:BatchLegs", false),
+                        // §arb-scan Phase 2a (unbaked): share the cross-listed gap scan across the cohort.
+                        sharedScan: _configuration.GetValue("Bots:Arbitrage:SharedScan", false));
         // §mm-cohort: all-weather two-sided resting-liquidity cohort (AiStrategy.MarketMakerHouse). Dedicated
         // decision path, fully outside the normal sentiment/anchor/veto/injection flow. Default OFF + (with no
         // strategy-6 bots seeded) byte-identical. Posts limit quotes around a one-sided-book-surviving reference.
