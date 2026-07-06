@@ -443,6 +443,18 @@ internal sealed class TradeSettler
             bool isShortFill = sellHasShortPart && sellerStartQty <= 0;
             bool isFlipFill = sellHasShortPart && sellerStartQty > 0;
 
+            // §F1 (DEFERRED — council 5/5, ship-freeze): under BatchShortOpens (default-OFF) this
+            // classification off the pre-batch sellerStartQty can be stale — if the seller's live
+            // Quantity was lifted non-negative by an intra-group buy, this collateralises a non-negative
+            // position → the Q7 pre-write scan rolls the short group back (~4x/75min, NO leak, persisted
+            // CK stays 0; the per-order path settles each in isolation and wins). A live-Quantity guard
+            // (mirror isFlipFill below) was written + reverted: it stops the trip but a contrived
+            // double-cross still diverges (batched != per-order end state, both CK-clean). Ruled an
+            // ACCEPTABLE rare rollback (a sim needs conservation, not batched==per-order determinism),
+            // so NOT shipped. This is "optimistic-read divergence" — act on a pre-batch snapshot after
+            // intra-group state moved — the same class any future deferred-write / settlement-reorder
+            // work (commit-cadence) must watch for. See MarketShortBatchFillEquivalenceTests. Post-freeze:
+            // re-apply the guard + route F1-precondition shorts to the per-order path + a short-heavy CK soak.
             if (isShortFill)
             {
                 // §3.6 P1 short open: reserve cash collateral == this fill's proceeds (just
