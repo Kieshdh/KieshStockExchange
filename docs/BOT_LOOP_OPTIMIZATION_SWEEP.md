@@ -65,10 +65,13 @@ change, or an architecture change.
 **Expansionist #1.** The crux the whole perf arc circled: a *single-threaded* committer gets **zero**
 benefit from Postgres group commit — Postgres amortizes fsync across *concurrent* committers at the WAL
 level. sc=off won ~4.5× by removing the fsync *wait* from the one serialized committer; concurrent shards
-recover the *amortization* structurally, potentially **with sc=ON (durability retained)**. Currency is
-the CK-safe partition: a bot holds one `Fund` per currency, so the USD shard never touches EUR funds →
-conservation stays independent and provable per shard. Per-currency alone ≈ 1.5–2× (USD dominates);
-architecture generalizes toward 4–8× if sub-currency account-contention is later solved. Hard risks:
+recover the *amortization* structurally, potentially **with sc=ON (durability retained)**. Currency
+partitions CASH cleanly (one `Fund` per currency) — **but NOT shares: `Position` is currency-agnostic**
+(`Position.cs:69-70`), so a cross-listed stock (≈40 of 70 books) shares ONE Position across both books,
+and the **default-on arb cohort** trades both legs + FX-rebalances Fund↔Fund↔house atomically every tick.
+⇒ safe for cash only; cross-currency / shared-`Position` ops MUST run serially outside the parallel
+barrier (the ultraplan prompt spells this out). Per-currency alone ≈ 1.5–2× *if* that contention is
+resolved (USD dominates); architecture generalizes further if sub-currency contention is later solved. Hard risks:
 cross-shard determinism (needs a deterministic per-tick barrier + fixed shard-merge order),
 `RunInTransactionAsync`'s AsyncLocal savepoint model under concurrency, per-shard scaler accounting, prod
 connection topology. **This is the beachhead** for B (pipeline the shards) and the realism-cohort scaling.
