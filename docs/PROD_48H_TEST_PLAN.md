@@ -77,10 +77,25 @@ new seed without a redeploy).
 ---
 
 ## RUNNING LOG (append dated entries as tests + reseeds happen)
-- **2026-07-08 (pre-deploy):** plan created; prod still on `1d3fdd3`; branch `3dc7a7b`; deploy NOT yet fired
-  (near weekly limit + compaction). Deploy = the first autonomous action when the run resumes. Rollback
-  anchor = `1d3fdd3`.
-- _(next: deploy fired → CK gate result → tape/cap read → …)_
+- **2026-07-08 (pre-deploy):** plan created; prod on `1d3fdd3`. Rollback anchor = `master @ 1d3fdd3`.
+- **2026-07-08 ~23:53 — ★ DEPLOYED + RESEEDED (LIVE).** Bundle committed/pushed (`f41db1d`, feature branch).
+  Box: `git checkout feature/bot-market-realism-v2` (f41db1d) → build server+migrate (embeds new xlsx) →
+  stop server → `DROP+CREATE kse` → `run --rm migrate` (schema, Done) → `up -d server` → seeded from embedded
+  workbook (~49s) → **bot loop started 23:53:36** with the experimental config (TradeIntervalMs 250 + Staggering
+  Slots 4 + Rotator+BankEstimate ON; Scaler corrections STAGED OFF). healthz=401 via duckdns (app serving).
+  **0 errors / 0 CK violations since boot.** Deploy = feature BRANCH (NOT merged to master ⇒ master stays clean
+  1d3fdd3 = trivial rollback). `Seed:AutoOnEmptyDb=true` (safe; skips populated DB).
+- **NEXT (autonomous, resume here):** (1) CK=0 GATE @15m + @1h (ssh; grep server logs for ERROR/CK_/Conservation;
+  should stay 0). (2) TAPE/SMOOTHNESS: eyeball the 15s chart + confirm 250ms fills land per render frame (smoother).
+  (3) CAP/TICK: `docker logs ... | grep BotPhase` (needs PhaseTimingSeconds=20 → the profiling line: cap, tick,
+  collect/batch/adv/cohorts ms). (4) ROTATOR/BANK: grep `BotStratPerf` (per-strategy; rotator no strip-mine/runaway;
+  correlation). (5) **STAGE 2 (after CK=0 confirmed clean ~1h+):** enable the cap-raising scaler — edit
+  `appsettings.Production.json` Bots:Scaler:{DutyCycleDenominator,ActionableSpanSizing,SelfCorrectingDelay}=true,
+  commit+push, box `git pull` + `up -d --build server` (or restart) → watch cap rises w/o runaway, CK=0, tape OK.
+  If cap runs away / CK breaks / tape breaks → flip the offending flag off + restart. (6) Iterate/re-reseed as needed.
+- **ROLLBACK (no backup):** box `git checkout master` (1d3fdd3) → rebuild → drop+create kse → migrate → up (reseeds
+  prior embedded xlsx). Fast partial = flip experimental Production.json flags off + `up -d --build server`.
+- Box deploy commands (exact) for reuse are in the RUNNING LOG deploy entry above.
 
 ## Notes / open seed decisions folded (autonomous)
 - Rotator seed: equal-VALUE (~$30k/stock) + cash one equal bucket ($30k/ccy) + turnover SeedBalance→$30k.
