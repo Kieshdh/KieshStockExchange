@@ -83,19 +83,21 @@ FX_BASE_RATES = {
 
 # Per-bot home-currency draw weights. Must sum to 1.
 HOME_CURRENCY_WEIGHTS = {
-    "USD": 0.70,
-    "EUR": 0.30,
+    "USD": 0.60,   # §reseed: 60/40 (was 70/30) — grows the EUR-home fleet for the EUR books
+    "EUR": 0.40,
 }
 
-# Stocks that trade on both USD and EUR books. Cap-diverse — 5 each from
-# id ranges 1-10, 11-20, 21-30, 31-50.
+# Stocks that trade on both USD and EUR books. §reseed-2026-07 (council): dual = the
+# top-20 by market cap (ids 1-20, incl. mids 17-20) → deep, arb-able dual books; the
+# smaller names (21-50) are single-currency. SCRATCH / uncommitted — Kiesh's final call.
 CROSS_LISTED_STOCK_IDS = [
-    1, 3, 4, 5, 6, 7, 8, 9, 14, 16, 20,
-    23, 25, 28, 32, 33, 36, 38, 42, 45,
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
 ]
 
-# Stocks that trade only on the EUR book.
-EUR_ONLY_STOCK_IDS = [10, 19, 27, 37, 44, 46, 47, 48, 49, 50]
+# Stocks that trade only on the EUR book. §reseed: 15 EUR-only (8 European-domiciled
+# naturals + 7 mids); the other 15 of ids 21-50 are USD-only by default.
+EUR_ONLY_STOCK_IDS = [27, 32, 33, 36, 37, 38, 41, 42, 43, 44, 46, 47, 48, 49, 50]
 
 # Random jitter applied to the derived EUR seed price for cross-listed stocks.
 LISTING_PRICE_JITTER = 0.005   # ±0.5%
@@ -132,7 +134,10 @@ ARB_SEED_BALANCE_EUR      = 1_800_000.0
 # around a one-sided-book-surviving reference, self-fund (no cash injection), and cover the whole
 # board in their home currency. DEFAULT SIZE 0 ⇒ no strategy-6 bots are seeded ⇒ byte-identical to
 # today; set > 0 to seed the cohort for an MM A/B bake (then toggle Bots:MarketMaker:Enabled).
-MARKET_MAKER_COHORT_SIZE  = 0
+# CANDIDATE 12 (Rotator+MM build): a modest depth-anchor for the 70-book board. GATED on a local
+# 15-min perf soak before the reseed bakes — cohort 40 CHOKED the commit-bound loop, cohort 8 +
+# RequoteThresholdBps 50 was healthy; drop to 8 if the loop chokes (Kiesh's final call on the number).
+MARKET_MAKER_COHORT_SIZE  = 12
 
 # Per-bot draw ranges (jittered so the cohort isn't identical). MaxInventoryPerStock IS the hard
 # two-sided position cap the quote math clamps against; the seed balance funds bids + §F14 short
@@ -140,6 +145,24 @@ MARKET_MAKER_COHORT_SIZE  = 0
 MM_MAX_INVENTORY_RANGE    = (200, 800)         # MaxInventoryPerStock (shares), the |inventory| cap
 MM_DECISION_INTERVAL      = (1, 2)             # seconds between quote refreshes
 MM_SEED_BALANCE_USD       = 5_000_000.0
+
+# ───────────────────── §rotator: estimate-driven rotational cohort ─────────────────────
+# A fixed cohort of AiStrategy.Rotator (=7) bots, generated SEPARATELY from the random fleet
+# (STRATEGY_CHOICES stays 0-4). They stay ~fully invested and rotate capital toward the bank
+# price-estimate (BankEstimateService) via batched MARKET orders. Reseed-only: the SIZE is the
+# flow-magnitude ceiling; the runtime valve is Bots:Rotator:ParticipationFraction (0.10 start,
+# swept up for correlation without a reseed). Seed 200 (~1% of 20k) so PF 0.05→1.0 spans the whole
+# useful ~10→~300 effective-rotator range. Inert until Bots:Rotator:Enabled + Bots:BankEstimate:Enabled.
+ROTATOR_COHORT_SIZE       = 200
+ROTATOR_DECISION_INTERVAL = (5, 15)            # seconds between rotation decisions (a second load lever)
+# Dual-currency seed + EQUAL-VALUE distribution across ALL stocks (+ cash as one more equal bucket) so a
+# rotator always has inventory to SELL to fund a rotation (no dry-powder problem) in either book. Equal
+# VALUE, not equal share count: shares[sid] = round(ROTATOR_VALUE_PER_STOCK / seed_price) ⇒ cheaper stocks
+# get more shares and every starting position is worth the same. Cash per currency = the same slice value
+# (one more equal bucket), so the whole portfolio is a uniform equal-value distribution over stocks + cash.
+ROTATOR_VALUE_PER_STOCK   = 30_000.0           # market VALUE seeded per stock (base-currency units)
+ROTATOR_SEED_BALANCE_USD  = ROTATOR_VALUE_PER_STOCK   # cash = one equal bucket (equal amount)
+ROTATOR_SEED_BALANCE_EUR  = ROTATOR_VALUE_PER_STOCK
 
 # The platform house account: reserved UserId (server reads Platform:HouseUserId, default 20002),
 # Identity + dual-currency Holding, NO Profile (so it is never a bot / never in the fleet). Seeded
@@ -159,7 +182,7 @@ HOUSE_SEED_BALANCE_EUR    = 45_000_000.0
 # stays sequential as they change; the server's Bots:Jumps:AggressorUserId must equal NUM_PEOPLE + this.
 # Seeded large in cash AND a per-stock share float so BOTH buy and sell jump legs are fundable (the FX-desk
 # house 20002 holds zero shares, so it can't sell — hence this separate account).
-JUMP_AGGRESSOR_USER_ID_OFFSET = HOUSE_USER_ID_OFFSET + 1 + ARBITRAGE_COHORT_SIZE + MARKET_MAKER_COHORT_SIZE  # =8 ⇒ id NUM_PEOPLE+8 (20008)
+JUMP_AGGRESSOR_USER_ID_OFFSET = HOUSE_USER_ID_OFFSET + 1 + ARBITRAGE_COHORT_SIZE + MARKET_MAKER_COHORT_SIZE + ROTATOR_COHORT_SIZE  # house(2)+admin(1)+arb+MM+rotator ⇒ id NUM_PEOPLE+offset. ⚠️ Keep Bots:Jumps:AggressorUserId in appsettings == NUM_PEOPLE + this.
 JUMP_AGGRESSOR_SEED_BALANCE_USD = 50_000_000.0
 JUMP_AGGRESSOR_SEED_BALANCE_EUR = 45_000_000.0
 JUMP_AGGRESSOR_SEED_SHARES      = 200_000         # per-stock share float (funds sell legs)
@@ -250,18 +273,18 @@ STOCKS_LOW_MAX_RANGE      = (6, 12)
 STOCKS_MID_MIN_RANGE      = (3, 5)
 STOCKS_MID_MAX_RANGE      = (8, 15)
 STOCKS_HIGH_MIN_RANGE     = (5, 8)
-STOCKS_HIGH_MAX_RANGE     = (12, 20)
+STOCKS_HIGH_MAX_RANGE     = (12, 15)   # §reseed: 20->15 (cap watchlist size for the gated pool)
 
 # Watchlist extras above max_stocks (_portfolio).
 WATCHLIST_EXTRA_LO        = 3
-WATCHLIST_EXTRA_HI        = 8
+WATCHLIST_EXTRA_HI        = 5          # §reseed: 8->5 (post currency-gate, keep EUR watchlists discriminating, not ~93% of the 30-stock pool)
 
 # Watchlist sampling weight. STOCKS is keyed by StockId in market-cap descending
 # order (id 1 = largest), so 1/sid**alpha biases the watchlist towards bigger
 # names: 0 = uniform, ~0.5 = mild bias, ~1.0 = strong Zipf-style.
 # Kept mild — composition bias has been moved to HOLDING_WEIGHT_ALPHA so that
 # big-caps still dominate by *quantity held*, but watchlists are broader.
-WATCHLIST_WEIGHT_ALPHA    = 1.2
+WATCHLIST_WEIGHT_ALPHA    = 0.9        # §reseed: 1.2->0.9 (lift the high-id EUR-only tail ~2.7x; keep the big-cap bias)
 
 # Order types (_order_types).
 USE_MARKET_BASE           = 0.20
@@ -505,6 +528,11 @@ def _validate() -> None:
         raise ValueError(f"MARKET_MAKER_COHORT_SIZE={MARKET_MAKER_COHORT_SIZE} must be ≥ 0")
     if 6 in STRATEGY_CHOICES:
         raise ValueError("STRATEGY_CHOICES must NOT include 6 (MarketMakerHouse) — the cohort is generated separately.")
+    # §rotator: the rotational cohort (strategy 7) is also generated separately from the random fleet.
+    if ROTATOR_COHORT_SIZE < 0:
+        raise ValueError(f"ROTATOR_COHORT_SIZE={ROTATOR_COHORT_SIZE} must be ≥ 0")
+    if 7 in STRATEGY_CHOICES:
+        raise ValueError("STRATEGY_CHOICES must NOT include 7 (Rotator) — the cohort is generated separately.")
 
     # Sentiment-dynamics §: strategy weights must sum to 1, key only the non-arbitrage strategies, and the
     # lateness skew must be positive.

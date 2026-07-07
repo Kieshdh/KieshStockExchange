@@ -12,6 +12,7 @@ from Config import (
     ARBITRAGE_COHORT_SIZE, HOUSE_USER_ID_OFFSET,
     HOUSE_SEED_BALANCE_USD, HOUSE_SEED_BALANCE_EUR,
     MARKET_MAKER_COHORT_SIZE,
+    ROTATOR_COHORT_SIZE,
     JUMP_AGGRESSOR_USER_ID_OFFSET,
     JUMP_AGGRESSOR_SEED_BALANCE_USD, JUMP_AGGRESSOR_SEED_BALANCE_EUR,
     JUMP_AGGRESSOR_SEED_SHARES,
@@ -24,7 +25,7 @@ from ExcelLayout import *
 BASE_DIR = Path(__file__).resolve().parent
 EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange" / "Resources" / "Raw" / "AIUserData.xlsx"
 SERVER_EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange.Server" / "Resources" / "Raw" / "AIUserData.xlsx"
-NUM_PEOPLE = 20000
+NUM_PEOPLE = 19783   # §20k-cap (Kiesh): random fleet + arb(5) + MM(12) + rotator(200) = 20,000 trading bots total
 
 # §P6 "layout/userinfo skip for speed": set KSE_FAST_GEN=1 to skip the dark-theme styling + autofit
 # (by far the slowest step over 20000 rows). Data is identical; only the cosmetic sheet styling differs.
@@ -140,6 +141,19 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
         sheets["Profile"].append(bot.ToProfileList())
     if MARKET_MAKER_COHORT_SIZE > 0:
         print(f"✅ Appended {MARKET_MAKER_COHORT_SIZE} market-maker bots (UserIds {mm_start}–{mm_start + MARKET_MAKER_COHORT_SIZE - 1}).")
+
+    # §rotator: rotational cohort (strategy=7), generated separately from the random fleet. Dual-currency seed,
+    # EQUAL-distribution holdings across ALL stocks (always has inventory to rotate), cash-injection disabled,
+    # full-board watchlist. Appended between MM and the jump aggressor so ids stay sequential. Reseed-only ⇒
+    # inert until Bots:Rotator:Enabled + Bots:BankEstimate:Enabled.
+    rotator_start = mm_start + MARKET_MAKER_COHORT_SIZE
+    for i in range(ROTATOR_COHORT_SIZE):
+        bot = Person.make_rotator_bot(rotator_start + i)
+        sheets["Identity"].append(bot.ToIdentityList())
+        sheets["Holding"].append(bot.ToHoldingList())
+        sheets["Profile"].append(bot.ToProfileList())
+    if ROTATOR_COHORT_SIZE > 0:
+        print(f"✅ Appended {ROTATOR_COHORT_SIZE} rotator bots (UserIds {rotator_start}–{rotator_start + ROTATOR_COHORT_SIZE - 1}).")
 
     # §fat-tail jumps: dedicated aggressor account — Identity + Holding (cash + per-stock share float),
     # NO Profile (never a bot / never in the fleet). Reserved at NUM_PEOPLE + JUMP_AGGRESSOR_USER_ID_OFFSET

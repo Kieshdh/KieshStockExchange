@@ -304,6 +304,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // §perf: cache the reconcile-clamp flag once (startup) instead of a config walk on every reconcile pass —
         // consistent with every other Bots flag (all startup-cached); loses only mid-run live reconfig of it.
         _reconcileClamp = _configuration.GetValue("Bots:ReconcileClamp", true);
+        // §tick: config-settable loop period (default 0 ⇒ keep the 1s default ⇒ byte-identical). Prod uses a
+        // shorter tick (e.g. 250ms) so staggered fills land per render frame; see docs/COUNCIL_DECISION_shorter_tick_fleet_split.md.
+        var tradeIntervalMs = _configuration.GetValue("Bots:TradeIntervalMs", 0.0);
+        if (tradeIntervalMs > 0.0) TradeInterval = TimeSpan.FromMilliseconds(tradeIntervalMs);
         // Engine commit counting rides the same opt-in switch: on only when phase timing
         // is enabled, so the default path stays byte-identical (no counting, no log line).
         EngineCommitMetrics.Configure(_phaseTimingInterval > TimeSpan.Zero);

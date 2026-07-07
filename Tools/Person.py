@@ -157,11 +157,18 @@ class Person:
             self.min_stocks = random.randint(*STOCKS_HIGH_MIN_RANGE)
             self.max_stocks = random.randint(*STOCKS_HIGH_MAX_RANGE)
 
-        # Watchlist: composition biased toward big-caps by 1/sid**α
-        # (α = WATCHLIST_WEIGHT_ALPHA). Holdings split equally across picks.
+        # Watchlist: composition biased toward big-caps by 1/sid**α (α = WATCHLIST_WEIGHT_ALPHA).
+        # §reseed-2026-07 (council): CURRENCY-GATE the draw to the bot's home-currency listings — it only
+        # watches (and, via the sample below, holds) stocks it can actually trade. Removes wasted watchlist
+        # slots + the stranded cross-currency holdings bug, and concentrates the minority currency's fleet
+        # on its own books. USD-home: everything except EUR-only. EUR-home: cross-listed + EUR-only.
         watchlist_extra = random.randint(WATCHLIST_EXTRA_LO, WATCHLIST_EXTRA_HI)
-        watchlist_size = min(len(STOCKS), self.max_stocks + watchlist_extra)
-        ids = list(STOCKS)
+        if self.home_currency == "EUR":
+            eligible = set(CROSS_LISTED_STOCK_IDS) | set(EUR_ONLY_STOCK_IDS)
+        else:
+            eligible = set(STOCKS) - set(EUR_ONLY_STOCK_IDS)
+        ids = [sid for sid in STOCKS if sid in eligible]
+        watchlist_size = min(len(ids), self.max_stocks + watchlist_extra)
         weights = [1.0 / (sid ** WATCHLIST_WEIGHT_ALPHA) for sid in ids]
         watchlist = weighted_sample_no_replace(ids, weights, watchlist_size)
         self.watchlist_csv = ",".join(str(sid) for sid in sorted(watchlist))
@@ -426,6 +433,40 @@ class Person:
         # MaxInventoryPerStock is the live cap; the arbitrage-only knobs stay 0 (unused for strategy 6).
         p.min_arbitrage_rate_prc = 0.0
         p.max_inventory_per_stock = random.randint(*MM_MAX_INVENTORY_RANGE)
+        p.conversion_cadence_seconds = 0
+        return p
+
+    @classmethod
+    def make_rotator_bot(cls, user_id: int) -> "Person":
+        """§rotator: build one estimate-driven rotational bot (AiStrategy.Rotator=7). Generated separately
+        from the random fleet so STRATEGY_CHOICES never yields strategy 7. Dual-currency seed + EQUAL-VALUE
+        holdings across ALL stocks + cash as one more equal bucket (so it always has inventory to SELL to fund
+        a rotation in either book), full-board watchlist, self-funded. The arbitrage/MM knobs stay 0 (unused for strategy 7);
+        the runtime flow valve is Bots:Rotator:ParticipationFraction, not a per-bot field."""
+        p = cls()                               # fills every Profile field with valid values
+        p.user_id = user_id                     # explicit id (the auto-assigned one is discarded)
+        p.strategy = 7                          # AiStrategy.Rotator
+        p.home_currency = "USD"
+        p.interval_seconds = int(max(1, random.randint(*ROTATOR_DECISION_INTERVAL)))
+
+        # Self-funding: no cash injection, dual-currency cash (buys are funded in the book the sells returned).
+        p.cash_injection_frequency_prc = 0.0
+        p.cash_injection_amount_prc = 0.0
+        p.balance = ROTATOR_SEED_BALANCE_USD
+        p.balance_secondary = ROTATOR_SEED_BALANCE_EUR
+
+        # Equal-VALUE start: every listed stock seeded to the same market value (shares = value / seed price),
+        # so cheaper stocks get more shares and every starting position is worth the same ⇒ always holds
+        # something worth selling to fund a rotation.
+        p.holdings = {sid: max(1, round(ROTATOR_VALUE_PER_STOCK / STOCKS[sid]["price"]))
+                      for sid in STOCKS}
+
+        # Cover the whole board — a rotator ranks every listed stock by the price-vs-estimate gap.
+        p.watchlist_csv = ",".join(str(sid) for sid in sorted(STOCKS))
+
+        # The arbitrage/MM-only knobs stay 0 (unused for strategy 7).
+        p.min_arbitrage_rate_prc = 0.0
+        p.max_inventory_per_stock = 0
         p.conversion_cadence_seconds = 0
         return p
 
