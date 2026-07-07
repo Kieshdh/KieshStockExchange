@@ -170,7 +170,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // without an external profiler. Single-threaded loop → plain fields are safe.
     private TimeSpan _phaseTimingInterval = TimeSpan.Zero;
     private DateTime _nextPhaseLogTime = DateTime.MaxValue;
+    private readonly bool _reconcileClamp; // §perf: cached once at startup (was a config walk per reconcile pass)
     private long _phCheckUs, _phCollectUs, _phBatchUs, _phAdvUs, _phArbUs, _phReconUs, _phMaintUs;
+    // §perf-observability: the special cohorts (market-maker, rotator, jump) + the bracket drain run between the
+    // arb pass and RecordTickLatency, so their cost feeds the scaler EWMA but was NOT in the BotPhase breakdown.
+    // This bucket makes "did enabling the rotator/MM slow the loop?" directly observable (near-zero when all off).
+    private long _phCohortsUs;
     private long _phPending, _phAdvCount, _phTicks;
     // Window snapshot of the process-cumulative root-commit (fsync) counter, so the
     // BotPhase line can report commits/sec + round-trips/order — the commit-bound
@@ -200,6 +205,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly bool                 _arbitrageEnabled; // §3.7 Bots:Arbitrage:Enabled kill-switch
     private readonly MarketMakerDecisionService _marketMaker; // §mm-cohort all-weather two-sided maker (OUT of normal path)
     private readonly bool                 _marketMakerEnabled; // §mm-cohort Bots:MarketMaker:Enabled master gate (default off)
+    private readonly BankEstimateService  _bank;              // §bank-estimate published fair-value estimate (feeds anchor + rotator)
+    private readonly bool                 _bankEstimateEnabled; // §bank-estimate Bots:BankEstimate:Enabled master gate (default off)
+    private readonly RotatorDecisionService _rotator;         // §rotator estimate-driven rotational cohort (OUT of normal path)
+    private readonly bool                 _rotatorEnabled;    // §rotator Bots:Rotator:Enabled master gate (default off)
     private readonly JumpService          _jump;               // §fat-tail jumps rare realized price-jump lever (OUT of normal path)
     private readonly bool                 _jumpEnabled;        // §fat-tail jumps Bots:Jumps:Enabled master gate (default off)
     private readonly int                  _jumpAggressorUserId; // §fat-tail jumps dedicated house aggressor account (warm-loaded)
@@ -281,6 +290,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         Math.Max(1.0, _configuration.GetValue("Bots:SentimentLogIntervalSeconds", 60.0)));
         _phaseTimingInterval = TimeSpan.FromSeconds(
                         Math.Max(0.0, _configuration.GetValue("Bots:PhaseTimingSeconds", 0.0)));
+        // §perf: cache the reconcile-clamp flag once (startup) instead of a config walk on every reconcile pass —
+        // consistent with every other Bots flag (all startup-cached); loses only mid-run live reconfig of it.
+        _reconcileClamp = _configuration.GetValue("Bots:ReconcileClamp", true);
         // Engine commit counting rides the same opt-in switch: on only when phase timing
         // is enabled, so the default path stays byte-identical (no counting, no log line).
         EngineCommitMetrics.Configure(_phaseTimingInterval > TimeSpan.Zero);
@@ -319,7 +331,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _economy   = new BotEconomyTelemetry(_ctx, accounts, fxRates,
                         new SeparatorLogger<BotEconomyTelemetry>(loggerFactory, loggerOptions),
                         houseUserId:     _houseUserId,
-                        drainCeilingPct: _configuration.GetValue("Bots:Arbitrage:ValueDrainCeilingPct", 5.0m));
+                        drainCeilingPct: _configuration.GetValue("Bots:Arbitrage:ValueDrainCeilingPct", 5.0m),
+                        // §per-strategy telemetry: emit the BotStratPerf line each economy snapshot (default on).
+                        strategyTelemetry: _configuration.GetValue("Bots:StrategyTelemetry:Enabled", true));
         // §P6 liveliness: per-stock personality + slowly-drifting fundamentals. Built before the
         // sentiment + decision services because both consume them.
         _profiles  = new StockProfileService(
@@ -390,6 +404,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             }
         }
 
+        // §bank-estimate: the "house analyst" published fair-value estimate. Built AFTER _sentiment (below), but
+        // the master gate is read here so the anchor pivot can be wired via a lazy field reference — null when off
+        // ⇒ FundamentalService's reversion target stays the seed ⇒ byte-identical.
+        _bankEstimateEnabled = _configuration.GetValue("Bots:BankEstimate:Enabled", false);
         _funds     = new FundamentalService(stocks, _profiles,
                         new SeparatorLogger<FundamentalService>(loggerFactory, loggerOptions),
                         enabled:          _configuration.GetValue("Bots:Fundamental:Enabled", true),
@@ -406,7 +424,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // (cross-stock correlation). Lazily reads _sentiment (assigned just below) ⇒ null-safe;
                         // returns 0 when CoMovement is disabled ⇒ byte-identical.
                         coMoveShift:      sid => _sentiment?.CoMoveShift(sid) ?? 0.0,
-                        coMoveShiftCap:   _configuration.GetValue("Bots:Sentiment:CoMovement:ShiftCap", 0.08m));
+                        coMoveShiftCap:   _configuration.GetValue("Bots:Sentiment:CoMovement:ShiftCap", 0.08m),
+                        // §bank-estimate: pivot the OU reversion target to the bank estimate (lazy field ref, _bank
+                        // assigned below). null when off ⇒ target stays the seed ⇒ byte-identical.
+                        bankTarget:       _bankEstimateEnabled ? (Func<int, double>)(sid => _bank?.BankTarget(sid) ?? 0.0) : null);
         // Sentiment-dynamics §: the master flag gates BOTH the EWMA slope (here) and the directional phase
         // model (in AiBotDecisionService). Off ⇒ no slope compute and byte-identical decisions.
         var sentimentDynamics = _configuration.GetValue("Bots:SentimentDynamics:Enabled", false);
@@ -483,6 +504,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // §correlation lever: scale per-stock (down) + global (up) ring σ ⇒ shared common-mode dominates.
                         perStockSigmaMult:            _configuration.GetValue("Bots:Sentiment:PerStockSigmaMult", 1.0),
                         globalSigmaMult:              _configuration.GetValue("Bots:Sentiment:GlobalSigmaMult", 1.0));
+        // §bank-estimate: build the published-estimate state machine now that _sentiment exists (it zero-means the
+        // per-stock sentiment). Folds live news via the existing shock delegate. Default OFF ⇒ Tick no-op / target 0.
+        _bank      = new BankEstimateService(stocks, _profiles, _sentiment,
+                        new SeparatorLogger<BankEstimateService>(loggerFactory, loggerOptions),
+                        enabled:                _bankEstimateEnabled,
+                        alpha:                  _configuration.GetValue("Bots:BankEstimate:Alpha", 0.3),
+                        poissonMeanIntervalSec: _configuration.GetValue("Bots:BankEstimate:PoissonMeanIntervalSec", 30.0),
+                        wrongnessFraction:      _configuration.GetValue("Bots:BankEstimate:WrongnessFraction", 0.15),
+                        sectorCount:            _configuration.GetValue("Bots:BankEstimate:SectorCount", exogSectorCount),
+                        exogShock:              exogEnabled ? (Func<int, double>)_news.GetShock : null);
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
@@ -538,6 +569,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             UseMicro:            _configuration.GetValue("Bots:MarketMaker:UseMicro", false));
         _marketMaker = new MarketMakerDecisionService(entry, books, accounts, stocks,
                         new SeparatorLogger<MarketMakerDecisionService>(loggerFactory, loggerOptions), mmCfg);
+        // §rotator: the estimate-driven rotational cohort (AiStrategy.Rotator). Dedicated decision path OUT of the
+        // normal flow; reads the bank estimate + rotates capital via batched market orders. Default OFF + (with no
+        // strategy-7 bots seeded) byte-identical. ParticipationFraction is the runtime correlation/flow valve.
+        _rotatorEnabled = _configuration.GetValue("Bots:Rotator:Enabled", false);
+        // §rotator: the scaler must exist before the rotator (which reads its load for scaler-coupled participation).
+        _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
+        _rotator = new RotatorDecisionService(entry, accounts, stocks, _bank, _sentiment, _economy, _scaler,
+                        new SeparatorLogger<RotatorDecisionService>(loggerFactory, loggerOptions),
+                        participationFraction: _configuration.GetValue("Bots:Rotator:ParticipationFraction", 0.10),
+                        participationFloor:    _configuration.GetValue("Bots:Rotator:ParticipationFloor", 0.02),
+                        turnoverFraction:      _configuration.GetValue("Bots:Rotator:TurnoverFraction", 0.10),
+                        seedBalanceUsd:        _configuration.GetValue("Bots:Rotator:SeedBalanceUsd", 1_000_000m),
+                        seedBalanceEur:        _configuration.GetValue("Bots:Rotator:SeedBalanceEur", 900_000m));
         // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
         // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
         // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/
@@ -820,7 +864,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 "The Path-1 minimal qty-clamp has been removed; BracketFlip is the only flag. " +
                 "Remove the setting from appsettings to silence this warning.");
         }
-        _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
+        // _scaler is constructed earlier (before the rotator, which reads its load) — see the §rotator block above.
 
         _market.QuoteUpdated += OnQuoteUpdated;
     }
@@ -979,8 +1023,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _sentiment.Reset(TimeHelper.NowUtc());
         _regime.Reset(TimeHelper.NowUtc());    // §A2/A3/A4: open from a deterministic +1 regime
         _activity.Reset(TimeHelper.NowUtc());  // §Pillar B: open neutral (field ≡ baseline/1)
+        _bank.Reset(TimeHelper.NowUtc()); // §bank-estimate: clear estimates + reseed RNG (before _funds reads them)
         _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
         _news.Reset(TimeHelper.NowUtc()); // §exogenous-information: clear shocks + reseed source (inert when off)
+        _rotator.Reset(); // §rotator: reset the participation-shuffle pass counter (deterministic)
         _jump.Reset(TimeHelper.NowUtc()); // §fat-tail jumps: clear aftershocks + reseed source (inert when off)
         _priceMemory.Reset(TimeHelper.NowUtc()); // re-seed EWMA + day window; inert until Tick if anyConsumer=false
         _fxDesk.Reset();  // §3.7: fresh per-session FX-desk conversion tallies
@@ -1057,6 +1103,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 if (_marketMakerEnabled)
                     await _marketMaker.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
 
+                // §rotator: the estimate-driven rotational cohort's pass, AFTER the MM pass (so it rotates against
+                // the freshest two-sided book) and outside the matcher's locked region — its market legs settle
+                // through the same engine, so ConservationProbe/ReservationAuditor cover them. Gated by
+                // Bots:Rotator:Enabled ⇒ a single bool check when off (byte-identical).
+                if (_rotatorEnabled)
+                    await _rotator.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
+
                 // §fat-tail jumps: rare realized price-jump pass, AFTER the MM pass (so it walks the freshest
                 // two-sided book) and outside the matcher's locked region (its marketable orders own their own
                 // gates and settle through the same engine, so ConservationProbe/ReservationAuditor cover them).
@@ -1071,6 +1124,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 try { await _bracket.DrainAsync(_engineCts?.Token ?? ct).ConfigureAwait(false); }
                 catch (OperationCanceledException) when ((_engineCts?.Token ?? ct).IsCancellationRequested) { }
                 catch (Exception ex) { _logger.LogError(ex, "Bracket coordinator drain failed on tick {Tick}", _tickCount); }
+                var tCohorts = Stopwatch.GetTimestamp(); // end of the special-cohort span (mm + rotator + jump + drain)
 
                 RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
                 Interlocked.Increment(ref _tickCount);
@@ -1090,9 +1144,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 if (now >= _nextReconcileTime)
                 {
                     _nextReconcileTime = now + ReconcileInterval;
-                    var clamp = _configuration.GetValue("Bots:ReconcileClamp", true);
                     var tReconStart = Stopwatch.GetTimestamp();
-                    try { await _auditor.AuditAsync(clamp, ct).ConfigureAwait(false); }
+                    try { await _auditor.AuditAsync(_reconcileClamp, ct).ConfigureAwait(false); }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
                     catch (Exception ex) { _logger.LogError(ex, "Reservation reconcile pass failed."); }
                     reconUs = (long)Stopwatch.GetElapsedTime(tReconStart).TotalMicroseconds;
@@ -1114,6 +1167,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                     _phBatchUs   += (long)Stopwatch.GetElapsedTime(tCollect, tBatch).TotalMicroseconds;
                     _phAdvUs     += (long)Stopwatch.GetElapsedTime(tBatch, tAdv).TotalMicroseconds;
                     _phArbUs     += (long)Stopwatch.GetElapsedTime(tAdv, tArb).TotalMicroseconds;
+                    _phCohortsUs += (long)Stopwatch.GetElapsedTime(tArb, tCohorts).TotalMicroseconds;
                     _phReconUs   += reconUs;
                     _phMaintUs   += maintUs;
                     _phPending   += pending.Count;
@@ -1503,6 +1557,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             // §mm-cohort: the house market-maker cohort (strategy 6) likewise runs only via _marketMaker.RunAsync.
             // Dead branch until strategy-6 bots are seeded, so this is byte-identical when the cohort is absent.
             if (user.Strategy == AiStrategy.MarketMakerHouse) continue;
+            // §rotator: the rotational cohort (strategy 7) runs only via _rotator.RunAsync. Dead branch until
+            // strategy-7 bots are seeded ⇒ byte-identical when the cohort is absent.
+            if (user.Strategy == AiStrategy.Rotator) continue;
 
             // Spontaneous burst: rare chance (~0.2%/tick) of entering a focused session.
             var burstActive = _ctx.BurstEndTimes.TryGetValue(user.AiUserId, out var burstEnd) && now < burstEnd;
@@ -1659,7 +1716,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     {
         if (_phTicks == 0) return;
         double n = _phTicks, k = 1000.0;
-        double tot = (_phCheckUs + _phCollectUs + _phBatchUs + _phAdvUs + _phArbUs + _phReconUs + _phMaintUs) / n / k;
+        double tot = (_phCheckUs + _phCollectUs + _phBatchUs + _phAdvUs + _phArbUs + _phCohortsUs + _phReconUs + _phMaintUs) / n / k;
         // Commit telemetry (the prod-transferable lever metric): root commits == fsync
         // round-trips this window. commits/sec is the headline; round-trips/order is
         // normalized to plain orders (the dominant commit driver — advanced arms collapse
@@ -1673,14 +1730,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         double tradesPerSec    = winSec > 0 ? dTrades / winSec : 0.0;
         double roundTripsPerOrder = _phPending > 0 ? (double)dCommits / _phPending : 0.0;
         _logger.LogInformation(
-            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order); {Trds:F0} trades ({Tps:F1}/sec)",
+            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + cohorts {Coh:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order); {Trds:F0} trades ({Tps:F1}/sec)",
             _phTicks, ActiveBotCap?.ToString() ?? "all", tot,
             _phCheckUs / n / k, _phCollectUs / n / k, _phBatchUs / n / k,
-            _phAdvUs / n / k, _phArbUs / n / k, _phReconUs / n / k, _phMaintUs / n / k,
+            _phAdvUs / n / k, _phArbUs / n / k, _phCohortsUs / n / k, _phReconUs / n / k, _phMaintUs / n / k,
             _phPending / n, _phAdvCount / n,
             (double)dCommits, commitsPerSec, roundTripsPerOrder,
             (double)dTrades, tradesPerSec);
-        _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = _phMaintUs = 0;
+        _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phCohortsUs = _phReconUs = _phMaintUs = 0;
         _phPending = _phAdvCount = _phTicks = 0;
         _cmPrevCommits = commitsNow;
         _cmPrevTrades = tradesNow;
@@ -1808,6 +1865,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _regime.Tick(now);    // §A2/A3/A4 regime (no-op when all consumers disabled)
         _activity.Tick(now);  // §Pillar B activity field (no-op when disabled); reads sentiment shock above
         _news.Tick(now);    // §exogenous-information: decay + arrive news shocks before consumers read them
+        _bank.Tick(now);    // §bank-estimate: republish estimates AFTER sentiment/news, BEFORE _funds reads them
         _funds.Tick(now);   // §P6: advance the slowly-drifting fundamentals (internally gated to its interval)
         _priceMemory.Tick(now); // EWMA + day-TWAP; short-circuits at top when anyConsumer=false
         if (now >= _nextDailyCheck)

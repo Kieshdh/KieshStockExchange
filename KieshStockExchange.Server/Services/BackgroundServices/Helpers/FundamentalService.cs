@@ -48,6 +48,15 @@ internal sealed class FundamentalService
     private readonly Func<int, double>? _coMoveShift;
     private readonly decimal            _coMoveShiftCap;
 
+    // §bank-estimate: when wired (Bots:BankEstimate:Enabled), the OU reversion TARGET is the bank's published
+    // per-stock estimate (a fractional deviation from seed) instead of the raw seed. The estimate is clamped
+    // INTERIOR to the existing hard band (seed × [1 ± Band·EstimateTargetInnerBand]) so the OU can still diffuse
+    // around it — a target parked at the hard band would kill diffusion variance. Null ⇒ the target stays the
+    // seed ⇒ byte-identical to the pre-feature engine. Applied in Tick only (the gaussian term still scales by
+    // seed, so diffusion magnitude is unchanged).
+    private readonly Func<int, double>? _bankTarget;
+    private const decimal EstimateTargetInnerBand = 0.8m; // estimate lives inside 80% of the hard band
+
     private readonly Dictionary<(int, CurrencyType), decimal> _seed = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _current = new();
     private readonly Dictionary<(int, CurrencyType), decimal> _sigmaMult = new();
@@ -59,7 +68,8 @@ internal sealed class FundamentalService
         ILogger<FundamentalService> logger, bool enabled = true, decimal band = 0.12m,
         double theta = 0.02, double sigma = 0.004, double driftIntervalSec = 60.0,
         Func<int, double>? exogShock = null, Func<bool>? anyShockActive = null, decimal shockCap = 0m,
-        Func<int, double>? coMoveShift = null, decimal coMoveShiftCap = 0m)
+        Func<int, double>? coMoveShift = null, decimal coMoveShiftCap = 0m,
+        Func<int, double>? bankTarget = null)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -74,6 +84,7 @@ internal sealed class FundamentalService
         _shockCap = Math.Max(0m, shockCap);
         _coMoveShift = coMoveShift;
         _coMoveShiftCap = Math.Max(0m, coMoveShiftCap);
+        _bankTarget = bankTarget;
     }
 
     /// <summary>Seed every (stock,currency) fundamental at its listing seed price and arm the clock.</summary>
@@ -117,8 +128,21 @@ internal sealed class FundamentalService
             var s = (double)seed;
             var sigmaMult = _sigmaMult.TryGetValue(key, out var m) ? (double)m : 1.0;
 
-            // OU step: pull toward seed + scaled gaussian shock.
-            f += _theta * (s - f) + _sigma * sigmaMult * s * Gaussian();
+            // §bank-estimate: the reversion target is the bank's published estimate (a fractional deviation
+            // from seed), clamped INTERIOR to the hard band (±Band·0.8) so the OU keeps diffusion room around
+            // it — parking the target at the hard band would kill diffusion variance. Null/at-rest ⇒ target = seed
+            // ⇒ byte-identical. This is the ONLY site the estimate is bounded into the anchor.
+            double target = s;
+            if (_bankTarget is not null)
+            {
+                double inner = (double)(_band * EstimateTargetInnerBand);
+                double dev = Math.Clamp(_bankTarget(key.Item1), -inner, inner);
+                target = s * (1.0 + dev);
+            }
+
+            // OU step: pull toward the target + scaled gaussian shock. The gaussian stays SEED-scaled (s), so the
+            // diffusion magnitude is independent of where the estimate has moved the target.
+            f += _theta * (target - f) + _sigma * sigmaMult * s * Gaussian();
 
             // Hard band clamp so the fundamental itself can never run away.
             var lo = s * (1.0 - (double)_band);

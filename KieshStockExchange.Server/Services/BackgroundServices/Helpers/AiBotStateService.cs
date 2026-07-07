@@ -148,6 +148,9 @@ internal sealed class AiBotStateService
             // §mm-cohort: the house market-maker cohort is a small fixed liquidity floor — always on, and not
             // counted against the cap so it never crowds out the random fleet's budget (mirrors arbitrage).
             if (user.Strategy == AiStrategy.MarketMakerHouse) { user.IsEnabled = true; continue; }
+            // §rotator: the estimate-driven rotational cohort is a fixed house set — always on and cap-exempt.
+            // Its per-tick load is throttled at decision time by Bots:Rotator:ParticipationFraction, not the cap.
+            if (user.Strategy == AiStrategy.Rotator) { user.IsEnabled = true; continue; }
 
             bool active = !cap.HasValue || enabled < cap.Value;
             user.IsEnabled = active;

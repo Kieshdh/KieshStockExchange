@@ -6,7 +6,10 @@ namespace KieshStockExchange.Models;
 // fair-weather quoting in AiBotDecisionService (Bots:MarketMakerQuoting). MarketMakerHouse (6) is the
 // dedicated all-weather two-sided resting-liquidity cohort — seeded SEPARATELY from the random fleet and
 // driven by MarketMakerDecisionService, exactly like the Arbitrage (5) house cohort.
-public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4, Arbitrage = 5, MarketMakerHouse = 6 }
+// Rotator (7) is the estimate-driven rotational cohort — a separate house pass (RotatorDecisionService)
+// that stays ~fully invested and rotates capital toward the bank price-estimate; seeded separately and
+// exempt from the active-cap / cash-injection like the other house cohorts.
+public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4, Arbitrage = 5, MarketMakerHouse = 6, Rotator = 7 }
 
 public class AIUser : IValidatable
 {
@@ -292,6 +295,10 @@ public class AIUser : IValidatable
     public bool IsEnabled { get; set; } = true;
     public DateOnly TradesDayUtc { get; private set; } = TimeHelper.Today();
     public int TradesToday { get; private set; } = 0;
+    // Per-session (not per-calendar-day) trade count for the per-strategy telemetry. Starts at 0 on each
+    // session load (ClearAll rebuilds AIUser objects) and only ever increments in RecordTrade; unlike
+    // TradesToday it is never rolled by ResetDay, so it aggregates a whole Stop/Start session.
+    public int TotalTradesThisSession { get; private set; } = 0;
     public int ErrorsToday { get; private set; } = 0;
     public DateTime LastDecisionTime { get; private set; } = DateTime.MinValue;
     public DateTime LastTradeTime { get; private set; } = DateTime.MinValue;
@@ -424,6 +431,7 @@ public class AIUser : IValidatable
     {
         if (tx == null || tx.IsInvalid || !tx.InvolvesUser(UserId)) return;
         TradesToday++;
+        TotalTradesThisSession++;
         StocksTouchedToday.Add(tx.StockId);
         LastTradeTime = tx.Timestamp;
         Touched();

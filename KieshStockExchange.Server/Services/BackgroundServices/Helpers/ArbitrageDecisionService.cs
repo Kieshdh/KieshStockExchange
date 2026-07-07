@@ -93,11 +93,19 @@ internal sealed class ArbitrageDecisionService
         List<(AIUser User, RoundTripPlan Plan)>? pendingEntries =
             (_batchLegs && !throttled) ? new() : null;
 
-        // Iterate in ascending AiUserId for the same seed-determinism contract as the main loop.
-        foreach (var user in ctx.AiUsersByAiUserId.Values.OrderBy(u => u.AiUserId))
+        // §perf: filter the ~5-bot cohort FIRST, then sort the handful — materializing + sorting all ~20k users
+        // every tick was pure waste (mirrors the rotator's cohort selection). Ascending AiUserId preserves the
+        // same seed-determinism contract as the main loop.
+        var cohort = new List<AIUser>();
+        foreach (var u in ctx.AiUsersByAiUserId.Values)
         {
-            if (!user.IsEnabled || user.Strategy != AiStrategy.Arbitrage) continue;
-            if (now - user.LastDecisionTime < user.DecisionInterval) continue;
+            if (!u.IsEnabled || u.Strategy != AiStrategy.Arbitrage) continue;
+            if (now - u.LastDecisionTime < u.DecisionInterval) continue;
+            cohort.Add(u);
+        }
+        cohort.Sort((a, b) => a.AiUserId.CompareTo(b.AiUserId));
+        foreach (var user in cohort)
+        {
             user.RecordDecision(now);
 
             try

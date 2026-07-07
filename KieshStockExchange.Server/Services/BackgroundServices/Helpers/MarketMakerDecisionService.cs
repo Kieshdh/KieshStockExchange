@@ -60,11 +60,19 @@ internal sealed class MarketMakerDecisionService
     #region Run
     internal async Task RunAsync(AiBotContext ctx, DateTime now, CancellationToken ct)
     {
-        // Ascending AiUserId for the same seed-determinism contract as the main loop.
-        foreach (var user in ctx.AiUsersByAiUserId.Values.OrderBy(u => u.AiUserId))
+        // §perf: filter the small MM cohort FIRST, then sort the handful — materializing + sorting all ~20k users
+        // every tick was pure waste (mirrors the rotator's cohort selection). Ascending AiUserId preserves the
+        // same seed-determinism contract as the main loop.
+        var cohort = new List<AIUser>();
+        foreach (var u in ctx.AiUsersByAiUserId.Values)
         {
-            if (!user.IsEnabled || user.Strategy != AiStrategy.MarketMakerHouse) continue;
-            if (now - user.LastDecisionTime < user.DecisionInterval) continue;
+            if (!u.IsEnabled || u.Strategy != AiStrategy.MarketMakerHouse) continue;
+            if (now - u.LastDecisionTime < u.DecisionInterval) continue;
+            cohort.Add(u);
+        }
+        cohort.Sort((a, b) => a.AiUserId.CompareTo(b.AiUserId));
+        foreach (var user in cohort)
+        {
             if (user.MaxInventoryPerStock <= 0) continue; // cap-less MM would be unbounded — skip
             user.RecordDecision(now);
 

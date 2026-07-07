@@ -59,6 +59,9 @@ internal sealed class BotCashInjector
             if (ai.Strategy == AiStrategy.Arbitrage) continue;
             // §mm-cohort: the house market-maker cohort is self-funded too (seeded once) — never top it up.
             if (ai.Strategy == AiStrategy.MarketMakerHouse) continue;
+            // §rotator: the rotational cohort is self-funded (equal-distribution seed) and rotates existing
+            // capital — never inject cash into it (topping it up would break its conserved rotation accounting).
+            if (ai.Strategy == AiStrategy.Rotator) continue;
             if (ai.CashInjectionFrequencyPrc <= 0m) continue;
 
             if (_ctx.Decimal01(ai.AiUserId) >= ai.CashInjectionFrequencyPrc) continue;

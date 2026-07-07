@@ -5,6 +5,7 @@ using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
@@ -29,6 +30,36 @@ internal sealed class BotEconomyTelemetry
     private readonly decimal _drainCeilingPct;
     internal bool ArbThrottleEngaged { get; private set; }
 
+    // §per-strategy telemetry: emit a BotStratPerf line each snapshot (portfolio-Δ vs seed + win-rate per
+    // strategy) so we can validate the Rotator + judge whether any strategy strip-mines the rest. Default on.
+    private readonly bool _strategyTelemetry;
+    // Per-bot USD wealth captured at the FIRST snapshot that has prices (the lazy session anchor — the economy
+    // telemetry is deliberately NOT reset on Start, so there is no Reset hook to hang this off). Baseline for Δ.
+    private Dictionary<int, decimal>? _seedWealthByUserId;
+
+    // Compact per-strategy labels for the BotStratPerf line (covers all AiStrategy members).
+    private static readonly IReadOnlyDictionary<AiStrategy, string> StrategyShortName = new Dictionary<AiStrategy, string>
+    {
+        [AiStrategy.MarketMaker]      = "MM0",
+        [AiStrategy.TrendFollower]    = "TF",
+        [AiStrategy.MeanReversion]    = "MR",
+        [AiStrategy.Random]           = "Rnd",
+        [AiStrategy.Scalper]          = "Scp",
+        [AiStrategy.Arbitrage]        = "Arb",
+        [AiStrategy.MarketMakerHouse] = "MMH",
+        [AiStrategy.Rotator]          = "Rot",
+    };
+
+    // Mutable per-strategy accumulator for one snapshot (USD wealth now, seed baseline, count, trades, wins).
+    private sealed class StratAcc
+    {
+        public int Count;
+        public int Wins;       // bots whose current wealth exceeds their seed baseline
+        public long Trades;    // Σ TotalTradesThisSession
+        public decimal CurUsd; // current wealth in USD
+        public decimal SeedUsd; // Σ seed-baseline wealth for the bots we have a baseline for
+    }
+
     private Dictionary<(int StockId, CurrencyType Currency), decimal>? _sessionStartPrices;
     private readonly Queue<EconomySample> _samples = new();
     // Guarded by lock(_samples).
@@ -37,7 +68,7 @@ internal sealed class BotEconomyTelemetry
 
     internal BotEconomyTelemetry(AiBotContext ctx, IAccountsCache accounts,
         IFxRateService fxRates, ILogger<BotEconomyTelemetry> logger,
-        int houseUserId = 20002, decimal drainCeilingPct = 5.0m)
+        int houseUserId = 20002, decimal drainCeilingPct = 5.0m, bool strategyTelemetry = true)
     {
         _ctx      = ctx      ?? throw new ArgumentNullException(nameof(ctx));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
@@ -45,6 +76,7 @@ internal sealed class BotEconomyTelemetry
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
         _houseUserId     = houseUserId;
         _drainCeilingPct = drainCeilingPct;
+        _strategyTelemetry = strategyTelemetry;
         _store    = new RingBufferStore<EconomySample>("data/telemetry/bot_economy.ndjson");
 
         var prior = _store.LoadTail(RecentSamplesMax);
@@ -58,6 +90,7 @@ internal sealed class BotEconomyTelemetry
     internal void Reset()
     {
         _sessionStartPrices = null;
+        _seedWealthByUserId = null;
         lock (_samples)
         {
             _samples.Clear();
@@ -86,9 +119,18 @@ internal sealed class BotEconomyTelemetry
             arbSharesByCurrency[c] = 0m;
         }
 
+        // §per-strategy telemetry: precompute the FX mids once, then bucket each bot's USD wealth by strategy in
+        // the SAME O(bots) walk (no extra DB I/O). seedCapture is populated only on the first priced snapshot to
+        // seed the per-bot baseline (the economy telemetry is not reset on Start, so there is no Reset hook).
+        var midByCcy = new Dictionary<CurrencyType, decimal>(currencies.Count);
+        foreach (var c in currencies) midByCcy[c] = _fxRates.GetMidRate(c, CurrencyType.USD);
+        var strat = _strategyTelemetry ? new Dictionary<AiStrategy, StratAcc>() : null;
+        Dictionary<int, decimal>? seedCapture = (_strategyTelemetry && _seedWealthByUserId is null) ? new() : null;
+
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
             bool isArb = user.Strategy == AiStrategy.Arbitrage;
+            decimal botUsd = 0m; // this bot's total wealth in USD (for the per-strategy bucket)
             foreach (var currency in currencies)
             {
                 var fund = _accounts.GetFund(user.UserId, currency);
@@ -96,6 +138,7 @@ internal sealed class BotEconomyTelemetry
                 {
                     cashByCurrency[currency] += fund.TotalBalance;
                     if (isArb) arbCashByCurrency[currency] += fund.TotalBalance;
+                    botUsd += fund.TotalBalance * midByCcy[currency];
                 }
             }
             // Walk only the stocks this bot actually holds (avg ~13.5 of 50), mirroring
@@ -111,13 +154,31 @@ internal sealed class BotEconomyTelemetry
                         var notional = CurrencyHelper.Notional(price, pos.Quantity, currency);
                         sharesByCurrency[currency] += notional;
                         if (isArb) arbSharesByCurrency[currency] += notional;
+                        botUsd += notional * midByCcy[currency];
                     }
+            }
+
+            if (strat != null)
+            {
+                if (!strat.TryGetValue(user.Strategy, out var acc)) strat[user.Strategy] = acc = new StratAcc();
+                acc.Count++;
+                acc.Trades += user.TotalTradesThisSession;
+                acc.CurUsd += botUsd;
+                if (seedCapture != null) seedCapture[user.UserId] = botUsd;
+                if (_seedWealthByUserId != null && _seedWealthByUserId.TryGetValue(user.UserId, out var sw))
+                {
+                    acc.SeedUsd += sw;
+                    if (botUsd > sw) acc.Wins++;
+                }
             }
         }
 
         // Anchor lazily so we don't capture an all-zero snapshot.
         if (_sessionStartPrices is null && _ctx.StockPrices.Count > 0)
             _sessionStartPrices = new Dictionary<(int, CurrencyType), decimal>(_ctx.StockPrices);
+        // Seed the per-bot wealth baseline on the same first priced snapshot (current == session-start here).
+        if (_seedWealthByUserId is null && seedCapture is not null && _ctx.StockPrices.Count > 0)
+            _seedWealthByUserId = seedCapture;
 
         decimal driftSum = 0m, minDrift = 0m, maxDrift = 0m;
         int tracked = 0, minSid = 0, maxSid = 0;
@@ -202,6 +263,31 @@ internal sealed class BotEconomyTelemetry
             totalWealthUsd, totalCashUsd, totalSharesUsd,
             avgDrift, tracked, injectedSnapshot,
             arbCohortWealthUsd, houseWealthUsd, arbHouseFractionPct);
+
+        if (strat is not null && strat.Count > 0) LogStrategySnapshot(strat);
+    }
+
+    // §per-strategy telemetry: one compact line — portfolio-Δ vs seed baseline, bot count, win-rate and session
+    // trades per strategy — so the soak shows whether the Rotator (and every other strategy) win/lose and whether
+    // any strategy strip-mines the rest. Δ is 0 until a baseline exists (from the 2nd priced snapshot on).
+    private void LogStrategySnapshot(Dictionary<AiStrategy, StratAcc> strat)
+    {
+        if (!_logger.IsEnabled(LogLevel.Information)) return;
+        var inv = CultureInfo.InvariantCulture;
+        var sb = new StringBuilder(200);
+        sb.Append("BotStratPerf @ ").Append(TimeHelper.NowUtc().ToLocalTime().ToString("HH:mm:ss", inv)).Append(':');
+        foreach (var kv in strat.OrderBy(k => (int)k.Key))
+        {
+            var acc = kv.Value;
+            if (acc.Count == 0) continue;
+            string name = StrategyShortName.TryGetValue(kv.Key, out var n) ? n : kv.Key.ToString();
+            double pct = acc.SeedUsd > 0m ? (double)((acc.CurUsd - acc.SeedUsd) / acc.SeedUsd) * 100.0 : 0.0;
+            double winRate = 100.0 * acc.Wins / acc.Count;
+            sb.Append(' ').Append(name).Append('=').Append(pct >= 0 ? "+" : "")
+              .Append(pct.ToString("0.0", inv)).Append("%(n=").Append(acc.Count)
+              .Append(",w=").Append(winRate.ToString("0", inv)).Append("%,t=").Append(acc.Trades).Append(')');
+        }
+        _logger.LogInformation("{Line}", sb.ToString());
     }
     #endregion
 
