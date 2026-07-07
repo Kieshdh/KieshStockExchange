@@ -36,6 +36,11 @@ internal sealed class BotScalerService
     // for any finite ewma) never reaches it ⇒ byte-identical; wiring lowers it to ~0.95 only when the
     // denominator correction is enabled.
     public double TickGuardFraction { get; set; } = 1.0;
+    // §R2-1: operator-facing tick-cadence ceiling for the corrected-denominator path (unset ⇒ 0). It names a
+    // full-tick WORK multiple k (work ≤ k×interval); ApplyMaxTickMultiple recenters the whole hysteresis band
+    // on k so the cap settles at ewma ≈ k×interval instead of racing to MaxBotCap. Purely informational here —
+    // the wiring calls ApplyMaxTickMultiple, which folds it into the four band tunables OnTick already reads.
+    public double MaxTickMultiple { get; set; }
     #endregion
 
     #region Observed state
@@ -69,6 +74,34 @@ internal sealed class BotScalerService
     internal BotScalerService(ILogger<BotScalerService> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+    #endregion
+
+    #region Setpoint
+    /// <summary>
+    /// §R2-1: recenter the control band on a chosen tick-work multiple <paramref name="k"/> (work ≤ k×interval),
+    /// for the corrected-denominator path only. On that path loadFrac == ewma/(interval+ewma), so a full-tick
+    /// work multiple m maps to a duty of duty(m) = m/(1+m). Placing the guard and the shrink/grow thresholds at
+    /// points on that curve makes the scaler settle at ewma ≈ k×interval:
+    ///   • guard  = duty(k)        — hard growth ceiling exactly at the chosen multiple;
+    ///   • target = duty(k)        — proportional growth aims at the ceiling (supersedes the fixed 0.60, which
+    ///                               on the corrected denominator implied a 1.5× tick regardless of k);
+    ///   • high   = duty(k·1.25)   — shrink only when work runs ~25% past the ceiling (strictly above the guard,
+    ///                               so the shrink branch never undercuts it — the fixed 0.70 mapped to k≈2.33
+    ///                               and would otherwise cap growth there);
+    ///   • low    = duty(k·0.80)   — grow when work is ~20% under the ceiling.
+    /// The guard/shrink deadband (k … k·1.25) prevents hunting. Caller invokes this ONLY when the corrected
+    /// denominator is enabled, so the all-off default path keeps its 0.70/0.60/0.50 band byte-identical.
+    /// </summary>
+    internal void ApplyMaxTickMultiple(double k)
+    {
+        if (k <= 0.0) return; // unset ⇒ leave the existing tunables (and the auto-armed guard) untouched
+        static double Duty(double m) => m / (1.0 + m);
+        MaxTickMultiple    = k;
+        TickGuardFraction  = Math.Clamp(Duty(k), 0.5, 1.0);
+        TargetLoadFraction = Duty(k);
+        HighLoadFraction   = Duty(k * 1.25);
+        LowLoadFraction    = Duty(k * 0.80);
     }
     #endregion
 

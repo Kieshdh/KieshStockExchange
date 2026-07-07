@@ -594,6 +594,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _scaler.SizeFromActionableSpan      = _configuration.GetValue("Bots:Scaler:ActionableSpanSizing", false);
         _scaler.TickGuardFraction           = Math.Clamp(
                         _configuration.GetValue("Bots:Scaler:TickGuardFraction", correctDenom ? 0.95 : 1.0), 0.5, 1.0);
+        // §R2-1: MaxTickMultiple is the operator-facing tick-cadence ceiling for the corrected path. It engages
+        // ONLY with DutyCycleDenominator on (off ⇒ ignored ⇒ byte-identical). When on and the operator hasn't
+        // set it, default k=1.0 (work ≤ interval, guard 0.5) — this supersedes the inert 0.95 auto-guard above
+        // and honours the tick-≤-interval gate out of the box; raise k for a coarser tick / higher throughput.
+        // ApplyMaxTickMultiple recenters the whole band on k, so it overrides the TickGuardFraction set above.
+        if (correctDenom)
+            _scaler.ApplyMaxTickMultiple(_configuration.GetValue("Bots:Scaler:MaxTickMultiple", 1.0));
         _selfCorrectingDelay = _configuration.GetValue("Bots:Scaler:SelfCorrectingDelay", false);
         _rotator = new RotatorDecisionService(entry, accounts, stocks, _bank, _sentiment, _economy, _scaler,
                         new SeparatorLogger<RotatorDecisionService>(loggerFactory, loggerOptions),

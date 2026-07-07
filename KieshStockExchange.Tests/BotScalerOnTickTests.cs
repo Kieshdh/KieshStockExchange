@@ -136,4 +136,66 @@ public sealed class BotScalerOnTickTests : IDisposable
         Assert.True(s.LoadFractionEwma > 0.0);
         Assert.True(s.LastLoadFraction > 0.0);
     }
+
+    [Fact]
+    public void MaxTickMultiple_1_holdsGrowthAtInterval()
+    {
+        // §R2-1: k=1 recenters the band so the guard binds at work == interval (duty 0.5). With the full tick
+        // AT the interval, the guard refuses the increase even though the actionable span says "grow".
+        var held = NewScaler();
+        held.CorrectDutyCycleDenominator = true;
+        held.SizeFromActionableSpan = true;
+        held.ApplyMaxTickMultiple(1.0);
+        Assert.Equal(0.5, held.TickGuardFraction, 6);
+        Assert.Null(DriveToDecision(held, Trade(fullEwmaMs: 1000, activeCap: 100, actionableEwmaMs: 100).Object));
+
+        // Full tick well under the interval ⇒ guard clear ⇒ the cap grows.
+        var grows = NewScaler();
+        grows.CorrectDutyCycleDenominator = true;
+        grows.SizeFromActionableSpan = true;
+        grows.ApplyMaxTickMultiple(1.0);
+        var grow = DriveToDecision(grows, Trade(fullEwmaMs: 300, activeCap: 100, actionableEwmaMs: 100).Object);
+        Assert.NotNull(grow);
+        Assert.True(grow > 100, $"expected k=1 to grow when the tick is under the interval, got {grow}");
+    }
+
+    [Fact]
+    public void MaxTickMultiple_4_growsToFourInterval_thenShrinks()
+    {
+        // §R2-1: k=4 recenters the band on a 4× tick (guard/target duty 0.8, shrink at duty(5)≈0.833). At
+        // ewma 2500 (loadFrac 2500/3500≈0.714) the OLD fixed 0.70 band would shrink; the k=4 band GROWS.
+        var grows = NewScaler();
+        grows.CorrectDutyCycleDenominator = true;
+        grows.ApplyMaxTickMultiple(4.0);
+        Assert.Equal(0.8, grows.TickGuardFraction, 6);
+        var grow = DriveToDecision(grows, Trade(fullEwmaMs: 2500, activeCap: 100).Object);
+        Assert.NotNull(grow);
+        Assert.True(grow > 100, $"expected k=4 to keep growing at a 2.5× tick, got {grow}");
+
+        // Past the deadband (ewma 6000 ⇒ loadFrac 6000/7000≈0.857 ≥ high duty(5)≈0.833) ⇒ shrink.
+        var shrinks = NewScaler();
+        shrinks.CorrectDutyCycleDenominator = true;
+        shrinks.ApplyMaxTickMultiple(4.0);
+        var shrink = DriveToDecision(shrinks, Trade(fullEwmaMs: 6000, activeCap: 1000).Object);
+        Assert.NotNull(shrink);
+        Assert.True(shrink < 1000, $"expected k=4 to shrink past a 5× tick, got {shrink}");
+    }
+
+    [Fact]
+    public void MaxTickMultiple_unset_and_denomOff_isByteIdentical()
+    {
+        // ApplyMaxTickMultiple(k≤0) is a no-op, so the wiring's "skip when the corrected denominator is off"
+        // leaves the band exactly at its defaults ⇒ byte-identical to today's control path.
+        var s = NewScaler();
+        s.ApplyMaxTickMultiple(0.0);
+        Assert.Equal(0.70, s.HighLoadFraction, 6);
+        Assert.Equal(0.60, s.TargetLoadFraction, 6);
+        Assert.Equal(0.50, s.LowLoadFraction, 6);
+        Assert.Equal(1.0, s.TickGuardFraction, 6);
+
+        // And the decision is exactly today's: ewma 800 / interval 1000 = 0.8 ≥ 0.70 ⇒ shrink.
+        var shrink = DriveToDecision(s, Trade(fullEwmaMs: 800, activeCap: 1000).Object);
+        Assert.NotNull(shrink);
+        Assert.True(shrink < 1000, $"expected the unset/off path to shrink like today, got {shrink}");
+    }
 }
