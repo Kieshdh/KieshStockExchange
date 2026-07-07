@@ -67,6 +67,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     /// <summary>EWMA-smoothed tick-work duration in milliseconds. 0 until first tick.</summary>
     public double TickWorkMsEwma => Volatile.Read(ref _tickWorkMsEwma);
 
+    /// <summary>EWMA-smoothed "actionable" tick-work in ms — the Collect+Batch span the scaler can act
+    /// on, excluding the cap-exempt cohorts. Always maintained (telemetry). 0 until first tick.</summary>
+    public double TickWorkActionableMsEwma => Volatile.Read(ref _tickWorkActionableMsEwma);
+
     /// <summary>Raw duration of the most recent tick's work in microseconds.</summary>
     public long LastTickWorkMicros => Interlocked.Read(ref _lastTickWorkMicros);
 
@@ -163,7 +167,14 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // EWMA tick-latency for the dashboard + scaler. α=0.2 reacts in ~5 ticks.
     private const double EwmaAlpha = 0.2;
     private double _tickWorkMsEwma = 0.0;
+    // §B-P-b: parallel EWMA of the actionable (Collect+Batch) span only — feeds the scaler's §B-2 sizing
+    // when enabled; always maintained so the switch is a pure read (no plumbing change on the hot path).
+    private double _tickWorkActionableMsEwma = 0.0;
     private long _lastTickWorkMicros = 0;
+
+    // §B-(b) self-correcting delay: when true, the end-of-tick delay subtracts elapsed work so the true
+    // period tracks TradeInterval instead of interval + work. Default off ⇒ fixed delay (byte-identical).
+    private readonly bool _selfCorrectingDelay;
 
     // Per-phase tick profiling (opt-in via Bots:PhaseTimingSeconds > 0). Accumulates µs per phase
     // across the window, logs the average breakdown so "what takes the most time" is observable
@@ -575,13 +586,23 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _rotatorEnabled = _configuration.GetValue("Bots:Rotator:Enabled", false);
         // §rotator: the scaler must exist before the rotator (which reads its load for scaler-coupled participation).
         _scaler    = new BotScalerService(new SeparatorLogger<BotScalerService>(loggerFactory, loggerOptions));
+        // §B scaler control-loop levers (Bots:Scaler:*). All default-off ⇒ loadFrac == ewma/interval,
+        // byte-identical. The tick-≤-interval guard defaults to 1.0 (inert) but auto-lowers to 0.95 when
+        // the denominator correction is on, so enabling §B-1a can never crank the cap up unguarded.
+        var correctDenom = _configuration.GetValue("Bots:Scaler:DutyCycleDenominator", false);
+        _scaler.CorrectDutyCycleDenominator = correctDenom;
+        _scaler.SizeFromActionableSpan      = _configuration.GetValue("Bots:Scaler:ActionableSpanSizing", false);
+        _scaler.TickGuardFraction           = Math.Clamp(
+                        _configuration.GetValue("Bots:Scaler:TickGuardFraction", correctDenom ? 0.95 : 1.0), 0.5, 1.0);
+        _selfCorrectingDelay = _configuration.GetValue("Bots:Scaler:SelfCorrectingDelay", false);
         _rotator = new RotatorDecisionService(entry, accounts, stocks, _bank, _sentiment, _economy, _scaler,
                         new SeparatorLogger<RotatorDecisionService>(loggerFactory, loggerOptions),
                         participationFraction: _configuration.GetValue("Bots:Rotator:ParticipationFraction", 0.10),
                         participationFloor:    _configuration.GetValue("Bots:Rotator:ParticipationFloor", 0.02),
                         turnoverFraction:      _configuration.GetValue("Bots:Rotator:TurnoverFraction", 0.10),
                         seedBalanceUsd:        _configuration.GetValue("Bots:Rotator:SeedBalanceUsd", 1_000_000m),
-                        seedBalanceEur:        _configuration.GetValue("Bots:Rotator:SeedBalanceEur", 900_000m));
+                        seedBalanceEur:        _configuration.GetValue("Bots:Rotator:SeedBalanceEur", 900_000m),
+                        useLoadEwma:           _configuration.GetValue("Bots:Rotator:UseLoadEwma", false));
         // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
         // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
         // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/
@@ -1068,6 +1089,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         while (!ct.IsCancellationRequested)
         {
+            // §B-(b): start-of-iteration stamp for the optional self-correcting delay below. Reading a
+            // timestamp has no observable effect ⇒ byte-identical when the flag is off.
+            var iterStart = Stopwatch.GetTimestamp();
             // Whole-tick guard: a transient failure (e.g. a DB command timeout) must not end
             // the loop — log and continue after the interval so the fleet keeps trading.
             try
@@ -1127,6 +1151,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var tCohorts = Stopwatch.GetTimestamp(); // end of the special-cohort span (mm + rotator + jump + drain)
 
                 RecordTickLatency(Stopwatch.GetElapsedTime(tickStart));
+                // §B-P-b: the actionable (Collect+Batch) span — the fleet load the scaler can act on,
+                // excluding the cap-exempt cohorts (arb/mm/rotator/jump/drain) between tBatch and here.
+                RecordActionableLatency(Stopwatch.GetElapsedTime(tCheck, tBatch));
                 Interlocked.Increment(ref _tickCount);
                 RecordActivitySample();
 
@@ -1182,7 +1209,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 _logger.LogError(ex, "Bot tick failed; loop continuing after the interval delay.");
             }
 
-            try { await Task.Delay(TradeInterval, ct).ConfigureAwait(false); }
+            // §B-(b) self-correcting delay: when on, subtract this iteration's elapsed work so the true
+            // period tracks TradeInterval (not interval + work). NOT byte-identical — it changes `now`
+            // spacing ⇒ which bots are due ⇒ own flag, default off. Off ⇒ the fixed delay below verbatim.
+            var delay = TradeInterval;
+            if (_selfCorrectingDelay)
+            {
+                var remainMs = TradeInterval.TotalMilliseconds - Stopwatch.GetElapsedTime(iterStart).TotalMilliseconds;
+                delay = remainMs > 0.0 ? TimeSpan.FromMilliseconds(remainMs) : TimeSpan.Zero;
+            }
+            try { await Task.Delay(delay, ct).ConfigureAwait(false); }
             catch (TaskCanceledException) { /* breaking loop */ }
         }
     }
@@ -1709,6 +1745,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         Volatile.Write(ref _tickWorkMsEwma, next);
     }
 
+    // §B-P-b: EWMA of the actionable (Collect+Batch) span the scaler can act on. Same α as the full-span
+    // EWMA. Telemetry only — read by the scaler solely when Bots:Scaler:ActionableSpanSizing is on.
+    private void RecordActionableLatency(TimeSpan elapsed)
+    {
+        var ms = elapsed.TotalMilliseconds;
+        var prev = _tickWorkActionableMsEwma;
+        var next = prev <= 0.0 ? ms : EwmaAlpha * ms + (1.0 - EwmaAlpha) * prev;
+        Volatile.Write(ref _tickWorkActionableMsEwma, next);
+    }
+
     // Windowed per-phase breakdown (opt-in via Bots:PhaseTimingSeconds). Shows where tick time goes
     // so the scaler's active-bot ceiling can be traced to the dominant phase. Reconcile is a periodic
     // pass, so its per-tick average is diluted across the window (a spike in the window it fires).
@@ -1729,13 +1775,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         double commitsPerSec   = winSec > 0 ? dCommits / winSec : 0.0;
         double tradesPerSec    = winSec > 0 ? dTrades / winSec : 0.0;
         double roundTripsPerOrder = _phPending > 0 ? (double)dCommits / _phPending : 0.0;
+        // §A measurement gate: the high-water mark of concurrent root committers — if this is well above 1
+        // under load the default path already amortizes fsync across committers, discounting Workstream A.
+        int maxCommitters = EngineCommitMetrics.ReadMaxConcurrentCommitters();
         _logger.LogInformation(
-            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + cohorts {Coh:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order); {Trds:F0} trades ({Tps:F1}/sec)",
+            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + cohorts {Coh:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order, {MaxC} max concurrent committers); {Trds:F0} trades ({Tps:F1}/sec)",
             _phTicks, ActiveBotCap?.ToString() ?? "all", tot,
             _phCheckUs / n / k, _phCollectUs / n / k, _phBatchUs / n / k,
             _phAdvUs / n / k, _phArbUs / n / k, _phCohortsUs / n / k, _phReconUs / n / k, _phMaintUs / n / k,
             _phPending / n, _phAdvCount / n,
-            (double)dCommits, commitsPerSec, roundTripsPerOrder,
+            (double)dCommits, commitsPerSec, roundTripsPerOrder, maxCommitters,
             (double)dTrades, tradesPerSec);
         _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phCohortsUs = _phReconUs = _phMaintUs = 0;
         _phPending = _phAdvCount = _phTicks = 0;

@@ -21,10 +21,28 @@ internal sealed class BotScalerService
     public TimeSpan SampleInterval { get; set; } = TimeSpan.FromSeconds(2);
     public int ConsecutiveSamples { get; set; } = 2;
     public TimeSpan CooldownAfterChange { get; set; } = TimeSpan.FromSeconds(4);
+
+    // §B control-loop levers — all default-off ⇒ loadFrac == ewma/intervalMs, byte-identical to prior.
+    // §B-1a: divide by the TRUE wall-clock period (intervalMs + full tick work) instead of the bare
+    // interval — the loop's fixed Task.Delay(TradeInterval) makes the real period 1000 + ewma, so the
+    // uncorrected ewma/1000 overstates load and holds the cap far below what the box can carry.
+    public bool CorrectDutyCycleDenominator { get; set; } = false;
+    // §B-2: size the cap from the actionable (Collect+Batch) span the scaler can act on, rather than the
+    // full tick span that also includes the cap-exempt cohorts (arb/mm/rotator/jump/drain).
+    public bool SizeFromActionableSpan { get; set; } = false;
+    // §B-P-a tick-≤-interval guard: refuse a cap INCREASE once the FULL tick already fills this fraction
+    // of the true period, so correcting the denominator (§B-1a) can't crank the cap up until the tick
+    // work balloons past the interval and the EWMA chases itself. Default 1.0 ⇒ fullDuty (strictly < 1
+    // for any finite ewma) never reaches it ⇒ byte-identical; wiring lowers it to ~0.95 only when the
+    // denominator correction is enabled.
+    public double TickGuardFraction { get; set; } = 1.0;
     #endregion
 
     #region Observed state
     public double LastLoadFraction { get; private set; }
+    // §B-3: EWMA-smoothed load, published for the rotator's opt-in read (a smoothed alternative to the
+    // raw 2s sample it reads today). Always maintained; does not feed the cap math ⇒ byte-identical.
+    public double LoadFractionEwma { get; private set; }
     public int? LastTarget { get; private set; }
     #endregion
 
@@ -33,6 +51,9 @@ internal sealed class BotScalerService
     private DateTime _lastChangeAt = DateTime.MinValue;
     private int _highCount;
     private int _lowCount;
+    // §B-3: state for the published LoadFractionEwma (smoothed at ~3 samples).
+    private double _loadFractionEwma;
+    private const double LoadEwmaAlpha = 0.3;
 
     // Logging throttle. Cap changes happen frequently when load wobbles around a
     // threshold; emitting one INFO per change buries the rest of the log. Buffer
@@ -69,15 +90,24 @@ internal sealed class BotScalerService
         var intervalMs = trade.TradeInterval.TotalMilliseconds;
         if (intervalMs <= 0) return null;
 
-        var ewma = trade.TickWorkMsEwma;
-        if (ewma <= 0) return null; // wait for the first real sample
+        var fullEwma = trade.TickWorkMsEwma;
+        if (fullEwma <= 0) return null; // wait for the first real sample
 
         var now = TimeHelper.NowUtc();
         if (now - _lastSampleAt < SampleInterval) return null;
         _lastSampleAt = now;
 
-        var loadFrac = ewma / intervalMs;
+        // §B-2 sizing span + §B-1a denominator. Both flags off ⇒ sizeEwma == fullEwma and
+        // denom == intervalMs ⇒ loadFrac == fullEwma/intervalMs (today, byte-identical).
+        var sizeEwma = SizeFromActionableSpan ? trade.TickWorkActionableMsEwma : fullEwma;
+        if (sizeEwma <= 0.0) sizeEwma = fullEwma; // actionable span not warm yet ⇒ fall back to full
+        var denom = CorrectDutyCycleDenominator ? (intervalMs + fullEwma) : intervalMs;
+        var loadFrac = sizeEwma / denom;
         LastLoadFraction = loadFrac;
+        _loadFractionEwma = _loadFractionEwma <= 0.0
+            ? loadFrac
+            : LoadEwmaAlpha * loadFrac + (1.0 - LoadEwmaAlpha) * _loadFractionEwma;
+        LoadFractionEwma = _loadFractionEwma;
 
         if (loadFrac >= HighLoadFraction) { _highCount++; _lowCount = 0; }
         else if (loadFrac <= LowLoadFraction) { _lowCount++; _highCount = 0; }
@@ -101,6 +131,13 @@ internal sealed class BotScalerService
         }
         else if (_lowCount >= ConsecutiveSamples && current < max)
         {
+            // §B-P-a tick-≤-interval guard: never raise the cap when the FULL tick already fills most of
+            // the true period, regardless of which span sized loadFrac. Uses the real wall-clock duty
+            // cycle (fullEwma / (intervalMs + fullEwma)), so it binds even under the §B-1a correction.
+            // Guard fraction 1.0 ⇒ never triggers ⇒ byte-identical to prior increase behaviour.
+            var fullDuty = fullEwma / (intervalMs + fullEwma);
+            if (fullDuty >= TickGuardFraction) return null;
+
             int desired;
             if (current <= 0)
             {
@@ -124,7 +161,7 @@ internal sealed class BotScalerService
         _highCount = _lowCount = 0;
         LastTarget = target;
 
-        _pendingChanges.Add((current, target.Value, loadFrac, ewma));
+        _pendingChanges.Add((current, target.Value, loadFrac, fullEwma));
         FlushPendingLog(now, force: false);
 
         return target;

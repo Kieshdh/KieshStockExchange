@@ -63,13 +63,14 @@ internal sealed class RotatorDecisionService
     private readonly double _turnoverFraction;      // per-decision order size bound (fraction of seed notional / held qty)
     private readonly decimal _seedBalanceUsd;       // reseed-time seed cash (turnover notional base — no per-tick scan)
     private readonly decimal _seedBalanceEur;
+    private readonly bool   _useLoadEwma;           // §B-3: read the scaler's smoothed load instead of the raw 2s sample
     private long _passCount;                        // monotonic, reshuffles the participation subset + picks each pass
 
     internal RotatorDecisionService(IOrderEntryService entry, IAccountsCache accounts,
         IStockService stocks, BankEstimateService bank, BotSentimentService sentiment, BotEconomyTelemetry economy,
         BotScalerService scaler, ILogger<RotatorDecisionService> logger,
         double participationFraction = 0.10, double participationFloor = 0.02, double turnoverFraction = 0.10,
-        decimal seedBalanceUsd = 1_000_000m, decimal seedBalanceEur = 900_000m)
+        decimal seedBalanceUsd = 1_000_000m, decimal seedBalanceEur = 900_000m, bool useLoadEwma = false)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -84,6 +85,7 @@ internal sealed class RotatorDecisionService
         _turnoverFraction      = Math.Clamp(turnoverFraction, 0.0001, 1.0);
         _seedBalanceUsd        = seedBalanceUsd;
         _seedBalanceEur        = seedBalanceEur;
+        _useLoadEwma           = useLoadEwma;
     }
 
     internal void Reset() => _passCount = 0;
@@ -130,7 +132,10 @@ internal sealed class RotatorDecisionService
 
         // 2) Participation valve, SCALER-COUPLED: the effective PF is scaled down by the loop load so the cohort
         //    backs off when the tick is busy (never freezes the fleet), floored so its flow never fully dies.
-        double load = Math.Clamp(_scaler.LastLoadFraction, 0.0, 1.0);
+        // §B-3: default reads the raw 2s LastLoadFraction (byte-identical); the opt-in flag reads the
+        // scaler's smoothed LoadFractionEwma to damp the phase-lag hunting from two controllers on one
+        // up-to-2s-stale signal. The participationFloor interlock below is UNCHANGED either way.
+        double load = Math.Clamp(_useLoadEwma ? _scaler.LoadFractionEwma : _scaler.LastLoadFraction, 0.0, 1.0);
         double effectivePF = Math.Max(_participationFloor, _participationFraction * (1.0 - load));
         int fireCount = effectivePF >= 1.0
             ? eligible.Count

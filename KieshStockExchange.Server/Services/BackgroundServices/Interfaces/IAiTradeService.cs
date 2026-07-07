@@ -40,6 +40,10 @@ public interface IAiTradeService
     /// <summary>EWMA-smoothed tick-work duration in milliseconds. 0 until first tick.</summary>
     double TickWorkMsEwma { get; }
 
+    /// <summary>EWMA-smoothed "actionable" tick-work in ms — the Collect+Batch span the scaler can
+    /// act on, excluding the cap-exempt cohorts. Always maintained (telemetry). 0 until first tick.</summary>
+    double TickWorkActionableMsEwma { get; }
+
     /// <summary>Raw duration of the most recent tick's work in microseconds.</summary>
     long LastTickWorkMicros { get; }
 

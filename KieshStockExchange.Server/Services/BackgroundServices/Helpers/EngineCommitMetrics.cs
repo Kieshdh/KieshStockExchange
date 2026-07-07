@@ -24,6 +24,8 @@ internal static class EngineCommitMetrics
 {
     private static long _rootCommits;   // each root COMMIT == one fsync round-trip
     private static long _trades;        // settled Transaction rows this process
+    private static int _activeCommitters;        // root commits currently inside their fsync-flush window
+    private static int _maxConcurrentCommitters; // high-water mark of the above this process
 
     /// <summary>True only under the opt-in PhaseTiming diagnostic; default off.</summary>
     internal static bool Enabled;
@@ -36,6 +38,30 @@ internal static class EngineCommitMetrics
     }
 
     internal static long ReadCommits() => Interlocked.Read(ref _rootCommits);
+
+    // §A measurement gate: bracket the actual root COMMIT fsync window so the soak can observe HOW MANY
+    // root commits overlap in their flush window. The default path already fans out per-(stock,currency)
+    // group ~24-wide via Task.WhenAll, so Postgres may already amortize fsync across concurrent committers
+    // — if this high-water mark is well above 1 under load, per-currency sharding (Workstream A) adds
+    // little. Gated by Enabled ⇒ both calls are a single bool check (byte-identical) when the diagnostic
+    // is off. CommitWindowExit must run in a finally so an aborted commit still decrements.
+    internal static void CommitWindowEnter()
+    {
+        if (!Enabled) return;
+        var n = Interlocked.Increment(ref _activeCommitters);
+        int seen;
+        while (n > (seen = Volatile.Read(ref _maxConcurrentCommitters)))
+            if (Interlocked.CompareExchange(ref _maxConcurrentCommitters, n, seen) == seen) break;
+    }
+
+    internal static void CommitWindowExit()
+    {
+        if (Enabled) Interlocked.Decrement(ref _activeCommitters);
+    }
+
+    /// <summary>High-water mark of concurrent root committers observed this process (0 until first commit
+    /// under the diagnostic). The Workstream-A "is the default already concurrent?" signal.</summary>
+    internal static int ReadMaxConcurrentCommitters() => Volatile.Read(ref _maxConcurrentCommitters);
 
     // Settled trades this process, counted at the durable settle write. Fed to the
     // BotPhase line as trades/sec — the throughput signal a commit-cadence A/B needs,

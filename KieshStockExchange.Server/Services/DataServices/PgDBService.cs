@@ -304,7 +304,17 @@ public sealed partial class PgDBService : IDataBaseService
             {
                 try
                 {
-                    await _tx.CommitAsync(ct).ConfigureAwait(false);
+                    // §A measurement gate: bracket the fsync window to record concurrent-committer overlap
+                    // (no-op unless the opt-in PhaseTiming diagnostic is on ⇒ byte-identical when off).
+                    BackgroundServices.Helpers.EngineCommitMetrics.CommitWindowEnter();
+                    try
+                    {
+                        await _tx.CommitAsync(ct).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        BackgroundServices.Helpers.EngineCommitMetrics.CommitWindowExit();
+                    }
                     // One root COMMIT == one fsync round-trip. Counted (no-op unless the
                     // opt-in PhaseTiming diagnostic is on) so the soak can adjudicate
                     // commits/sec; nested savepoint RELEASE below is intentionally not.
