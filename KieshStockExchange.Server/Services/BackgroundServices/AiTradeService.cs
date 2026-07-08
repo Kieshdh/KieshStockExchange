@@ -188,6 +188,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // This bucket makes "did enabling the rotator/MM slow the loop?" directly observable (near-zero when all off).
     private long _phCohortsUs;
     private long _phPending, _phAdvCount, _phTicks;
+    // §collect-split observability: break the aggregate collect span into the one-time shared-cache prepass,
+    // the O(N) full-fleet burst/bookkeeping "pass", and the heavy per-due Compute*Async. pass is DERIVED at
+    // log time (= _phCollectUs − pre − compute) so it needs no per-tick subtraction. Eligible/Due counts give
+    // per-bot unit costs to project collect to a larger fleet. Timing-only ⇒ byte-identical; gated by the
+    // same Bots:PhaseTimingSeconds as the rest of BotPhase.
+    private long _phCollectPreUs, _phCollectComputeUs, _phCollectEligibleN, _phCollectDueN;
     // Window snapshot of the process-cumulative root-commit (fsync) counter, so the
     // BotPhase line can report commits/sec + round-trips/order — the commit-bound
     // metrics that transfer to prod (per-tick ms / cap are docker-skew artifacts).
@@ -1072,6 +1078,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _nextStatsLogTime      = TimeHelper.NowUtc() + StatsLogInterval;
         _nextPhaseLogTime      = _phaseTimingInterval > TimeSpan.Zero ? TimeHelper.NowUtc() + _phaseTimingInterval : DateTime.MaxValue;
         _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phReconUs = 0;
+        _phCollectPreUs = _phCollectComputeUs = _phCollectEligibleN = _phCollectDueN = 0;
         _phPending = _phAdvCount = _phTicks = 0;
         _cmPrevCommits = EngineCommitMetrics.ReadCommits(); // first window measures from loop start
         _cmPrevTrades = EngineCommitMetrics.ReadTrades();
@@ -1598,13 +1605,20 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _ctx.TickId = Interlocked.Read(ref _tickCount);
         _ctx.TickNowTicks = now.Ticks;   // §impact-decouple B: one deterministic clock for all bots this tick
         _ctx.ClearTickCaches();
+        // §collect-split: only when BotPhase timing is on. Times the prepass + heavy compute so the aggregate
+        // collect span can be broken into pre / pass / compute (see LogPhaseTiming). Zero syscalls when off.
+        bool phase = _phaseTimingInterval > TimeSpan.Zero;
         // §bot-parallelism Phase 0: warm the shared per-stock caches once, deterministically, before the
         // sweep. Byte-identical to the prior lazy populate-on-first-read (values are frozen during collect);
         // makes the future parallel-collect region pure-read on these caches. Serial today.
+        long tPre0 = phase ? Stopwatch.GetTimestamp() : 0L;
         _decisions.PrecomputeSharedTickCaches(_ctx);
+        if (phase) _phCollectPreUs += (long)Stopwatch.GetElapsedTime(tPre0).TotalMicroseconds;
 
         var pending = new List<(AIUser user, Order order)>();
         var advanced = new List<(AIUser user, BotAdvancedDecision dec)>();
+        int collectEligibleN = 0, collectDueN = 0;   // §collect-split per-bot unit-cost denominators
+        long collectComputeUs = 0;                    // §collect-split heavy Compute*Async accumulator (this tick)
         foreach (var user in _ctx.AiUsersByAiUserId.Values)
         {
             if (!user.IsEnabled || !_decisions.CanPlaceMoreOrder(_ctx, user)) continue;
@@ -1617,6 +1631,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             // §rotator: the rotational cohort (strategy 7) runs only via _rotator.RunAsync. Dead branch until
             // strategy-7 bots are seeded ⇒ byte-identical when the cohort is absent.
             if (user.Strategy == AiStrategy.Rotator) continue;
+            collectEligibleN++;   // §collect-split: reached the O(N) full-fleet burst/bookkeeping pass
 
             // Spontaneous burst: rare chance (~0.2%/tick) of entering a focused session.
             var burstActive = _ctx.BurstEndTimes.TryGetValue(user.AiUserId, out var burstEnd) && now < burstEnd;
@@ -1659,6 +1674,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             // quiet / activity bookkeeping above still runs every tick, so their RNG streams and the
             // interval floor below are untouched when off.
             if (_staggerEnabled && !StaggerDue(user.AiUserId, _ctx.TickId, _staggerSlots)) continue;
+            collectDueN++;   // §collect-split: past the stagger gate — the O(cap/Slots) due population
 
             if (now - user.LastDecisionTime < effectiveInterval) continue;
 
@@ -1669,13 +1685,23 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             // top with NO seeded RNG consumed, so the plain-order stream stays byte-identical vs pre-P6.
             if (_advancedEnabled && advanced.Count < _maxAdvancedPerTick)
             {
+                long ca0 = phase ? Stopwatch.GetTimestamp() : 0L;
                 var adv = await _decisions.ComputeAdvancedDecisionAsync(_ctx, user, user.HomeCurrencyType, ct).ConfigureAwait(false);
+                if (phase) collectComputeUs += (long)Stopwatch.GetElapsedTime(ca0).TotalMicroseconds;
                 if (adv is not null) { advanced.Add((user, adv)); continue; }
             }
 
             // Bot decides in its home currency only.
+            long co0 = phase ? Stopwatch.GetTimestamp() : 0L;
             var order = await _decisions.ComputeOrderAsync(_ctx, user, user.HomeCurrencyType, ct).ConfigureAwait(false);
+            if (phase) collectComputeUs += (long)Stopwatch.GetElapsedTime(co0).TotalMicroseconds;
             if (order is not null) pending.Add((user, order));
+        }
+        if (phase)
+        {
+            _phCollectComputeUs += collectComputeUs;
+            _phCollectEligibleN += collectEligibleN;
+            _phCollectDueN      += collectDueN;
         }
         return (pending, advanced);
     }
@@ -1799,15 +1825,24 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // §A measurement gate: the high-water mark of concurrent root committers — if this is well above 1
         // under load the default path already amortizes fsync across committers, discounting Workstream A.
         int maxCommitters = EngineCommitMetrics.ReadMaxConcurrentCommitters();
+        // §collect-split: pass is the residual O(N) full-fleet burst/bookkeeping cost (= collect − pre − compute),
+        // clamped ≥0 against measurement skew. Unit costs (µs/eligible-bot for pass, µs/due-bot for compute) let
+        // the collect cost be PROJECTED to a larger fleet: pass ∝ eligible N, compute ∝ due = N/Slots.
+        long collectPassUsWin = Math.Max(0L, _phCollectUs - _phCollectPreUs - _phCollectComputeUs);
+        double colPassBotUs = _phCollectEligibleN > 0 ? (double)collectPassUsWin / _phCollectEligibleN : 0.0;
+        double colCmpDueUs  = _phCollectDueN > 0 ? (double)_phCollectComputeUs / _phCollectDueN : 0.0;
         _logger.LogInformation(
-            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + cohorts {Coh:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order, {MaxC} max concurrent committers); {Trds:F0} trades ({Tps:F1}/sec)",
+            "BotPhase [{Ticks} ticks, cap {Cap}]: {Tot:F1}ms/tick = check {Chk:F2} + collect {Col:F2} + batch {Bat:F2} + adv {Adv:F2} + arb {Arb:F2} + cohorts {Coh:F2} + recon {Rec:F2} + maint {Mnt:F2} (ms); collect-split[pre {ColPre:F2} / pass {ColPass:F2} / compute {ColCmp:F2} ms; {ColElig:F0} eligible, {ColDue:F0} due/tick; {ColPassBot:F1}µs/bot, {ColCmpDue:F1}µs/due]; {Pend:F0} orders + {AdvN:F1} adv/tick; {Commits:F0} commits ({Cps:F1}/sec, {Rto:F3} round-trips/order, {MaxC} max concurrent committers); {Trds:F0} trades ({Tps:F1}/sec)",
             _phTicks, ActiveBotCap?.ToString() ?? "all", tot,
             _phCheckUs / n / k, _phCollectUs / n / k, _phBatchUs / n / k,
             _phAdvUs / n / k, _phArbUs / n / k, _phCohortsUs / n / k, _phReconUs / n / k, _phMaintUs / n / k,
+            _phCollectPreUs / n / k, collectPassUsWin / n / k, _phCollectComputeUs / n / k,
+            _phCollectEligibleN / n, _phCollectDueN / n, colPassBotUs, colCmpDueUs,
             _phPending / n, _phAdvCount / n,
             (double)dCommits, commitsPerSec, roundTripsPerOrder, maxCommitters,
             (double)dTrades, tradesPerSec);
         _phCheckUs = _phCollectUs = _phBatchUs = _phAdvUs = _phArbUs = _phCohortsUs = _phReconUs = _phMaintUs = 0;
+        _phCollectPreUs = _phCollectComputeUs = _phCollectEligibleN = _phCollectDueN = 0;
         _phPending = _phAdvCount = _phTicks = 0;
         _cmPrevCommits = commitsNow;
         _cmPrevTrades = tradesNow;
