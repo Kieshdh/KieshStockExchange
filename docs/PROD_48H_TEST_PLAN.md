@@ -99,6 +99,18 @@ new seed without a redeploy).
   correction staged OFF; at 250 ms tick the uncorrected scaler reads load ~4× high → conservative cap; Stage-2
   DutyCycleDenominator flip is the fix). **Obs 2:** avg drift **−4.1% / 69 stocks** at 2h = early intraday transient,
   WATCH as the window matures. Next: Stage-2 scaler flip after a longer CK-clean stretch, then keep watching drift.
+- **2026-07-09 ~02:20 — EXP1: DipBuy 2.0→3.0 (Production.json override, rebuild+restart, DB preserved).** Countered the
+  slow −1%/h down-drift. Result: drift ARRESTED — absolute drift (vs open, restart-invariant DB metric) held ~−4.2%
+  (was sliding −1%/h), now ~flat ±0.2%/h. CK=0, healthy. NOTE: BotEconomy "avg drift" resets on restart (service-relative)
+  ⇒ use the DB from-open metric across restarts.
+- **2026-07-09 ~02:45 — ★ REALISM SCORECARD (prod, 35 USD stocks, best-ever):** drift arrested ~−4%; intraday range
+  median 7% / only 2/70 >20% (extremes rare); **cross-stock corr 10-min mean +0.129 / factorR2 0.244** (IN real-equity
+  0.2-0.5 band — the arc never broke ~0.08 locally); 5-min factorR2 0.196; **1-min excess kurtosis mean +7.57 / median
+  +5.49** (real +3..+8 = realistic fat tails). The rotator cohort + 20k scale delivers the correlation + tails local
+  soaks couldn't. Market is HEALTHY; tuning = optimization now. Correlation export: `data/prod/prod_usd_close.csv` via
+  `ssh ... COPY(...) TO STDOUT` → `py scripts/cross_stock_diag.py --csv ... --horizons 1,5,10`.
+- **NEXT:** confirm DipBuy-3.0 drift holds ~1h (don't confound), THEN optional EXP2 = rotator `ParticipationFraction`
+  0.10→0.15 to push corr toward 0.3+ (revert if book thins / drift returns).
 - **ROLLBACK (no backup):** box `git checkout master` (1d3fdd3) → rebuild → drop+create kse → migrate → up (reseeds
   prior embedded xlsx). Fast partial = flip experimental Production.json flags off + `up -d --build server`.
 - Box deploy commands (exact) for reuse are in the RUNNING LOG deploy entry above.
