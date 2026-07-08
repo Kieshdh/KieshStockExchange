@@ -42,6 +42,12 @@ internal sealed class AiBotStateService
     // per sweep (_stopCullMaxPerSweep) so the backlog drains gently instead of one mass-cancel spike. 0 = off.
     private readonly int _stopMaxAgeSec;
     private readonly int _stopCullMaxPerSweep;
+    // §B2 (Bots:PruneLimitOnly): when on, maintain ctx.OpenLimitOrders (a limit-only mirror) and make
+    // PruneWorstOrdersAsync iterate it instead of the full ctx.OpenOrders — so the ~30s prune is O(limits),
+    // independent of the armed-stop count (the maint-growth term). Off ⇒ prune reads OpenOrders as before,
+    // no mirror maintained ⇒ byte-identical. Supersedes the §stop-ttl interim (StopMaxAgeSec).
+    private readonly bool _pruneLimitOnly;
+    private bool _warnedStopTtlSuperseded;
 
     // Throttle "Applied active bot cap" — the scaler may toggle the cap several
     // times per minute when load wobbles. One INFO per change buries everything
@@ -54,7 +60,8 @@ internal sealed class AiBotStateService
     internal AiBotStateService(IDataBaseService db, IAccountsCache accounts,
         IOrderExecutionService orders, BotStatsLogger stats,
         ILogger<AiBotStateService> logger, decimal distanceMult = 1m,
-        int orderMaxAgeSec = 0, int stopMaxAgeSec = 0, int stopCullMaxPerSweep = 500)
+        int orderMaxAgeSec = 0, int stopMaxAgeSec = 0, int stopCullMaxPerSweep = 500,
+        bool pruneLimitOnly = false)
     {
         _db       = db       ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
@@ -65,6 +72,7 @@ internal sealed class AiBotStateService
         _orderMaxAgeSec = orderMaxAgeSec < 0 ? 0 : orderMaxAgeSec;
         _stopMaxAgeSec = stopMaxAgeSec < 0 ? 0 : stopMaxAgeSec;
         _stopCullMaxPerSweep = stopCullMaxPerSweep < 1 ? 1 : stopCullMaxPerSweep;
+        _pruneLimitOnly = pruneLimitOnly;
     }
     #endregion
 
@@ -96,6 +104,7 @@ internal sealed class AiBotStateService
     {
         ctx.StocksByUser.Clear();
         ctx.OpenOrders.Clear();
+        if (_pruneLimitOnly) ctx.OpenLimitOrders.Clear();   // §B2: rebuilt in lock-step below
 
         var userIds = ctx.AiUsersByAiUserId.Values
             .Where(u => u.IsEnabled).Select(u => u.UserId).ToList();
@@ -126,7 +135,17 @@ internal sealed class AiBotStateService
         }
 
         foreach (var g in allOrders.GroupBy(o => o.UserId))
+        {
             ctx.OpenOrders[g.Key] = g.ToDictionary(o => o.OrderId, o => o);
+            // §B2: mirror only the resting limits into the prune's limit-only index (same GroupBy pass).
+            if (_pruneLimitOnly)
+            {
+                Dictionary<int, Order>? lim = null;
+                foreach (var o in g)
+                    if (o.IsOpenLimitOrder) (lim ??= new Dictionary<int, Order>())[o.OrderId] = o;
+                if (lim != null) ctx.OpenLimitOrders[g.Key] = lim;
+            }
+        }
     }
     #endregion
 
@@ -229,6 +248,13 @@ internal sealed class AiBotStateService
             if (!ctx.OpenOrders.ContainsKey(placed.UserId))
                 ctx.OpenOrders[placed.UserId] = new Dictionary<int, Order>();
             ctx.OpenOrders[placed.UserId][placed.OrderId] = placed;
+            // §B2: keep the limit-only index in lock-step (this add-site is already limit-gated).
+            if (_pruneLimitOnly)
+            {
+                if (!ctx.OpenLimitOrders.ContainsKey(placed.UserId))
+                    ctx.OpenLimitOrders[placed.UserId] = new Dictionary<int, Order>();
+                ctx.OpenLimitOrders[placed.UserId][placed.OrderId] = placed;
+            }
         }
     }
     #endregion
@@ -256,12 +282,23 @@ internal sealed class AiBotStateService
         bool ageExpiry = _orderMaxAgeSec > 0;
         // §stop-ttl: standalone armed stops have no TTL and pile up unbounded; expire the oldest-reached
         // (capped this sweep) via the safe per-order path below. Interim — see the field comment.
-        bool stopAgeExpiry = _stopMaxAgeSec > 0;
+        // §B2: PruneLimitOnly SUPERSEDES stop-ttl — the limit-only index carries no armed stops, so the
+        // stop-ttl branch could never match anyway; disable it explicitly and warn once so the interim is
+        // clearly retired (set Bots:StopMaxAgeSec=0). replace-old (Bots:StopReplaceOld) cures the source.
+        bool stopAgeExpiry = _stopMaxAgeSec > 0 && !_pruneLimitOnly;
+        if (_pruneLimitOnly && _stopMaxAgeSec > 0 && !_warnedStopTtlSuperseded)
+        {
+            _warnedStopTtlSuperseded = true;
+            _logger.LogInformation("§B2: Bots:PruneLimitOnly is on — the StopMaxAgeSec stop-ttl cull is " +
+                "superseded (replace-old bounds the pool) and will not run; set Bots:StopMaxAgeSec=0.");
+        }
         var stopVictims = stopAgeExpiry ? new List<(int userId, Order order)>() : null;
 
         foreach (var user in ctx.AiUsersByAiUserId.Values)
         {
-            if (!ctx.OpenOrders.TryGetValue(user.UserId, out var userOrders) || userOrders.Count == 0)
+            // §B2: iterate the limit-only index when on (O(limits), no armed stops); else the full set.
+            var source = _pruneLimitOnly ? ctx.OpenLimitOrders : ctx.OpenOrders;
+            if (!source.TryGetValue(user.UserId, out var userOrders) || userOrders.Count == 0)
                 continue;
 
             // Rule 0 (realism, flag-gated): expire resting limit orders past their per-order randomized
@@ -391,6 +428,9 @@ internal sealed class AiBotStateService
                     if (toCancel[j].order.OrderId != orderId) continue;
                     if (ctx.OpenOrders.TryGetValue(toCancel[j].userId, out var userOrders))
                         userOrders.Remove(orderId);
+                    // §B2: these victims are all resting limits ⇒ keep the limit-only index in sync.
+                    if (_pruneLimitOnly && ctx.OpenLimitOrders.TryGetValue(toCancel[j].userId, out var limitOrders))
+                        limitOrders.Remove(orderId);
                     break;
                 }
                 pruned++;
@@ -446,6 +486,56 @@ internal sealed class AiBotStateService
             _stats.AddCancelled(pruned);
             _logger.LogInformation("§stop-ttl: expired {Pruned} aged standalone armed stops this sweep", pruned);
         }
+    }
+
+    // §replace-old (Bots:StopReplaceOld): before a bot ARMS a new standalone protective stop, cancel its
+    // existing standalone armed stop(s) on the SAME (stock, side) — so a bot MOVES its stop instead of
+    // STACKING a new one on every StopProb/TrailingProb draw (the additive firehose = ~58/bot, ~570/min).
+    // Uses the SAFE per-order path (mirrors CancelAgedStopsAsync): CancelOrderAsync resolves the canonical +
+    // CancelRemainderAsync releases the arm reservation; the BATCH path can't (treats Pending as AlreadyClosed
+    // ⇒ leaks the reservation + leaves the watcher armed = phantom-fill = CK break). Bracket/OCO children
+    // EXCLUDED. Called from AiTradeService.SubmitAdvancedAsync BEFORE the new arm. Not a decision-path change
+    // (RNG untouched) ⇒ market realism byte-unaffected; it only removes dormant duplicate stops.
+    internal async Task CancelPriorStandaloneStopsAsync(AiBotContext ctx, int userId, int stockId,
+        OrderSide side, CancellationToken ct)
+    {
+        if (!ctx.OpenOrders.TryGetValue(userId, out var userOrders) || userOrders.Count == 0) return;
+
+        // Snapshot the matches first — CancelOrderAsync is async and we mutate userOrders on success.
+        // NOTE (ordering caveat): armed stops enter ctx.OpenOrders only at the ~60s cold-load, so this sees
+        // the bot's ACCUMULATED prior stops (the hours-long pile), not one armed within the current window —
+        // which is exactly what needs pruning. StopProb draws are rare per bot ⇒ residual ~1–2/(bot,stock,side).
+        List<Order>? victims = null;
+        foreach (var o in userOrders.Values)
+            if (o.IsArmed && !o.IsBracketChild && o.StockId == stockId && o.Side == side)
+                (victims ??= new List<Order>()).Add(o);
+        if (victims is null) return;
+
+        int pruned = 0, failed = 0;
+        foreach (var order in victims)
+        {
+            OrderResult res;
+            try
+            {
+                res = await _orders.CancelOrderAsync(order.OrderId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+            {
+                if (failed++ == 0) _logger.LogError(ex, "ReplaceOld: cancel failed for #{Id}", order.OrderId);
+                continue;
+            }
+            if (res.Status == OrderStatus.Success || res.Status == OrderStatus.AlreadyClosed)
+            {
+                // Armed stop — never in the limit-only index, so no OpenLimitOrders touch needed.
+                userOrders.Remove(order.OrderId);
+                pruned++;
+            }
+            else if (failed++ == 0)
+            {
+                _logger.LogWarning("ReplaceOld: #{Id} not cancelled ({Status})", order.OrderId, res.Status);
+            }
+        }
+        if (pruned > 0) _stats.AddCancelled(pruned);
     }
 
     // Realism §: per-order lifetime jitter in [0.5, 1.5] from an OrderId avalanche hash. Deterministic

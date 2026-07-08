@@ -41,6 +41,14 @@ internal sealed class AiBotContext
 
     internal readonly Dictionary<int, Dictionary<int, Order>> OpenOrders = new();
 
+    // §B2 (Bots:PruneLimitOnly): a per-bot LIMIT-ONLY mirror of OpenOrders (userId→orderId→Order, only
+    // IsOpenLimitOrder). PruneWorstOrdersAsync iterates THIS instead of OpenOrders so the ~30s prune is
+    // O(limits) not O(limits + armed-stops) — the armed-stop pool no longer inflates the maint phase.
+    // Maintained in lock-step with OpenOrders at cold-load / placement / limit-cancel (AiBotStateService),
+    // ONLY when the flag is on. Decision-path reads (open-order cap, MM balance, reserved-qty aggregates)
+    // keep reading the FULL OpenOrders. Empty/unused when the flag is off ⇒ byte-identical.
+    internal readonly Dictionary<int, Dictionary<int, Order>> OpenLimitOrders = new();
+
     // Three-stage price cache: StockPrices is the raw last quote, PreviousPrices
     // is the prior raw value for tick-to-tick deltas, SmoothedPrices is EWMA
     // (α=0.15, ~6-tick window) that ChooseOrderType reads to dampen spike noise.
@@ -514,6 +522,7 @@ internal sealed class AiBotContext
         AiUserRngs.Clear();
         StocksByUser.Clear();
         OpenOrders.Clear();
+        OpenLimitOrders.Clear();
         StockPrices.Clear();
         PreviousPrices.Clear();
         SmoothedPrices.Clear();

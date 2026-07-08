@@ -249,6 +249,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly bool _bracketBatch;          // Round 2 §0005 batch the bracket route (default off)
     private readonly bool _batchBuyStops;         // §A1b batch the buy-stop fund-reserve arm route (default off)
     private readonly bool _batchShortOpens;       // Slice 2 batch the flat market-short-open match+settle route (default off)
+    private readonly bool _stopReplaceOld;        // §replace-old: cancel a bot's prior (stock,side) standalone armed stop before arming a new one (default off)
     private readonly double _smoothedPriceHalfLifeSec; // 0 ⇒ legacy fixed α=0.15 EWMA; >0 ⇒ time-based half-life
     // §impact-decouple A: the >1-min reaction reference EWMA (maintained in OnQuoteUpdated). Default off.
     private readonly bool   _reactionRef;
@@ -654,7 +655,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // lifetime, cancelled via the safe per-order path; StopCullMaxPerSweep caps the per-sweep
                         // drain so a large backlog can't mass-cancel in one tick. 0 = off.
                         stopMaxAgeSec: _configuration.GetValue("Bots:StopMaxAgeSec", 0),
-                        stopCullMaxPerSweep: _configuration.GetValue("Bots:StopCullMaxPerSweep", 500));
+                        stopCullMaxPerSweep: _configuration.GetValue("Bots:StopCullMaxPerSweep", 500),
+                        // §B2 (Workstream 1): make PruneWorstOrdersAsync iterate a limit-only index so the
+                        // ~30s maint scan is O(limits), independent of the armed-stop pool. Default off ⇒
+                        // prune reads full OpenOrders, byte-identical. Supersedes the StopMaxAgeSec interim.
+                        pruneLimitOnly: _configuration.GetValue("Bots:PruneLimitOnly", false));
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         _regime, _activity, _priceMemory,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
@@ -887,6 +892,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGain", 1.0m),
             _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGovScale", 1000000000m));
         _batchArms          = _configuration.GetValue("Bots:Advanced:BatchArms", false);
+        // §replace-old (Workstream 1): before arming a new standalone protective stop, cancel the bot's prior
+        // (stock,side) standalone armed stop via the SAFE per-order path — cures the additive stop firehose.
+        // Default off ⇒ byte-identical. See AiBotStateService.CancelPriorStandaloneStopsAsync.
+        _stopReplaceOld     = _configuration.GetValue("Bots:StopReplaceOld", false);
         _bracketBatch       = _configuration.GetValue("Bots:Advanced:BracketBatch", false);
         _batchBuyStops      = _configuration.GetValue("Bots:Advanced:BatchBuyStops", false);
         _batchShortOpens    = _configuration.GetValue("Bots:Advanced:BatchShortOpens", false);
@@ -1257,6 +1266,27 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private async Task SubmitAdvancedAsync(List<(AIUser user, BotAdvancedDecision dec)> advanced, CancellationToken ct)
     {
         advanced.Sort((a, b) => a.user.AiUserId.CompareTo(b.user.AiUserId));
+
+        // §replace-old (Bots:StopReplaceOld): BEFORE arming this tick's new standalone protective stops,
+        // cancel each bot's prior (stock,side) standalone armed stop via the SAFE per-order path — so a bot
+        // MOVES its stop instead of STACKING a new one on every StopProb/TrailingProb draw (the additive
+        // firehose). Runs on the sorted list (deterministic). Only protective-stop kinds match; bracket
+        // children never reach here. Off ⇒ skipped entirely ⇒ byte-identical.
+        if (_stopReplaceOld)
+        {
+            foreach (var (user, dec) in advanced)
+            {
+                OrderSide? side = dec.Kind switch
+                {
+                    BotAdvancedKind.StopMarketSell or BotAdvancedKind.TrailingStopSell => OrderSide.Sell,
+                    BotAdvancedKind.StopMarketBuy                                       => OrderSide.Buy,
+                    _                                                                   => null,
+                };
+                if (side is { } s)
+                    await _state.CancelPriorStandaloneStopsAsync(_ctx, user.UserId, dec.StockId, s, ct)
+                        .ConfigureAwait(false);
+            }
+        }
 
         if (_batchArms || _bracketBatch || _batchBuyStops || _batchShortOpens)
         {
