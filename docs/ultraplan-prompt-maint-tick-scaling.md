@@ -50,10 +50,27 @@ Over ~13h the tick degraded **250ms → ~450ms**, entirely from the periodic **`
 - **Approach D — orphan-cancel (cancel stops whose protected position is gone). Correctness, LATER.** Real CK exposure
   (cancel path) — do after B2, carefully, under ConservationProbe.
 
-### Recommended build order
-**B2 (immediate maint relief, CK-neutral) → investigate the 50-stops/bot cause → C (bound source) → D (orphan
-correctness).** Skip A. Gate every step: CK=0 (ConservationProbe + ReservationAuditor through any drain), tick holds
-~250ms over a multi-hour soak, market metrics (corr/tails/movement) unchanged, new levers default-off/byte-identical.
+### ★ PROD FINDINGS (2026-07-09, from the interim rollout)
+- The 1.16M Pending are **100% standalone stops** (`ParentOrderId IS NULL`); **0 bracket children** (brackets are
+  DISABLED in the seed). So the leak is NOT brackets — it's standalone protective/entry stops.
+- **THE DISEASE = a placement FIREHOSE: bots place ~570 standalone stops/MINUTE (~815k/day) that never trigger.**
+  ~58/bot and rising. This dwarfs any per-order cull.
+- **INTERIM SHIPPED + CK-CLEAN: `Bots:StopMaxAgeSec=600` + `StopCullMaxPerSweep=350`** (per-order safe cancel; commit
+  `see feat(bots): StopMaxAgeSec`). Validated on prod: cull fires, CK=0 through the drain, releases reservations
+  correctly. BUT per-order cancel is the bottleneck — it can only HOLD the pool ≈flat vs the firehose; draining the
+  1.16M fast would need ~1500/sweep = multi-second tick spikes every 30s (hurts the tape). So the interim caps the
+  GROWTH but gives little maint relief. **CHANGE `StopMaxAgeSec` BACK / remove the interim when the real fix lands.**
+- **★ THE LIKELY-BEST FIX is the SOURCE, not the cull: reduce the stop-PLACEMENT rate** (advanced-order probabilities
+  are "tuned high for chaos" — bots place far more protective/entry stops than ever trigger). A config/seed dial-down
+  of stop placement prevents the work up-front (DB write + arm + watcher-add per stop) — cheaper + spike-free than
+  culling, and it shrinks the DB + watcher scans too. Rank this ABOVE the cull; likely simplest + highest leverage.
+
+### Recommended build order (REVISED)
+**(1) Reduce stop-placement rate at the source (config/seed) — the firehose is the root; cheapest, spike-free →
+(2) B2 (don't scan armed stops — CK-neutral, immediate maint relief) → (3) retire the StopMaxAgeSec interim →
+(4) D orphan-correctness later.** Skip A (per-order cull) as anything but the interim. Gate every step: CK=0
+(ConservationProbe + ReservationAuditor), tick holds ~250ms over a multi-hour soak, market metrics unchanged,
+levers default-off/byte-identical.
 
 ## WORKSTREAM 2 — the O(bots×stocks) economy snapshot
 `_economy.LogSnapshot` (in the same maint phase) is O(20k×50 ≈ 1M ops)/interval. Fixed-size (not the growth driver) but
