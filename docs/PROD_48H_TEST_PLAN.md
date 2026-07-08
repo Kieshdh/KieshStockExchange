@@ -93,6 +93,12 @@ new seed without a redeploy).
   `appsettings.Production.json` Bots:Scaler:{DutyCycleDenominator,ActionableSpanSizing,SelfCorrectingDelay}=true,
   commit+push, box `git pull` + `up -d --build server` (or restart) → watch cap rises w/o runaway, CK=0, tape OK.
   If cap runs away / CK breaks / tape breaks → flip the offending flag off + restart. (6) Iterate/re-reseed as needed.
+- **2026-07-09 ~02:12 (T+2h checkpoint):** container Up 2h healthy, **0 CK / 0 errors**. **2.23M trades, ~300/sec**
+  (80,353 in 5 min) — tape flowing. BotPhase: 146–225 ms/tick, cap **~8–10k**, 17 max concurrent committers, 0.63
+  round-trips/order; cohorts (rotator+bank) ~30 ms/tick = live. **Obs 1:** cap ~10k not 20k = EXPECTED (scaler
+  correction staged OFF; at 250 ms tick the uncorrected scaler reads load ~4× high → conservative cap; Stage-2
+  DutyCycleDenominator flip is the fix). **Obs 2:** avg drift **−4.1% / 69 stocks** at 2h = early intraday transient,
+  WATCH as the window matures. Next: Stage-2 scaler flip after a longer CK-clean stretch, then keep watching drift.
 - **ROLLBACK (no backup):** box `git checkout master` (1d3fdd3) → rebuild → drop+create kse → migrate → up (reseeds
   prior embedded xlsx). Fast partial = flip experimental Production.json flags off + `up -d --build server`.
 - Box deploy commands (exact) for reuse are in the RUNNING LOG deploy entry above.
