@@ -60,10 +60,18 @@ Over ~13h the tick degraded **250ms → ~450ms**, entirely from the periodic **`
   correctly. BUT per-order cancel is the bottleneck — it can only HOLD the pool ≈flat vs the firehose; draining the
   1.16M fast would need ~1500/sweep = multi-second tick spikes every 30s (hurts the tape). So the interim caps the
   GROWTH but gives little maint relief. **CHANGE `StopMaxAgeSec` BACK / remove the interim when the real fix lands.**
-- **★ THE LIKELY-BEST FIX is the SOURCE, not the cull: reduce the stop-PLACEMENT rate** (advanced-order probabilities
-  are "tuned high for chaos" — bots place far more protective/entry stops than ever trigger). A config/seed dial-down
-  of stop placement prevents the work up-front (DB write + arm + watcher-add per stop) — cheaper + spike-free than
-  culling, and it shrinks the DB + watcher scans too. Rank this ABOVE the cull; likely simplest + highest leverage.
+- **★ THE ROOT CAUSE (verified): additive protective stops.** `AiBotDecisionService.BuildProtectiveStopAsync` (~L954)
+  places a NEW armed stop on each `StopProb`/`TrailingProb` draw and **NEVER cancels the bot's prior protective stop** —
+  so a bot that keeps managing a stop STACKS them (→ ~58/bot). It's not "prob too high", it's additive accumulation.
+- **★ FIX (a) — "REPLACE-OLD" (RECOMMENDED, the disease cure):** before `BuildProtectiveStopAsync` places a new
+  standalone protective stop, cancel that bot's existing standalone armed stop(s) (same stock/side, or all its
+  standalone armed stops) via the SAFE per-order `CancelOrderAsync` path (the one the interim validated CK-clean).
+  Bounds the pool to **~1/bot (~20k)** vs 1.16M ⇒ maint scan → O(20k), retires the StopMaxAgeSec interim + its cull
+  spikes, and PRESERVES behaviour (bots still actively manage one protective stop = realistic; real traders MOVE a
+  stop, not stack 58). Default-off behind a flag; CK gate through a soak. Bracket children EXCLUDED (as the interim).
+- **FIX (b) — lower `StopProb`/`TrailingProb`:** trivial config/multiplier, but reduces how often bots hold protective
+  stops at all (less protective-stop realism) and doesn't cure the additive root. Fallback only.
+- Rank: **(a) replace-old FIRST** (source cure, realism-preserving) → then B2 if the residual O(book) scan still bites.
 
 ### Recommended build order (REVISED)
 **(1) Reduce stop-placement rate at the source (config/seed) — the firehose is the root; cheapest, spike-free →
