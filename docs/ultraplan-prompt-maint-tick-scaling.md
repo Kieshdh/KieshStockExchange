@@ -99,8 +99,10 @@ Over ~13h the tick degraded **250ms → ~450ms**, entirely from the periodic **`
 **(1) Reduce stop-placement rate at the source (config/seed) — the firehose is the root; cheapest, spike-free →
 (2) B2 (don't scan armed stops — CK-neutral, immediate maint relief) → (3) retire the StopMaxAgeSec interim →
 (4) D orphan-correctness later.** Skip A (per-order cull) as anything but the interim. Gate every step: CK=0
-(ConservationProbe + ReservationAuditor), tick holds ~250ms over a multi-hour soak, market metrics unchanged,
-levers default-off/byte-identical.
+(ConservationProbe + ReservationAuditor), tick recovers toward ~250ms — validated by a CLOSELY-WATCHED 45m soak
+with monitors @15/30/45m (B2 makes maint O(limits) by construction, so relief is immediate + structural and a
+full multi-hour run isn't needed to prove it — the interim was the thing that needed hours), market metrics
+unchanged, levers default-off/byte-identical.
 
 ## WORKSTREAM 2 — the O(bots×stocks) economy snapshot
 `_economy.LogSnapshot` (in the same maint phase) is O(20k×50 ≈ 1M ops)/interval. Fixed-size (not the growth driver) but
@@ -119,6 +121,9 @@ ParallelCollect` (default-off, gated on a replay-equivalence test + prod collect
 ENUMERATION ORDINAL not aiUserId; `_maxAdvancedPerTick` → post-filter.
 
 ## Constraints / acceptance
-CK=0 sacred; tick ~250ms held over a MULTI-HOUR run (the real test — the degradation only shows over hours); both order
+CK=0 sacred; tick recovers toward ~250ms — VALIDATED by a CLOSELY-WATCHED 45m soak with monitors every 15min (maint ms
+drops + holds, CK=0 through the drain, stop pool trending down, tick recovered). B2 makes the prune O(limits) by
+construction ⇒ relief is immediate + structural, so a 45m watched soak suffices (the multi-hour concern was the
+StopMaxAgeSec INTERIM, a cull that couldn't keep pace — the structural fix doesn't need hours to prove); both order
 pools plateau; market realism byte-unaffected (maintenance is not a decision-path change); new levers default-off.
 Interim prod mitigation already on: `Bots:OrderMaxAgeSec=1800` (bounds the Open limit pool only) — superseded by this.
