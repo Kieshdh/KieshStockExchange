@@ -6,6 +6,28 @@ soak. PERF/scaling, orthogonal to market realism (the market is converged + good
 This ticket = **make the tick hold ~250ms over a multi-hour/48h run.** Kiesh: combine with the parallelization
 workstream (below) since it's the same class of wall ("the tick does O(fleet) work").
 
+## ★★ MEASUREMENT GATE RESULT (2026-07-09, prod, collect-split telemetry `52372e3`) — SELECTS THIS PATCH
+Deployed the collect-split BotPhase telemetry to prod and measured two pinned operating points (ActiveCap 10k vs 5k
+via the admin API, AutoScale off, MaxBotCap left at 20k), 6 steady windows each, **CK=0 both**:
+
+| field (avg) | ~10k | ~5k |
+|---|---|---|
+| Tot ms | 110 (maint-off floor ~63) | 83 (floor ~52) |
+| collect ms | 7.2 | 5.0 |
+| batch ms | 29.8 | 24.4 |
+| recon ms (bursty) | 6.0 | 4.2 |
+| **maint ms (bursty, the growth term)** | 37 (0–100) | 22 (0–54) |
+| collect-split pre / pass / compute ms | 0.17 / 4.70 / 2.34 | 0.18 / 3.19 / 1.62 |
+| eligible / due | 2964 / 230 | 2388 / 160 |
+| µs/bot (pass) / µs/due (compute) | 1.58 / 10.2 | 1.33 / 10.15 |
+
+**Verdict against the pre-registered gate:** µs/due is dead-flat (10.2≈10.15) and µs/bot ~flat, so the projection is
+valid — BUT collect is only **6–7% of the tick** at both points, the N's scale sub-linearly with the cap (eligible
+0.81×, due 0.70× for a 2× cap cut ⇒ slope ambiguous), and even a generous linear projection of collect to 50k (~35ms)
+stays far under 40% of a multi-hour tick that maint drags to 300–450ms. ⇒ **collect is NOT the bottleneck; the unbounded
+`maint` scan is. Build Workstream 1 (stop-leak: replace-old → B2), NOT the collect-parallelism (Workstream 4 is
+DEFERRED — measurement-justified: parallelizing the cheap 7ms collect can't touch the disease).**
+
 ## The problem (measured on prod)
 Over ~13h the tick degraded **250ms → ~450ms**, entirely from the periodic **`maint` phase growing 0 → ~300ms/tick**
 (`RunPeriodicMaintenanceAsync`, `AiTradeService.cs:1943`). Root: the **armed-stop pool grows UNBOUNDED** — ~1.05M
