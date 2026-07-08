@@ -123,6 +123,17 @@ new seed without a redeploy).
   produced, at 20k-seed scale on prod.
 - **★ CONFIRMED PROD CONFIG (converged, Production.json, reversible):** DipBuyStrength 3.0 · Rotator 0.10 + BankEstimate on ·
   TradeIntervalMs 250 + Slots 4 · Scaler correction STAGED OFF (fleet held ~10k **BY DESIGN**).
+- **2026-07-09 ~10:09 — EXP3: Slots 4→8 (rotate the full 20k fleet at same flow) → REVERTED ~11:00.** Verified the
+  mechanism (`ApplyActiveBotCap`, AiBotStateService.cs:139): the cap enables the FIRST ~10k bots in fixed order, other
+  ~10k DORMANT (never trade) = fixed-10k market, half the seed wasted. Slots 8 halves per-bot load ⇒ scaler lifts the
+  cap toward 20k (all rotate). RESULT: **corr NEUTRAL** (matched windows: 5m 0.086→0.069, 10m 0.116→0.149 = within
+  sub-hour noise — the char comes from the ROTATOR's coordinated flow, not raw fleet-participant count) + **perf
+  REGRESSION: maint phase 7ms→258ms** (scales badly with enabled count), tick 250→447ms, cap stuck ~15k (couldn't
+  reach 20k), drift deepened −5.3→−6.7%. CK=0. **CONCLUSION: rotating the full fleet gives NO realism benefit + costs
+  perf ⇒ 50k-rotate would be STRICTLY WORSE (heavier maint/iteration, cap more suppressed, no gain). Fixed ~10k-
+  participant market is the RIGHT config; the other 10k seeds being idle is fine.** Reverted to Slots 4.
+- **★ PERF NOTE (for the bot-parallelism track):** the `maint` phase scales badly (~40×) with enabled-bot count — a real
+  O(N)-per-tick inefficiency surfaced by the 20k-enabled test. Worth investigating if fleet size is ever raised.
 - **★ KIESH DECISION (2026-07-09): HOLD the fleet at ~10k to PROTECT REALISM** (do NOT flip the staged scaler to 20k —
   more independent bots = LLN-flattening risk to the validated corr/tails). Capacity-vs-realism tradeoff resolved = realism wins.
 - **POSTURE NOW = HOLD + SOAK.** Market converged; further rapid changes risk degrading a good market. Periodic health
