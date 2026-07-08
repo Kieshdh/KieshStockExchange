@@ -1,4 +1,31 @@
-# Ultraplan prompt — re-enable rich bracket orders (cheaply) — COUNCIL-VETTED (round 1)
+# Ultraplan prompt — re-enable rich bracket orders (cheaply) — COUNCIL-VETTED (rounds 1 + 2)
+
+## ★★ ROUND-2 VERDICT (FINAL RECOMMENDATION): DON'T re-enable brackets for the BOTS
+Two round-2 reviewers, decisive:
+- **Premise is weak (cosmetic, not realism).** The market is ALREADY converged + validated on prod (corr factorR2
+  0.244, fat tails, healthy movement) with bots on market/limit/standalone-stops. Realism = aggregate ORDER FLOW, not
+  which order TYPE a bot nominally uses: a bracket's entry hits the book identically, and the TP/SL children only matter
+  on fill — so bot brackets add **no flow signature the tape can distinguish.** Re-enabling for 20k bots buys back the
+  +43% throughput hit + fresh fill-path CK exposure + the client blast radius, for zero visible gain.
+- **Brackets are a HUMAN/CLIENT feature** (already supported + working; TP/SL is where human psychology lives). Keep them
+  client-only. **Don't reintroduce the fill-path cost across the bot fleet.**
+- **Opportunity cost = last.** The armed-stop leak (~570 orphan stops/min, currently masked by the StopMaxAgeSec interim)
+  and the queued maint/parallelism perf work both out-rank this. **RECOMMEND: close the bot-bracket-re-enable idea;
+  redirect the effort to the leak fix + perf.**
+- **★ MUST-ADD if ever pursued (sharpest cross-cutting risk):** a bracket protective SL arms into the SAME armed-Pending
+  pool that `StopMaxAgeSec` culls. **The SL MUST be EXEMPT from age-culling** (else the cull releases the position
+  reservation and silently tears down protection = CK/correctness break; and un-exempted bracket SLs re-inflate the pool).
+  NOTE: the shipped interim ALREADY exempts bracket children (`cull condition = o.IsArmed && !o.IsBracketChild`), so it is
+  future-proofed — but make SL-exemption an explicit ACCEPTANCE CRITERION of any re-enable. Also add a **DB group-tx/
+  commit-count-per-fill** counter to the measurement (the commit-bound settlement is the real ceiling), and gate the
+  cohort soak on CK=0 specifically for the multi-leg (SL + up-to-3 TP) atomic arm (BatchArms is proven at bot-stop scale,
+  NOT at bracket group-tx scale).
+
+**The rest of this doc = the round-1 analysis + the measure-first plan, kept for IF the idea is ever revived.**
+
+---
+
+# (round 1) Re-enable rich bracket orders (cheaply)
 
 **Origin (Kiesh, 2026-07-09):** "Alter bracket orders so each is separate but an overview BracketOrder handles all
 children (initial + 0-3 TPs + 0-1 SL); when the initial triggers the children are placed. Right now they're placed
