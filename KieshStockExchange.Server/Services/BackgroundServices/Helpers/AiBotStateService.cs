@@ -34,6 +34,14 @@ internal sealed class AiBotStateService
     // steady-state volatility over a long soak). Per-order jitter via an OrderId hash avoids
     // synchronized mass-cancels that would print an artificial volatility spike.
     private readonly int _orderMaxAgeSec;
+    // §stop-ttl (INTERIM — ultraplan docs/ultraplan-prompt-maint-tick-scaling.md; CHANGE BACK when B2 lands):
+    // armed stops have NO expiry (retention leaves them), so they accumulate unbounded and bloat the O(book)
+    // prune scan (the maint-phase blowup). >0 gives standalone armed stops a per-order jittered TTL, cancelled
+    // via the SAFE single-order path (CancelOrderAsync releases the arm reservation; the batch path can't). The
+    // watcher's promote is defensive on !IsArmed so a lingering index entry cannot phantom-fill. Cull is capped
+    // per sweep (_stopCullMaxPerSweep) so the backlog drains gently instead of one mass-cancel spike. 0 = off.
+    private readonly int _stopMaxAgeSec;
+    private readonly int _stopCullMaxPerSweep;
 
     // Throttle "Applied active bot cap" — the scaler may toggle the cap several
     // times per minute when load wobbles. One INFO per change buries everything
@@ -46,7 +54,7 @@ internal sealed class AiBotStateService
     internal AiBotStateService(IDataBaseService db, IAccountsCache accounts,
         IOrderExecutionService orders, BotStatsLogger stats,
         ILogger<AiBotStateService> logger, decimal distanceMult = 1m,
-        int orderMaxAgeSec = 0)
+        int orderMaxAgeSec = 0, int stopMaxAgeSec = 0, int stopCullMaxPerSweep = 500)
     {
         _db       = db       ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
@@ -55,6 +63,8 @@ internal sealed class AiBotStateService
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
         _distanceMult = distanceMult <= 0m ? 1m : distanceMult;
         _orderMaxAgeSec = orderMaxAgeSec < 0 ? 0 : orderMaxAgeSec;
+        _stopMaxAgeSec = stopMaxAgeSec < 0 ? 0 : stopMaxAgeSec;
+        _stopCullMaxPerSweep = stopCullMaxPerSweep < 1 ? 1 : stopCullMaxPerSweep;
     }
     #endregion
 
@@ -244,27 +254,44 @@ internal sealed class AiBotStateService
         // Realism §: age cutoff for resting-limit expiry. Computed once per sweep.
         var nowUtc = TimeHelper.NowUtc();
         bool ageExpiry = _orderMaxAgeSec > 0;
+        // §stop-ttl: standalone armed stops have no TTL and pile up unbounded; expire the oldest-reached
+        // (capped this sweep) via the safe per-order path below. Interim — see the field comment.
+        bool stopAgeExpiry = _stopMaxAgeSec > 0;
+        var stopVictims = stopAgeExpiry ? new List<(int userId, Order order)>() : null;
 
         foreach (var user in ctx.AiUsersByAiUserId.Values)
         {
             if (!ctx.OpenOrders.TryGetValue(user.UserId, out var userOrders) || userOrders.Count == 0)
                 continue;
 
-            // Rule 0 (realism, flag-gated): expire resting limit orders past their per-order
-            // randomized lifetime so the book churns instead of accumulating forever. Runs even
-            // for bots with no Far band (the FarLimitMax<=0 early-continue below would skip them).
-            if (ageExpiry)
+            // Rule 0 (realism, flag-gated): expire resting limit orders past their per-order randomized
+            // lifetime so the book churns instead of accumulating forever; §stop-ttl: same for standalone
+            // armed stops. ONE pass over the bot's orders (double-iterating the ~1M book would be the very
+            // cost we're cutting). Runs even for bots with no Far band (FarLimitMax<=0 continues below).
+            if (ageExpiry || stopAgeExpiry)
             {
                 foreach (var o in userOrders.Values)
                 {
-                    if (!o.IsOpenLimitOrder) continue;
                     // Jitter the lifetime per order in [0.5x, 1.5x] via an OrderId hash, times a per-bot
                     // patience factor in [0.7x, 1.3x] via a UserId hash (patient vs impatient traders).
                     // Both deterministic, RNG-free, independent and mean-1.0 ⇒ the population mean lifetime
-                    // stays at _orderMaxAgeSec; the product just disperses expiries further (smoother churn).
-                    var lifetime = _orderMaxAgeSec * AgeJitterFactor(o.OrderId) * BotLifetimeFactor(user.UserId);
-                    if ((nowUtc - o.CreatedAt).TotalSeconds >= lifetime)
-                        toCancel.Add((user.UserId, o));
+                    // is preserved; the product just disperses expiries (smoother churn).
+                    if (ageExpiry && o.IsOpenLimitOrder)
+                    {
+                        var lifetime = _orderMaxAgeSec * AgeJitterFactor(o.OrderId) * BotLifetimeFactor(user.UserId);
+                        if ((nowUtc - o.CreatedAt).TotalSeconds >= lifetime)
+                            toCancel.Add((user.UserId, o));
+                    }
+                    // §stop-ttl: standalone armed stops only — bracket children are EXCLUDED (their reservation
+                    // is pooled by the Σ child-reservations == position.ReservedQuantity bracket invariant).
+                    // Capped per sweep so the backlog drains gently instead of one mass-cancel spike.
+                    else if (stopAgeExpiry && o.IsArmed && !o.IsBracketChild
+                             && stopVictims!.Count < _stopCullMaxPerSweep)
+                    {
+                        var lifetime = _stopMaxAgeSec * AgeJitterFactor(o.OrderId) * BotLifetimeFactor(user.UserId);
+                        if ((nowUtc - o.CreatedAt).TotalSeconds >= lifetime)
+                            stopVictims!.Add((user.UserId, o));
+                    }
                 }
             }
 
@@ -319,6 +346,10 @@ internal sealed class AiBotStateService
                 }
             }
         }
+
+        // §stop-ttl: cancel aged standalone stops via their own SAFE per-order path, independent of whether
+        // any resting limits were culled this sweep.
+        if (stopVictims is { Count: > 0 }) await CancelAgedStopsAsync(ctx, stopVictims, ct).ConfigureAwait(false);
 
         if (toCancel.Count == 0) return;
 
@@ -377,6 +408,44 @@ internal sealed class AiBotStateService
                 failed, results.Count, firstFailedId, firstFailedStatus);
 
         if (pruned > 0) _stats.AddCancelled(pruned);
+    }
+
+    // §stop-ttl: cancel aged standalone armed stops one at a time via the SAFE single-order path.
+    // CancelOrderAsync resolves the canonical + CancelRemainderAsync releases the arm reservation (the BATCH
+    // path can't — it treats Pending as AlreadyClosed and would leak the reservation + leave the watcher
+    // armed). The StopTriggerWatcher promote is defensive on !IsArmed (PromoteStopAsync early-returns), so a
+    // lingering index entry cannot phantom-fill. Victims are capped upstream so this drains gently.
+    private async Task CancelAgedStopsAsync(AiBotContext ctx, List<(int userId, Order order)> stopVictims,
+        CancellationToken ct)
+    {
+        int pruned = 0, failed = 0;
+        foreach (var (userId, order) in stopVictims)
+        {
+            OrderResult res;
+            try
+            {
+                res = await _orders.CancelOrderAsync(order.OrderId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
+            {
+                if (failed++ == 0) _logger.LogError(ex, "CancelAgedStops: cancel failed for #{Id}", order.OrderId);
+                continue;
+            }
+            if (res.Status == OrderStatus.Success || res.Status == OrderStatus.AlreadyClosed)
+            {
+                if (ctx.OpenOrders.TryGetValue(userId, out var uo)) uo.Remove(order.OrderId);
+                pruned++;
+            }
+            else if (failed++ == 0)
+            {
+                _logger.LogWarning("CancelAgedStops: #{Id} not cancelled ({Status})", order.OrderId, res.Status);
+            }
+        }
+        if (pruned > 0)
+        {
+            _stats.AddCancelled(pruned);
+            _logger.LogInformation("§stop-ttl: expired {Pruned} aged standalone armed stops this sweep", pruned);
+        }
     }
 
     // Realism §: per-order lifetime jitter in [0.5, 1.5] from an OrderId avalanche hash. Deterministic

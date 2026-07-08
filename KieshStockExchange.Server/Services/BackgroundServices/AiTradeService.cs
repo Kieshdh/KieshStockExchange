@@ -642,7 +642,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // When > 0, the prune sweep cancels open limit orders older than a per-order
                         // randomized [0.5x, 1.5x] of this lifetime, so the book churns like a real
                         // market instead of accumulating resting orders without bound.
-                        orderMaxAgeSec: _configuration.GetValue("Bots:OrderMaxAgeSec", 0));
+                        orderMaxAgeSec: _configuration.GetValue("Bots:OrderMaxAgeSec", 0),
+                        // §stop-ttl (INTERIM): standalone armed stops have no TTL and pile up unbounded, bloating
+                        // the O(book) prune scan (the maint-phase blowup). >0 gives them a per-order jittered
+                        // lifetime, cancelled via the safe per-order path; StopCullMaxPerSweep caps the per-sweep
+                        // drain so a large backlog can't mass-cancel in one tick. 0 = off.
+                        stopMaxAgeSec: _configuration.GetValue("Bots:StopMaxAgeSec", 0),
+                        stopCullMaxPerSweep: _configuration.GetValue("Bots:StopCullMaxPerSweep", 500));
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         _regime, _activity, _priceMemory,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
