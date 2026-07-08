@@ -1,5 +1,24 @@
 # Bot-decision parallelism — execution build plan (for 2026-07-09)
 
+## ★★ READ BEFORE FIRING — current prod context + two hard constraints (2026-07-09)
+- **Goal = CAPACITY/liquidity, NOT realism.** The market is already converged + validated on prod (cross-stock corr
+  factorR2 0.244, realistic fat tails, healthy movement) at ~10k active bots. EXP3 (rotating the full 20k) was
+  realism-NEUTRAL, and the project's core LLN finding is that MORE independent bots AVERAGE OUT imbalance (flatter tape,
+  not richer) — the realism comes from the ROTATOR's coordinated flow, not headcount. So this project buys DEPTH/
+  headroom for more real users; **when growing the cap (Phase 3-4) you MUST re-measure corr/tails and STOP if they
+  dilute.** Don't expect a livelier market from more bots.
+- **★ HARD PREREQUISITE for Phase 3-4 (fleet growth): the standalone-armed-stop LEAK must be fixed FIRST.** Bots emit
+  a firehose of ~570 never-triggering standalone stops/MIN at 10k (additive — `BuildProtectiveStopAsync` never cancels
+  the prior stop; ~58/bot piled up to 1.16M). Growing to 50k scales that to ~2,800/min ⇒ it re-creates the exact
+  maint/tick blowup (the periodic prune scans the O(book) armed-stop pool) that this whole perf effort is about —
+  WORSE. Fix the source first: **"replace-old"** (cancel the bot's prior standalone stop when placing a new one, via
+  the safe per-order path) bounds the pool to ~1/bot. Spec + rationale = **`docs/ultraplan-prompt-maint-tick-scaling.md`**
+  (Workstream 1). An interim `Bots:StopMaxAgeSec=600` (per-order cull, capped) is LIVE on prod holding the 10k pool
+  ~flat, but its cull can't keep up at 50k. **Do NOT raise `MaxBotCap` in Phase 4 until replace-old (or B2) has landed
+  + soaked CK-clean.**
+- Fleet is currently HELD at ~10k BY DESIGN (Kiesh); this plan's Phase 0-2 (foundation + threading, byte-identical,
+  default-off) is safe to build regardless — only Phase 3-4 (actually raising the cap) is gated on the above.
+
 Full design + rationale + the "no genuine blocker" verdict = **`docs/COUNCIL_DECISION_bot_parallelism.md`**
 (read it). This is the execution checklist. Goal: raise the fleet ceiling (20k → 50-100k at a low tick) by
 parallelizing the read-only bot-decision sweep — the SAFE boundary (engine stays single-threaded). CK=0 +
