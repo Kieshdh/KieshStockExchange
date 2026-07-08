@@ -132,8 +132,16 @@ new seed without a redeploy).
   reach 20k), drift deepened −5.3→−6.7%. CK=0. **CONCLUSION: rotating the full fleet gives NO realism benefit + costs
   perf ⇒ 50k-rotate would be STRICTLY WORSE (heavier maint/iteration, cap more suppressed, no gain). Fixed ~10k-
   participant market is the RIGHT config; the other 10k seeds being idle is fine.** Reverted to Slots 4.
-- **★ PERF NOTE (for the bot-parallelism track):** the `maint` phase scales badly (~40×) with enabled-bot count — a real
-  O(N)-per-tick inefficiency surfaced by the 20k-enabled test. Worth investigating if fleet size is ever raised.
+- **2026-07-09 ~11:31 — EXP4 + maint ROOT CAUSE (CORRECTED).** The maint blowup (~250ms/tick, tick→450ms) is NOT
+  Slots-driven — it's **time/book-driven**. Root: `RunPeriodicMaintenanceAsync` (the `maint` bucket, AiTradeService.cs:1943)
+  bundles the periodic heavy tasks — `RefreshAssets` + `PruneWorstOrdersAsync` (scans the growing book) + `LogSnapshot`
+  (O(bots×stocks) ≈ 20k×50 = 1M ops). The resting-limit book grew UNBOUNDED to **210k Open + 984k Pending** over ~12h
+  ⇒ the prune scan + snapshot got heavy. **EXP4 = `OrderMaxAgeSec=1800`** (expires stale resting LIMIT orders only, not
+  stops; CK-safe, reversible): modest cut (maint ~250→210ms in 15m), bounds the Open pool gradually (history plateau ~110k).
+  KEPT as 48h-soak hygiene (prevents unbounded book growth over the run). The full maint cost (O(bots×stocks) snapshot +
+  the 984k Pending advanced-order pool) is a **PERF-TRACK item** (not market realism) — noted, not chased here.
+- **★ MARKET REALISM = UNAFFECTED + still converged/good** across all of EXP3/EXP4 (corr, tails, movement, CK=0). The
+  fleet-size + maint threads are CAPACITY/PERF, orthogonal to the (good) market character.
 - **★ KIESH DECISION (2026-07-09): HOLD the fleet at ~10k to PROTECT REALISM** (do NOT flip the staged scaler to 20k —
   more independent bots = LLN-flattening risk to the validated corr/tails). Capacity-vs-realism tradeoff resolved = realism wins.
 - **POSTURE NOW = HOLD + SOAK.** Market converged; further rapid changes risk degrading a good market. Periodic health
