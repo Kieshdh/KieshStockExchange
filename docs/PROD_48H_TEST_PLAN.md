@@ -114,9 +114,20 @@ new seed without a redeploy).
   the reliable 3h 0.244). Side effects: drift −4.7→−5.2% + trades/sec 300→240 (book thinned). Verdict: no benefit + mild
   harm → reverted to 0.10. **LEARNINGS: (1) corr is already in-band (0.244/3h) and CANNOT be tuned on sub-hour prod
   windows (noise-dominated) — leave the rotator at 0.10; (2) rapid restarts each perturb the drift settling.**
-- **NEXT:** hold prod STEADY (no restarts) + long uninterrupted drift watch (~60m from 04:04) to read the true drift
-  trajectory (settling vs linear). If it settles acceptably → done. If still linear ~−0.5%/h → escalate DipBuy 3.0→4.0
-  (one change) or attack the sell-lean at source. Mild settling down-drift is realistic; exact-neutral is hard (structural).
+- **2026-07-09 ~05:05 — ★ MARKET TUNING CONVERGED.** 60-min UNINTERRUPTED drift watch (clean config, no restarts):
+  service-relative drift 0.00 → +0.25 → −0.30 → recovered, oscillating ~−0.15, ended −0.11 = **−0.11%/h, MEAN-REVERTING**
+  (dipped then bounced, NOT a slide). Absolute from-open −5.18%(04:00)→−5.30%(05:03) = −0.11%/h confirms. The earlier
+  "−0.7%/h" was the EXP2 rotator confound + restart transients. **With the clean config uninterrupted, drift is SETTLED
+  ~−5%, flat, mean-reverting.** trades/sec recovered to 257, CK=0, healthy. **Full scorecard all in-band: drift settled
+  flat; corr factorR2 0.244@10m; kurtosis +7.6; range median 7% / extremes rare; CK=0.** Best realism the project has
+  produced, at 20k-seed scale on prod.
+- **★ CONFIRMED PROD CONFIG (converged, Production.json, reversible):** DipBuyStrength 3.0 · Rotator 0.10 + BankEstimate on ·
+  TradeIntervalMs 250 + Slots 4 · Scaler correction STAGED OFF (fleet held ~10k **BY DESIGN**).
+- **★ KIESH DECISION (2026-07-09): HOLD the fleet at ~10k to PROTECT REALISM** (do NOT flip the staged scaler to 20k —
+  more independent bots = LLN-flattening risk to the validated corr/tails). Capacity-vs-realism tradeoff resolved = realism wins.
+- **POSTURE NOW = HOLD + SOAK.** Market converged; further rapid changes risk degrading a good market. Periodic health
+  monitoring over the 48h (CK=0, drift stays bounded/oscillating, no runaway, tape healthy). NO more config changes unless
+  a regression appears. Stage-2 scaler + bot-parallelism = separate perf tracks, NOT market tuning, held.
 - **ROLLBACK (no backup):** box `git checkout master` (1d3fdd3) → rebuild → drop+create kse → migrate → up (reseeds
   prior embedded xlsx). Fast partial = flip experimental Production.json flags off + `up -d --build server`.
 - Box deploy commands (exact) for reuse are in the RUNNING LOG deploy entry above.
