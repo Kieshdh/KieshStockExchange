@@ -109,8 +109,14 @@ new seed without a redeploy).
   +5.49** (real +3..+8 = realistic fat tails). The rotator cohort + 20k scale delivers the correlation + tails local
   soaks couldn't. Market is HEALTHY; tuning = optimization now. Correlation export: `data/prod/prod_usd_close.csv` via
   `ssh ... COPY(...) TO STDOUT` → `py scripts/cross_stock_diag.py --csv ... --horizons 1,5,10`.
-- **NEXT:** confirm DipBuy-3.0 drift holds ~1h (don't confound), THEN optional EXP2 = rotator `ParticipationFraction`
-  0.10→0.15 to push corr toward 0.3+ (revert if book thins / drift returns).
+- **2026-07-09 ~03:20 — EXP2: rotator ParticipationFraction 0.10→0.15 → REVERTED ~04:04.** Matched 38-min pre/post
+  windows: corr UNCHANGED (1m factorR2 0.052→0.052, 5m 0.080→0.063, 10m 0.131→0.155 = noise; both windows 0.05-0.15 ≪
+  the reliable 3h 0.244). Side effects: drift −4.7→−5.2% + trades/sec 300→240 (book thinned). Verdict: no benefit + mild
+  harm → reverted to 0.10. **LEARNINGS: (1) corr is already in-band (0.244/3h) and CANNOT be tuned on sub-hour prod
+  windows (noise-dominated) — leave the rotator at 0.10; (2) rapid restarts each perturb the drift settling.**
+- **NEXT:** hold prod STEADY (no restarts) + long uninterrupted drift watch (~60m from 04:04) to read the true drift
+  trajectory (settling vs linear). If it settles acceptably → done. If still linear ~−0.5%/h → escalate DipBuy 3.0→4.0
+  (one change) or attack the sell-lean at source. Mild settling down-drift is realistic; exact-neutral is hard (structural).
 - **ROLLBACK (no backup):** box `git checkout master` (1d3fdd3) → rebuild → drop+create kse → migrate → up (reseeds
   prior embedded xlsx). Fast partial = flip experimental Production.json flags off + `up -d --build server`.
 - Box deploy commands (exact) for reuse are in the RUNNING LOG deploy entry above.
