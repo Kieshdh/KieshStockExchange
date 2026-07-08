@@ -31,6 +31,7 @@ namespace KieshStockExchange.Tests;
 /// the test sets), <c>StockProfileService(enabled:false)</c> (neutral mult = 1 ⇒ cap == overheatCap), and
 /// RefillThrottle left off (ctx.RefillGate null ⇒ MoverGate is a no-op, matching the shipping config).
 /// </summary>
+[Collection("BotPrecomputeSerial")]
 public class BotPrecomputeEquivalenceTests
 {
     private const CurrencyType USD = CurrencyType.USD;
@@ -207,3 +208,13 @@ public class BotPrecomputeEquivalenceTests
         }
     }
 }
+
+/// <summary>
+/// Serial collection: the two-sweep byte-identity comparison drives <c>ComputeOrderAsync</c>, whose
+/// order-type / over-band path reads process-global statics (same class of tunables that make
+/// FxRate/MidReference/PriceTick serialize). Running this suite non-parallel keeps a concurrent test from
+/// mutating that shared config mid-sweep and flipping one decision (lazy vs eager) — a test-isolation
+/// guarantee only; no product code and no assertion is affected.
+/// </summary>
+[CollectionDefinition("BotPrecomputeSerial", DisableParallelization = true)]
+public sealed class BotPrecomputeSerialCollection { }
