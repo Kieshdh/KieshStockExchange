@@ -61,48 +61,48 @@ internal sealed class AiBotContext
     internal readonly ConcurrentDictionary<(int, CurrencyType), decimal>  ReactionRefPrices     = new();
     internal readonly ConcurrentDictionary<(int, CurrencyType), DateTime> ReactionRefUpdatedUtc = new();
 
-    internal readonly Dictionary<int, DateTime> BurstEndTimes  = new();
+    internal readonly ConcurrentDictionary<int, DateTime> BurstEndTimes  = new();
 
     // §A1 inertia: per-bot directional STANCE (dir +1 buy / -1 sell) that persists until `until`, so a
     // bot's order flow is one-directional over the stance window instead of re-rolling buy/sell every
     // tick. Keyed by aiUserId, mirroring BurstEndTimes. Empty (and never touched) when the flag is off.
-    internal readonly Dictionary<int, (sbyte dir, DateTime until)> Stances = new();
+    internal readonly ConcurrentDictionary<int, (sbyte dir, DateTime until)> Stances = new();
 
     // §reaction-persistence split: per-bot CONTINUOUS directional pressure (a slowly-decaying AR(1) memory) plus
     // its per-bot last-update tick for the time-based decay. Replaces the §A1 blindness stance with a two-clock
     // model — a FAST reaction feeds `Pressures`, which decays over a per-bot half-life (minutes) to carry trend +
-    // correlation. Loop-thread-only ⇒ plain Dictionary (mirrors Stances; NOT written by OnQuoteUpdated, so it must
-    // stay non-concurrent — contrast ReactionRefPrices above). Keyed by aiUserId (the decision granularity: one
+    // correlation. ConcurrentDictionary (see the per-bot-state note at the region header): keyed by aiUserId, so
+    // single-writer-per-key under the parallel sweep. Keyed by aiUserId (the decision granularity: one
     // ChooseOrderType call per bot per tick in its home currency). Empty (never touched) when the flag is off.
-    internal readonly Dictionary<int, decimal>  Pressures           = new();
-    internal readonly Dictionary<int, long>     PressureUpdatedTicks = new();
+    internal readonly ConcurrentDictionary<int, decimal>  Pressures           = new();
+    internal readonly ConcurrentDictionary<int, long>     PressureUpdatedTicks = new();
 
     // R5 §B: per-(userId, currency) PERCEIVED anchor tilt (EWMA). A bot's slowly-updating view of the
     // true anchor tilt — staggered by its Lateness so the cohort's correction spreads across minutes
     // instead of snapping back in lockstep. NOT cleared per tick (it's persistent state); cleared only
     // on ClearAll. Empty (and never touched) when Bots:AnchorReactionLag is off.
-    internal readonly Dictionary<(int userId, CurrencyType ccy), decimal> AnchorTiltLag = new();
+    internal readonly ConcurrentDictionary<(int userId, CurrencyType ccy), decimal> AnchorTiltLag = new();
 
     // #1: per-(userId, currency) PERCEIVED directional tilt (EWMA). Same Lateness-staggered lag as the
     // anchor, but on the FAST directional/sentiment loop — the slope reaction the bounce diagnostic
     // implicated as the genuine 1-min mean-reversion driver. NOT cleared per tick; cleared on ClearAll.
-    internal readonly Dictionary<(int userId, CurrencyType ccy), decimal> DirectionalLag = new();
+    internal readonly ConcurrentDictionary<(int userId, CurrencyType ccy), decimal> DirectionalLag = new();
 
     // §perceived-price desync (Bots:PerceivedPriceDesync): per-(userId, stockId, currency) PERCEIVED PRICE EWMAs —
     // a fast and a slow one — that each bot reacts to instead of the shared live price / shared sentiment slope.
     // The smoothing rate is dispersed per bot by BOTH Lateness AND a salted hash of AiUserId, so even same-Lateness,
     // same-tick bots perceive different prices — breaking the cohort lockstep that DirectionalReactionLag (keyed on
-    // Lateness only) could not. Loop-thread-only ⇒ plain Dictionary (mirrors DirectionalLag). NOT cleared per tick;
-    // cleared on ClearAll. Empty (and never touched) when the flag is off.
-    internal readonly Dictionary<(int userId, int stockId, CurrencyType ccy), decimal> PerceivedFast = new();
-    internal readonly Dictionary<(int userId, int stockId, CurrencyType ccy), decimal> PerceivedSlow = new();
+    // Lateness only) could not. ConcurrentDictionary (single-writer per (userId,…) key under the parallel sweep).
+    // NOT cleared per tick; cleared on ClearAll. Empty (and never touched) when the flag is off.
+    internal readonly ConcurrentDictionary<(int userId, int stockId, CurrencyType ccy), decimal> PerceivedFast = new();
+    internal readonly ConcurrentDictionary<(int userId, int stockId, CurrencyType ccy), decimal> PerceivedSlow = new();
 
     // §impact-decouple B (Bots:ImpactDecoupleHold): per-(userId, currency) sample-and-hold of the combined
     // directional stance plus the tick it was last changed. A bot may change its stance at most once per the
     // hold window, so it cannot fade its own move within the minute it caused (the HARD refractory the soft
-    // EWMA lag above lacked). Loop-thread-only ⇒ plain Dictionary (mirrors DirectionalLag). NOT cleared per
-    // tick; cleared only on ClearAll. Empty (and never touched) when the flag is off.
-    internal readonly Dictionary<(int userId, CurrencyType ccy), (decimal value, long lastChangeTicks)> ReactionHold = new();
+    // EWMA lag above lacked). ConcurrentDictionary (single-writer per (userId,ccy) key under the parallel sweep).
+    // NOT cleared per tick; cleared only on ClearAll. Empty (and never touched) when the flag is off.
+    internal readonly ConcurrentDictionary<(int userId, CurrencyType ccy), (decimal value, long lastChangeTicks)> ReactionHold = new();
 
     // Reset by CheckDailyRefresh so a tx that fills across the day boundary isn't double-counted.
     internal readonly HashSet<int>              ProcessedTxIds = new();
@@ -117,18 +117,21 @@ internal sealed class AiBotContext
 
     #region Per-tick memoization caches (patch 0001)
     // Cleared at the top of each tick by AiTradeService.CollectPendingOrdersAsync via ClearTickCaches.
-    // Plain Dictionary (not ConcurrentDictionary) because they're touched only by the bot-loop
-    // thread — OnQuoteUpdated writes only to StockPrices/PreviousPrices/SmoothedPrices.
+    // The genuinely-shared per-STOCK caches below (OverBand*/Fundamental/SeedPrice + RefillGateCache) are
+    // ConcurrentDictionary: they are warmed once per tick by PrecomputeSharedTickCaches (serial today) and
+    // read by every bot, so under the future parallel-collect sweep they are pure-read shared state. The
+    // remaining per-BOT memo caches (Committed/Watchlist*) stay plain Dictionary for now — they are only
+    // touched by the single bot-loop thread and are retyped when the parallel branch lands.
+    // (OnQuoteUpdated writes only to StockPrices/PreviousPrices/SmoothedPrices, all already Concurrent.)
     internal long TickId;
     // §impact-decouple B: the loop's single per-tick now.Ticks, stamped beside TickId in
     // CollectPendingOrdersAsync so HeldDirectional reads one deterministic clock for every bot in the tick
     // (no per-bot NowUtc() call, no within-tick boundary skew).
     internal long TickNowTicks;
-    internal readonly Dictionary<(int, CurrencyType), bool>     OverBandBuyCache  = new();
-    internal readonly Dictionary<(int, CurrencyType), bool>     OverBandSellCache = new();
-    internal readonly Dictionary<(int, CurrencyType), decimal>  FundamentalCache  = new();
-    internal readonly Dictionary<(int, CurrencyType), decimal>  SeedPriceCache    = new();
-    internal readonly Dictionary<(int, CurrencyType), decimal?> MidPriceCache     = new();
+    internal readonly ConcurrentDictionary<(int, CurrencyType), bool>     OverBandBuyCache  = new();
+    internal readonly ConcurrentDictionary<(int, CurrencyType), bool>     OverBandSellCache = new();
+    internal readonly ConcurrentDictionary<(int, CurrencyType), decimal>  FundamentalCache  = new();
+    internal readonly ConcurrentDictionary<(int, CurrencyType), decimal>  SeedPriceCache    = new();
     internal readonly Dictionary<int, AiBotDecisionService.CommittedTotals> CommittedCache = new();
     internal readonly Dictionary<(int userId, CurrencyType), decimal> WatchlistMomentumCache    = new();
     internal readonly Dictionary<(int userId, CurrencyType), decimal> WatchlistSentimentCache   = new();
@@ -144,14 +147,15 @@ internal sealed class AiBotContext
     // §refill-throttle (Bots:RefillThrottle): the mover-response gate. Non-null ONLY when the lever is
     // enabled (assigned from AiTradeService), so every refill-throttle call site is byte-identical and
     // draw-free when off. The per-tick cache memoizes the gate's (sign,intensity) per stock so the first
-    // acting bot on a stock advances the control loop once and the rest read it — mirrors MidPriceCache.
+    // acting bot on a stock advances the control loop once and the rest read it. Warmed deterministically by
+    // PrecomputeSharedTickCaches so the parallel region is pure-read on it; ConcurrentDictionary for that reason.
     internal RefillThrottleGate? RefillGate;
-    internal readonly Dictionary<int, (sbyte sign, decimal intensity)> RefillGateCache = new();
+    internal readonly ConcurrentDictionary<int, (sbyte sign, decimal intensity)> RefillGateCache = new();
 
     internal void ClearTickCaches()
     {
         OverBandBuyCache.Clear(); OverBandSellCache.Clear();
-        FundamentalCache.Clear(); SeedPriceCache.Clear(); MidPriceCache.Clear();
+        FundamentalCache.Clear(); SeedPriceCache.Clear();
         CommittedCache.Clear();
         WatchlistMomentumCache.Clear(); WatchlistSentimentCache.Clear();
         WatchlistValueGapCache.Clear(); WatchlistRecentGapCache.Clear();
@@ -550,7 +554,9 @@ internal sealed class AiBotContext
     // L=0 → maxAlpha (fast); L=1 → minAlpha (slow). Seeds at the target on first sight (no startup
     // transient). Pure/deterministic — no RNG. Per-decision EWMA, so bots that decide more often track
     // faster in wall-clock terms (active traders react faster).
-    private static decimal LaggedEwma(Dictionary<(int userId, CurrencyType ccy), decimal> store,
+    // §bot-parallelism Phase 0: IDictionary accepts both the (now Concurrent) AnchorTiltLag/DirectionalLag
+    // stores; each (userId,ccy) key is single-writer-per-bot so the TryGetValue→indexer RMW stays race-free.
+    private static decimal LaggedEwma(IDictionary<(int userId, CurrencyType ccy), decimal> store,
         int userId, CurrencyType ccy, decimal target, decimal lateness, decimal minAlpha, decimal maxAlpha)
     {
         var L = Clamp01(lateness);

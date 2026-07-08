@@ -1598,6 +1598,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _ctx.TickId = Interlocked.Read(ref _tickCount);
         _ctx.TickNowTicks = now.Ticks;   // §impact-decouple B: one deterministic clock for all bots this tick
         _ctx.ClearTickCaches();
+        // §bot-parallelism Phase 0: warm the shared per-stock caches once, deterministically, before the
+        // sweep. Byte-identical to the prior lazy populate-on-first-read (values are frozen during collect);
+        // makes the future parallel-collect region pure-read on these caches. Serial today.
+        _decisions.PrecomputeSharedTickCaches(_ctx);
 
         var pending = new List<(AIUser user, Order order)>();
         var advanced = new List<(AIUser user, BotAdvancedDecision dec)>();

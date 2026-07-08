@@ -2011,6 +2011,33 @@ internal sealed class AiBotDecisionService
         return Math.Max(0.001m, off) * _distanceMult;   // §P6 tightness dial
     }
 
+    // §bot-parallelism Phase 0: warm the genuinely-shared per-STOCK tick caches in ONE deterministic pass
+    // over every (stock, currency) listing, ascending by stockId, right after ClearTickCaches() and BEFORE
+    // the bot sweep. Today the sweep populates these lazily on first read; because each value is a pure
+    // function of state that is frozen during the collect phase (ctx.StockPrices, _profiles, _priceMemory,
+    // _funds, _stocks), eager warming is VALUE-IDENTICAL to lazy warming — so this is byte-identical while
+    // still serial. Its purpose is to make the future parallel-collect region PURE-READ on these caches (no
+    // populate-on-miss races), and it removes the redundant per-bot recompute even in the serial path.
+    // The per-cache write is self-gated: Fundamental/SeedPrice/IsOverBand only cache when _memoizeTickValues
+    // (else they recompute and this pass is a harmless no-op on them), and MoverGate is a no-op while
+    // ctx.RefillGate is null (the prod default) — so on the shipping config this pass touches only the pure
+    // memo caches and changes no observable behavior.
+    internal void PrecomputeSharedTickCaches(AiBotContext ctx)
+    {
+        foreach (var stockId in _stocks.ById.Keys.OrderBy(id => id))
+        {
+            foreach (var l in _stocks.GetListings(stockId))
+            {
+                var ccy = l.CurrencyType;
+                Fundamental(stockId, ccy, ctx);              // → ctx.FundamentalCache
+                SeedPrice(stockId, ccy, ctx);                // → ctx.SeedPriceCache
+                IsOverBand(ctx, stockId, ccy, isBuy: true);  // → ctx.OverBandBuyCache
+                IsOverBand(ctx, stockId, ccy, isBuy: false); // → ctx.OverBandSellCache
+                ctx.MoverGate(stockId, ccy);                 // → ctx.RefillGateCache (no-op while RefillGate null)
+            }
+        }
+    }
+
     // §P6 value-band veto (shared by the plain and advanced order paths): true when an order would chase
     // price past the personality-scaled overheat band — buying a stock already far above fundamental, or
     // selling/shorting one already far below. Brackets and shorts route through this too, so the advanced
