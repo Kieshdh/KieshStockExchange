@@ -127,3 +127,39 @@ construction ⇒ relief is immediate + structural, so a 45m watched soak suffice
 StopMaxAgeSec INTERIM, a cull that couldn't keep pace — the structural fix doesn't need hours to prove); both order
 pools plateau; market realism byte-unaffected (maintenance is not a decision-path change); new levers default-off.
 Interim prod mitigation already on: `Bots:OrderMaxAgeSec=1800` (bounds the Open limit pool only) — superseded by this.
+
+---
+
+## ★★ W1 SOAK RESULT + WORKSTREAM 1b (B3) — the reload is a SECOND O(pool) cost (2026-07-09)
+W1 (replace-old + B2, `Bots:StopReplaceOld`+`Bots:PruneLimitOnly` on, `StopMaxAgeSec=0`) shipped default-off (`884fd28`),
+flags flipped on prod (`cf4df62`), soaked 45m with monitors @15/30/45m:
+- **CK=0 at every checkpoint.** replace-old is conservation-safe.
+- **Pool draining:** 1,184,129 → 1,160,582 → 1,138,139 (−46k/45m, ~1.5k/min net) — replace-old works, but drains the
+  1.14M backlog only GRADUALLY (~12h), because a bot only cancels its prior stop when it re-arms that same (stock,side).
+- **maint (ms):** 185/242/233 → 350/230/202 → 227/125/83. **tick 208–540ms — did NOT reach ~250ms.**
+- **adv phase elevated 42–104ms** (the replace-old per-order cancels, while the backlog is still large).
+- **KEY:** maint still TRACKS the pool size (falls as the pool falls) — the opposite of what B2 promised (flat-low
+  regardless of pool).
+
+**DIAGNOSIS (confirmed in code):** B2 made `PruneWorstOrdersAsync` limit-only, BUT the maint phase
+(`RunPeriodicMaintenanceAsync`, `AiTradeService.cs:2018`) ALSO calls `RefreshAssetsAsync` (`AiBotStateService.cs:103`)
+on the reload interval, which re-fetches ALL open orders incl the ~1.18M armed stops via `GetOpenOrdersForUsersAsync`
+and rebuilds `ctx.OpenOrders` (`~:126-149`) = **O(pool)**. That periodic reload is the residual pool-proportional maint
+cost B2 doesn't touch ⇒ the tick only recovers as the pool drains (slow), not immediately.
+
+**CONSTRAINT (the wrinkle B2 already respected):** you can't just skip armed stops on reload — the decision path reads
+`ctx.OpenOrders` for the per-bot open-order cap (`AiBotDecisionService.cs:639`) + the reserved-qty aggregates
+(`:1562`, `:1942`), which include armed stops (a bot's reserved inventory includes its armed sell-stops). Dropping them
+changes those reads = behavior change.
+
+**B3 = the next fix (design + implement, default-off/byte-identical, CK-neutral):** get the tick to ~250ms WITHOUT
+waiting ~12h for the drain. Candidate directions (pick/blend/beat):
+  (i) **Reload not O(pool):** don't re-fetch/rebuild armed stops every cycle (they change rarely) — load once +
+     maintain incrementally, or reload limits every cycle and armed stops far less often; keep the reserved-qty/cap
+     reads correct (maintain the armed-stop reserved aggregates separately so `OpenOrders` needn't hydrate every stop).
+  (ii) **Drain faster:** a bounded background cull of the OLD standalone armed stops (the `StopMaxAgeSec` interim shape)
+     running ALONGSIDE replace-old, so 1.14M drains in a couple hours not ~12h — bounded per sweep, SAFE per-order
+     cancel, CK-gated.
+  (iii) whatever the council finds is the true minimal fix.
+Acceptance: tick recovers toward ~250ms — validated by a closely-watched 45m prod soak, monitors @15/30/45m (maint ms
+drops + holds INDEPENDENT of the stop pool, CK=0, pool draining). W1 stays on prod meanwhile (CK-safe + draining).
