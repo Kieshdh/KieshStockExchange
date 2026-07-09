@@ -65,7 +65,7 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
 
     # Append stock data
     for stock_id, data in STOCKS.items():
-        sheets["Stocks"].append([stock_id, data["ticker"], data["name"]])
+        sheets["Stocks"].append([stock_id, data["ticker"], data["name"], data["sector"]])
 
     # Append listings data. Cross-listed → USD primary + EUR row at usd/fx_rate
     # ± LISTING_PRICE_JITTER. USD-only → single USD row. EUR-only → single

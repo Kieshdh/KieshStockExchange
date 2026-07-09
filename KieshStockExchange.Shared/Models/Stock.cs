@@ -30,6 +30,15 @@ public class Stock : IValidatable
         set => _companyName = value?.Trim() ?? string.Empty;
     }
 
+    // Seed-authoritative human-readable GICS-ish group (e.g. "Semiconductors"). Empty on legacy seeds ⇒
+    // parsed to Sector.Unknown ⇒ the mechanism falls back to modulo. Not required by IsValid (old seeds stay valid).
+    private string _sector = string.Empty;
+    public string Sector
+    {
+        get => _sector;
+        set => _sector = value?.Trim() ?? string.Empty;
+    }
+
     // Total shares issued for this company (currency-agnostic — one pool across all currency listings).
     // Set at seed time; the conservation invariant is Σ(Position.Quantity over all holders) == SharesOutstanding.
     // Used for marketcap (= price × SharesOutstanding).

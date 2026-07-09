@@ -14,6 +14,8 @@ public class StockRow
 
     [Column("CompanyName")] public string CompanyName { get; set; } = string.Empty;
 
+    [Column("Sector")] public string Sector { get; set; } = string.Empty;
+
     [Column("SharesOutstanding")] public int SharesOutstanding { get; set; }
 
     [Column("CreatedAt")] public DateTime CreatedAt { get; set; }
@@ -26,6 +28,7 @@ public static class StockMapper
         StockId = r.StockId,
         Symbol = r.Symbol,
         CompanyName = r.CompanyName,
+        Sector = r.Sector,
         SharesOutstanding = r.SharesOutstanding,
         CreatedAt = r.CreatedAt,
     };
@@ -35,6 +38,7 @@ public static class StockMapper
         StockId = s.StockId,
         Symbol = s.Symbol,
         CompanyName = s.CompanyName,
+        Sector = s.Sector,
         SharesOutstanding = s.SharesOutstanding,
         CreatedAt = s.CreatedAt,
     };

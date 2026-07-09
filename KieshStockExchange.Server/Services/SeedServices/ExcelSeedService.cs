@@ -99,6 +99,8 @@ public sealed class ExcelSeedService : IExcelSeedService
 
             var symbol = row["Ticker"]?.ToString() ?? string.Empty;
             var companyName = row["CompanyName"]?.ToString() ?? string.Empty;
+            // §sector: defensive — old workbooks predate the column ⇒ "" ⇒ Sector.Unknown ⇒ modulo fallback.
+            var sector = stockTable.Columns.Contains("Sector") ? row["Sector"]?.ToString() ?? string.Empty : string.Empty;
 
             if (string.IsNullOrEmpty(symbol) || string.IsNullOrWhiteSpace(companyName))
             {
@@ -106,7 +108,7 @@ public sealed class ExcelSeedService : IExcelSeedService
                 continue;
             }
 
-            Stock stock = new Stock { StockId = stockId, Symbol = symbol, CompanyName = companyName };
+            Stock stock = new Stock { StockId = stockId, Symbol = symbol, CompanyName = companyName, Sector = sector };
             if (!stock.IsValid())
             {
                 _logger.LogWarning("Failed to register stock #{StockId}: {Symbol}.", stockId, symbol);

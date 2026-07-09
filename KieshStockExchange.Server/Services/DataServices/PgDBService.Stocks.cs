@@ -7,7 +7,7 @@ namespace KieshStockExchange.Services.DataServices;
 
 public sealed partial class PgDBService
 {
-    private const string StockCols     = @"""StockId"",""Symbol"",""CompanyName"",""CreatedAt""";
+    private const string StockCols     = @"""StockId"",""Symbol"",""CompanyName"",""Sector"",""CreatedAt""";
     private const string ListingCols   = @"""ListingId"",""StockId"",""Currency"",""IsPrimary"",""SeedPrice"",""CreatedAt""";
     private const string StockPriceCols = @"""PriceId"",""StockId"",""Price"",""Currency"",""Timestamp""";
 
@@ -42,8 +42,8 @@ public sealed partial class PgDBService
         await using var c = await OpenAsync(ct);
         var row = StockMapper.ToRow(stock);
         row.StockId = await c.ExecuteScalarAsync<int>(@"
-            INSERT INTO ""Stocks"" (""Symbol"",""CompanyName"",""CreatedAt"")
-            VALUES (@Symbol,@CompanyName,@CreatedAt)
+            INSERT INTO ""Stocks"" (""Symbol"",""CompanyName"",""Sector"",""CreatedAt"")
+            VALUES (@Symbol,@CompanyName,@Sector,@CreatedAt)
             RETURNING ""StockId""", row);
         stock.StockId = row.StockId;
     }
@@ -53,7 +53,8 @@ public sealed partial class PgDBService
         if (!stock.IsValid()) throw new ArgumentException("Stock entity is not valid", nameof(stock));
         await using var c = await OpenAsync(ct);
         await c.ExecuteAsync(@"
-            UPDATE ""Stocks"" SET ""Symbol"" = @Symbol, ""CompanyName"" = @CompanyName, ""CreatedAt"" = @CreatedAt
+            UPDATE ""Stocks"" SET ""Symbol"" = @Symbol, ""CompanyName"" = @CompanyName,
+              ""Sector"" = @Sector, ""CreatedAt"" = @CreatedAt
             WHERE ""StockId"" = @StockId", StockMapper.ToRow(stock));
     }
 
@@ -63,11 +64,11 @@ public sealed partial class PgDBService
         await using var c = await OpenAsync(ct);
         var row = StockMapper.ToRow(stock);
         var returned = await c.ExecuteScalarAsync<int>(@"
-            INSERT INTO ""Stocks"" (""StockId"",""Symbol"",""CompanyName"",""CreatedAt"")
-            VALUES (@StockId,@Symbol,@CompanyName,@CreatedAt)
+            INSERT INTO ""Stocks"" (""StockId"",""Symbol"",""CompanyName"",""Sector"",""CreatedAt"")
+            VALUES (@StockId,@Symbol,@CompanyName,@Sector,@CreatedAt)
             ON CONFLICT (""StockId"") DO UPDATE SET
               ""Symbol"" = EXCLUDED.""Symbol"", ""CompanyName"" = EXCLUDED.""CompanyName"",
-              ""CreatedAt"" = EXCLUDED.""CreatedAt""
+              ""Sector"" = EXCLUDED.""Sector"", ""CreatedAt"" = EXCLUDED.""CreatedAt""
             RETURNING ""StockId""", row);
         stock.StockId = returned;
     }

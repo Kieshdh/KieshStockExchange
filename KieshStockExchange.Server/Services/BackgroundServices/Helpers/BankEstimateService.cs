@@ -1,4 +1,5 @@
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using Microsoft.Extensions.Logging;
 using System.Globalization;
@@ -46,6 +47,7 @@ internal sealed class BankEstimateService
     private const double SectorDriftSoftWallK = 0.1;
 
     private readonly IStockService _stocks;
+    private readonly ISectorMap? _sectorMap;        // §sector: real stock→sector map; null/empty ⇒ modulo fallback
     private readonly StockProfileService _profiles;
     private readonly BotSentimentService _sentiment;
     private readonly ILogger<BankEstimateService> _logger;
@@ -55,7 +57,8 @@ internal sealed class BankEstimateService
     private readonly double _alpha;                 // weight on the (zero-meaned) sentiment vs the prior estimate
     private readonly double _poissonMeanIntervalSec;
     private readonly double _wrongnessFraction;     // idiosyncratic variance scale (the estimate is sometimes wrong)
-    private readonly int    _sectorCount;
+    private readonly int    _sectorCount;           // fallback modulo count (used only when the real map is absent)
+    private readonly bool   _useRealSectors;        // gate the real map (false ⇒ force the config-modulo path even if seeded)
 
     // Per-stock published estimate + its previous published value (for the Rotator's estimate-velocity term).
     private readonly Dictionary<int, double> _estimate     = new();
@@ -74,9 +77,11 @@ internal sealed class BankEstimateService
     internal BankEstimateService(IStockService stocks, StockProfileService profiles,
         BotSentimentService sentiment, ILogger<BankEstimateService> logger,
         bool enabled = false, double alpha = 0.3, double poissonMeanIntervalSec = 30.0,
-        double wrongnessFraction = 0.15, int sectorCount = 1, Func<int, double>? exogShock = null)
+        double wrongnessFraction = 0.15, ISectorMap? sectorMap = null, int sectorCount = 1,
+        Func<int, double>? exogShock = null, bool useRealSectors = true)
     {
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
+        _sectorMap = sectorMap;
         _profiles  = profiles  ?? throw new ArgumentNullException(nameof(profiles));
         _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
         _logger    = logger    ?? throw new ArgumentNullException(nameof(logger));
@@ -86,7 +91,16 @@ internal sealed class BankEstimateService
         _poissonMeanIntervalSec = Math.Max(0.01, poissonMeanIntervalSec);
         _wrongnessFraction = Math.Max(0.0, wrongnessFraction);
         _sectorCount = Math.Max(1, sectorCount);
+        _useRealSectors = useRealSectors;
     }
+
+    // §sector: the real map supersedes the config modulo count once sectors are seeded. Built lazily, so it is
+    // evaluated per-Tick (cheap after the first build) rather than snapshotted before the catalog loads. No real
+    // sectors ⇒ these fall back to the config modulo path ⇒ byte-identical to the pre-feature engine.
+    private bool UseRealSectors => _useRealSectors && _sectorMap is { HasRealSectors: true };
+    private int EffectiveSectorCount => UseRealSectors ? _sectorMap!.SectorCount : _sectorCount;
+    // Stable per-sector index (the RNG-walk key). Ordinal from the real map, else stockId % modulo count.
+    private int SectorOrdinal(int stockId) => UseRealSectors ? _sectorMap!.OrdinalOf(stockId) : stockId % _sectorCount;
 
     /// <summary>Fractional deviation from seed of the current published estimate (0 when disabled/unseen).</summary>
     internal double BankTarget(int stockId)
@@ -105,10 +119,12 @@ internal sealed class BankEstimateService
         _lastTickUtc = now;
         _simTick++;
 
-        // 1) Sector shared-drift bounded walk (only when sectors are enabled). One draw per sector, fixed order.
-        if (_sectorCount > 1)
+        // 1) Sector shared-drift bounded walk (only when sectors are enabled). One draw per sector, fixed order —
+        //    the ordinal order (real map or modulo) is stable ⇒ reproducible draw sequence.
+        int sectorCount = EffectiveSectorCount;
+        if (sectorCount > 1)
         {
-            for (int sector = 0; sector < _sectorCount; sector++)
+            for (int sector = 0; sector < sectorCount; sector++)
             {
                 double prev = _sectorDrift.GetValueOrDefault(sector);
                 double step = (_rng.NextDouble() * 2.0 - 1.0) * _wrongnessFraction * 0.01;
@@ -130,7 +146,8 @@ internal sealed class BankEstimateService
             double centered = sent - _sentMean[sid];
             double sigmaMult = (double)_profiles.Get(sid).FundamentalSigmaMult;
             double variance = (_rng.NextDouble() * 2.0 - 1.0) * _wrongnessFraction * SentimentToDevScale * sigmaMult; // draw 2
-            double sectorTerm = _sectorCount > 1 ? _sectorDrift.GetValueOrDefault(sid % _sectorCount) : 0.0;
+            int ordinal = sectorCount > 1 ? SectorOrdinal(sid) : -1;
+            double sectorTerm = ordinal >= 0 ? _sectorDrift.GetValueOrDefault(ordinal) : 0.0;
             double news = _exogShock?.Invoke(sid) ?? 0.0;
 
             double prevDev = _estimate.GetValueOrDefault(sid);

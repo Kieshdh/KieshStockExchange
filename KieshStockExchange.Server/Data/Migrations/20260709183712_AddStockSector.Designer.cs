@@ -3,17 +3,20 @@ using System;
 using KieshStockExchange.Server.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace KieshStockExchange.Server.Data.Migrations
+namespace KieshStockExchange.Server.data.Migrations
 {
     [DbContext(typeof(KseDbContext))]
-    partial class KseDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260709183712_AddStockSector")]
+    partial class AddStockSector
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

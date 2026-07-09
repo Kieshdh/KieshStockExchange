@@ -46,7 +46,8 @@ def prepare_stocks_sheet(wb: Workbook) -> Worksheet:
     """Create/reset the Stocks sheet and write its header row."""
     ws = reset_or_create_sheet(wb, "Stocks")
     # Price lives on the Listings sheet (per-currency SeedPrice); not duplicated here.
-    ws.append(["StockId", "Ticker", "CompanyName"])
+    # §sector: real GICS-ish group (one of Config.SECTORS) — drives the BankEstimate per-sector re-rating.
+    ws.append(["StockId", "Ticker", "CompanyName", "Sector"])
     return ws
 
 

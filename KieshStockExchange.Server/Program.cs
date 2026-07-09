@@ -200,6 +200,9 @@ builder.Services.AddSingleton<ISettlementEngine, SettlementEngine>();
 // IDispatcher gets a no-op impl — server has no UI thread to marshal to.
 builder.Services.AddSingleton<IDispatcher, NoopDispatcher>();
 builder.Services.AddSingleton<IStockService, StockService>();
+// §sector: seed-authoritative stock→sector map (built once from the loaded catalog). BankEstimate reads it in
+// place of stockId % SectorCount; no real sectors seeded ⇒ HasRealSectors false ⇒ modulo fallback (byte-identical).
+builder.Services.AddSingleton<ISectorMap, SectorMap>();
 builder.Services.AddSingleton<IMarketLookupService, MarketLookupService>();
 builder.Services.AddSingleton<ICandleService, CandleService>();
 builder.Services.AddSingleton<IMarketDataService, MarketDataService>();

@@ -5,71 +5,87 @@
 # Listings sheet writer in GenerateAIUsers.py derives the EUR seed price for
 # cross-listed stocks via FX_BASE_RATES.
 STOCKS = {
-    # Mega-cap tech (top 10 by market cap)
-     1: {"ticker": "MSFT",  "name": "Microsoft Corporation",                "price":  513.71},
-     2: {"ticker": "NVDA",  "name": "NVIDIA Corporation",                   "price":  173.50},
-     3: {"ticker": "AAPL",  "name": "Apple Inc.",                           "price":  213.88},
-     4: {"ticker": "AMZN",  "name": "Amazon.com, Inc.",                     "price":  231.44},
-     5: {"ticker": "GOOG",  "name": "Alphabet Inc.",                        "price":  194.08},
-     6: {"ticker": "META",  "name": "Meta Platforms, Inc.",                 "price":  712.68},
-     7: {"ticker": "AVGO",  "name": "Broadcom Inc.",                        "price":  290.18},
-     8: {"ticker": "TSLA",  "name": "Tesla, Inc.",                          "price":  316.06},
-     9: {"ticker": "TSM",   "name": "Taiwan Semiconductor Manufacturing",   "price":  245.60},
-    10: {"ticker": "NESN",  "name": "Nestle S.A.",                          "price":  102.50},
+    # Mega-cap tech (top 10 by market cap). "sector" = real GICS-ish group (council 5/5, 2026-07-09):
+    # a stock property fed into the reseed; drives the BankEstimate per-sector re-rating + rotation.
+    # 8 sectors, intentionally UNEVEN. Canonical names must match Config.SECTORS below.
+     1: {"ticker": "MSFT",  "name": "Microsoft Corporation",                "price":  513.71, "sector": "Software & IT"},
+     2: {"ticker": "NVDA",  "name": "NVIDIA Corporation",                   "price":  173.50, "sector": "Semiconductors"},
+     3: {"ticker": "AAPL",  "name": "Apple Inc.",                           "price":  213.88, "sector": "Software & IT"},
+     4: {"ticker": "AMZN",  "name": "Amazon.com, Inc.",                     "price":  231.44, "sector": "Consumer Discretionary"},
+     5: {"ticker": "GOOG",  "name": "Alphabet Inc.",                        "price":  194.08, "sector": "Communication & Internet"},
+     6: {"ticker": "META",  "name": "Meta Platforms, Inc.",                 "price":  712.68, "sector": "Communication & Internet"},
+     7: {"ticker": "AVGO",  "name": "Broadcom Inc.",                        "price":  290.18, "sector": "Semiconductors"},
+     8: {"ticker": "TSLA",  "name": "Tesla, Inc.",                          "price":  316.06, "sector": "Consumer Discretionary"},
+     9: {"ticker": "TSM",   "name": "Taiwan Semiconductor Manufacturing",   "price":  245.60, "sector": "Semiconductors"},
+    10: {"ticker": "NESN",  "name": "Nestle S.A.",                          "price":  102.50, "sector": "Consumer Staples"},
     # Mega-cap mixed (11-20)
-    11: {"ticker": "LLY",   "name": "Eli Lilly & Co",                       "price":  812.69},
-    12: {"ticker": "WMT",   "name": "Walmart Inc.",                         "price":   97.47},
-    13: {"ticker": "JPM",   "name": "JPMorgan Chase & Co.",                 "price":  285.00},
-    14: {"ticker": "V",     "name": "Visa Inc.",                            "price":  357.04},
-    15: {"ticker": "ORCL",  "name": "Oracle Corporation",                   "price":  245.12},
-    16: {"ticker": "MA",    "name": "Mastercard Incorporated",              "price":  568.22},
-    17: {"ticker": "XOM",   "name": "Exxon Mobil Corporation",              "price":  115.00},
-    18: {"ticker": "UNH",   "name": "UnitedHealth Group Incorporated",      "price":  580.00},
+    11: {"ticker": "LLY",   "name": "Eli Lilly & Co",                       "price":  812.69, "sector": "Health Care"},
+    12: {"ticker": "WMT",   "name": "Walmart Inc.",                         "price":   97.47, "sector": "Consumer Staples"},
+    13: {"ticker": "JPM",   "name": "JPMorgan Chase & Co.",                 "price":  285.00, "sector": "Financials"},
+    14: {"ticker": "V",     "name": "Visa Inc.",                            "price":  357.04, "sector": "Financials"},
+    15: {"ticker": "ORCL",  "name": "Oracle Corporation",                   "price":  245.12, "sector": "Software & IT"},
+    16: {"ticker": "MA",    "name": "Mastercard Incorporated",              "price":  568.22, "sector": "Financials"},
+    17: {"ticker": "XOM",   "name": "Exxon Mobil Corporation",              "price":  115.00, "sector": "Energy & Industrials"},
+    18: {"ticker": "UNH",   "name": "UnitedHealth Group Incorporated",      "price":  580.00, "sector": "Health Care"},
     # Slot 19: European-domiciled (LVMH) replaces JNJ.
-    19: {"ticker": "LVMH",  "name": "LVMH Moet Hennessy Louis Vuitton SE",  "price":  790.00},
-    20: {"ticker": "COST",  "name": "Costco Wholesale Corporation",         "price":  950.00},
+    19: {"ticker": "LVMH",  "name": "LVMH Moet Hennessy Louis Vuitton SE",  "price":  790.00, "sector": "Consumer Discretionary"},
+    20: {"ticker": "COST",  "name": "Costco Wholesale Corporation",         "price":  950.00, "sector": "Consumer Staples"},
     # Large-cap (21-30)
-    21: {"ticker": "NFLX",  "name": "Netflix, Inc.",                        "price": 1180.49},
-    22: {"ticker": "PG",    "name": "The Procter & Gamble Company",         "price":  168.00},
-    23: {"ticker": "HD",    "name": "The Home Depot, Inc.",                 "price":  410.00},
-    24: {"ticker": "BAC",   "name": "Bank of America Corporation",          "price":   48.45},
-    25: {"ticker": "ABBV",  "name": "AbbVie Inc.",                          "price":  215.00},
-    26: {"ticker": "CRM",   "name": "Salesforce, Inc.",                     "price":  305.00},
+    21: {"ticker": "NFLX",  "name": "Netflix, Inc.",                        "price": 1180.49, "sector": "Communication & Internet"},
+    22: {"ticker": "PG",    "name": "The Procter & Gamble Company",         "price":  168.00, "sector": "Consumer Staples"},
+    23: {"ticker": "HD",    "name": "The Home Depot, Inc.",                 "price":  410.00, "sector": "Consumer Discretionary"},
+    24: {"ticker": "BAC",   "name": "Bank of America Corporation",          "price":   48.45, "sector": "Financials"},
+    25: {"ticker": "ABBV",  "name": "AbbVie Inc.",                          "price":  215.00, "sector": "Health Care"},
+    26: {"ticker": "CRM",   "name": "Salesforce, Inc.",                     "price":  305.00, "sector": "Software & IT"},
     # Slot 27: ASML (already European-domiciled, becomes EUR-only).
-    27: {"ticker": "ASML",  "name": "ASML Holding N.V.",                    "price":  711.25},
-    28: {"ticker": "CVX",   "name": "Chevron Corporation",                  "price":  165.00},
-    29: {"ticker": "KO",    "name": "The Coca-Cola Company",                "price":   69.17},
-    30: {"ticker": "WFC",   "name": "Wells Fargo & Company",                "price":   78.00},
+    27: {"ticker": "ASML",  "name": "ASML Holding N.V.",                    "price":  711.25, "sector": "Semiconductors"},
+    28: {"ticker": "CVX",   "name": "Chevron Corporation",                  "price":  165.00, "sector": "Energy & Industrials"},
+    29: {"ticker": "KO",    "name": "The Coca-Cola Company",                "price":   69.17, "sector": "Consumer Staples"},
+    30: {"ticker": "WFC",   "name": "Wells Fargo & Company",                "price":   78.00, "sector": "Financials"},
     # Large-cap (31-40)
-    31: {"ticker": "PEP",   "name": "PepsiCo, Inc.",                        "price":  152.00},
-    32: {"ticker": "ADBE",  "name": "Adobe Inc.",                           "price":  425.00},
-    33: {"ticker": "BABA",  "name": "Alibaba Group Holding Limited",        "price":  120.03},
-    34: {"ticker": "MCD",   "name": "McDonald's Corporation",               "price":  298.47},
-    35: {"ticker": "TMO",   "name": "Thermo Fisher Scientific Inc.",        "price":  545.00},
-    36: {"ticker": "ACN",   "name": "Accenture plc",                        "price":  345.00},
+    31: {"ticker": "PEP",   "name": "PepsiCo, Inc.",                        "price":  152.00, "sector": "Consumer Staples"},
+    32: {"ticker": "ADBE",  "name": "Adobe Inc.",                           "price":  425.00, "sector": "Software & IT"},
+    33: {"ticker": "BABA",  "name": "Alibaba Group Holding Limited",        "price":  120.03, "sector": "Communication & Internet"},
+    34: {"ticker": "MCD",   "name": "McDonald's Corporation",               "price":  298.47, "sector": "Consumer Discretionary"},
+    35: {"ticker": "TMO",   "name": "Thermo Fisher Scientific Inc.",        "price":  545.00, "sector": "Health Care"},
+    36: {"ticker": "ACN",   "name": "Accenture plc",                        "price":  345.00, "sector": "Software & IT"},
     # Slot 37: Linde plc reclassified as EUR-only for this simulation.
-    37: {"ticker": "LIN",   "name": "Linde plc",                            "price":  470.00},
-    38: {"ticker": "CSCO",  "name": "Cisco Systems, Inc.",                  "price":   76.00},
-    39: {"ticker": "ABT",   "name": "Abbott Laboratories",                  "price":  130.00},
-    40: {"ticker": "MRK",   "name": "Merck & Co., Inc.",                    "price":   95.00},
+    37: {"ticker": "LIN",   "name": "Linde plc",                            "price":  470.00, "sector": "Energy & Industrials"},
+    38: {"ticker": "CSCO",  "name": "Cisco Systems, Inc.",                  "price":   76.00, "sector": "Software & IT"},
+    39: {"ticker": "ABT",   "name": "Abbott Laboratories",                  "price":  130.00, "sector": "Health Care"},
+    40: {"ticker": "MRK",   "name": "Merck & Co., Inc.",                    "price":   95.00, "sector": "Health Care"},
     # Large-cap (41-50)
-    41: {"ticker": "AMD",   "name": "Advanced Micro Devices, Inc.",         "price":  166.47},
-    42: {"ticker": "IBM",   "name": "International Business Machines Corporation", "price": 268.00},
-    43: {"ticker": "INTU",  "name": "Intuit Inc.",                          "price":  645.00},
+    41: {"ticker": "AMD",   "name": "Advanced Micro Devices, Inc.",         "price":  166.47, "sector": "Semiconductors"},
+    42: {"ticker": "IBM",   "name": "International Business Machines Corporation", "price": 268.00, "sector": "Software & IT"},
+    43: {"ticker": "INTU",  "name": "Intuit Inc.",                          "price":  645.00, "sector": "Software & IT"},
     # Slot 44: European-domiciled (NOVO) replaces DHR.
-    44: {"ticker": "NOVO",  "name": "Novo Nordisk A/S",                     "price":   78.00},
-    45: {"ticker": "TXN",   "name": "Texas Instruments Incorporated",       "price":  195.00},
+    44: {"ticker": "NOVO",  "name": "Novo Nordisk A/S",                     "price":   78.00, "sector": "Health Care"},
+    45: {"ticker": "TXN",   "name": "Texas Instruments Incorporated",       "price":  195.00, "sector": "Semiconductors"},
     # Slot 46: European-domiciled (SAP) replaces NKE.
-    46: {"ticker": "SAP",   "name": "SAP SE",                               "price":  245.00},
+    46: {"ticker": "SAP",   "name": "SAP SE",                               "price":  245.00, "sector": "Software & IT"},
     # Slot 47: European-domiciled (OR) replaces QCOM.
-    47: {"ticker": "OR",    "name": "L'Oreal S.A.",                         "price":  385.00},
+    47: {"ticker": "OR",    "name": "L'Oreal S.A.",                         "price":  385.00, "sector": "Consumer Discretionary"},
     # Slot 48: European-domiciled (SIE) replaces DIS.
-    48: {"ticker": "SIE",   "name": "Siemens AG",                           "price":  205.00},
+    48: {"ticker": "SIE",   "name": "Siemens AG",                           "price":  205.00, "sector": "Energy & Industrials"},
     # Slot 49: European-domiciled (AZN) replaces VZ.
-    49: {"ticker": "AZN",   "name": "AstraZeneca PLC",                      "price":   72.00},
+    49: {"ticker": "AZN",   "name": "AstraZeneca PLC",                      "price":   72.00, "sector": "Health Care"},
     # Slot 50: European-domiciled (ALV) replaces PFE.
-    50: {"ticker": "ALV",   "name": "Allianz SE",                           "price":  365.00},
+    50: {"ticker": "ALV",   "name": "Allianz SE",                           "price":  365.00, "sector": "Financials"},
 }
+
+# Canonical sector list (council 5/5, 2026-07-09). Order = the stable ordinal the BankEstimate
+# per-sector shared-drift walk keys off (must NOT be reordered — replay/RNG determinism). Uneven
+# by design. The C# `Sector` enum mirrors these names 1:1; a stock's "sector" must be one of these.
+SECTORS = [
+    "Semiconductors",           # NVDA AVGO TSM ASML AMD TXN
+    "Software & IT",            # MSFT AAPL ORCL CRM ADBE ACN CSCO IBM INTU SAP
+    "Communication & Internet", # GOOG META NFLX BABA
+    "Consumer Discretionary",   # AMZN TSLA LVMH HD MCD OR
+    "Consumer Staples",         # NESN WMT COST PG KO PEP
+    "Health Care",              # LLY UNH ABBV TMO ABT MRK NOVO AZN
+    "Financials",               # JPM V MA BAC WFC ALV
+    "Energy & Industrials",     # XOM CVX LIN SIE
+]
 
 # ────────────────────────── Multi-currency tunables ──────────────────────────
 
@@ -493,6 +509,15 @@ def _validate() -> None:
              "CASH_INJECTION_FREQ_CAP",     CASH_INJECTION_FREQ_CAP)
     _ordered("CASH_INJECTION_AMOUNT_FLOOR", CASH_INJECTION_AMOUNT_FLOOR,
              "CASH_INJECTION_AMOUNT_CAP",   CASH_INJECTION_AMOUNT_CAP)
+
+    # §sector invariants: the canonical list must be unique, and every stock's sector must be one of them
+    # (the C# Sector enum mirrors SECTORS 1:1; an unknown string would parse to Sector.Unknown at boot).
+    if len(SECTORS) != len(set(SECTORS)):
+        raise ValueError(f"SECTORS must be unique (got {SECTORS}).")
+    for sid, data in STOCKS.items():
+        sec = data.get("sector")
+        if sec not in SECTORS:
+            raise ValueError(f"STOCKS[{sid}] sector {sec!r} is not in SECTORS.")
 
     # Multi-currency invariants.
     if not SUPPORTED_CURRENCIES:

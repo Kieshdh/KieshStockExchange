@@ -240,6 +240,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly IOrderEntryService     _entry;   // §P6: stop/trailing/bracket entry route (not the batch matcher)
     private readonly IMarketDataService     _market;
     private readonly IStockService          _stocks;
+    private readonly ISectorMap             _sectorMap; // §sector: real stock→sector map for BankEstimate re-rating
     private readonly IAccountsCache         _accounts;
     private readonly IFxRateService         _fxRates;
     private readonly IBracketCoordinator    _bracket;   // Round 2 §0006c: end-of-tick queue drain
@@ -265,6 +266,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IOrderEntryService entry,
         IMarketDataService market,
         IStockService stocks,
+        ISectorMap sectorMap,
         IDataBaseService db,
         IBotMaintenanceQueries botMaint,
         IAccountsCache accounts,
@@ -283,6 +285,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _entry        = entry        ?? throw new ArgumentNullException(nameof(entry));
         _market       = market       ?? throw new ArgumentNullException(nameof(market));
         _stocks       = stocks       ?? throw new ArgumentNullException(nameof(stocks));
+        _sectorMap    = sectorMap    ?? throw new ArgumentNullException(nameof(sectorMap));
         _accounts     = accounts     ?? throw new ArgumentNullException(nameof(accounts));
         _fxRates      = fxRates      ?? throw new ArgumentNullException(nameof(fxRates));
         _fxDesk       = fxDesk       ?? throw new ArgumentNullException(nameof(fxDesk));
@@ -540,8 +543,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         alpha:                  _configuration.GetValue("Bots:BankEstimate:Alpha", 0.3),
                         poissonMeanIntervalSec: _configuration.GetValue("Bots:BankEstimate:PoissonMeanIntervalSec", 30.0),
                         wrongnessFraction:      _configuration.GetValue("Bots:BankEstimate:WrongnessFraction", 0.15),
+                        // §sector: real map supersedes the modulo count when sectors are seeded; the config value is
+                        // kept as the fallback modulo count (byte-identical when HasRealSectors is false).
+                        sectorMap:              _sectorMap,
                         sectorCount:            _configuration.GetValue("Bots:BankEstimate:SectorCount", exogSectorCount),
-                        exogShock:              exogEnabled ? (Func<int, double>)_news.GetShock : null);
+                        exogShock:              exogEnabled ? (Func<int, double>)_news.GetShock : null,
+                        // §sector A/B rollback: false forces the config-modulo path even with sectors seeded.
+                        useRealSectors:         _configuration.GetValue("Bots:BankEstimate:UseRealSectors", true));
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
