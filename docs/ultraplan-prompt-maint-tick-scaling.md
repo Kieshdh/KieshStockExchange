@@ -206,3 +206,11 @@ deferred (collect 6-7% of tick).
 **⇒ NEXT ULTRAPLAN (after the B3 soak reads):** the SOURCE-CAP (per-bot armed-stop cap + netting) as the disease cure,
 then INCREMENTAL AGGREGATES to retire the periodic recompute, then W3 to move maint off the tick. This supersedes the
 "faster-drain" and pure-B-workstream framing above.
+
+### ★ B3 SOAK RESULT (2026-07-09, prod `d0dcc40`, 45m @15/30/45m) — VALIDATED
+maint **~296ms → ~8–70ms** (5–30× down) while the pool stayed ~855k (863k→855k) ⇒ **maint is now INDEPENDENT of the
+pool** = the O(limits) reload works, diagnosis + fix confirmed. tick **483ms → ~180–210ms** (at/under the 250ms target).
+**CK=0 every checkpoint.** The residual maint spikes (~51–70ms) are now the economy `LogSnapshot` (W2, O(bots×stocks)) —
+**confirms W2 is the next dominant maint sub-phase**, exactly as predicted. Per the planning council: B3 = **validated
+interim, HELD not baked** (stays on prod, CK-safe); the incoming source-cap/IVM PR supersedes it (expand/contract: land
+IVM default-off → parity-soak IVM-on vs B3-on → flip + delete B3 in a follow-up). W2 rides the W3 off-thread mechanism.
