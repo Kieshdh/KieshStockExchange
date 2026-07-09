@@ -214,3 +214,18 @@ pool** = the O(limits) reload works, diagnosis + fix confirmed. tick **483ms →
 **confirms W2 is the next dominant maint sub-phase**, exactly as predicted. Per the planning council: B3 = **validated
 interim, HELD not baked** (stays on prod, CK-safe); the incoming source-cap/IVM PR supersedes it (expand/contract: land
 IVM default-off → parity-soak IVM-on vs B3-on → flip + delete B3 in a follow-up). W2 rides the W3 off-thread mechanism.
+
+### ★ SOURCE-CAP (Phase 1) SOAK RESULT (2026-07-09, cap=20, prod, 45m) — REVERTED, don't enable on the polluted pool
+Landed `MaxArmedStopsPerBot=20` (default-off code merged to main, byte-identical), flipped on prod. **CK=0 all 3
+checkpoints; cap bit hard (blocked ~300/window).** BUT it's **counterproductive on the existing ~838k pool** and was
+reverted:
+1. The reject fires in the DECISION phase (`BuildProtectiveStopAsync`→null), which **also skips replace-old** (submit
+   phase) ⇒ the backlog drained only **~90/min vs ~440/min under W1+B3 alone (≈5× SLOWER)**.
+2. **12.3k of ~20k bots already hold >20 stops** from the pre-cap dead accumulation, so cap=20 blocks MOST bots' new
+   arms (starvation risk — the reject can't tell a dead lingering stop from a legitimate one).
+3. **B3 already made maint pool-INDEPENDENT** (8–70ms @855k), so bounding the pool is now LOW-VALUE while the cap's cost
+   (slower drain + arm starvation) is real.
+**Verdict:** the cap only helps on a PRE-DRAINED clean pool (each bot < cap of *live* stops). Keep it **default-off**.
+If ever wanted: drain the backlog FIRST (replace-old alone, or a bounded faster-drain), THEN cap to prevent
+re-accumulation. Given B3, the pool size no longer gates the tick — so the whole source-cap may simply be unnecessary.
+Code (`Bots:MaxArmedStopsPerBot`, 469 tests, byte-identical off) is committed on main as a tool; not enabled.
