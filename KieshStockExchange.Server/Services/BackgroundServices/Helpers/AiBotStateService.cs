@@ -54,6 +54,11 @@ internal sealed class AiBotStateService
     // of scanning ctx.OpenOrders. Off ⇒ full hydration as before ⇒ byte-identical. Server-only query surface.
     private readonly IBotMaintenanceQueries _maint;
     private readonly bool _leanReload;
+    // §source-cap (Bots:MaxArmedStopsPerBot): per-bot armed-stop CAP. 0 = off. When > 0 (and LeanReload on),
+    // NoteArmedStopPlaced increments ctx.ArmedStopCount on each standalone protective-stop arm so the count is
+    // exact intra-window (replace-old already decrements it), letting BuildProtectiveStopAsync reject a bot's
+    // new arm past the cap. Bounds the pool at the SOURCE (the disease cure). Off ⇒ no increment ⇒ byte-identical.
+    private readonly int _maxArmedStopsPerBot;
 
     // Throttle "Applied active bot cap" — the scaler may toggle the cap several
     // times per minute when load wobbles. One INFO per change buries everything
@@ -67,7 +72,7 @@ internal sealed class AiBotStateService
         IOrderExecutionService orders, BotStatsLogger stats,
         ILogger<AiBotStateService> logger, IBotMaintenanceQueries maint, decimal distanceMult = 1m,
         int orderMaxAgeSec = 0, int stopMaxAgeSec = 0, int stopCullMaxPerSweep = 500,
-        bool pruneLimitOnly = false, bool leanReload = false)
+        bool pruneLimitOnly = false, bool leanReload = false, int maxArmedStopsPerBot = 0)
     {
         _db       = db       ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
@@ -81,6 +86,7 @@ internal sealed class AiBotStateService
         _stopCullMaxPerSweep = stopCullMaxPerSweep < 1 ? 1 : stopCullMaxPerSweep;
         _pruneLimitOnly = pruneLimitOnly;
         _leanReload = leanReload;
+        _maxArmedStopsPerBot = maxArmedStopsPerBot < 0 ? 0 : maxArmedStopsPerBot;
     }
     #endregion
 
@@ -576,6 +582,34 @@ internal sealed class AiBotStateService
             }
         }
         if (pruned > 0) _stats.AddCancelled(pruned);
+    }
+
+    // §source-cap (Bots:MaxArmedStopsPerBot): the arm(+1) mirror of CancelPriorStandaloneStopsAsync's
+    // decrement(-1). Called from the advanced-submit result paths after a placement so ctx.ArmedStopCount is
+    // exact intra-window (the ~60s reload GROUP-BY re-baselines it, so these deltas can't accumulate). Owning
+    // the mutation here keeps ArmedStopCount single-writer (this service). Off / lean-off ⇒ ShouldCountArm is
+    // false ⇒ no-op ⇒ byte-identical. Only STANDALONE protective-stop kinds that left a resting Pending row
+    // count (bracket/short excluded; an arm that fills at placement leaves no Pending row and is skipped).
+    internal void NoteArmedStopPlaced(AiBotContext ctx, AIUser user, BotAdvancedKind kind, OrderResult result)
+    {
+        if (!ShouldCountArm(kind, result, _maxArmedStopsPerBot, _leanReload)) return;
+        ctx.ArmedStopCount[user.UserId] = ctx.ArmedStopCount.GetValueOrDefault(user.UserId) + 1;
+        ArmedStopCapProbe.RecordArmed();
+    }
+
+    // Pure decision for NoteArmedStopPlaced — no state, no RNG, no clock — so it is unit-testable without an
+    // AiTradeService/AiBotStateService instance. Counts a placement iff the cap is on, LeanReload is on, and the
+    // result left a resting STANDALONE armed (Pending, Stop≠None, no parent) stop of a protective-stop kind.
+    // PlacedSuccessfully alone is insufficient: it is also true for PartialFill/Filled, and a per-order
+    // stop-limit BUY (PlaceStopLimitBuyOrderAsync) can fill at placement leaving no Pending row to count.
+    internal static bool ShouldCountArm(BotAdvancedKind kind, OrderResult result, int maxArmedStopsPerBot, bool leanReload)
+    {
+        if (maxArmedStopsPerBot <= 0 || !leanReload) return false;
+        if (result?.PlacedOrder is not { } o) return false;
+        if (o.Status != Order.Statuses.Pending || o.Stop == StopKind.None || o.ParentOrderId is not null) return false;
+        return kind is BotAdvancedKind.StopMarketSell
+                    or BotAdvancedKind.StopMarketBuy
+                    or BotAdvancedKind.TrailingStopSell;
     }
 
     // Realism §: per-order lifetime jitter in [0.5, 1.5] from an OrderId avalanche hash. Deterministic

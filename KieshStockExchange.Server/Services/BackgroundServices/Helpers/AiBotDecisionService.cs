@@ -16,7 +16,7 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 //     covers the short on a rally. Mirrors StopMarketSell so protective stops exist in BOTH directions
 //     (the long-only sell-stops were the entire taker sell-skew / down-drift). Flag-gated, default off.
 //   ShortOpen (P6b): flat-only market short.  LongBracket (P6b)/ShortBracket (P6c): bracketed entry.
-internal enum BotAdvancedKind { StopMarketSell, TrailingStopSell, ShortOpen, LongBracket, ShortBracket, StopMarketBuy }
+public enum BotAdvancedKind { StopMarketSell, TrailingStopSell, ShortOpen, LongBracket, ShortBracket, StopMarketBuy }
 
 internal sealed record BotAdvancedDecision(
     BotAdvancedKind Kind, int StockId, int Quantity, CurrencyType Currency,
@@ -284,6 +284,9 @@ internal sealed class AiBotDecisionService
     private readonly Func<int>?         _globalPulseIdOf;      // monotonic id per global pulse (cohort + spread key)
     private readonly Func<int>?         _globalCoFireSectorOf; // sector (0..N−1) a pulse scoped to, else −1 (market-wide)
     private readonly int                _sectorCount;          // 1 ⇒ no sector filtering (byte-identical)
+    // §source-cap: per-bot armed-stop cap (0 = off) + the LeanReload flag that selects the count source.
+    private readonly int                _maxArmedStopsPerBot;
+    private readonly bool               _leanReload;
     // Hybrid pressure formula §: when on, directional+herd push the cohort multiplicatively
     // around 0.5 (preserves diversity at extremes); anchors stay additive (structural override).
     private readonly bool    _multiplicativeDirectional;
@@ -468,7 +471,11 @@ internal sealed class AiBotDecisionService
         bool reactionTakerCoupling = false,
         decimal reactionTakerThreshold = 0.15m,
         decimal reactionTakerGain = 1.0m,
-        decimal reactionTakerGovScale = 1000000000m)
+        decimal reactionTakerGovScale = 1000000000m,
+        // §source-cap: per-bot armed-stop CAP (Bots:MaxArmedStopsPerBot; 0 = off). BuildProtectiveStopAsync
+        // rejects a new protective-stop arm once the bot already holds this many armed stops. leanReload
+        // selects the count source (ctx.ArmedStopCount vs an OpenOrders scan). Off ⇒ no gate ⇒ byte-identical.
+        int maxArmedStopsPerBot = 0, bool leanReload = false)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -626,6 +633,8 @@ internal sealed class AiBotDecisionService
         _globalPulseIdOf           = globalPulseIdOf;
         _globalCoFireSectorOf      = globalCoFireSectorOf;
         _sectorCount               = Math.Max(1, sectorCount);
+        _maxArmedStopsPerBot       = Math.Max(0, maxArmedStopsPerBot);
+        _leanReload                = leanReload;
     }
     #endregion
 
@@ -648,6 +657,19 @@ internal sealed class AiBotDecisionService
         // No daily-trades cap — it would only force churning bots dormant mid-session;
         // MaxOpenOrders + ErrorsToday throttle instead. TradesToday still counts for the UI.
         return true;
+    }
+
+    // §source-cap lean-off fallback: count a bot's STANDALONE armed stops directly from the hydrated
+    // ctx.OpenOrders (LeanReload off keeps armed stops in the map). Bracket children (ParentOrderId set) are
+    // excluded, matching the replace-old victim set. Reload-granular (ApplyResultToCache hydrates only limits),
+    // so best-effort — prod runs LeanReload on and uses ctx.ArmedStopCount instead.
+    private static int CountArmedStandalone(AiBotContext ctx, int userId)
+    {
+        if (!ctx.OpenOrders.TryGetValue(userId, out var orders)) return 0;
+        int n = 0;
+        foreach (var o in orders.Values)
+            if (o.IsArmed && !o.IsBracketChild) n++;
+        return n;
     }
 
     internal async Task<Order?> ComputeOrderAsync(AiBotContext ctx, AIUser user,
@@ -960,6 +982,23 @@ internal sealed class AiBotDecisionService
     private async Task<BotAdvancedDecision?> BuildProtectiveStopAsync(AiBotContext ctx, AIUser user,
         CurrencyType currency, CancellationToken ct)
     {
+        // §source-cap: a bot at its armed-stop cap does NOT arm a new protective stop — it returns null and
+        // falls through to a plain order (identical to the watch.Length==0 early return below). This bounds
+        // the armed-stop pool at the SOURCE; it cancels nothing ⇒ zero cancel/reservation/CK exposure. Off
+        // (cap 0) ⇒ zero draws, byte-identical. The count re-baselines every ~60s reload (LeanReload GROUP-BY)
+        // and is kept exact intra-window by NoteArmedStopPlaced(+1) / replace-old(−1).
+        if (_maxArmedStopsPerBot > 0)
+        {
+            int armed = _leanReload
+                ? ctx.ArmedStopCount.GetValueOrDefault(user.UserId)
+                : CountArmedStandalone(ctx, user.UserId);
+            if (armed >= _maxArmedStopsPerBot)
+            {
+                ArmedStopCapProbe.RecordBlocked();
+                return null;
+            }
+        }
+
         var watch = EligibleWatchlist(ctx, user, currency);
         if (watch.Length == 0) return null;
 
