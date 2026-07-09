@@ -147,9 +147,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // run fires 1 minute after start so a cold-load mismatch surfaces early.
     private static readonly TimeSpan ReconcileInterval   = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ReconcileFirstDelay = TimeSpan.FromMinutes(1);
-    // Economy snapshot: 60s is frequent enough to spot drift trends without the
-    // per-call walk (bots × positions) crowding the log.
-    private static readonly TimeSpan EconomyLogInterval = TimeSpan.FromSeconds(60);
+    // Economy snapshot cadence (config Bots:EconomyLogIntervalSeconds, default 60 = byte-identical). The
+    // per-call walk (bots × positions) is the largest residual maint chunk; raise the interval to sample it
+    // down (telemetry-only — zero CK/behaviour effect).
+    private readonly TimeSpan _economyLogInterval;
     // Sentiment snapshot cadence (config Bots:SentimentLogIntervalSeconds, default 60). Lower it (e.g.
     // 15s) for a denser sentiment/price correlation export; higher to thin production telemetry.
     private readonly TimeSpan _sentimentLogInterval;
@@ -309,6 +310,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
         _sentimentLogInterval = TimeSpan.FromSeconds(
                         Math.Max(1.0, _configuration.GetValue("Bots:SentimentLogIntervalSeconds", 60.0)));
+        _economyLogInterval = TimeSpan.FromSeconds(
+                        Math.Max(1.0, _configuration.GetValue("Bots:EconomyLogIntervalSeconds", 60.0)));
         _phaseTimingInterval = TimeSpan.FromSeconds(
                         Math.Max(0.0, _configuration.GetValue("Bots:PhaseTimingSeconds", 0.0)));
         // §perf: cache the reconcile-clamp flag once (startup) instead of a config walk on every reconcile pass —
@@ -1118,7 +1121,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _cmPrevCommits = EngineCommitMetrics.ReadCommits(); // first window measures from loop start
         _cmPrevTrades = EngineCommitMetrics.ReadTrades();
         _nextReconcileTime     = TimeHelper.NowUtc() + ReconcileFirstDelay;
-        _nextEconomyLogTime    = TimeHelper.NowUtc() + EconomyLogInterval;
+        _nextEconomyLogTime    = TimeHelper.NowUtc() + _economyLogInterval;
         _nextSentimentLogTime  = TimeHelper.NowUtc() + _sentimentLogInterval;
         _nextCashInjectionTime = TimeHelper.NowUtc() + _cashInjectionInterval;
         LastTradeAtUtc   = null;
@@ -2064,7 +2067,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (now >= _nextEconomyLogTime)
         {
             _economy.LogSnapshot(CurrenciesToTrade);
-            _nextEconomyLogTime = now + EconomyLogInterval;
+            _nextEconomyLogTime = now + _economyLogInterval;
         }
         if (now >= _nextSentimentLogTime)
         {
