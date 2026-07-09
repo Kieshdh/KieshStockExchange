@@ -180,6 +180,20 @@ ROTATOR_VALUE_PER_STOCK   = 30_000.0           # market VALUE seeded per stock (
 ROTATOR_SEED_BALANCE_USD  = ROTATOR_VALUE_PER_STOCK   # cash = one equal bucket (equal amount)
 ROTATOR_SEED_BALANCE_EUR  = ROTATOR_VALUE_PER_STOCK
 
+# ───────────────────── §conviction: discretionary sentiment-momentum cohort ─────────────────────
+# A fixed cohort of AiStrategy.Conviction (=8) bots — realistic CASH-HEAVY discretionary traders (NOT the
+# mechanical Rotator). Generated SEPARATELY from the random fleet (STRATEGY_CHOICES stays 0-4) but REALLOCATED
+# from it (NUM_PEOPLE drops by this size) so the grand total stays 20k. Every per-bot personality dial
+# (cash floor, risk appetite, conviction bar, sentiment sensitivity, chaser/fader lean, check-in cadence) is
+# HASHED from the aiUserId at RUNTIME — no trait columns here. Seeded single-currency USD, MOSTLY CASH + a
+# light diversified holding (so the memoryless exit has something to act on). Inert until Bots:Conviction:Enabled
+# (+ Bots:BankEstimate:Enabled for the overvaluation guardrail).
+CONVICTION_COHORT_SIZE       = 300
+CONVICTION_DECISION_INTERVAL = (5, 30)         # DecisionInterval seconds (the runtime fire cadence is the hashed
+                                               #   CheckInMeanSec dial, not this — kept sane for the model invariant)
+CONVICTION_SEED_BALANCE_USD  = 200_000.0       # per-bot USD cash (the bet-notional base = Bots:Conviction:SeedBalanceUsd)
+CONVICTION_HOLDING_VALUE_PER_STOCK = 250.0     # LIGHT market value seeded per stock (≈5% of cash across the board ⇒ cash-heavy)
+
 # The platform house account: reserved UserId (server reads Platform:HouseUserId, default 20002),
 # Identity + dual-currency Holding, NO Profile (so it is never a bot / never in the fleet). Seeded
 # generously in BOTH currencies so it always has inventory to settle conversions (a depleted house
@@ -198,7 +212,7 @@ HOUSE_SEED_BALANCE_EUR    = 45_000_000.0
 # stays sequential as they change; the server's Bots:Jumps:AggressorUserId must equal NUM_PEOPLE + this.
 # Seeded large in cash AND a per-stock share float so BOTH buy and sell jump legs are fundable (the FX-desk
 # house 20002 holds zero shares, so it can't sell — hence this separate account).
-JUMP_AGGRESSOR_USER_ID_OFFSET = HOUSE_USER_ID_OFFSET + 1 + ARBITRAGE_COHORT_SIZE + MARKET_MAKER_COHORT_SIZE + ROTATOR_COHORT_SIZE  # house(2)+admin(1)+arb+MM+rotator ⇒ id NUM_PEOPLE+offset. ⚠️ Keep Bots:Jumps:AggressorUserId in appsettings == NUM_PEOPLE + this.
+JUMP_AGGRESSOR_USER_ID_OFFSET = HOUSE_USER_ID_OFFSET + 1 + ARBITRAGE_COHORT_SIZE + MARKET_MAKER_COHORT_SIZE + ROTATOR_COHORT_SIZE + CONVICTION_COHORT_SIZE  # house(2)+admin(1)+arb+MM+rotator+conviction ⇒ id NUM_PEOPLE+offset. ⚠️ Keep Bots:Jumps:AggressorUserId in appsettings == NUM_PEOPLE + this.
 JUMP_AGGRESSOR_SEED_BALANCE_USD = 50_000_000.0
 JUMP_AGGRESSOR_SEED_BALANCE_EUR = 45_000_000.0
 JUMP_AGGRESSOR_SEED_SHARES      = 200_000         # per-stock share float (funds sell legs)

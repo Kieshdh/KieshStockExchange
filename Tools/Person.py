@@ -470,5 +470,39 @@ class Person:
         p.conversion_cadence_seconds = 0
         return p
 
+    @classmethod
+    def make_conviction_bot(cls, user_id: int) -> "Person":
+        """§conviction: build one discretionary sentiment/sector-momentum bot (AiStrategy.Conviction=8). Generated
+        separately from the random fleet so STRATEGY_CHOICES never yields strategy 8. CASH-HEAVY single-currency USD
+        seed + a LIGHT diversified holding across the board (so the memoryless exit has inventory to act on),
+        full-board watchlist, self-funded. NO per-bot trait columns: every personality dial (cash floor, risk
+        appetite, conviction bar, sentiment sensitivity, chaser/fader lean, check-in cadence) is HASHED from the
+        aiUserId at runtime by ConvictionDecisionService. The arbitrage/MM knobs stay 0 (unused for strategy 8)."""
+        p = cls()                               # fills every Profile field with valid values
+        p.user_id = user_id                     # explicit id (the auto-assigned one is discarded)
+        p.strategy = 8                          # AiStrategy.Conviction
+        p.home_currency = "USD"
+        p.interval_seconds = int(max(1, random.randint(*CONVICTION_DECISION_INTERVAL)))
+
+        # Self-funding: no cash injection, single-currency USD cash, MOSTLY CASH.
+        p.cash_injection_frequency_prc = 0.0
+        p.cash_injection_amount_prc = 0.0
+        p.balance = CONVICTION_SEED_BALANCE_USD
+        p.balance_secondary = 0.0
+
+        # Light diversified start: a small equal-VALUE slice of every listed stock (shares = value / seed price),
+        # far below the cash pile ⇒ cash-heavy, but every bot holds something the exit path can sell.
+        p.holdings = {sid: max(1, round(CONVICTION_HOLDING_VALUE_PER_STOCK / STOCKS[sid]["price"]))
+                      for sid in STOCKS}
+
+        # Cover the whole board — a conviction bot ranks every listed stock by its Hot signal.
+        p.watchlist_csv = ",".join(str(sid) for sid in sorted(STOCKS))
+
+        # The arbitrage/MM-only knobs stay 0 (unused for strategy 8).
+        p.min_arbitrage_rate_prc = 0.0
+        p.max_inventory_per_stock = 0
+        p.conversion_cadence_seconds = 0
+        return p
+
     def __repr__(self):
         return (f"Person({self.username!r}, Aggressive={self.aggressive:.2f}, balance=${self.balance:.2f})")

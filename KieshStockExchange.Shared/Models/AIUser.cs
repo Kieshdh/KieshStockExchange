@@ -9,7 +9,10 @@ namespace KieshStockExchange.Models;
 // Rotator (7) is the estimate-driven rotational cohort — a separate house pass (RotatorDecisionService)
 // that stays ~fully invested and rotates capital toward the bank price-estimate; seeded separately and
 // exempt from the active-cap / cash-injection like the other house cohorts.
-public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4, Arbitrage = 5, MarketMakerHouse = 6, Rotator = 7 }
+// Conviction (8) is a SEPARATE cohort of realistic cash-heavy discretionary traders (ConvictionDecisionService)
+// that rotate into "good plays" OCCASIONALLY on sentiment + sector-momentum with per-bot personality and REAL
+// directional risk (win-rate ≪ 100%); seeded separately and cohort-exempt like the other house passes.
+public enum AiStrategy { MarketMaker = 0, TrendFollower = 1, MeanReversion = 2, Random = 3, Scalper = 4, Arbitrage = 5, MarketMakerHouse = 6, Rotator = 7, Conviction = 8 }
 
 public class AIUser : IValidatable
 {

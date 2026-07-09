@@ -228,6 +228,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly bool                 _bankEstimateEnabled; // §bank-estimate Bots:BankEstimate:Enabled master gate (default off)
     private readonly RotatorDecisionService _rotator;         // §rotator estimate-driven rotational cohort (OUT of normal path)
     private readonly bool                 _rotatorEnabled;    // §rotator Bots:Rotator:Enabled master gate (default off)
+    private readonly ConvictionDecisionService _conviction;   // §conviction discretionary sentiment-momentum cohort (OUT of normal path)
+    private readonly bool                 _convictionEnabled; // §conviction Bots:Conviction:Enabled master gate (default off)
     private readonly JumpService          _jump;               // §fat-tail jumps rare realized price-jump lever (OUT of normal path)
     private readonly bool                 _jumpEnabled;        // §fat-tail jumps Bots:Jumps:Enabled master gate (default off)
     private readonly int                  _jumpAggressorUserId; // §fat-tail jumps dedicated house aggressor account (warm-loaded)
@@ -635,6 +637,26 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         seedBalanceUsd:        _configuration.GetValue("Bots:Rotator:SeedBalanceUsd", 1_000_000m),
                         seedBalanceEur:        _configuration.GetValue("Bots:Rotator:SeedBalanceEur", 900_000m),
                         useLoadEwma:           _configuration.GetValue("Bots:Rotator:UseLoadEwma", false));
+        // §conviction: the discretionary sentiment/sector-momentum cohort (AiStrategy.Conviction). Dedicated decision
+        // path OUT of the normal flow; places AGGRESSIVE TAKER orders so the value-anchor can't absorb them. Default
+        // OFF + (with no strategy-8 bots seeded) byte-identical. Reads the bank estimate only as a guardrail veto.
+        _convictionEnabled = _configuration.GetValue("Bots:Conviction:Enabled", false);
+        _conviction = new ConvictionDecisionService(entry, accounts, stocks, sectorMap, _bank, _sentiment, _economy, _scaler,
+                        new SeparatorLogger<ConvictionDecisionService>(loggerFactory, loggerOptions),
+                        wSec:               _configuration.GetValue("Bots:Conviction:Wsec", 1.0),
+                        wMom:               _configuration.GetValue("Bots:Conviction:Wmom", 0.5),
+                        wGlobal:            _configuration.GetValue("Bots:Conviction:Wglobal", 0.3),
+                        wIdio:              _configuration.GetValue("Bots:Conviction:Widio", 0.2),
+                        wOver:              _configuration.GetValue("Bots:Conviction:Wover", 0.5),
+                        convictionBarBase:  _configuration.GetValue("Bots:Conviction:ConvictionBarBase", 0.03),
+                        exitBar:            _configuration.GetValue("Bots:Conviction:ExitBar", 0.0),
+                        stopOvervaluation:  _configuration.GetValue("Bots:Conviction:StopOvervaluation", 0.10),
+                        cashFloorBase:      _configuration.GetValue("Bots:Conviction:CashFloorBase", 0.55),
+                        riskAppetiteBase:   _configuration.GetValue("Bots:Conviction:RiskAppetiteBase", 0.05),
+                        checkInMeanSecBase: _configuration.GetValue("Bots:Conviction:CheckInMeanSecBase", 1200.0),
+                        seedBalanceUsd:     _configuration.GetValue("Bots:Conviction:SeedBalanceUsd", 200_000m),
+                        seedBalanceEur:     _configuration.GetValue("Bots:Conviction:SeedBalanceEur", 180_000m),
+                        useLoadEwma:        _configuration.GetValue("Bots:Conviction:UseLoadEwma", false));
         // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
         // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
         // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/
@@ -1117,6 +1139,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
         _news.Reset(TimeHelper.NowUtc()); // §exogenous-information: clear shocks + reseed source (inert when off)
         _rotator.Reset(); // §rotator: reset the participation-shuffle pass counter (deterministic)
+        _conviction.Reset(); // §conviction: reset the fire-cadence pass counter + arm the clock (deterministic)
         _jump.Reset(TimeHelper.NowUtc()); // §fat-tail jumps: clear aftershocks + reseed source (inert when off)
         _priceMemory.Reset(TimeHelper.NowUtc()); // re-seed EWMA + day window; inert until Tick if anyConsumer=false
         _fxDesk.Reset();  // §3.7: fresh per-session FX-desk conversion tallies
@@ -1203,6 +1226,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 // Bots:Rotator:Enabled ⇒ a single bool check when off (byte-identical).
                 if (_rotatorEnabled)
                     await _rotator.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
+
+                // §conviction: the discretionary sentiment/sector-momentum cohort's pass, AFTER the rotator (so it
+                // acts on the freshest book) and outside the matcher's locked region — its taker orders own their own
+                // gates and settle through the same engine, so ConservationProbe/ReservationAuditor cover them.
+                // Gated by Bots:Conviction:Enabled ⇒ a single bool check when off (byte-identical).
+                if (_convictionEnabled)
+                    await _conviction.RunAsync(_ctx, now, _engineCts?.Token ?? ct).ConfigureAwait(false);
 
                 // §fat-tail jumps: rare realized price-jump pass, AFTER the MM pass (so it walks the freshest
                 // two-sided book) and outside the matcher's locked region (its marketable orders own their own
@@ -1701,6 +1731,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             // §rotator: the rotational cohort (strategy 7) runs only via _rotator.RunAsync. Dead branch until
             // strategy-7 bots are seeded ⇒ byte-identical when the cohort is absent.
             if (user.Strategy == AiStrategy.Rotator) continue;
+            // §conviction: the conviction cohort (strategy 8) runs only via _conviction.RunAsync. Dead branch until
+            // strategy-8 bots are seeded ⇒ byte-identical when the cohort is absent.
+            if (user.Strategy == AiStrategy.Conviction) continue;
             collectEligibleN++;   // §collect-split: reached the O(N) full-fleet burst/bookkeeping pass
 
             // Spontaneous burst: rare chance (~0.2%/tick) of entering a focused session.

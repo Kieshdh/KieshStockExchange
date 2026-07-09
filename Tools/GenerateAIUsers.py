@@ -13,6 +13,7 @@ from Config import (
     HOUSE_SEED_BALANCE_USD, HOUSE_SEED_BALANCE_EUR,
     MARKET_MAKER_COHORT_SIZE,
     ROTATOR_COHORT_SIZE,
+    CONVICTION_COHORT_SIZE,
     JUMP_AGGRESSOR_USER_ID_OFFSET,
     JUMP_AGGRESSOR_SEED_BALANCE_USD, JUMP_AGGRESSOR_SEED_BALANCE_EUR,
     JUMP_AGGRESSOR_SEED_SHARES,
@@ -25,7 +26,7 @@ from ExcelLayout import *
 BASE_DIR = Path(__file__).resolve().parent
 EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange" / "Resources" / "Raw" / "AIUserData.xlsx"
 SERVER_EXCEL_PATH = BASE_DIR.parent / "KieshStockExchange.Server" / "Resources" / "Raw" / "AIUserData.xlsx"
-NUM_PEOPLE = 19783   # §20k-cap (Kiesh): random fleet + arb(5) + MM(12) + rotator(200) = 20,000 trading bots total
+NUM_PEOPLE = 19483   # §20k-cap (Kiesh): random fleet + arb(5) + MM(12) + rotator(200) + conviction(300) = 20,000 trading bots total (conviction cohort REALLOCATED from the random fleet: 19783→19483 so the grand total stays flat at 20k)
 
 # §P6 "layout/userinfo skip for speed": set KSE_FAST_GEN=1 to skip the dark-theme styling + autofit
 # (by far the slowest step over 20000 rows). Data is identical; only the cosmetic sheet styling differs.
@@ -154,6 +155,20 @@ def generate_aiuser_excel(excel_path: Path = EXCEL_PATH, num_people: int = NUM_P
         sheets["Profile"].append(bot.ToProfileList())
     if ROTATOR_COHORT_SIZE > 0:
         print(f"✅ Appended {ROTATOR_COHORT_SIZE} rotator bots (UserIds {rotator_start}–{rotator_start + ROTATOR_COHORT_SIZE - 1}).")
+
+    # §conviction: discretionary sentiment/sector-momentum cohort (strategy=8), generated separately from the random
+    # fleet (REALLOCATED from it — NUM_PEOPLE dropped by CONVICTION_COHORT_SIZE so the grand total stays 20k).
+    # Single-currency USD, cash-heavy + light diversified holdings, cash-injection disabled, full-board watchlist.
+    # Appended between the rotator cohort and the jump aggressor so ids stay sequential. Reseed-only ⇒ inert until
+    # Bots:Conviction:Enabled.
+    conviction_start = rotator_start + ROTATOR_COHORT_SIZE
+    for i in range(CONVICTION_COHORT_SIZE):
+        bot = Person.make_conviction_bot(conviction_start + i)
+        sheets["Identity"].append(bot.ToIdentityList())
+        sheets["Holding"].append(bot.ToHoldingList())
+        sheets["Profile"].append(bot.ToProfileList())
+    if CONVICTION_COHORT_SIZE > 0:
+        print(f"✅ Appended {CONVICTION_COHORT_SIZE} conviction bots (UserIds {conviction_start}–{conviction_start + CONVICTION_COHORT_SIZE - 1}).")
 
     # §fat-tail jumps: dedicated aggressor account — Identity + Holding (cash + per-stock share float),
     # NO Profile (never a bot / never in the fleet). Reserved at NUM_PEOPLE + JUMP_AGGRESSOR_USER_ID_OFFSET

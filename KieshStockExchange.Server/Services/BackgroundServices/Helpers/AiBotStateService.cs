@@ -206,6 +206,9 @@ internal sealed class AiBotStateService
             // §rotator: the estimate-driven rotational cohort is a fixed house set — always on and cap-exempt.
             // Its per-tick load is throttled at decision time by Bots:Rotator:ParticipationFraction, not the cap.
             if (user.Strategy == AiStrategy.Rotator) { user.IsEnabled = true; continue; }
+            // §conviction: the discretionary conviction cohort is a fixed set — always on and cap-exempt. Its
+            // per-tick load is throttled at decision time by the occasional-cadence fire gate, not the cap.
+            if (user.Strategy == AiStrategy.Conviction) { user.IsEnabled = true; continue; }
 
             bool active = !cap.HasValue || enabled < cap.Value;
             user.IsEnabled = active;

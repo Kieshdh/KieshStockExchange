@@ -48,6 +48,7 @@ internal sealed class BotEconomyTelemetry
         [AiStrategy.Arbitrage]        = "Arb",
         [AiStrategy.MarketMakerHouse] = "MMH",
         [AiStrategy.Rotator]          = "Rot",
+        [AiStrategy.Conviction]       = "Cnv",
     };
 
     // Mutable per-strategy accumulator for one snapshot (USD wealth now, seed baseline, count, trades, wins).

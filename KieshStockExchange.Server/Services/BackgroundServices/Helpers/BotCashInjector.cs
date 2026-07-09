@@ -62,6 +62,9 @@ internal sealed class BotCashInjector
             // §rotator: the rotational cohort is self-funded (equal-distribution seed) and rotates existing
             // capital — never inject cash into it (topping it up would break its conserved rotation accounting).
             if (ai.Strategy == AiStrategy.Rotator) continue;
+            // §conviction: the conviction cohort is self-funded (cash-heavy seed) — never inject cash into it
+            // (its cash floor + risk-appetite sizing assume a fixed seed notional).
+            if (ai.Strategy == AiStrategy.Conviction) continue;
             if (ai.CashInjectionFrequencyPrc <= 0m) continue;
 
             if (_ctx.Decimal01(ai.AiUserId) >= ai.CashInjectionFrequencyPrc) continue;
