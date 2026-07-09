@@ -48,6 +48,12 @@ internal sealed class AiBotStateService
     // no mirror maintained ⇒ byte-identical. Supersedes the §stop-ttl interim (StopMaxAgeSec).
     private readonly bool _pruneLimitOnly;
     private bool _warnedStopTtlSuperseded;
+    // §B3 (Bots:LeanReload): when on, RefreshAssetsAsync fetches only open LIMITS into ctx.OpenOrders (not the
+    // ~1.18M armed stops) + a per-bot armed-stop COUNT into ctx.ArmedStopCount, so the ~60s reload is O(limits)
+    // instead of O(pool). The cap adds ArmedStopCount; replace-old sources its victims from a DB query instead
+    // of scanning ctx.OpenOrders. Off ⇒ full hydration as before ⇒ byte-identical. Server-only query surface.
+    private readonly IBotMaintenanceQueries _maint;
+    private readonly bool _leanReload;
 
     // Throttle "Applied active bot cap" — the scaler may toggle the cap several
     // times per minute when load wobbles. One INFO per change buries everything
@@ -59,20 +65,22 @@ internal sealed class AiBotStateService
 
     internal AiBotStateService(IDataBaseService db, IAccountsCache accounts,
         IOrderExecutionService orders, BotStatsLogger stats,
-        ILogger<AiBotStateService> logger, decimal distanceMult = 1m,
+        ILogger<AiBotStateService> logger, IBotMaintenanceQueries maint, decimal distanceMult = 1m,
         int orderMaxAgeSec = 0, int stopMaxAgeSec = 0, int stopCullMaxPerSweep = 500,
-        bool pruneLimitOnly = false)
+        bool pruneLimitOnly = false, bool leanReload = false)
     {
         _db       = db       ?? throw new ArgumentNullException(nameof(db));
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _orders   = orders   ?? throw new ArgumentNullException(nameof(orders));
         _stats    = stats    ?? throw new ArgumentNullException(nameof(stats));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _maint    = maint    ?? throw new ArgumentNullException(nameof(maint));
         _distanceMult = distanceMult <= 0m ? 1m : distanceMult;
         _orderMaxAgeSec = orderMaxAgeSec < 0 ? 0 : orderMaxAgeSec;
         _stopMaxAgeSec = stopMaxAgeSec < 0 ? 0 : stopMaxAgeSec;
         _stopCullMaxPerSweep = stopCullMaxPerSweep < 1 ? 1 : stopCullMaxPerSweep;
         _pruneLimitOnly = pruneLimitOnly;
+        _leanReload = leanReload;
     }
     #endregion
 
@@ -105,6 +113,7 @@ internal sealed class AiBotStateService
         ctx.StocksByUser.Clear();
         ctx.OpenOrders.Clear();
         if (_pruneLimitOnly) ctx.OpenLimitOrders.Clear();   // §B2: rebuilt in lock-step below
+        if (_leanReload) ctx.ArmedStopCount.Clear();        // §B3: rebuilt from the GROUP-BY below
 
         var userIds = ctx.AiUsersByAiUserId.Values
             .Where(u => u.IsEnabled).Select(u => u.UserId).ToList();
@@ -120,7 +129,18 @@ internal sealed class AiBotStateService
         // bot loop reads currency state live via ctx.GetFund, so no per-user currency
         // index is built here.
         var allPositions = await _db.GetPositionsForUsersAsync(userIds, ct).ConfigureAwait(false);
-        var allOrders    = await _db.GetOpenOrdersForUsersAsync(userIds, ct).ConfigureAwait(false);
+        // §B3 lean reload: fetch only open LIMITS (~96k) instead of limits + ~1.18M armed stops. The armed-stop
+        // info the decision path still needs — the per-bot cap COUNT — comes from a cheap GROUP-BY below;
+        // replace-old sources its victims from a targeted query. Off ⇒ the full fetch (byte-identical). The
+        // shared GetOpenOrdersForUsersAsync is intentionally NOT narrowed (AccountsCache reseed depends on it).
+        var allOrders = _leanReload
+            ? await _maint.GetOpenLimitOrdersForUsersAsync(userIds, ct).ConfigureAwait(false)
+            : await _db.GetOpenOrdersForUsersAsync(userIds, ct).ConfigureAwait(false);
+        if (_leanReload)
+        {
+            var counts = await _maint.GetArmedStopCountsByUserAsync(userIds, ct).ConfigureAwait(false);
+            foreach (var kv in counts) ctx.ArmedStopCount[kv.Key] = kv.Value;
+        }
 
         // Only index live (non-zero) positions: the seed gives every bot a row for ALL 50 stocks,
         // so an unfiltered index degenerates to the whole universe per bot. Both readers
@@ -499,40 +519,60 @@ internal sealed class AiBotStateService
     internal async Task CancelPriorStandaloneStopsAsync(AiBotContext ctx, int userId, int stockId,
         OrderSide side, CancellationToken ct)
     {
-        if (!ctx.OpenOrders.TryGetValue(userId, out var userOrders) || userOrders.Count == 0) return;
-
-        // Snapshot the matches first — CancelOrderAsync is async and we mutate userOrders on success.
-        // NOTE (ordering caveat): armed stops enter ctx.OpenOrders only at the ~60s cold-load, so this sees
-        // the bot's ACCUMULATED prior stops (the hours-long pile), not one armed within the current window —
-        // which is exactly what needs pruning. StopProb draws are rare per bot ⇒ residual ~1–2/(bot,stock,side).
-        List<Order>? victims = null;
-        foreach (var o in userOrders.Values)
-            if (o.IsArmed && !o.IsBracketChild && o.StockId == stockId && o.Side == side)
-                (victims ??= new List<Order>()).Add(o);
-        if (victims is null) return;
+        // Source the victim order-ids. §B3 lean reload: armed stops aren't hydrated into ctx.OpenOrders, so
+        // fetch them with a targeted (bot,stock,side) STANDALONE query. Off: scan the in-memory set (the
+        // pre-B3 path, byte-identical). NOTE (ordering caveat, both paths): armed stops enter ctx.OpenOrders /
+        // the query reflects DB state only up to the last commit, so this sees the bot's ACCUMULATED prior
+        // stops (the hours-long pile), not one armed within the current window — exactly what needs pruning.
+        Dictionary<int, Order>? userOrders = null;
+        List<int>? victimIds = null;
+        if (_leanReload)
+        {
+            var ids = await _maint.GetStandaloneArmedStopIdsAsync(userId, stockId, side, ct).ConfigureAwait(false);
+            if (ids.Count > 0) victimIds = ids;
+        }
+        else
+        {
+            if (!ctx.OpenOrders.TryGetValue(userId, out userOrders) || userOrders.Count == 0) return;
+            foreach (var o in userOrders.Values)
+                if (o.IsArmed && !o.IsBracketChild && o.StockId == stockId && o.Side == side)
+                    (victimIds ??= new List<int>()).Add(o.OrderId);
+        }
+        if (victimIds is null) return;
 
         int pruned = 0, failed = 0;
-        foreach (var order in victims)
+        foreach (var orderId in victimIds)
         {
             OrderResult res;
             try
             {
-                res = await _orders.CancelOrderAsync(order.OrderId, ct).ConfigureAwait(false);
+                res = await _orders.CancelOrderAsync(orderId, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
-                if (failed++ == 0) _logger.LogError(ex, "ReplaceOld: cancel failed for #{Id}", order.OrderId);
+                if (failed++ == 0) _logger.LogError(ex, "ReplaceOld: cancel failed for #{Id}", orderId);
                 continue;
             }
             if (res.Status == OrderStatus.Success || res.Status == OrderStatus.AlreadyClosed)
             {
-                // Armed stop — never in the limit-only index, so no OpenLimitOrders touch needed.
-                userOrders.Remove(order.OrderId);
+                if (_leanReload)
+                {
+                    // Keep the cap exact intra-window — mirrors the off-path OpenOrders.Remove decrementing
+                    // .Count. Clamp: the query set can exceed the stale reload count (arms since last reload
+                    // aren't in it), so an unclamped decrement would underflow.
+                    if (ctx.ArmedStopCount.TryGetValue(userId, out var cnt))
+                        ctx.ArmedStopCount[userId] = Math.Max(0, cnt - 1);
+                }
+                else
+                {
+                    // Armed stop — never in the limit-only index, so no OpenLimitOrders touch needed.
+                    userOrders!.Remove(orderId);
+                }
                 pruned++;
             }
             else if (failed++ == 0)
             {
-                _logger.LogWarning("ReplaceOld: #{Id} not cancelled ({Status})", order.OrderId, res.Status);
+                _logger.LogWarning("ReplaceOld: #{Id} not cancelled ({Status})", orderId, res.Status);
             }
         }
         if (pruned > 0) _stats.AddCancelled(pruned);

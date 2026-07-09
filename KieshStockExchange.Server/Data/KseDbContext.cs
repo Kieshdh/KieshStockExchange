@@ -99,6 +99,16 @@ public sealed class KseDbContext : DbContext
             // child queries + cold-load rehydration.
             b.HasIndex(x => x.ParentOrderId)
              .HasDatabaseName("IX_Orders_ParentOrderId");
+            // §B3 lean reload: two PARTIAL indexes so the bot-maintenance armed-stop queries are index-only
+            // instead of scanning the ~1.18M-row Pending pool each ~60s reload. #1 backs the per-user COUNT of
+            // ALL armed stops (bracket children included, to match today's cap). #2 backs replace-old's
+            // per-(bot,stock,side) STANDALONE lookup. Both filter to armed stops so they stay tiny.
+            b.HasIndex(x => x.UserId)
+             .HasDatabaseName("IX_Orders_ArmedStop_User")
+             .HasFilter(@"""Status"" = 'Pending' AND ""Stop"" <> 'None'");
+            b.HasIndex(x => new { x.UserId, x.StockId, x.Side })
+             .HasDatabaseName("IX_Orders_ArmedStandalone_User_Stock_Side")
+             .HasFilter(@"""Status"" = 'Pending' AND ""Stop"" <> 'None' AND ""ParentOrderId"" IS NULL");
         });
 
         modelBuilder.Entity<TransactionRow>(b =>

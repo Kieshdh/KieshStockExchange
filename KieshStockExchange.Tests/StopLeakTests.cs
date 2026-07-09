@@ -1,6 +1,7 @@
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.BackgroundServices.Helpers;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
@@ -30,9 +31,10 @@ public class StopLeakTests
         var db = new Mock<IDataBaseService>();
         var accounts = new Mock<IAccountsCache>();
         var orders = new Mock<IOrderExecutionService>();
+        var maint = new Mock<IBotMaintenanceQueries>();   // §B3: unused here (leanReload defaults off)
         var stats = new BotStatsLogger(NullLogger<BotStatsLogger>.Instance);
         var svc = new AiBotStateService(db.Object, accounts.Object, orders.Object, stats,
-            NullLogger<AiBotStateService>.Instance, pruneLimitOnly: pruneLimitOnly);
+            NullLogger<AiBotStateService>.Instance, maint.Object, pruneLimitOnly: pruneLimitOnly);
         return (svc, orders, db, accounts);
     }
 

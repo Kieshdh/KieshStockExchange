@@ -2,6 +2,7 @@ using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.BackgroundServices.Helpers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
@@ -264,6 +265,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IMarketDataService market,
         IStockService stocks,
         IDataBaseService db,
+        IBotMaintenanceQueries botMaint,
         IAccountsCache accounts,
         IReservationLedger ledger,
         IOrderBookEngine books,
@@ -644,6 +646,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         driftGuardPct:     _configuration.GetValue("Bots:Jumps:DriftGuardPct", 0.10));
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
+                        botMaint,
                         distanceMult: _configuration.GetValue("Bots:DecisionDistanceMult", 1m),
                         // Realism §: age-based resting-limit-order expiry. 0 = off (default, byte-identical).
                         // When > 0, the prune sweep cancels open limit orders older than a per-order
@@ -659,7 +662,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // §B2 (Workstream 1): make PruneWorstOrdersAsync iterate a limit-only index so the
                         // ~30s maint scan is O(limits), independent of the armed-stop pool. Default off ⇒
                         // prune reads full OpenOrders, byte-identical. Supersedes the StopMaxAgeSec interim.
-                        pruneLimitOnly: _configuration.GetValue("Bots:PruneLimitOnly", false));
+                        pruneLimitOnly: _configuration.GetValue("Bots:PruneLimitOnly", false),
+                        // §B3 (Workstream 1b): lean reload — RefreshAssetsAsync fetches only open limits + a
+                        // per-bot armed-stop COUNT (not the ~1.18M armed-stop Orders), so the ~60s reload is
+                        // O(limits) not O(pool). Default off ⇒ full hydration, byte-identical. Assumes
+                        // Bots:StopMaxAgeSec=0 (stop-ttl retired).
+                        leanReload: _configuration.GetValue("Bots:LeanReload", false));
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         _regime, _activity, _priceMemory,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),

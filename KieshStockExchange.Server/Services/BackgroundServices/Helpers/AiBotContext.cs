@@ -49,6 +49,12 @@ internal sealed class AiBotContext
     // keep reading the FULL OpenOrders. Empty/unused when the flag is off ⇒ byte-identical.
     internal readonly Dictionary<int, Dictionary<int, Order>> OpenLimitOrders = new();
 
+    // §B3 lean reload (Bots:LeanReload): per-bot count of armed (Pending) stops, refreshed each reload by a
+    // cheap GROUP-BY instead of hydrating the ~1.18M stop Orders into OpenOrders. The open-order cap adds this
+    // to OpenOrders.Count so it stays byte-identical to today's hydrated .Count. Empty when the flag is off ⇒
+    // the cap adds 0 ⇒ byte-identical. Counts ALL Pending stops (incl bracket children), matching today.
+    internal readonly Dictionary<int, int> ArmedStopCount = new();
+
     // Three-stage price cache: StockPrices is the raw last quote, PreviousPrices
     // is the prior raw value for tick-to-tick deltas, SmoothedPrices is EWMA
     // (α=0.15, ~6-tick window) that ChooseOrderType reads to dampen spike noise.
@@ -523,6 +529,7 @@ internal sealed class AiBotContext
         StocksByUser.Clear();
         OpenOrders.Clear();
         OpenLimitOrders.Clear();
+        ArmedStopCount.Clear();
         StockPrices.Clear();
         PreviousPrices.Clear();
         SmoothedPrices.Clear();

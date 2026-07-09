@@ -636,7 +636,13 @@ internal sealed class AiBotDecisionService
         if (user.ErrorsToday >= 10) return false;
 
         var openCap = (int)Math.Ceiling(user.MaxOpenOrders * _maxOpenOrdersMult);
-        if (ctx.OpenOrders.TryGetValue(user.UserId, out var orders) && orders.Count >= openCap)
+        // §B3 lean reload: under LeanReload, armed stops are NOT hydrated into OpenOrders — their per-bot count
+        // lives in ctx.ArmedStopCount, so add it back. When off, ArmedStopCount is empty ⇒ +0 ⇒ byte-identical
+        // (OpenOrders still holds the stops itself). Evaluate even with no OpenOrders key so a stops-only bot is
+        // still capped (matches today, where such a bot had an OpenOrders entry holding its stops).
+        var openCount = (ctx.OpenOrders.TryGetValue(user.UserId, out var orders) ? orders.Count : 0)
+                      + ctx.ArmedStopCount.GetValueOrDefault(user.UserId);
+        if (openCount >= openCap)
             return false;
 
         // No daily-trades cap — it would only force churning bots dormant mid-session;

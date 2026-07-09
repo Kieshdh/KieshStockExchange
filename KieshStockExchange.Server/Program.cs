@@ -173,6 +173,9 @@ builder.Services.AddSignalR();
 // pooling live inside PgDBService and PostgresConnectionFactory.
 builder.Services.AddSingleton<IDbConnectionFactory, PostgresConnectionFactory>();
 builder.Services.AddSingleton<IDataBaseService, PgDBService>();
+// §B3 lean reload: expose the same singleton PgDBService under the server-only bot-maintenance query
+// interface (no second instance; never enters the shared IDataBaseService / the client).
+builder.Services.AddSingleton<IBotMaintenanceQueries>(sp => (PgDBService)sp.GetRequiredService<IDataBaseService>());
 
 // SeparatorLogger options — engine helpers construct SeparatorLogger<T> inline.
 builder.Services.Configure<SeparatorLoggerOptions>(_ => { });
