@@ -43,39 +43,42 @@ public sealed class AuthService : IAuthService
 
     #region Authentication Methods
     public async Task<bool> RegisterAsync(string username, string fullname,
-        string email, string password, DateTime birthdate) 
+        string email, string password, DateTime birthdate)
     {
-        // Check for existing user by username
-        if (await _db.GetUserByUsername(username).ConfigureAwait(false) != null)
-            return false;
-
-        // Check for existing user by email
-        var allUsers = await _db.GetUsersAsync().ConfigureAwait(false);
-        if (allUsers.Any(u => u.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
-            return false;
-
-        // Check valid password
+        // Server is authoritative for registration now: it creates a NON-admin trader,
+        // provisions seed cash, and (server-side) enforces uniqueness. The old local-DB
+        // path is gone — an anonymous client can't write Users through the [Authorize]
+        // wall, and it wrongly minted admins. After a successful register the user logs
+        // in normally via LoginAsync (which mints the JWT + joins the hub groups).
         if (!SecurityHelper.IsValidPassword(password))
             return false;
 
-        // Create user
-        var user = new User
+        try
         {
-            Username = username,
-            FullName = fullname,
-            Email = email,
-            PasswordHash = SecurityHelper.HashPassword(password),
-            BirthDate = birthdate,
-            IsAdmin = true, // Humans always admin
-        };
-        if (!user.IsValid()) return false;
+            var resp = await _http.PostAsJsonAsync("api/auth/register", new
+            {
+                Username = username,
+                Password = password,
+                Email = email,
+                FullName = fullname,
+                BirthDate = birthdate,
+            }).ConfigureAwait(false);
 
-        // Save user
-        await _db.CreateUser(user).ConfigureAwait(false);
+            if (resp.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Registered user {Username} on the server.", username);
+                return true;
+            }
 
-        _logger.LogInformation("New user registered: #{UserId} {Username}", user.UserId, user.Username);
-
-        return true;
+            // 409 username_taken / 400 invalid_* → the VM shows a generic "already exists / invalid" alert.
+            _logger.LogInformation("Registration rejected for {Username}: {Status}.", username, resp.StatusCode);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Registration request failed for {Username} (server unreachable?).", username);
+            return false;
+        }
     }
 
     public async Task LoginAsync(string username, string password)
