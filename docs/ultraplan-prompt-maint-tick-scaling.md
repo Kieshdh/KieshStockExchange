@@ -163,3 +163,46 @@ waiting ~12h for the drain. Candidate directions (pick/blend/beat):
   (iii) whatever the council finds is the true minimal fix.
 Acceptance: tick recovers toward ~250ms — validated by a closely-watched 45m prod soak, monitors @15/30/45m (maint ms
 drops + holds INDEPENDENT of the stop pool, CK=0, pool draining). W1 stays on prod meanwhile (CK-safe + draining).
+
+---
+
+## ★★ COUNCIL VERDICT (2026-07-09, 4 advisors) — the forward plan: bound the SOURCE + incremental aggregates + off-thread
+The council (First-Principles / Contrarian / Executor / Outsider) reviewed the whole arc and converged on a **root
+reframe**: the flag-stack (replace-old + B2 + B3) treats SYMPTOMS of two diseases —
+1. **Unbounded source** — bots hoard ~58 dormant standalone stops/bot (~570/min firehose that never triggers). Real
+   venues never hold that; "most stops die young." B3 exists only because the pool is allowed to reach ~1.18M.
+2. **Materialized-view-recompute anti-pattern** — the in-memory open-order dict (`ctx.OpenOrders`) is a matview
+   REBUILT FROM SCRATCH every ~60s by `RefreshAssetsAsync` = O(pool). B2/B3 only lower the coefficient on the pool
+   term; neither removes it.
+
+**Three structural end-state moves (ranked):**
+1. **★ BOUND THE SOURCE (the disease cure — Contrarian headline, Executor + Outsider concur).** A per-bot armed-stop
+   CAP at placement (mirror the open-order cap) + per-(bot,stock,side) NETTING (replace-old is a partial version) +
+   optional TTL. Bounds the pool to a small multiple of bots ⇒ **O(pool) stops mattering ⇒ B3/LeanReload's whole
+   justification largely evaporates.** Cheapest, highest-leverage, CK-neutral. First understand WHY ~58/bot (initial
+   pile + arms on new (stock,side) that replace-old doesn't catch).
+2. **★ INCREMENTAL AGGREGATES / IVM (the clean architecture — First-Principles headline, Outsider #1).** The decision
+   path needs only a per-bot open-order COUNT + reserved-qty SUM from armed stops — both are monoids (arm +1/+qty,
+   fill/cancel −1/−qty). Maintain them incrementally at the arm/fill/cancel sites the loop already owns; then the
+   reload never hydrates armed stops AND never recomputes their aggregates. `RefreshAssetsAsync` degrades to a rare
+   reconciliation/drift-audit, not the hot path. Collapses maint O(pool)→O(events/tick). **Retires B3's count query.**
+3. **★ W3 — MAINT OFF THE TICK THREAD (the invariant — First-Principles #2, Outsider #3).** Double-buffered immutable
+   snapshot the tick swaps atomically; the heavy sweep (reload, prune, economy LogSnapshot) runs on a background
+   context so a pass NEVER inflates a latency-critical tick. This is the invariant that ENDS the whole class:
+   **the ~1s tick must never do O(fleet) work.** Subsumes W2 (the economy `LogSnapshot` O(bots×stocks) rides the same
+   off-thread mechanism).
+
+**On B3 (the split):** Contrarian = don't even ship it (bound the source and it's unnecessary). First-Principles +
+Executor = ship it, it's built + unblocks the soak + VALIDATES the diagnosis (does an O(limits) reload flatten maint?).
+**Resolution: B3 = validated INTERIM (soaking now), NOT the architecture.** Its soak data tells us the maint FLOOR once
+the pool term is gone — which directly informs whether source-cap alone would have sufficed.
+
+**Executor's operational sequence:** B3 soak green (maint <~120ms + slope~0 vs pool + CK=0 across the 3 monitors) →
+consider baking the 3 flags → **RE-PROFILE** the maint sub-phases for the next dominant one (expect W2 economy
+LogSnapshot) → then fire the SOURCE-CAP (cheap, always-worth) and/or W2/W3 per the profile. **DROP faster-drain** —
+the ~30h drain self-heals and is a non-problem (doubly so once the source is capped). W4 (collect parallelism) stays
+deferred (collect 6-7% of tick).
+
+**⇒ NEXT ULTRAPLAN (after the B3 soak reads):** the SOURCE-CAP (per-bot armed-stop cap + netting) as the disease cure,
+then INCREMENTAL AGGREGATES to retire the periodic recompute, then W3 to move maint off the tick. This supersedes the
+"faster-drain" and pure-B-workstream framing above.
