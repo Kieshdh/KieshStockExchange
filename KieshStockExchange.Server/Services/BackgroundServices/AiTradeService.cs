@@ -299,6 +299,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _reactionRefHalfLifeSec = Math.Max(0.0, _configuration.GetValue("Bots:ImpactDecoupleReferenceHalfLifeSec", 240.0));
         ImpactHoldProbe.Configure(_configuration.GetValue("Bots:ImpactHoldProbe", false));
         ChaserProbe.Configure(_configuration.GetValue("Bots:ExogShock:ChaserProbe", false));
+        ArmedStopCapProbe.Configure(_configuration.GetValue("Bots:ArmedStopCapProbe", false));
         if (db          is null) throw new ArgumentNullException(nameof(db));
         if (ledger      is null) throw new ArgumentNullException(nameof(ledger));
         if (books       is null) throw new ArgumentNullException(nameof(books));
@@ -644,6 +645,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         aftershockBuckets: _configuration.GetValue("Bots:Jumps:AftershockBuckets", 4),
                         aftershockDecay:   _configuration.GetValue("Bots:Jumps:AftershockDecay", 0.5),
                         driftGuardPct:     _configuration.GetValue("Bots:Jumps:DriftGuardPct", 0.10));
+        // §source-cap (Bots:MaxArmedStopsPerBot): bound the per-bot armed-stop pool at placement. Shared by the
+        // state service (the +1 increment) and the decision service (the reject gate). Requires LeanReload for
+        // exact counting, and StopMaxAgeSec=0 (the aged cull removes armed stops without decrementing the count).
+        var leanReload          = _configuration.GetValue("Bots:LeanReload", false);
+        var maxArmedStopsPerBot = _configuration.GetValue("Bots:MaxArmedStopsPerBot", 0);
+        if (maxArmedStopsPerBot > 0 && !leanReload)
+            _logger.LogWarning("§source-cap: Bots:MaxArmedStopsPerBot={Cap} requires Bots:LeanReload=true for an " +
+                "exact per-bot count; degrading to a reload-granular OpenOrders scan.", maxArmedStopsPerBot);
+        if (maxArmedStopsPerBot > 0 && _configuration.GetValue("Bots:StopMaxAgeSec", 0) > 0)
+            _logger.LogWarning("§source-cap: Bots:MaxArmedStopsPerBot={Cap} with Bots:StopMaxAgeSec>0 — the aged-stop " +
+                "cull removes armed stops without decrementing the count, biasing the cap high. Set StopMaxAgeSec=0.",
+                maxArmedStopsPerBot);
         _state     = new AiBotStateService(db, accounts, marketOrders, _stats,
                         new SeparatorLogger<AiBotStateService>(loggerFactory, loggerOptions),
                         botMaint,
@@ -667,7 +680,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // per-bot armed-stop COUNT (not the ~1.18M armed-stop Orders), so the ~60s reload is
                         // O(limits) not O(pool). Default off ⇒ full hydration, byte-identical. Assumes
                         // Bots:StopMaxAgeSec=0 (stop-ttl retired).
-                        leanReload: _configuration.GetValue("Bots:LeanReload", false));
+                        leanReload: leanReload,
+                        // §source-cap: the +1 increment (NoteArmedStopPlaced) is gated on this being > 0.
+                        maxArmedStopsPerBot: maxArmedStopsPerBot);
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         _regime, _activity, _priceMemory,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
@@ -835,7 +850,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         reactionTakerCoupling:     _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerCoupling", false),
                         reactionTakerThreshold:    _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerThreshold", 0.15m),
                         reactionTakerGain:         _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGain", 1.0m),
-                        reactionTakerGovScale:     _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGovScale", 1000000000m));
+                        reactionTakerGovScale:     _configuration.GetValue("Bots:Imbalance:ReactionPersistence:TakerGovScale", 1000000000m),
+                        // §source-cap: the reject gate in BuildProtectiveStopAsync + the count source selector.
+                        maxArmedStopsPerBot:       maxArmedStopsPerBot,
+                        leanReload:                leanReload);
         _maxAdvancedPerTick = _configuration.GetValue("Bots:Advanced:MaxPerTick", 50);
         _advancedEnabled    = _configuration.GetValue("Bots:Advanced:Enabled", false);
         _logger.LogInformation(
@@ -1431,6 +1449,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (result.PlacedSuccessfully)
         {
             Interlocked.Increment(ref _tradesPlacedThisSession);
+            _state.NoteArmedStopPlaced(_ctx, user, dec.Kind, result);   // §source-cap: +1 on a standalone arm
         }
         else
         {
@@ -1493,6 +1512,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             if (result.PlacedSuccessfully)
             {
                 Interlocked.Increment(ref _tradesPlacedThisSession);
+                _state.NoteArmedStopPlaced(_ctx, user, d.Kind, result);   // §source-cap: +1 on a standalone arm
             }
             else
             {
@@ -1607,6 +1627,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             if (result.PlacedSuccessfully)
             {
                 Interlocked.Increment(ref _tradesPlacedThisSession);
+                _state.NoteArmedStopPlaced(_ctx, user, d.Kind, result);   // §source-cap: +1 on a standalone arm
             }
             else
             {
@@ -2056,6 +2077,17 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 var (held, recomputed, heldFrac) = ImpactHoldProbe.Drain();
                 _logger.LogInformation("IMPACTHOLD held={Held} recomputed={Recomp} heldFrac={Frac:0.000}",
                     held, recomputed, heldFrac);
+            }
+            if (ArmedStopCapProbe.Enabled)
+            {
+                // §source-cap liveliness: blocked>0 once the pool reaches the cap confirms the gate fires;
+                // poolTotal/maxPerBot show the pool bounded at ≈ cap×fleet. blocked==0 with a large pool = the
+                // inert-flag trap (increment wired to the wrong path). Pool read from the loop-owned dict.
+                var (blocked, armed) = ArmedStopCapProbe.Drain();
+                long poolTotal = 0; int maxPerBot = 0;
+                foreach (var c in _ctx.ArmedStopCount.Values) { poolTotal += c; if (c > maxPerBot) maxPerBot = c; }
+                _logger.LogInformation("ARMEDCAP blocked={Blocked} armed={Armed} poolTotal={Pool} maxPerBot={Max}",
+                    blocked, armed, poolTotal, maxPerBot);
             }
             if (ChaserProbe.Enabled)
             {
