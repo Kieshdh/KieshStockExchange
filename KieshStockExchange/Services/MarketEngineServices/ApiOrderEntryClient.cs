@@ -149,6 +149,11 @@ public sealed class ApiOrderEntryClient : IOrderEntryService
         IReadOnlyList<CommandDtos.TrueMarketSellBatchRequest> requests, CancellationToken ct = default)
         => throw new NotSupportedException("PlaceTrueMarketSellBatchAsync is server-side (arb-leg batch route).");
 
+    // §A1b: batch arm BUY-stops — server-internal bot-loop optimization; never called client-side.
+    public Task<IReadOnlyList<OrderResult>> ArmStopBuyBatchAsync(
+        IReadOnlyList<StopArmRequest> requests, CancellationToken ct = default)
+        => throw new NotSupportedException("ArmStopBuyBatchAsync is server-side (bot-loop §A1b batch arm).");
+
     public async Task<OrderResult> ModifyStopAsync(int userId, int orderId, int? newQuantity = null,
         decimal? newStopPrice = null, decimal? newLimitPrice = null, CancellationToken ct = default)
     {
