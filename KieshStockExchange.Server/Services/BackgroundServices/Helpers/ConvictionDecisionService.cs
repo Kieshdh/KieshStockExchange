@@ -19,9 +19,15 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// GUARDRAIL that vetoes chasing a name already far above the bank estimate (it never pushes a buy).
 ///
 /// CRITICAL: every acted order is an AGGRESSIVE DIRECTIONAL TAKER (true-market) order — a passive limit would just
-/// be absorbed by the value-anchor (the known failure), producing no price impact. Long-only entries: a fire buys
-/// ONE max-conviction name; exits are MEMORYLESS (no entry-price memory) — a held name is sold when its live
-/// conviction decays below ExitBar, its momentum flips negative, or it prints overvalued past StopOvervaluation.
+/// be absorbed by the value-anchor (the known failure), producing no price impact. A fire buys ONE max-conviction
+/// name; exits are MEMORYLESS (no entry-price memory) — a held name is sold when its live conviction decays below
+/// ExitBar, its momentum flips negative, or it prints overvalued past StopOvervaluation.
+///
+/// §P3 shorting (default OFF): when ShortingEnabled, a fire may ALSO short the single most-OVERVALUED name it is
+/// FLAT in (flat-only, mirrors the existing short cohort) via the batched market-short route, and COVER a held short
+/// once it reverts (hysteresis at 0.5·ShortBar) or momentum turns up. Kept SEPARATE from the long Hot pick (the full
+/// signed two-way Hot is the later CRUX phase); this only exercises the short-open + cover plumbing CK-safely. Shorts
+/// are SMALL so the cover buyback is always affordable from the cash pile. Off ⇒ byte-identical long-only behaviour.
 ///
 /// Stable by construction:
 ///  • RiskAppetite ≤ 0.25 HARD-CLAMP + ONE bet per fire ⇒ no all-in cash-bomb (the past failure that froze the loop).
@@ -90,6 +96,15 @@ internal sealed class ConvictionDecisionService
     // Default off ⇒ the original flat sizing. Cash floor still applies (removed only in the later cash-to-zero phase).
     private readonly bool   _convictionSizingEnabled;
     private readonly double _convScale, _maxDeploy, _sizingGamma;
+    // §P3 shorting ROUTE (isolation): when enabled, a firing bot may also SHORT the single most-OVERVALUED name it is
+    // FLAT in (overvaluation ≥ ShortBar, momentum not rising) via the batched market-short route, and COVER a held
+    // short once it reverts toward fair value (hysteresis at 0.5·ShortBar) or momentum turns up. Deliberately kept
+    // SEPARATE from the long Hot pick (the full signed two-way Hot is the later CRUX phase) — this phase only proves
+    // the short-open + cover plumbing, the collateral/CK invariant, F1 rollback rate, and perf. Shorts are sized
+    // SMALL (ShortRiskFraction·RiskAppetite·seed) so the cover buyback is always affordable from the cash pile.
+    // Default off ⇒ no short/cover requests are built (byte-identical long-only behaviour).
+    private readonly bool   _shortingEnabled;
+    private readonly double _shortBar, _shortRiskFraction;
     private long _passCount;                                        // monotonic, reshuffles the fire subset each pass
     private DateTime _lastPassUtc = DateTime.MaxValue;              // inert until the first RunAsync arms the clock
 
@@ -101,7 +116,8 @@ internal sealed class ConvictionDecisionService
         double cashFloorBase = 0.55, double riskAppetiteBase = 0.05, double checkInMeanSecBase = 1200.0,
         decimal seedBalanceUsd = 200_000m, decimal seedBalanceEur = 180_000m, bool useLoadEwma = false,
         bool holdHorizonEnabled = false, double holdMinSec = 1800.0, double holdMaxSec = 172_800.0,
-        bool convictionSizingEnabled = false, double convScale = 0.12, double maxDeploy = 0.90, double sizingGamma = 3.0)
+        bool convictionSizingEnabled = false, double convScale = 0.12, double maxDeploy = 0.90, double sizingGamma = 3.0,
+        bool shortingEnabled = false, double shortBar = 0.06, double shortRiskFraction = 0.15)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -129,6 +145,9 @@ internal sealed class ConvictionDecisionService
         _convScale          = Math.Max(1e-6, convScale);
         _maxDeploy          = Math.Clamp(maxDeploy, 0.0, 1.0);
         _sizingGamma        = Math.Max(0.1, sizingGamma);
+        _shortingEnabled    = shortingEnabled;
+        _shortBar           = Math.Max(0.0, shortBar);
+        _shortRiskFraction  = Math.Clamp(shortRiskFraction, 0.0, 1.0);
     }
 
     internal void Reset() { _passCount = 0; _lastPassUtc = DateTime.MaxValue; }
@@ -193,6 +212,29 @@ internal sealed class ConvictionDecisionService
     {
         double z = Math.Clamp(strength / Math.Max(1e-9, convScale), 0.0, 1.0);
         return maxDeploy * Math.Pow(z, gamma);
+    }
+
+    /// <summary>§P3 open a short: the name prints OVERVALUED past ShortBar (price well above the bank estimate) and its
+    /// momentum is NOT rising. Flat-only is enforced at the call site (Position.Quantity==0). Pure ⇒ testable.</summary>
+    internal static bool ShouldOpenShort(double overvaluation, double mom, double shortBar)
+        => overvaluation >= shortBar && mom <= 0.0;
+
+    /// <summary>§P3 cover a held short: HYSTERESIS — the overvaluation has reverted below half the open bar (back toward
+    /// fair value) OR momentum has turned up against the short. The 0.5·ShortBar band prevents open/cover thrash.
+    /// Pure ⇒ testable.</summary>
+    internal static bool ShouldCoverShort(double overvaluation, double mom, double shortBar)
+        => overvaluation <= 0.5 * shortBar || mom > 0.0;
+
+    /// <summary>§P3 short size (SHARES): a SMALL exposure = ShortRiskFraction·RiskAppetite·seedNotional / price, floored
+    /// at 0. Shorts reserve collateral at fill (not cash at placement); this bounds EXPOSURE so the later cover buyback
+    /// stays affordable from the cash pile. Pure ⇒ testable.</summary>
+    internal static int ShortQty(decimal seedNotional, double riskAppetite, double shortRiskFraction, double price)
+    {
+        if (price <= 0.0) return 0;
+        decimal notional = (decimal)(riskAppetite * shortRiskFraction) * seedNotional;
+        if (notional <= 0m) return 0;
+        int q = (int)Math.Floor((double)notional / price);
+        return q > 0 ? q : 0;
     }
 
     private double CashFloorPctOf(int id)   => Dial(id, CashFloorSalt, _cashFloorBase, _cashFloorBase + CashFloorSpan);
@@ -296,6 +338,11 @@ internal sealed class ConvictionDecisionService
         var sellReqs   = new List<TrueMarketSellBatchRequest>();
         var sellOwners = new List<AIUser>();
         var buyPlans   = new List<(AIUser User, int Sid, double Price, double Strength)>();
+        // §P3 short-side (only populated when _shortingEnabled): covers (buy-to-flatten a held short) and opens.
+        var coverReqs   = new List<TrueMarketBuyBatchRequest>();
+        var coverOwners = new List<AIUser>();
+        var shortReqs   = new List<MarketShortBatchRequest>();
+        var shortOwners = new List<AIUser>();
 
         // §perf: one reusable scratch buffer for the per-bot ranking (single loop thread ⇒ no aliasing).
         var scored = new List<(int Sid, double Price, double Hot, double Mom, double Overval)>(signal.Count);
@@ -315,21 +362,34 @@ internal sealed class ConvictionDecisionService
                 if (hot > bestHot) { bestHot = hot; bestIdx = scored.Count - 1; }
             }
 
-            // EXIT (turnover-bounded to ONE name/fire): the worst-Hot HELD name that fails its thesis. §P1: with the
-            // hold-horizon ON, hold THROUGH DRAWDOWNS — the soft thesis-decay exit waits out the per-bot HoldSec
-            // (hard overvaluation exits bypass it); OFF ⇒ the original memoryless (mom-knee-jerk) exit.
-            int sellIdx = -1; double sellHot = double.PositiveInfinity;
+            // Per-bot scan (turnover-bounded to ONE name each): the worst-Hot HELD LONG that fails its thesis (exit),
+            // and — §P3 shorting on — the most-bullish HELD SHORT to cover + the most-overvalued FLAT name to short.
+            // §P1: with the hold-horizon ON, a held long is HELD THROUGH DRAWDOWNS — the soft thesis-decay exit waits
+            // out the per-bot HoldSec (hard overvaluation bypasses it); OFF ⇒ the original memoryless exit.
+            int sellIdx = -1;  double sellHot   = double.PositiveInfinity;
+            int coverIdx = -1; double coverHot  = double.NegativeInfinity;  // §P3 most-bullish held short = urgent cover
+            int shortIdx = -1; double shortOver = double.NegativeInfinity;  // §P3 most-overvalued flat = short candidate
             for (int i = 0; i < scored.Count; i++)
             {
                 var s = scored[i];
                 var pos = _accounts.GetPosition(user.UserId, s.Sid);
-                if ((pos?.AvailableQuantity ?? 0) <= 0) continue;
-                bool doExit = _holdHorizonEnabled
-                    ? ShouldExitHeld(s.Hot, s.Overval, _exitBar, _stopOvervaluation,
-                                     (now - pos!.UpdatedAt).TotalSeconds, HoldSecOf(user.AiUserId))
-                    : ShouldExit(s.Hot, s.Mom, s.Overval, _exitBar, _stopOvervaluation);
-                if (!doExit) continue;
-                if (s.Hot < sellHot) { sellHot = s.Hot; sellIdx = i; }
+                int qty = pos?.Quantity ?? 0;
+                if ((pos?.AvailableQuantity ?? 0) > 0)
+                {
+                    bool doExit = _holdHorizonEnabled
+                        ? ShouldExitHeld(s.Hot, s.Overval, _exitBar, _stopOvervaluation,
+                                         (now - pos!.UpdatedAt).TotalSeconds, HoldSecOf(user.AiUserId))
+                        : ShouldExit(s.Hot, s.Mom, s.Overval, _exitBar, _stopOvervaluation);
+                    if (doExit && s.Hot < sellHot) { sellHot = s.Hot; sellIdx = i; }
+                }
+                else if (_shortingEnabled && qty < 0)
+                {
+                    if (ShouldCoverShort(s.Overval, s.Mom, _shortBar) && s.Hot > coverHot) { coverHot = s.Hot; coverIdx = i; }
+                }
+                else if (_shortingEnabled && qty == 0)
+                {
+                    if (ShouldOpenShort(s.Overval, s.Mom, _shortBar) && s.Overval > shortOver) { shortOver = s.Overval; shortIdx = i; }
+                }
             }
             if (sellIdx >= 0)
             {
@@ -341,20 +401,57 @@ internal sealed class ConvictionDecisionService
                 }
             }
 
-            // ENTRY: buy the single max-conviction name when it clears the sensitivity-scaled bar (funded in pass 2).
+            // §P3 COVER: buy EXACTLY the short qty to flatten (never flip long); a ×1.5 budget headroom for a price
+            // rise (always affordable — P3 shorts are small vs the cash pile). The settler releases the collateral.
+            if (_shortingEnabled && coverIdx >= 0)
+            {
+                int shortQty = -(_accounts.GetPosition(user.UserId, scored[coverIdx].Sid)?.Quantity ?? 0);
+                double cprice = scored[coverIdx].Price;
+                if (shortQty > 0 && cprice > 0.0)
+                {
+                    decimal budget = (decimal)(shortQty * cprice * 1.5);
+                    coverReqs.Add(new TrueMarketBuyBatchRequest(user.UserId, scored[coverIdx].Sid, shortQty, budget, ccy));
+                    coverOwners.Add(user);
+                }
+            }
+
+            // §P3 SHORT OPEN: a small flat-only market short of the most-overvalued name (collateral reserved at fill).
+            if (_shortingEnabled && shortIdx >= 0)
+            {
+                int qty = ShortQty(seedNotional, RiskAppetiteOf(user.AiUserId), _shortRiskFraction, scored[shortIdx].Price);
+                if (qty > 0)
+                {
+                    shortReqs.Add(new MarketShortBatchRequest(user.UserId, scored[shortIdx].Sid, qty, ccy));
+                    shortOwners.Add(user);
+                }
+            }
+
+            // ENTRY: buy the single max-conviction name when it clears the sensitivity-scaled bar (funded in pass 3).
             // §P2 carries the conviction STRENGTH above the effective bar (bar/sens) so the sizing curve can read it.
-            if (bestIdx >= 0 && PassesBar(bestHot, bar, sens))
+            // §P3 flip guard: with shorting on, never long-buy a name the bot is SHORT in (the cover path flattens it).
+            if (bestIdx >= 0 && PassesBar(bestHot, bar, sens)
+                && (!_shortingEnabled || (_accounts.GetPosition(user.UserId, scored[bestIdx].Sid)?.Quantity ?? 0) >= 0))
                 buyPlans.Add((user, scored[bestIdx].Sid, scored[bestIdx].Price, bestHot - bar / Math.Max(1e-9, sens)));
         }
 
-        // Pass 1 — SELLS first so proceeds settle and cash returns to fund the buys (CK-safe funding order).
+        // CK-safe ordering = sell / cover THEN buy / short: cash-producing legs settle first so the cash-consuming
+        // buys are sized off FRESH AvailableBalance; the collateral-neutral short opens go last.
+        // Pass 1 — long SELLS (proceeds settle, cash returns to fund the buys).
         if (sellReqs.Count > 0)
         {
             var sellResults = await _entry.PlaceTrueMarketSellBatchAsync(sellReqs, ct).ConfigureAwait(false);
             for (int i = 0; i < sellOwners.Count; i++) RecordFills(sellOwners[i], sellResults[i]);
         }
 
-        // Pass 2 — one aggressive TAKER BUY per firing bot, from FRESH post-sell AvailableBalance, bounded by
+        // Pass 2 — §P3 COVERS (buy-to-flatten held shorts): releases short collateral + settles the short's P&L
+        // before the long buys read available cash. Cover buys ride the plain buy-batch; the settler flattens them.
+        if (coverReqs.Count > 0)
+        {
+            var coverResults = await _entry.PlaceTrueMarketBuyBatchAsync(coverReqs, ct).ConfigureAwait(false);
+            for (int i = 0; i < coverOwners.Count; i++) RecordFills(coverOwners[i], coverResults[i]);
+        }
+
+        // Pass 3 — one aggressive TAKER BUY per firing bot, from FRESH post-sell/cover AvailableBalance, bounded by
         // RiskAppetite·seed AND the cash floor ⇒ Σ buys ≤ available cash (no all-in cash-bomb, no self-inflation).
         var buyReqs   = new List<TrueMarketBuyBatchRequest>();
         var buyOwners = new List<AIUser>();
@@ -386,6 +483,14 @@ internal sealed class ConvictionDecisionService
         {
             var buyResults = await _entry.PlaceTrueMarketBuyBatchAsync(buyReqs, ct).ConfigureAwait(false);
             for (int i = 0; i < buyOwners.Count; i++) RecordFills(buyOwners[i], buyResults[i]);
+        }
+
+        // Pass 4 — §P3 SHORT OPENS (collateral-neutral at open: proceeds are locked as collateral, buying power
+        // unchanged) go LAST so they never affect the buys' cash sizing. Flat-only market shorts via the short batch.
+        if (shortReqs.Count > 0)
+        {
+            var shortResults = await _entry.PlaceMarketShortBatchAsync(shortReqs, ct).ConfigureAwait(false);
+            for (int i = 0; i < shortOwners.Count; i++) RecordFills(shortOwners[i], shortResults[i]);
         }
     }
 

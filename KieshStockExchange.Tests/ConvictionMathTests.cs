@@ -194,4 +194,53 @@ public class ConvictionMathTests
         }
     }
     #endregion
+
+    #region P3 shorting route
+    [Fact]
+    public void ShouldOpenShort_needs_overvaluation_past_the_bar_and_non_rising_momentum()
+    {
+        const double bar = 0.06;
+        // Strongly overvalued + momentum not rising ⇒ short.
+        Assert.True(ConvictionDecisionService.ShouldOpenShort(overvaluation: 0.10, mom: 0.0, bar));
+        Assert.True(ConvictionDecisionService.ShouldOpenShort(overvaluation: 0.06, mom: -0.02, bar)); // at the bar counts
+        // Not overvalued enough ⇒ no short (don't short a fairly-priced name).
+        Assert.False(ConvictionDecisionService.ShouldOpenShort(overvaluation: 0.03, mom: -0.02, bar));
+        // Overvalued but momentum RISING ⇒ don't fight the tape.
+        Assert.False(ConvictionDecisionService.ShouldOpenShort(overvaluation: 0.10, mom: 0.01, bar));
+    }
+
+    [Fact]
+    public void ShouldCoverShort_uses_hysteresis_below_half_the_bar_or_rising_momentum()
+    {
+        const double bar = 0.06; // open at >=0.06, cover at <=0.03 (0.5*bar)
+        // Reverted toward fair value (below half the bar) ⇒ cover.
+        Assert.True(ConvictionDecisionService.ShouldCoverShort(overvaluation: 0.02, mom: 0.0, bar));
+        Assert.True(ConvictionDecisionService.ShouldCoverShort(overvaluation: 0.03, mom: 0.0, bar)); // at the band counts
+        // Momentum turned up against the short ⇒ cover even if still overvalued.
+        Assert.True(ConvictionDecisionService.ShouldCoverShort(overvaluation: 0.10, mom: 0.005, bar));
+        // Still overvalued in the hysteresis dead-band, momentum not rising ⇒ HOLD the short (no thrash).
+        Assert.False(ConvictionDecisionService.ShouldCoverShort(overvaluation: 0.05, mom: 0.0, bar));
+
+        // The dead-band exists: an open-worthy overvaluation (>=bar) that hasn't reverted is NOT a cover, so a
+        // just-opened short is not immediately covered (open and cover cannot both fire on the same reading).
+        Assert.True(ConvictionDecisionService.ShouldOpenShort(0.07, -0.01, bar));
+        Assert.False(ConvictionDecisionService.ShouldCoverShort(0.07, -0.01, bar));
+    }
+
+    [Fact]
+    public void ShortQty_is_a_small_floored_exposure_and_zero_on_bad_inputs()
+    {
+        // 0.20 risk * 0.15 fraction * 200k seed = 6000 notional; /100 price = 60 shares.
+        Assert.Equal(60, ConvictionDecisionService.ShortQty(seedNotional: 200_000m, riskAppetite: 0.20, shortRiskFraction: 0.15, price: 100.0));
+        // Smaller than a whole share ⇒ 0 (never a fractional/oversized short).
+        Assert.Equal(0, ConvictionDecisionService.ShortQty(200_000m, 0.20, 0.15, price: 1_000_000.0));
+        // Degenerate inputs ⇒ 0.
+        Assert.Equal(0, ConvictionDecisionService.ShortQty(200_000m, 0.0, 0.15, 100.0));
+        Assert.Equal(0, ConvictionDecisionService.ShortQty(200_000m, 0.20, 0.0, 100.0));
+        Assert.Equal(0, ConvictionDecisionService.ShortQty(200_000m, 0.20, 0.15, price: 0.0));
+        // Exposure scales with the fraction (a bigger ShortRiskFraction ⇒ a bigger short).
+        Assert.True(ConvictionDecisionService.ShortQty(200_000m, 0.20, 0.30, 100.0)
+                  > ConvictionDecisionService.ShortQty(200_000m, 0.20, 0.15, 100.0));
+    }
+    #endregion
 }
