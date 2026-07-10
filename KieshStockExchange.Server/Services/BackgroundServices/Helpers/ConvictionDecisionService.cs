@@ -85,6 +85,11 @@ internal sealed class ConvictionDecisionService
     // exits (overvaluation, and later crash) bypass the horizon. Default off ⇒ the original memoryless exit.
     private readonly bool   _holdHorizonEnabled;
     private readonly double _holdMinSec, _holdMaxSec;
+    // §P2 conviction-scaled sizing: replace the flat RiskAppetite·seed bet with a CONVEX power curve of conviction
+    // strength above the bar ⇒ MOST plays tiny, RARE exceptional convictions approach MaxDeploy of the headroom.
+    // Default off ⇒ the original flat sizing. Cash floor still applies (removed only in the later cash-to-zero phase).
+    private readonly bool   _convictionSizingEnabled;
+    private readonly double _convScale, _maxDeploy, _sizingGamma;
     private long _passCount;                                        // monotonic, reshuffles the fire subset each pass
     private DateTime _lastPassUtc = DateTime.MaxValue;              // inert until the first RunAsync arms the clock
 
@@ -95,7 +100,8 @@ internal sealed class ConvictionDecisionService
         double convictionBarBase = 0.03, double exitBar = 0.0, double stopOvervaluation = 0.10,
         double cashFloorBase = 0.55, double riskAppetiteBase = 0.05, double checkInMeanSecBase = 1200.0,
         decimal seedBalanceUsd = 200_000m, decimal seedBalanceEur = 180_000m, bool useLoadEwma = false,
-        bool holdHorizonEnabled = false, double holdMinSec = 1800.0, double holdMaxSec = 172_800.0)
+        bool holdHorizonEnabled = false, double holdMinSec = 1800.0, double holdMaxSec = 172_800.0,
+        bool convictionSizingEnabled = false, double convScale = 0.12, double maxDeploy = 0.90, double sizingGamma = 3.0)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -119,6 +125,10 @@ internal sealed class ConvictionDecisionService
         _holdHorizonEnabled = holdHorizonEnabled;
         _holdMinSec         = Math.Max(0.0, holdMinSec);
         _holdMaxSec         = Math.Max(_holdMinSec, holdMaxSec);
+        _convictionSizingEnabled = convictionSizingEnabled;
+        _convScale          = Math.Max(1e-6, convScale);
+        _maxDeploy          = Math.Clamp(maxDeploy, 0.0, 1.0);
+        _sizingGamma        = Math.Max(0.1, sizingGamma);
     }
 
     internal void Reset() { _passCount = 0; _lastPassUtc = DateTime.MaxValue; }
@@ -174,6 +184,15 @@ internal sealed class ConvictionDecisionService
         if (headroom <= 0m) return 0m;
         decimal d = Math.Min(riskNotional, headroom);
         return d < 0m ? 0m : d;
+    }
+
+    /// <summary>§P2 conviction-scaled deploy fraction: a CONVEX power curve of conviction strength above the (already
+    /// sensitivity-scaled) bar ⇒ MOST fires deploy a tiny fraction of the cash headroom, RARE exceptional convictions
+    /// approach MaxDeploy. z = clamp(strength/convScale, 0, 1); frac = MaxDeploy·z^gamma. Pure ⇒ testable.</summary>
+    internal static double ConvictionDeployFraction(double strength, double convScale, double maxDeploy, double gamma)
+    {
+        double z = Math.Clamp(strength / Math.Max(1e-9, convScale), 0.0, 1.0);
+        return maxDeploy * Math.Pow(z, gamma);
     }
 
     private double CashFloorPctOf(int id)   => Dial(id, CashFloorSalt, _cashFloorBase, _cashFloorBase + CashFloorSpan);
@@ -276,7 +295,7 @@ internal sealed class ConvictionDecisionService
 
         var sellReqs   = new List<TrueMarketSellBatchRequest>();
         var sellOwners = new List<AIUser>();
-        var buyPlans   = new List<(AIUser User, int Sid, double Price)>();
+        var buyPlans   = new List<(AIUser User, int Sid, double Price, double Strength)>();
 
         // §perf: one reusable scratch buffer for the per-bot ranking (single loop thread ⇒ no aliasing).
         var scored = new List<(int Sid, double Price, double Hot, double Mom, double Overval)>(signal.Count);
@@ -323,8 +342,9 @@ internal sealed class ConvictionDecisionService
             }
 
             // ENTRY: buy the single max-conviction name when it clears the sensitivity-scaled bar (funded in pass 2).
+            // §P2 carries the conviction STRENGTH above the effective bar (bar/sens) so the sizing curve can read it.
             if (bestIdx >= 0 && PassesBar(bestHot, bar, sens))
-                buyPlans.Add((user, scored[bestIdx].Sid, scored[bestIdx].Price));
+                buyPlans.Add((user, scored[bestIdx].Sid, scored[bestIdx].Price, bestHot - bar / Math.Max(1e-9, sens)));
         }
 
         // Pass 1 — SELLS first so proceeds settle and cash returns to fund the buys (CK-safe funding order).
@@ -338,13 +358,24 @@ internal sealed class ConvictionDecisionService
         // RiskAppetite·seed AND the cash floor ⇒ Σ buys ≤ available cash (no all-in cash-bomb, no self-inflation).
         var buyReqs   = new List<TrueMarketBuyBatchRequest>();
         var buyOwners = new List<AIUser>();
-        foreach (var (user, sid, price) in buyPlans)
+        foreach (var (user, sid, price, strength) in buyPlans)
         {
             if (price <= 0.0) continue;
             decimal avail        = _accounts.GetFund(user.UserId, ccy)?.AvailableBalance ?? 0m;
             decimal cashFloorAmt = (decimal)CashFloorPctOf(user.AiUserId) * seedNotional;
-            decimal riskNotional = (decimal)RiskAppetiteOf(user.AiUserId) * seedNotional;
-            decimal budget = DeployNotional(riskNotional, avail, cashFloorAmt);   // ★ CK-safe: ≤ available cash
+            decimal budget;
+            if (_convictionSizingEnabled)
+            {
+                // §P2: convex conviction-scaled fraction of the cash HEADROOM (most small, rare large) — cash floor
+                // still applies (removed only in the later cash-to-zero phase). DeployNotional keeps it ≤ headroom ≤ avail.
+                double deployFrac = ConvictionDeployFraction(strength, _convScale, _maxDeploy, _sizingGamma);
+                budget = DeployNotional((decimal)deployFrac * (avail - cashFloorAmt), avail, cashFloorAmt);
+            }
+            else
+            {
+                decimal riskNotional = (decimal)RiskAppetiteOf(user.AiUserId) * seedNotional;
+                budget = DeployNotional(riskNotional, avail, cashFloorAmt);   // ★ CK-safe: ≤ available cash
+            }
             if (budget <= 0m) continue;
             int qty = (int)Math.Floor((double)budget / price);
             if (qty <= 0) continue;

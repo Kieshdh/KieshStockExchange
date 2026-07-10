@@ -659,7 +659,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         useLoadEwma:        _configuration.GetValue("Bots:Conviction:UseLoadEwma", false),
                         holdHorizonEnabled: _configuration.GetValue("Bots:Conviction:HoldHorizonEnabled", false),
                         holdMinSec:         _configuration.GetValue("Bots:Conviction:HoldMinSec", 1800.0),
-                        holdMaxSec:         _configuration.GetValue("Bots:Conviction:HoldMaxSec", 172_800.0));
+                        holdMaxSec:         _configuration.GetValue("Bots:Conviction:HoldMaxSec", 172_800.0),
+                        convictionSizingEnabled: _configuration.GetValue("Bots:Conviction:ConvictionSizingEnabled", false),
+                        convScale:          _configuration.GetValue("Bots:Conviction:ConvScale", 0.12),
+                        maxDeploy:          _configuration.GetValue("Bots:Conviction:MaxDeploy", 0.90),
+                        sizingGamma:        _configuration.GetValue("Bots:Conviction:SizingGamma", 3.0));
         // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
         // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
         // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/

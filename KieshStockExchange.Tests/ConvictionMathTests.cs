@@ -170,5 +170,28 @@ public class ConvictionMathTests
             Assert.True(d >= 0m);
         }
     }
+
+    [Fact]
+    public void ConvictionDeployFraction_is_convex_most_small_rare_large()
+    {
+        const double scale = 0.12, maxD = 0.90, gamma = 3.0;
+        // At/below the bar ⇒ deploy nothing.
+        Assert.Equal(0.0, ConvictionDecisionService.ConvictionDeployFraction(0.0, scale, maxD, gamma), 10);
+        Assert.Equal(0.0, ConvictionDecisionService.ConvictionDeployFraction(-0.05, scale, maxD, gamma), 10);
+        // Exceptional conviction (strength ≥ scale ⇒ z=1) ⇒ near-full MaxDeploy.
+        Assert.Equal(maxD, ConvictionDecisionService.ConvictionDeployFraction(scale, scale, maxD, gamma), 10);
+        Assert.Equal(maxD, ConvictionDecisionService.ConvictionDeployFraction(scale * 5, scale, maxD, gamma), 10);
+        // Convex: HALF-strength deploys only maxD·0.5³ = maxD·0.125 (most plays SMALL).
+        Assert.Equal(maxD * 0.125, ConvictionDecisionService.ConvictionDeployFraction(scale * 0.5, scale, maxD, gamma), 10);
+        // Monotonic non-decreasing, bounded [0, maxD].
+        double prev = -1;
+        for (int i = 0; i <= 20; i++)
+        {
+            double f = ConvictionDecisionService.ConvictionDeployFraction(scale * i / 10.0, scale, maxD, gamma);
+            Assert.InRange(f, 0.0, maxD);
+            Assert.True(f >= prev - 1e-12);
+            prev = f;
+        }
+    }
     #endregion
 }
