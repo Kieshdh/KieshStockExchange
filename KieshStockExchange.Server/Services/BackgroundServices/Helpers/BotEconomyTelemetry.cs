@@ -61,6 +61,12 @@ internal sealed class BotEconomyTelemetry
         public decimal SeedUsd; // Σ seed-baseline wealth for the bots we have a baseline for
     }
 
+    // §dashboard: the per-strategy snapshot from the LAST LogSnapshot, published as an immutable list the HTTP
+    // thread can read lock-free (built + swapped on the single bot-loop thread). Refreshes every economy log
+    // interval (~60s) — plenty fresh for the bot-types dashboard. Empty until the first priced snapshot.
+    private volatile IReadOnlyList<StrategySnapshotRow> _latestStrategySnapshot = Array.Empty<StrategySnapshotRow>();
+    internal IReadOnlyList<StrategySnapshotRow> LatestStrategySnapshot => _latestStrategySnapshot;
+
     private Dictionary<(int StockId, CurrencyType Currency), decimal>? _sessionStartPrices;
     private readonly Queue<EconomySample> _samples = new();
     // Guarded by lock(_samples).
@@ -265,7 +271,20 @@ internal sealed class BotEconomyTelemetry
             avgDrift, tracked, injectedSnapshot,
             arbCohortWealthUsd, houseWealthUsd, arbHouseFractionPct);
 
-        if (strat is not null && strat.Count > 0) LogStrategySnapshot(strat);
+        if (strat is not null && strat.Count > 0) { PublishStrategySnapshot(strat); LogStrategySnapshot(strat); }
+    }
+
+    // §dashboard: freeze this snapshot's per-strategy accumulators into an immutable list for the HTTP thread.
+    // Runs on the bot-loop thread; the volatile field swap makes it visible without a lock.
+    private void PublishStrategySnapshot(Dictionary<AiStrategy, StratAcc> strat)
+    {
+        var rows = new List<StrategySnapshotRow>(strat.Count);
+        foreach (var kv in strat)
+        {
+            var a = kv.Value;
+            rows.Add(new StrategySnapshotRow(kv.Key, a.Count, a.Wins, a.Trades, a.CurUsd, a.SeedUsd));
+        }
+        _latestStrategySnapshot = rows;
     }
 
     // §per-strategy telemetry: one compact line — portfolio-Δ vs seed baseline, bot count, win-rate and session
@@ -368,6 +387,11 @@ internal sealed class BotEconomyTelemetry
     }
     #endregion
 }
+
+/// <summary>§dashboard: one strategy's live snapshot (count / winners / cumulative session trades / current +
+/// seed-baseline USD wealth) frozen from a LogSnapshot, for the bot-types breakdown endpoint.</summary>
+public sealed record StrategySnapshotRow(
+    AiStrategy Strategy, int BotCount, int Wins, long SessionTrades, decimal CurUsd, decimal SeedUsd);
 
 internal sealed record EconomySample(
     DateTime TimestampUtc,

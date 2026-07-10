@@ -231,6 +231,103 @@
 
                 </Grid>
 
+                <!-- Bot types: per-strategy breakdown, grouped Traders vs House/Liquidity. -->
+                <Border Style="{StaticResource AdminCardStyle}">
+                    <VerticalStackLayout Spacing="8">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                            <Label Grid.Column="0" Text="Bot types"
+                                   Style="{StaticResource AdminCardSubtitle}"
+                                   VerticalOptions="Center" />
+                            <Label Grid.Column="1" Text="{Binding StrategyHeadlineText}"
+                                   Style="{StaticResource AdminBotStatLabel}"
+                                   VerticalOptions="Center" Margin="8,0,0,0" />
+                            <other:SegmentedTabView Grid.Column="2"
+                                SelectedIndex="{Binding StrategyRangeIndex, Mode=TwoWay}"
+                                SelectedButtonStyle="{StaticResource AdminSelectedSegment}"
+                                UnselectedButtonStyle="{StaticResource AdminUnselectedSegment}"
+                                HeaderContainerHorizontalOptions="End"
+                                MinTabWidth="0"
+                                VerticalOptions="Center">
+                                <other:SegmentedTabView.Tabs>
+                                    <other:SegmentedTabItem Header="1h" />
+                                    <other:SegmentedTabItem Header="6h" />
+                                    <other:SegmentedTabItem Header="24h" />
+                                    <other:SegmentedTabItem Header="All" />
+                                </other:SegmentedTabView.Tabs>
+                            </other:SegmentedTabView>
+                        </Grid>
+
+                        <Label Text="Session (all-time) view — trade volume is only available for windowed ranges."
+                               Style="{StaticResource AdminMutedNote}"
+                               IsVisible="{Binding StrategyShowVolume, Converter={StaticResource InvertedBoolConverter}}" />
+
+                        <!-- Column header -->
+                        <Grid ColumnDefinitions="*,110,64,58,66,84,58,88" ColumnSpacing="6" Padding="0,2">
+                            <Label Grid.Column="0" Text="Strategy" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Grid.Column="1" Text="Share" Style="{StaticResource AdminBotStatLabel}" />
+                            <Label Grid.Column="2" Text="Bots" Style="{StaticResource AdminBotStatLabel}" HorizontalTextAlignment="End" />
+                            <Label Grid.Column="3" Text="Win" Style="{StaticResource AdminBotStatLabel}" HorizontalTextAlignment="End" />
+                            <Label Grid.Column="4" Text="P&amp;L" Style="{StaticResource AdminBotStatLabel}" HorizontalTextAlignment="End" />
+                            <Label Grid.Column="5" Text="{Binding StrategyTradesHeader}" Style="{StaticResource AdminBotStatLabel}" HorizontalTextAlignment="End" />
+                            <Label Grid.Column="6" Text="/bot" Style="{StaticResource AdminBotStatLabel}" HorizontalTextAlignment="End" />
+                            <Label Grid.Column="7" Text="Volume" Style="{StaticResource AdminBotStatLabel}" HorizontalTextAlignment="End" />
+                        </Grid>
+                        <BoxView Style="{StaticResource TableHorizontalSeparator}" />
+
+                        <!-- TRADERS group -->
+                        <Label Text="Traders" Style="{StaticResource AdminMetricLabel}" Margin="0,2,0,0" />
+                        <VerticalStackLayout BindableLayout.ItemsSource="{Binding TraderStrategies}" Spacing="0">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="vm:StrategyBreakdownRowVm">
+                                    <Grid ColumnDefinitions="*,110,64,58,66,84,58,88" ColumnSpacing="6" Padding="0,4">
+                                        <VerticalStackLayout Grid.Column="0" Spacing="0" VerticalOptions="Center">
+                                            <Label Text="{Binding Name}" Style="{StaticResource AdminMetricValue}" />
+                                            <Label Text="{Binding Description}" Style="{StaticResource AdminMutedNote}"
+                                                   FontSize="11" LineBreakMode="TailTruncation" MaxLines="1" />
+                                        </VerticalStackLayout>
+                                        <VerticalStackLayout Grid.Column="1" Spacing="3" VerticalOptions="Center">
+                                            <Label Text="{Binding ShareText}" Style="{StaticResource AdminBotStatLabel}" />
+                                            <ProgressBar Progress="{Binding ShareFraction}" HeightRequest="4" />
+                                        </VerticalStackLayout>
+                                        <Label Grid.Column="2" Text="{Binding BotCountText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="3" Text="{Binding WinRateText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="4" Text="{Binding PnlText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="5" Text="{Binding TradesText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="6" Text="{Binding PerBotText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="7" Text="{Binding VolumeText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+
+                        <!-- HOUSE / LIQUIDITY group -->
+                        <Label Text="House &amp; Liquidity" Style="{StaticResource AdminMetricLabel}" Margin="0,6,0,0" />
+                        <VerticalStackLayout BindableLayout.ItemsSource="{Binding HouseStrategies}" Spacing="0">
+                            <BindableLayout.ItemTemplate>
+                                <DataTemplate x:DataType="vm:StrategyBreakdownRowVm">
+                                    <Grid ColumnDefinitions="*,110,64,58,66,84,58,88" ColumnSpacing="6" Padding="0,4">
+                                        <VerticalStackLayout Grid.Column="0" Spacing="0" VerticalOptions="Center">
+                                            <Label Text="{Binding Name}" Style="{StaticResource AdminMetricValue}" />
+                                            <Label Text="{Binding Description}" Style="{StaticResource AdminMutedNote}"
+                                                   FontSize="11" LineBreakMode="TailTruncation" MaxLines="1" />
+                                        </VerticalStackLayout>
+                                        <VerticalStackLayout Grid.Column="1" Spacing="3" VerticalOptions="Center">
+                                            <Label Text="{Binding ShareText}" Style="{StaticResource AdminBotStatLabel}" />
+                                            <ProgressBar Progress="{Binding ShareFraction}" HeightRequest="4" />
+                                        </VerticalStackLayout>
+                                        <Label Grid.Column="2" Text="{Binding BotCountText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="3" Text="{Binding WinRateText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="4" Text="{Binding PnlText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="5" Text="{Binding TradesText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="6" Text="{Binding PerBotText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                        <Label Grid.Column="7" Text="{Binding VolumeText}" Style="{StaticResource AdminMetricValue}" HorizontalTextAlignment="End" VerticalOptions="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </BindableLayout.ItemTemplate>
+                        </VerticalStackLayout>
+                    </VerticalStackLayout>
+                </Border>
+
                 <!-- Failure breakdown (reasons + top stocks) -->
                 <Border Style="{StaticResource AdminCardStyle}">
                     <VerticalStackLayout Spacing="8">

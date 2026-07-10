@@ -1,4 +1,5 @@
 using KieshStockExchange.Helpers;
+using KieshStockExchange.Models;
 using KieshStockExchange.Server.Controllers;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.DataServices.Interfaces;
@@ -27,6 +28,12 @@ public sealed class BotTelemetryCache
     private readonly SemaphoreSlim _last24hGate = new(1, 1);
 
     private readonly ConcurrentDictionary<BucketKey, BucketCacheEntry> _buckets = new();
+
+    // §dashboard: the transaction retention window (48h) caps how far back a range can be served from
+    // transactions; longer ranges (1w/all-time) need a persisted rollup and are flagged RangeCapped.
+    private const int RetentionMinutes = 48 * 60;
+
+    private readonly ConcurrentDictionary<int, StrategyCacheEntry> _strategyBreakdown = new();
 
     public BotTelemetryCache(IDataBaseService db, IAiTradeService bots, ILogger<BotTelemetryCache> logger)
     {
@@ -101,6 +108,83 @@ public sealed class BotTelemetryCache
         }
     }
 
+    /// <summary>§dashboard: per-strategy bot-types breakdown for the requested flow window. Snapshot columns
+    /// (bot count / win-rate / P&amp;L / session trades) come from the loop-thread economy snapshot; range columns
+    /// (trades / volume) are aggregated from transactions in the window, capped at the 48h retention.
+    /// rangeMinutes &lt;= 0 means "session / all-time" — range columns are left zero (the client shows the
+    /// session-cumulative trade count instead). TTL-cached per rangeMinutes.</summary>
+    public async Task<BotStrategyBreakdown> GetStrategyBreakdownAsync(int rangeMinutes, CancellationToken ct)
+    {
+        var entry = _strategyBreakdown.GetOrAdd(rangeMinutes, _ => new StrategyCacheEntry());
+        var now = TimeHelper.NowUtc();
+        if (entry.ExpiresUtc > now && entry.Value is { } cached) return cached;
+
+        await entry.Gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (entry.ExpiresUtc > now && entry.Value is { } cached2) return cached2;
+            var fresh = await ComputeStrategyBreakdownAsync(rangeMinutes, ct).ConfigureAwait(false);
+            entry.Value = fresh;
+            entry.ExpiresUtc = TimeHelper.NowUtc() + Ttl;
+            return fresh;
+        }
+        finally { entry.Gate.Release(); }
+    }
+
+    private async Task<BotStrategyBreakdown> ComputeStrategyBreakdownAsync(int rangeMinutes, CancellationToken ct)
+    {
+        var snapshot = _bots.GetStrategySnapshot();
+
+        // Range flow (trades + volume) per strategy, from transactions in the window (capped at retention).
+        bool capped = rangeMinutes > RetentionMinutes;
+        int effMinutes = capped ? RetentionMinutes : rangeMinutes;
+        var rangeTrades = new Dictionary<AiStrategy, long>();
+        var rangeVolume = new Dictionary<AiStrategy, decimal>();
+        if (effMinutes > 0)
+        {
+            var stratMap = _bots.GetBotStrategies();
+            var since = TimeHelper.NowUtc() - TimeSpan.FromMinutes(effMinutes);
+            var txs = await _db.GetTransactionsSinceTime(since, limit: null, ct).ConfigureAwait(false);
+            for (int i = 0; i < txs.Count; i++)
+            {
+                var t = txs[i];
+                if (stratMap.TryGetValue(t.BuyerId, out var bs)) Add(rangeTrades, rangeVolume, bs, t.TotalAmount);
+                if (stratMap.TryGetValue(t.SellerId, out var ss)) Add(rangeTrades, rangeVolume, ss, t.TotalAmount);
+            }
+        }
+
+        int totalBots = 0;
+        foreach (var s in snapshot) totalBots += s.BotCount;
+
+        var rows = new List<BotStrategyRow>(snapshot.Count);
+        long totalRangeTrades = 0;
+        foreach (var s in snapshot)
+        {
+            if (s.BotCount == 0) continue;
+            var (name, group, desc) = BotStrategyMeta.For(s.Strategy);
+            rangeTrades.TryGetValue(s.Strategy, out var rt);
+            rangeVolume.TryGetValue(s.Strategy, out var rv);
+            totalRangeTrades += rt;
+            double share  = totalBots > 0 ? 100.0 * s.BotCount / totalBots : 0.0;
+            double winPct = s.BotCount > 0 ? 100.0 * s.Wins / s.BotCount : 0.0;
+            double pnlPct = s.SeedUsd > 0m ? (double)((s.CurUsd - s.SeedUsd) / s.SeedUsd) * 100.0 : 0.0;
+            double perBot = s.BotCount > 0 ? (double)rt / s.BotCount : 0.0;
+            rows.Add(new BotStrategyRow(
+                (int)s.Strategy, name, group, desc,
+                s.BotCount, share, winPct, pnlPct, s.SessionTrades,
+                rt, rv, perBot));
+        }
+        rows.Sort((a, b) => b.BotCount.CompareTo(a.BotCount)); // default: count-desc
+
+        return new BotStrategyBreakdown(rangeMinutes, capped, totalBots, totalRangeTrades, rows);
+
+        static void Add(Dictionary<AiStrategy, long> tr, Dictionary<AiStrategy, decimal> vol, AiStrategy s, decimal amt)
+        {
+            tr[s] = tr.GetValueOrDefault(s) + 1;
+            vol[s] = vol.GetValueOrDefault(s) + amt;
+        }
+    }
+
     private async Task<BotLast24hStats> ComputeLast24hAsync(CancellationToken ct)
     {
         var since = TimeHelper.NowUtc() - TimeSpan.FromHours(24);
@@ -163,5 +247,12 @@ public sealed class BotTelemetryCache
         public SemaphoreSlim Gate { get; } = new(1, 1);
         public DateTime ExpiresUtc { get; set; } = DateTime.MinValue;
         public BotActivityBuckets? Value { get; set; }
+    }
+
+    private sealed class StrategyCacheEntry
+    {
+        public SemaphoreSlim Gate { get; } = new(1, 1);
+        public DateTime ExpiresUtc { get; set; } = DateTime.MinValue;
+        public BotStrategyBreakdown? Value { get; set; }
     }
 }

@@ -1026,6 +1026,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
 
     public IReadOnlyCollection<int> GetAiUserIds() => _ctx.AiUsersByUserId.Keys.ToArray();
 
+    // §dashboard: UserId -> strategy for per-strategy transaction aggregation. Best-effort snapshot (matches
+    // GetAiUserIds's lock-free read); the bot maps only change on load/reset, not per-tick.
+    public IReadOnlyDictionary<int, AiStrategy> GetBotStrategies()
+    {
+        var map = new Dictionary<int, AiStrategy>(_ctx.AiUsersByUserId.Count);
+        foreach (var kv in _ctx.AiUsersByUserId.ToArray()) map[kv.Key] = kv.Value.Strategy;
+        return map;
+    }
+
+    // §dashboard: the economy telemetry's latest per-strategy snapshot (loop-thread published, lock-free read).
+    public IReadOnlyList<StrategySnapshotRow> GetStrategySnapshot() => _economy.LatestStrategySnapshot;
+
     public IReadOnlyList<BotActivitySample> GetActivitySamples()
     {
         lock (_activitySamplesLock) return _activitySamples.ToArray();

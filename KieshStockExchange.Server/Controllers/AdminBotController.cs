@@ -166,6 +166,14 @@ public sealed class AdminBotController : ControllerBase
         return Ok(await _cache.GetActivityBucketsAsync(fromUtc, toUtc, bucketCount, ct).ConfigureAwait(false));
     }
 
+    // §dashboard: per-strategy bot-types breakdown. rangeMinutes controls the flow window (trades/volume);
+    // snapshot columns (bot count / win-rate / P&L / session trades) are range-independent. rangeMinutes <= 0
+    // means "session / all-time" (flow columns zero → client shows the session-cumulative trade count).
+    [HttpGet("strategy-breakdown")]
+    public async Task<ActionResult<BotStrategyBreakdown>> StrategyBreakdown(
+        [FromQuery] int rangeMinutes = 60, CancellationToken ct = default)
+        => Ok(await _cache.GetStrategyBreakdownAsync(rangeMinutes, ct).ConfigureAwait(false));
+
     private FileContentResult Csv(string body, string fileName)
     {
         var bytes = Encoding.UTF8.GetBytes(body);
@@ -176,3 +184,41 @@ public sealed class AdminBotController : ControllerBase
 public sealed record BotRingCounts(int FailureRows, int LedgerRows, int EconomyRows, int SentimentRows);
 public sealed record BotLast24hStats(int Trades, decimal Volume, int ActiveBots);
 public sealed record BotActivityBuckets(int[] Trades, decimal[] Volume);
+
+// §dashboard: the bot-types breakdown payload. Snapshot columns (bot count / win-rate / P&L / session trades)
+// are range-independent "now" state; range columns (trades / volume) are the flow over the requested window.
+public sealed record BotStrategyBreakdown(
+    int RangeMinutes, bool RangeCapped, int TotalBots, long TotalRangeTrades,
+    IReadOnlyList<BotStrategyRow> Strategies);
+
+public sealed record BotStrategyRow(
+    int Strategy, string Name, string Group, string Description,
+    int BotCount, double BotSharePercent,
+    double WinRatePercent, double PnlPercent, long SessionTrades,
+    long RangeTrades, decimal RangeVolume, double AvgRangeTradesPerBot);
+
+// §dashboard: static per-strategy display metadata — human name, dashboard group (Traders vs House/Liquidity per
+// council 3/3 + Kiesh: Random is the noise floor, Rotator is the correlation balancer), and a one-line "what it
+// does". Keyed by AiStrategy so it stays exhaustive as the enum grows.
+public static class BotStrategyMeta
+{
+    public const string TradersGroup = "Traders";
+    public const string HouseGroup   = "House & Liquidity";
+
+    private static readonly IReadOnlyDictionary<KieshStockExchange.Models.AiStrategy, (string Name, string Group, string Desc)> Map =
+        new Dictionary<KieshStockExchange.Models.AiStrategy, (string, string, string)>
+    {
+        [KieshStockExchange.Models.AiStrategy.MarketMaker]      = ("Market Maker",          HouseGroup,   "Posts two-sided resting quotes to supply continuous liquidity."),
+        [KieshStockExchange.Models.AiStrategy.TrendFollower]    = ("Momentum",              TradersGroup, "Chases recent price momentum — buys strength, sells weakness."),
+        [KieshStockExchange.Models.AiStrategy.MeanReversion]    = ("Mean Reversion",        TradersGroup, "Fades stretched moves back toward fair value."),
+        [KieshStockExchange.Models.AiStrategy.Random]           = ("Noise",                 HouseGroup,   "Uninformed random flow — the market's liquidity & noise floor."),
+        [KieshStockExchange.Models.AiStrategy.Scalper]          = ("Scalper",               TradersGroup, "High-frequency small-edge in-and-out trades."),
+        [KieshStockExchange.Models.AiStrategy.Arbitrage]        = ("Arbitrage",             HouseGroup,   "Closes cross-listing / FX price gaps (near-riskless)."),
+        [KieshStockExchange.Models.AiStrategy.MarketMakerHouse] = ("House Desk",            HouseGroup,   "Platform market-maker desk."),
+        [KieshStockExchange.Models.AiStrategy.Rotator]          = ("Correlation Balancer",  HouseGroup,   "Rotates capital toward the bank fair-value estimate — a cross-stock correlation balancer."),
+        [KieshStockExchange.Models.AiStrategy.Conviction]       = ("Conviction",            TradersGroup, "Cash-heavy discretionary traders placing occasional, sentiment-led conviction bets."),
+    };
+
+    public static (string Name, string Group, string Desc) For(KieshStockExchange.Models.AiStrategy s) =>
+        Map.TryGetValue(s, out var v) ? v : (s.ToString(), TradersGroup, "");
+}

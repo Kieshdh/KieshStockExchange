@@ -189,6 +189,14 @@ public interface IAiTradeService
     /// <summary>Returns a snapshot of all loaded bot UserIds.</summary>
     IReadOnlyCollection<int> GetAiUserIds();
 
+    /// <summary>§dashboard: maps each loaded bot's UserId to its trading strategy (for per-strategy
+    /// aggregation of transactions, which key on UserId). Snapshot; safe to call off the loop thread.</summary>
+    IReadOnlyDictionary<int, AiStrategy> GetBotStrategies();
+
+    /// <summary>§dashboard: the latest per-strategy wealth/win/trade snapshot from the economy telemetry
+    /// (refreshed on the ~60s economy log tick). Empty until the first priced snapshot.</summary>
+    IReadOnlyList<StrategySnapshotRow> GetStrategySnapshot();
+
     /// <summary> Bounded ring of per-tick activity samples; survives bot stop/restart. </summary>
     IReadOnlyList<BotActivitySample> GetActivitySamples();
 

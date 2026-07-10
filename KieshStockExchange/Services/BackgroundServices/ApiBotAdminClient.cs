@@ -84,7 +84,26 @@ public sealed class ApiBotAdminClient
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<BotActivityBuckets>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
     }
+
+    // §dashboard: per-strategy bot-types breakdown. rangeMinutes controls the flow window (trades/volume);
+    // pass <= 0 for the session/all-time view (flow columns come back zero, the client shows session trades).
+    public async Task<BotStrategyBreakdown?> GetStrategyBreakdownAsync(int rangeMinutes, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"api/admin/bots/strategy-breakdown?rangeMinutes={rangeMinutes}", ct).ConfigureAwait(false);
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<BotStrategyBreakdown>(ApiJsonOptions.Default, ct).ConfigureAwait(false);
+    }
 }
 
 public sealed record BotLast24hStats(int Trades, decimal Volume, int ActiveBots);
 public sealed record BotActivityBuckets(int[] Trades, decimal[] Volume);
+
+public sealed record BotStrategyBreakdown(
+    int RangeMinutes, bool RangeCapped, int TotalBots, long TotalRangeTrades,
+    List<BotStrategyRow> Strategies);
+
+public sealed record BotStrategyRow(
+    int Strategy, string Name, string Group, string Description,
+    int BotCount, double BotSharePercent,
+    double WinRatePercent, double PnlPercent, long SessionTrades,
+    long RangeTrades, decimal RangeVolume, double AvgRangeTradesPerBot);
