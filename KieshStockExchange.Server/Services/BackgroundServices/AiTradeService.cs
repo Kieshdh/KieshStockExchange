@@ -656,7 +656,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         checkInMeanSecBase: _configuration.GetValue("Bots:Conviction:CheckInMeanSecBase", 1200.0),
                         seedBalanceUsd:     _configuration.GetValue("Bots:Conviction:SeedBalanceUsd", 200_000m),
                         seedBalanceEur:     _configuration.GetValue("Bots:Conviction:SeedBalanceEur", 180_000m),
-                        useLoadEwma:        _configuration.GetValue("Bots:Conviction:UseLoadEwma", false));
+                        useLoadEwma:        _configuration.GetValue("Bots:Conviction:UseLoadEwma", false),
+                        holdHorizonEnabled: _configuration.GetValue("Bots:Conviction:HoldHorizonEnabled", false),
+                        holdMinSec:         _configuration.GetValue("Bots:Conviction:HoldMinSec", 1800.0),
+                        holdMaxSec:         _configuration.GetValue("Bots:Conviction:HoldMaxSec", 172_800.0));
         // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
         // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
         // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/

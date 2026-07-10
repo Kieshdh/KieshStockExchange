@@ -117,6 +117,31 @@ public class ConvictionMathTests
         // Printed overvalued past the stop.
         Assert.True(ConvictionDecisionService.ShouldExit(hot: 0.20, mom: 0.01, overvaluation: 0.15, exitBar, stopOver));
     }
+
+    [Fact]
+    public void ShouldExitHeld_holds_through_drawdown_until_horizon_then_exits_on_thesis_decay()
+    {
+        const double exitBar = 0.0, stopOver = 0.10;
+        // Hard exit (overvalued past the stop) ALWAYS fires — bypasses the horizon even when just entered.
+        Assert.True(ConvictionDecisionService.ShouldExitHeld(hot: 0.20, overvaluation: 0.15, exitBar, stopOver, heldSec: 10, holdSec: 9999));
+        // Thesis decayed (Hot < ExitBar) but the intended hold hasn't elapsed ⇒ HOLD THROUGH the drawdown.
+        Assert.False(ConvictionDecisionService.ShouldExitHeld(hot: -0.05, overvaluation: 0.0, exitBar, stopOver, heldSec: 100, holdSec: 1000));
+        // Thesis decayed AND the hold elapsed ⇒ exit + rotate.
+        Assert.True(ConvictionDecisionService.ShouldExitHeld(hot: -0.05, overvaluation: 0.0, exitBar, stopOver, heldSec: 2000, holdSec: 1000));
+        // Healthy conviction past the horizon ⇒ still HOLD (no thesis break, and no momentum knee-jerk here).
+        Assert.False(ConvictionDecisionService.ShouldExitHeld(hot: 0.20, overvaluation: 0.0, exitBar, stopOver, heldSec: 9999, holdSec: 1000));
+    }
+
+    [Fact]
+    public void HoldSec_dial_stays_in_range_and_is_deterministic()
+    {
+        for (int id = 1; id <= 500; id++)
+        {
+            double h = ConvictionDecisionService.Dial(id, 0x0C08, 1800.0, 172_800.0);
+            Assert.InRange(h, 1800.0, 172_800.0);
+            Assert.Equal(h, ConvictionDecisionService.Dial(id, 0x0C08, 1800.0, 172_800.0), 6);
+        }
+    }
     #endregion
 
     #region CK-safe sizing

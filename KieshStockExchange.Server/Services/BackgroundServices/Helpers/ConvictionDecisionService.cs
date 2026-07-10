@@ -69,7 +69,7 @@ internal sealed class ConvictionDecisionService
 
     // Distinct per-dial + fire-gate salts (mixed with the pass counter where a per-pass reshuffle is wanted).
     private const int CashFloorSalt = 0x0C01, RiskSalt = 0x0C02, BarSalt = 0x0C03, SensSalt = 0x0C04,
-                      LeanSalt = 0x0C05, CadenceSalt = 0x0C06, FireSalt = 0x0C07;
+                      LeanSalt = 0x0C05, CadenceSalt = 0x0C06, FireSalt = 0x0C07, HoldSalt = 0x0C08;
 
     private readonly double _wSec, _wMom, _wGlobal, _wIdio, _wOver; // Hot-signal weights (Wsec+Wmom ≫ Wover)
     private readonly double _convictionBarBase;                     // entry-bar low bound (dial spreads up)
@@ -80,6 +80,11 @@ internal sealed class ConvictionDecisionService
     private readonly double _checkInMeanSecBase;                    // CheckInMeanSec low bound
     private readonly decimal _seedBalanceUsd, _seedBalanceEur;      // per-bot seed notional (bet base — no per-tick scan)
     private readonly bool _useLoadEwma;                             // read the scaler's smoothed load instead of the raw sample
+    // §P1 hold-horizon: when enabled, a held name is HELD THROUGH DRAWDOWNS — the soft thesis-decay exit only fires
+    // after a per-bot intended holding period (hashed HoldSec) has elapsed since entry (Position.UpdatedAt). Hard
+    // exits (overvaluation, and later crash) bypass the horizon. Default off ⇒ the original memoryless exit.
+    private readonly bool   _holdHorizonEnabled;
+    private readonly double _holdMinSec, _holdMaxSec;
     private long _passCount;                                        // monotonic, reshuffles the fire subset each pass
     private DateTime _lastPassUtc = DateTime.MaxValue;              // inert until the first RunAsync arms the clock
 
@@ -89,7 +94,8 @@ internal sealed class ConvictionDecisionService
         double wSec = 1.0, double wMom = 0.5, double wGlobal = 0.3, double wIdio = 0.2, double wOver = 0.5,
         double convictionBarBase = 0.03, double exitBar = 0.0, double stopOvervaluation = 0.10,
         double cashFloorBase = 0.55, double riskAppetiteBase = 0.05, double checkInMeanSecBase = 1200.0,
-        decimal seedBalanceUsd = 200_000m, decimal seedBalanceEur = 180_000m, bool useLoadEwma = false)
+        decimal seedBalanceUsd = 200_000m, decimal seedBalanceEur = 180_000m, bool useLoadEwma = false,
+        bool holdHorizonEnabled = false, double holdMinSec = 1800.0, double holdMaxSec = 172_800.0)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -110,6 +116,9 @@ internal sealed class ConvictionDecisionService
         _seedBalanceUsd     = seedBalanceUsd;
         _seedBalanceEur     = seedBalanceEur;
         _useLoadEwma        = useLoadEwma;
+        _holdHorizonEnabled = holdHorizonEnabled;
+        _holdMinSec         = Math.Max(0.0, holdMinSec);
+        _holdMaxSec         = Math.Max(_holdMinSec, holdMaxSec);
     }
 
     internal void Reset() { _passCount = 0; _lastPassUtc = DateTime.MaxValue; }
@@ -149,6 +158,14 @@ internal sealed class ConvictionDecisionService
     internal static bool ShouldExit(double hot, double mom, double overvaluation, double exitBar, double stopOvervaluation)
         => hot < exitBar || mom < 0.0 || overvaluation > stopOvervaluation;
 
+    /// <summary>§P1 hold-horizon exit: a HARD exit (overvalued past the stop) fires immediately; the SOFT thesis-
+    /// decay exit (Hot below ExitBar) only fires once the intended holding period has elapsed (heldSec ≥ holdSec).
+    /// Unlike <see cref="ShouldExit"/> there is NO momentum knee-jerk — the bot HOLDS THROUGH DRAWDOWNS, so it can
+    /// end underwater (real directional risk = win-rate ≪ 100%). Pure ⇒ testable.</summary>
+    internal static bool ShouldExitHeld(double hot, double overvaluation, double exitBar, double stopOvervaluation,
+        double heldSec, double holdSec)
+        => overvaluation > stopOvervaluation || (hot < exitBar && heldSec >= holdSec);
+
     /// <summary>CK-safe bet size: min(RiskAppetite·seed, availCash − cashFloor), floored at 0 so a buy can never
     /// exceed available cash nor dip below the reserved floor. Pure ⇒ testable.</summary>
     internal static decimal DeployNotional(decimal riskNotional, decimal availCash, decimal cashFloorAmount)
@@ -165,6 +182,7 @@ internal sealed class ConvictionDecisionService
     private double ConvictionBarOf(int id)  => Dial(id, BarSalt, _convictionBarBase, _convictionBarBase + ConvictionBarSpan);
     private double SentimentSensOf(int id)  => Dial(id, SensSalt, SentimentSensLo, SentimentSensHi);
     private double CheckInMeanSecOf(int id) => Dial(id, CadenceSalt, _checkInMeanSecBase, _checkInMeanSecBase + CheckInMeanSpan);
+    private double HoldSecOf(int id)        => Dial(id, HoldSalt, _holdMinSec, _holdMaxSec);   // §P1 per-bot hold horizon
     #endregion
 
     #region Run
@@ -201,10 +219,10 @@ internal sealed class ConvictionDecisionService
         firing.Sort((a, b) => a.AiUserId.CompareTo(b.AiUserId)); // deterministic execution order
 
         foreach (var ccy in Books)
-            await TradeBookAsync(ctx, firing, ccy, ct).ConfigureAwait(false);
+            await TradeBookAsync(ctx, firing, ccy, now, ct).ConfigureAwait(false);
     }
 
-    private async Task TradeBookAsync(AiBotContext ctx, List<AIUser> firing, CurrencyType ccy, CancellationToken ct)
+    private async Task TradeBookAsync(AiBotContext ctx, List<AIUser> firing, CurrencyType ccy, DateTime now, CancellationToken ct)
     {
         // Board universe for this book: every listed stock with a live quote + seed (authoritative = IStockService).
         var board = new List<(int Sid, double Price, decimal Seed)>();
@@ -278,14 +296,20 @@ internal sealed class ConvictionDecisionService
                 if (hot > bestHot) { bestHot = hot; bestIdx = scored.Count - 1; }
             }
 
-            // EXIT (memoryless, turnover-bounded to ONE name/fire): the worst-Hot HELD name that fails its thesis.
+            // EXIT (turnover-bounded to ONE name/fire): the worst-Hot HELD name that fails its thesis. §P1: with the
+            // hold-horizon ON, hold THROUGH DRAWDOWNS — the soft thesis-decay exit waits out the per-bot HoldSec
+            // (hard overvaluation exits bypass it); OFF ⇒ the original memoryless (mom-knee-jerk) exit.
             int sellIdx = -1; double sellHot = double.PositiveInfinity;
             for (int i = 0; i < scored.Count; i++)
             {
                 var s = scored[i];
-                int held = _accounts.GetPosition(user.UserId, s.Sid)?.AvailableQuantity ?? 0;
-                if (held <= 0) continue;
-                if (!ShouldExit(s.Hot, s.Mom, s.Overval, _exitBar, _stopOvervaluation)) continue;
+                var pos = _accounts.GetPosition(user.UserId, s.Sid);
+                if ((pos?.AvailableQuantity ?? 0) <= 0) continue;
+                bool doExit = _holdHorizonEnabled
+                    ? ShouldExitHeld(s.Hot, s.Overval, _exitBar, _stopOvervaluation,
+                                     (now - pos!.UpdatedAt).TotalSeconds, HoldSecOf(user.AiUserId))
+                    : ShouldExit(s.Hot, s.Mom, s.Overval, _exitBar, _stopOvervaluation);
+                if (!doExit) continue;
                 if (s.Hot < sellHot) { sellHot = s.Hot; sellIdx = i; }
             }
             if (sellIdx >= 0)
