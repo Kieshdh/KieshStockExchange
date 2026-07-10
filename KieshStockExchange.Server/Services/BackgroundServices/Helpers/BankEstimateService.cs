@@ -59,6 +59,11 @@ internal sealed class BankEstimateService
     private readonly double _wrongnessFraction;     // idiosyncratic variance scale (the estimate is sometimes wrong)
     private readonly int    _sectorCount;           // fallback modulo count (used only when the real map is absent)
     private readonly bool   _useRealSectors;        // gate the real map (false ⇒ force the config-modulo path even if seeded)
+    // §soak: publish an estimate for EVERY stock on the FIRST tick (bypass the Poisson dribble) so short A/B soaks
+    // aren't starved to the ~few stocks that have arrived yet. Prod doesn't need it (it warms over its long run);
+    // default off ⇒ byte-identical to the Poisson-only path.
+    private readonly bool   _seedAllOnStart;
+    private bool            _seededAll;
 
     // Per-stock published estimate + its previous published value (for the Rotator's estimate-velocity term).
     private readonly Dictionary<int, double> _estimate     = new();
@@ -78,7 +83,7 @@ internal sealed class BankEstimateService
         BotSentimentService sentiment, ILogger<BankEstimateService> logger,
         bool enabled = false, double alpha = 0.3, double poissonMeanIntervalSec = 30.0,
         double wrongnessFraction = 0.15, ISectorMap? sectorMap = null, int sectorCount = 1,
-        Func<int, double>? exogShock = null, bool useRealSectors = true)
+        Func<int, double>? exogShock = null, bool useRealSectors = true, bool seedAllOnStart = false)
     {
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _sectorMap = sectorMap;
@@ -92,6 +97,7 @@ internal sealed class BankEstimateService
         _wrongnessFraction = Math.Max(0.0, wrongnessFraction);
         _sectorCount = Math.Max(1, sectorCount);
         _useRealSectors = useRealSectors;
+        _seedAllOnStart = seedAllOnStart;
     }
 
     // §sector: the real map supersedes the config modulo count once sectors are seeded. Built lazily, so it is
@@ -109,6 +115,9 @@ internal sealed class BankEstimateService
     /// <summary>The previous published estimate deviation (for the estimate-velocity term); 0 when unseen.</summary>
     internal double PrevBankTarget(int stockId)
         => _enabled && _prevEstimate.TryGetValue(stockId, out var v) ? v : 0.0;
+
+    /// <summary>§soak/test: how many stocks have a published estimate so far (all of them after a seed-all first tick).</summary>
+    internal int PublishedCount => _estimate.Count;
 
     /// <summary>Advance the rolling sentiment mean + sector drift, and republish estimates on Poisson arrivals.
     /// No-op (and no RNG draws) when disabled ⇒ byte-identical to the pre-feature engine.</summary>
@@ -135,13 +144,14 @@ internal sealed class BankEstimateService
         // 2) Per-stock: maintain the zero-mean sentiment EWMA, then republish on a Poisson arrival.
         double keep = Math.Pow(0.5, dt / Math.Max(MinDtSec, _poissonMeanIntervalSec * 4.0)); // slow mean
         double pArrival = 1.0 - Math.Exp(-dt / _poissonMeanIntervalSec);
+        bool seedAll = _seedAllOnStart && !_seededAll; // §soak: first tick republishes EVERY stock (no Poisson dribble)
         foreach (var sid in _stocks.ById.Keys) // stable iteration ⇒ reproducible draw sequence
         {
             double sent = (double)_sentiment.GetSentiment(sid);
             if (_sentMean.TryGetValue(sid, out var mean)) _sentMean[sid] = mean * keep + sent * (1.0 - keep);
             else _sentMean[sid] = sent; // cold-start ⇒ centered ≈ 0 initially
 
-            if (_rng.NextDouble() >= pArrival) continue; // draw 1: republish arrival
+            if (!seedAll && _rng.NextDouble() >= pArrival) continue; // draw 1: republish arrival (skipped on seed-all)
 
             double centered = sent - _sentMean[sid];
             double sigmaMult = (double)_profiles.Get(sid).FundamentalSigmaMult;
@@ -163,6 +173,7 @@ internal sealed class BankEstimateService
             _estimate[sid] = newDev;
             _republishesSinceLog++;
         }
+        if (seedAll) _seededAll = true; // one-shot: subsequent ticks resume the normal Poisson cadence
 
         if (now >= _nextLogUtc) { LogSummary(now); _nextLogUtc = now + TimeSpan.FromSeconds(60); }
     }
@@ -177,6 +188,7 @@ internal sealed class BankEstimateService
         _sectorDrift.Clear();
         _simTick = 0;
         _republishesSinceLog = 0;
+        _seededAll = false;
         _lastTickUtc = _enabled ? now : DateTime.MaxValue;
         _nextLogUtc  = now + TimeSpan.FromSeconds(60);
         _logger.LogDebug("BankEstimateService reset (enabled={Enabled}, alpha={Alpha}, meanInterval={Mean}s, sectors={Sectors}).",

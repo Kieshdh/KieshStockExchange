@@ -551,7 +551,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         sectorCount:            _configuration.GetValue("Bots:BankEstimate:SectorCount", exogSectorCount),
                         exogShock:              exogEnabled ? (Func<int, double>)_news.GetShock : null,
                         // §sector A/B rollback: false forces the config-modulo path even with sectors seeded.
-                        useRealSectors:         _configuration.GetValue("Bots:BankEstimate:UseRealSectors", true));
+                        useRealSectors:         _configuration.GetValue("Bots:BankEstimate:UseRealSectors", true),
+                        // §soak: publish an estimate for EVERY stock on the first tick (default off = prod unchanged).
+                        seedAllOnStart:         _configuration.GetValue("Bots:BankEstimate:SeedAllOnStart", false));
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),

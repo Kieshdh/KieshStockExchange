@@ -71,6 +71,28 @@ public class BankEstimateServiceTests
     }
 
     [Fact]
+    public void SeedAllOnStart_publishes_every_stock_on_the_first_tick()
+    {
+        var stocks = BuildStocks((1, 100m), (2, 50m), (3, 200m)).Object;
+        var profiles = new StockProfileService(enabled: false);
+        var sentiment = new BotSentimentService(stocks, profiles, NullLogger<BotSentimentService>.Instance);
+        // A LONG Poisson interval ⇒ without seeding, ~no stock republishes on the first tick.
+        BankEstimateService With(bool seed) => new(stocks, profiles, sentiment,
+            NullLogger<BankEstimateService>.Instance, enabled: true, alpha: 0.3,
+            poissonMeanIntervalSec: 100_000.0, wrongnessFraction: 0.5, sectorCount: 2, seedAllOnStart: seed);
+
+        var seeded = With(true);
+        seeded.Reset(T0);
+        seeded.Tick(T0.AddSeconds(1));
+        Assert.Equal(3, seeded.PublishedCount); // ALL stocks populated on the first tick
+
+        var poissonOnly = With(false);
+        poissonOnly.Reset(T0);
+        poissonOnly.Tick(T0.AddSeconds(1));
+        Assert.True(poissonOnly.PublishedCount < 3); // the slow dribble ⇒ few/none arrived yet
+    }
+
+    [Fact]
     public void Deterministic_across_resets()
     {
         // Same seed + same Tick schedule ⇒ identical estimate sequence (replayable).
