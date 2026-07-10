@@ -254,26 +254,37 @@ internal sealed class ConvictionDecisionService
              + wNoise  * noise;           // mistakes
     }
 
+    /// <summary>§P4 the SIGNED fundamental gap in LOG space: ln(est/price) — symmetric under the ×3/÷3 band (±ln 3 at
+    /// the edges), unlike the arithmetic (est−price)/est which is bounded +0.67 undervalued but −2.0 overvalued and
+    /// would systematically over-size shorts (Fable review). Positive ⇒ undervalued ⇒ long. Pure ⇒ testable.</summary>
+    internal static double LnGap(double est, double price)
+        => est <= 0.0 || price <= 0.0 ? 0.0 : Math.Log(est / price);
+
+    /// <summary>§P4 "satisfied with the result": the position's ENTRY gap has CLOSED — |gap| is now inside the band AND
+    /// the gap at entry was OUTSIDE it on the position's side (a long entered undervalued, a short entered overvalued).
+    /// Without the entry-gap condition a sentiment-led entry (gap≈0 at entry) is BORN satisfied and churns from its
+    /// first review — the Fable-review degeneracy. Pure ⇒ testable.</summary>
+    internal static bool GapSatisfied(double gap, double entryGap, double side, double satisfiedBand)
+        => Math.Abs(gap) <= satisfiedBand && side * entryGap > satisfiedBand;
+
     /// <summary>§P4 conviction-led soft-horizon EXIT hazard for a HELD position (side +1 long / −1 short). Returns the
-    /// per-review close PROBABILITY (caller compares vs a per-(bot,position,pass) hashed U01). Three ADDITIVE drivers on
-    /// a base rate so ANY can fire: (1) TIME — a convex ramp of heldSec/HoldSec (≈0 well before the horizon, =1 at it,
-    /// grows past) ⇒ realized hold CENTERS on HoldSec, a soft indication not a wall; (2) CONVICTION TURNING AGAINST —
-    /// alignment = side·hot; `against` grows as it decays below exitBar and especially when it FLIPS (the dominant,
-    /// near-deterministic trigger); (3) SATISFIED — |gap| inside satisfiedBand ⇒ price reached the (SHARED) estimate.
-    /// Conviction + gap are SHARED signals, so a whole sector's cohort distributes TOGETHER (correlation-positive), NOT
-    /// a private-PnL fade. A hard exit (crash / egregious overvaluation) is handled by the caller, bypassing this. Pure.</summary>
-    internal static double ExitHazard(double side, double hot, double gap, double heldSec, double holdSec,
-        double baseHazard, double exitBar, double satisfiedBand, double flipGain, double satisfyGain, double timeExp)
+    /// per-review close PROBABILITY (caller compares vs a per-(bot,position,pass) hashed U01). Three ADDITIVE competing
+    /// hazards so ANY can fire alone: (1) TIME — baseHazard × a convex ramp of heldSec/HoldSec (≈0 well before the
+    /// horizon, =1 at it, grows past) ⇒ realized hold CENTERS on HoldSec, a soft indication not a wall; (2) CONVICTION
+    /// TURNING AGAINST — alignment = side·hot; `against` grows as it decays below exitBar and especially FLIPS — its own
+    /// per-review rate, so a broken thesis exits regardless of elapsed time (the strong trigger); (3) SATISFIED — the
+    /// caller passes <see cref="GapSatisfied"/> (entry-record-aware: the ENTRY gap closed, not merely gap≈0). Conviction
+    /// + gap are SHARED signals, so a whole sector's cohort distributes TOGETHER (correlation-positive), NOT a private-
+    /// PnL fade. heldSec comes from the entry record (NOT Position.UpdatedAt, which moves on any write). A hard exit
+    /// (crash / egregious overvaluation) is handled by the caller, bypassing this. Pure ⇒ testable.</summary>
+    internal static double ExitHazard(double side, double hot, bool satisfied, double heldSec, double holdSec,
+        double baseHazard, double exitBar, double flipGain, double satisfyGain, double timeExp)
     {
         double ratio     = holdSec <= 0.0 ? 1.0 : Math.Clamp(heldSec / holdSec, 0.0, 4.0);
         double timeTerm  = Math.Pow(ratio, Math.Max(0.1, timeExp));       // convex: small early, 1 at horizon, grows past
         double alignment = side * hot;                                    // >0 ⇒ the signal still agrees with the position
         double against   = Math.Max(0.0, exitBar - alignment);           // 0 while intact; grows as conviction decays/flips
-        double satisfied = Math.Abs(gap) <= satisfiedBand ? 1.0 : 0.0;   // fundamental target reached (shared)
-        // ADDITIVE competing hazards so ANY driver fires on its own: the base rate scales only the aging/time-stop term;
-        // the conviction-flip and satisfied terms are their OWN per-review rates ⇒ a thesis flip exits regardless of how
-        // long the position has been held (the strong, near-deterministic trigger), not gated by the small base.
-        double rate = baseHazard * timeTerm + flipGain * against + satisfyGain * satisfied;
+        double rate = baseHazard * timeTerm + flipGain * against + (satisfied ? satisfyGain : 0.0);
         return Math.Clamp(rate, 0.0, 1.0);
     }
 

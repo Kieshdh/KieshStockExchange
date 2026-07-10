@@ -277,17 +277,49 @@ public class ConvictionMathTests
         Assert.Equal(PgNoise,  HotS(0, 0, 0, 0, 0, 1, +1), 10);
     }
 
-    // Exit-hazard defaults: base 0.02, exit bar 0 (any adverse alignment counts), satisfied band 0.01,
-    // strong flip gain, mild satisfy gain, convex time exponent.
-    private static double Hazard(double side, double hot, double gap, double heldSec, double holdSec)
-        => ConvictionDecisionService.ExitHazard(side, hot, gap, heldSec, holdSec,
-               baseHazard: 0.02, exitBar: 0.0, satisfiedBand: 0.01, flipGain: 2.0, satisfyGain: 0.15, timeExp: 2.5);
+    [Fact]
+    public void LnGap_is_symmetric_under_the_x3_band_unlike_arithmetic_gap()
+    {
+        // At the band edges (price = est/3 undervalued vs price = 3·est overvalued) the log gap is ±ln3 — SYMMETRIC —
+        // so shorts are not systematically over-sized (the arithmetic gap reaches −2.0 over but only +0.67 under).
+        double under = ConvictionDecisionService.LnGap(est: 100, price: 100.0 / 3.0);
+        double over  = ConvictionDecisionService.LnGap(est: 100, price: 300.0);
+        Assert.Equal(Math.Log(3), under, 10);
+        Assert.Equal(-under, over, 10);
+        // Fair value ⇒ 0; degenerate inputs ⇒ 0 (no signal).
+        Assert.Equal(0.0, ConvictionDecisionService.LnGap(100, 100), 10);
+        Assert.Equal(0.0, ConvictionDecisionService.LnGap(0, 100), 10);
+        Assert.Equal(0.0, ConvictionDecisionService.LnGap(100, 0), 10);
+    }
+
+    [Fact]
+    public void GapSatisfied_requires_the_entry_gap_to_have_actually_closed()
+    {
+        const double band = 0.02;
+        // A long entered genuinely undervalued (entryGap +0.10) whose gap collapsed ⇒ satisfied.
+        Assert.True(ConvictionDecisionService.GapSatisfied(gap: 0.005, entryGap: +0.10, side: +1, band));
+        // A short entered overvalued (entryGap −0.10) whose gap collapsed ⇒ satisfied.
+        Assert.True(ConvictionDecisionService.GapSatisfied(gap: -0.005, entryGap: -0.10, side: -1, band));
+        // ★ The born-satisfied degeneracy (Fable): a SENTIMENT-led long entered at gap≈0 must NOT be satisfied
+        // at its first review just because the gap is (still) small — there was no gap thesis to close.
+        Assert.False(ConvictionDecisionService.GapSatisfied(gap: 0.005, entryGap: 0.005, side: +1, band));
+        // Entry gap on the WRONG side (a long entered overvalued) never counts as a closed thesis.
+        Assert.False(ConvictionDecisionService.GapSatisfied(gap: 0.005, entryGap: -0.10, side: +1, band));
+        // Gap still wide open ⇒ not satisfied regardless of entry.
+        Assert.False(ConvictionDecisionService.GapSatisfied(gap: 0.08, entryGap: +0.10, side: +1, band));
+    }
+
+    // Exit-hazard defaults: base 0.02, exit bar 0 (any adverse alignment counts), strong flip gain,
+    // mild satisfy gain, convex time exponent.
+    private static double Hazard(double side, double hot, bool satisfied, double heldSec, double holdSec)
+        => ConvictionDecisionService.ExitHazard(side, hot, satisfied, heldSec, holdSec,
+               baseHazard: 0.02, exitBar: 0.0, flipGain: 2.0, satisfyGain: 0.15, timeExp: 2.5);
 
     [Fact]
     public void ExitHazard_holds_when_thesis_intact_and_early()
     {
-        // Long, conviction still strongly positive, gap wide open, only 10% into the horizon ⇒ tiny close prob.
-        double h = Hazard(side: +1, hot: 0.30, gap: 0.10, heldSec: 100, holdSec: 1000);
+        // Long, conviction still strongly positive, not satisfied, only 10% into the horizon ⇒ tiny close prob.
+        double h = Hazard(side: +1, hot: 0.30, satisfied: false, heldSec: 100, holdSec: 1000);
         Assert.InRange(h, 0.0, 0.01); // ~ base * 0.1^2.5 ≈ 0.00006
     }
 
@@ -295,26 +327,26 @@ public class ConvictionMathTests
     public void ExitHazard_spikes_when_conviction_flips_against_regardless_of_time()
     {
         // Long, but Hot has flipped NEGATIVE (thesis broke) — even EARLY in the hold, the close prob jumps sharply.
-        double flippedEarly = Hazard(side: +1, hot: -0.20, gap: -0.20, heldSec: 10, holdSec: 100000);
+        double flippedEarly = Hazard(side: +1, hot: -0.20, satisfied: false, heldSec: 10, holdSec: 100000);
         Assert.True(flippedEarly > 0.10, $"a thesis flip should strongly raise exit prob, got {flippedEarly}");
         // Short mirror: a short is 'wrong' as Hot turns POSITIVE (bullish) ⇒ same spike.
-        double shortFlip = Hazard(side: -1, hot: +0.20, gap: +0.20, heldSec: 10, holdSec: 100000);
+        double shortFlip = Hazard(side: -1, hot: +0.20, satisfied: false, heldSec: 10, holdSec: 100000);
         Assert.True(shortFlip > 0.10, $"a short's thesis flip should raise exit prob, got {shortFlip}");
         // A short whose thesis is INTACT (Hot still negative = overvalued) early ⇒ holds.
-        Assert.InRange(Hazard(side: -1, hot: -0.30, gap: -0.20, heldSec: 10, holdSec: 100000), 0.0, 0.01);
+        Assert.InRange(Hazard(side: -1, hot: -0.30, satisfied: false, heldSec: 10, holdSec: 100000), 0.0, 0.01);
     }
 
     [Fact]
     public void ExitHazard_time_stop_raises_prob_past_the_horizon_and_satisfied_lifts_it()
     {
         // Same intact-ish thesis, but held well PAST HoldSec ⇒ the time-stop lifts the close prob far above the early case.
-        double early = Hazard(+1, 0.05, 0.10, heldSec: 100, holdSec: 1000);
-        double late  = Hazard(+1, 0.05, 0.10, heldSec: 3000, holdSec: 1000);
+        double early = Hazard(+1, 0.05, false, heldSec: 100, holdSec: 1000);
+        double late  = Hazard(+1, 0.05, false, heldSec: 3000, holdSec: 1000);
         Assert.True(late > early * 20, $"time-stop should dominate past the horizon: early={early} late={late}");
-        // 'Satisfied' (gap collapsed to ~0 = price reached the estimate) raises the close prob vs a still-wide gap.
-        double wideGap = Hazard(+1, 0.05, 0.10, 500, 1000);
-        double reached = Hazard(+1, 0.05, 0.005, 500, 1000);
-        Assert.True(reached > wideGap, $"reaching fair value should raise exit prob: wide={wideGap} reached={reached}");
+        // 'Satisfied' (the entry gap closed = price reached the estimate) raises the close prob vs not-satisfied.
+        double open    = Hazard(+1, 0.05, false, 500, 1000);
+        double reached = Hazard(+1, 0.05, true, 500, 1000);
+        Assert.True(reached > open, $"reaching the entry thesis should raise exit prob: open={open} reached={reached}");
     }
 
     [Fact]
@@ -322,8 +354,8 @@ public class ConvictionMathTests
     {
         for (int i = 0; i <= 40; i++)
         {
-            double hot = -0.5 + i * 0.025, gap = -0.3 + i * 0.015;
-            double h = Hazard(i % 2 == 0 ? +1 : -1, hot, gap, heldSec: 50 * i, holdSec: 1000);
+            double hot = -0.5 + i * 0.025;
+            double h = Hazard(i % 2 == 0 ? +1 : -1, hot, satisfied: i % 3 == 0, heldSec: 50 * i, holdSec: 1000);
             Assert.InRange(h, 0.0, 1.0);
         }
     }
