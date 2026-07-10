@@ -237,6 +237,46 @@ internal sealed class ConvictionDecisionService
         return q > 0 ? q : 0;
     }
 
+    /// <summary>§P4 signed two-way conviction: the SIGN chooses long(+)/short(−), the MAGNITUDE drives size. `gap` is
+    /// the SIGNED fundamental (undervalued &gt;0 ⇒ long, overvalued &lt;0 ⇒ short) and REPLACES the one-way overvaluation
+    /// veto of <see cref="Hot"/>. The SHARED carriers (sector sentiment, global) are NOT lean-flipped — all bots lean the
+    /// same way on the shared signal ⇒ maximal cross-stock correlation. The OWN character terms (momentum, own sentiment)
+    /// ARE lean-flipped (chaser +1 / fader −1). Fresh per-fire noise injects mistakes. Pure ⇒ testable.</summary>
+    internal static double HotSigned(double gap, double sectorSent, double global, double mom, double ownSent, double noise,
+        int lean, double wGap, double wSec, double wGlobal, double wMom, double wOwn, double wNoise)
+    {
+        double leanF = lean >= 0 ? 1.0 : -1.0;
+        return wGap    * gap
+             + wSec    * sectorSent      // shared carrier — NO lean (correlation)
+             + wGlobal * global          // shared carrier — NO lean (correlation)
+             + wMom    * leanF * mom      // own character — lean-flipped
+             + wOwn    * leanF * ownSent  // own character — lean-flipped
+             + wNoise  * noise;           // mistakes
+    }
+
+    /// <summary>§P4 conviction-led soft-horizon EXIT hazard for a HELD position (side +1 long / −1 short). Returns the
+    /// per-review close PROBABILITY (caller compares vs a per-(bot,position,pass) hashed U01). Three ADDITIVE drivers on
+    /// a base rate so ANY can fire: (1) TIME — a convex ramp of heldSec/HoldSec (≈0 well before the horizon, =1 at it,
+    /// grows past) ⇒ realized hold CENTERS on HoldSec, a soft indication not a wall; (2) CONVICTION TURNING AGAINST —
+    /// alignment = side·hot; `against` grows as it decays below exitBar and especially when it FLIPS (the dominant,
+    /// near-deterministic trigger); (3) SATISFIED — |gap| inside satisfiedBand ⇒ price reached the (SHARED) estimate.
+    /// Conviction + gap are SHARED signals, so a whole sector's cohort distributes TOGETHER (correlation-positive), NOT
+    /// a private-PnL fade. A hard exit (crash / egregious overvaluation) is handled by the caller, bypassing this. Pure.</summary>
+    internal static double ExitHazard(double side, double hot, double gap, double heldSec, double holdSec,
+        double baseHazard, double exitBar, double satisfiedBand, double flipGain, double satisfyGain, double timeExp)
+    {
+        double ratio     = holdSec <= 0.0 ? 1.0 : Math.Clamp(heldSec / holdSec, 0.0, 4.0);
+        double timeTerm  = Math.Pow(ratio, Math.Max(0.1, timeExp));       // convex: small early, 1 at horizon, grows past
+        double alignment = side * hot;                                    // >0 ⇒ the signal still agrees with the position
+        double against   = Math.Max(0.0, exitBar - alignment);           // 0 while intact; grows as conviction decays/flips
+        double satisfied = Math.Abs(gap) <= satisfiedBand ? 1.0 : 0.0;   // fundamental target reached (shared)
+        // ADDITIVE competing hazards so ANY driver fires on its own: the base rate scales only the aging/time-stop term;
+        // the conviction-flip and satisfied terms are their OWN per-review rates ⇒ a thesis flip exits regardless of how
+        // long the position has been held (the strong, near-deterministic trigger), not gated by the small base.
+        double rate = baseHazard * timeTerm + flipGain * against + satisfyGain * satisfied;
+        return Math.Clamp(rate, 0.0, 1.0);
+    }
+
     private double CashFloorPctOf(int id)   => Dial(id, CashFloorSalt, _cashFloorBase, _cashFloorBase + CashFloorSpan);
     private double RiskAppetiteOf(int id)   => Math.Min(RiskAppetiteHardCap,
                                                    Dial(id, RiskSalt, _riskAppetiteBase, _riskAppetiteBase + RiskAppetiteSpan));

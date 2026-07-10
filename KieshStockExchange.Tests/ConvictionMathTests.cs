@@ -243,4 +243,89 @@ public class ConvictionMathTests
                   > ConvictionDecisionService.ShortQty(200_000m, 0.20, 0.15, 100.0));
     }
     #endregion
+
+    #region P4 signed Hot + conviction-led exit hazard
+    // Council-ordered weights: Wgap 1.0 >= Wsec 0.9 > Wmom 0.5 ~ Wglobal 0.4 >> Wown 0.1; noise small.
+    private const double PgGap = 1.0, PgSec = 0.9, PgGlobal = 0.4, PgMom = 0.5, PgOwn = 0.1, PgNoise = 0.2;
+
+    private static double HotS(double gap, double sec, double global, double mom, double own, double noise, int lean)
+        => ConvictionDecisionService.HotSigned(gap, sec, global, mom, own, noise, lean,
+                                               PgGap, PgSec, PgGlobal, PgMom, PgOwn, PgNoise);
+
+    [Fact]
+    public void HotSigned_sign_of_gap_chooses_long_vs_short()
+    {
+        // Undervalued (gap>0) ⇒ positive Hot (long); overvalued (gap<0) ⇒ negative Hot (short). Nothing else set.
+        Assert.True(HotS(+0.10, 0, 0, 0, 0, 0, +1) > 0);
+        Assert.True(HotS(-0.10, 0, 0, 0, 0, 0, +1) < 0);
+        Assert.Equal(-HotS(+0.10, 0, 0, 0, 0, 0, +1), HotS(-0.10, 0, 0, 0, 0, 0, +1), 10); // antisymmetric in gap
+    }
+
+    [Fact]
+    public void HotSigned_shared_carriers_are_not_lean_flipped_but_own_terms_are()
+    {
+        // Sector + global are the correlation carriers: identical for a chaser and a fader (no lean).
+        Assert.Equal(HotS(0, 0.5, 0.3, 0, 0, 0, +1), HotS(0, 0.5, 0.3, 0, 0, 0, -1), 10);
+        // Momentum + own sentiment carry character: a fader NEGATES them.
+        Assert.Equal(PgMom * 1,  HotS(0, 0, 0, 1, 0, 0, +1), 10);
+        Assert.Equal(PgMom * -1, HotS(0, 0, 0, 1, 0, 0, -1), 10);
+        Assert.Equal(PgOwn * -1, HotS(0, 0, 0, 0, 1, 0, -1), 10);
+        // Each weighted term isolates.
+        Assert.Equal(PgGap,    HotS(1, 0, 0, 0, 0, 0, +1), 10);
+        Assert.Equal(PgSec,    HotS(0, 1, 0, 0, 0, 0, +1), 10);
+        Assert.Equal(PgGlobal, HotS(0, 0, 1, 0, 0, 0, +1), 10);
+        Assert.Equal(PgNoise,  HotS(0, 0, 0, 0, 0, 1, +1), 10);
+    }
+
+    // Exit-hazard defaults: base 0.02, exit bar 0 (any adverse alignment counts), satisfied band 0.01,
+    // strong flip gain, mild satisfy gain, convex time exponent.
+    private static double Hazard(double side, double hot, double gap, double heldSec, double holdSec)
+        => ConvictionDecisionService.ExitHazard(side, hot, gap, heldSec, holdSec,
+               baseHazard: 0.02, exitBar: 0.0, satisfiedBand: 0.01, flipGain: 2.0, satisfyGain: 0.15, timeExp: 2.5);
+
+    [Fact]
+    public void ExitHazard_holds_when_thesis_intact_and_early()
+    {
+        // Long, conviction still strongly positive, gap wide open, only 10% into the horizon ⇒ tiny close prob.
+        double h = Hazard(side: +1, hot: 0.30, gap: 0.10, heldSec: 100, holdSec: 1000);
+        Assert.InRange(h, 0.0, 0.01); // ~ base * 0.1^2.5 ≈ 0.00006
+    }
+
+    [Fact]
+    public void ExitHazard_spikes_when_conviction_flips_against_regardless_of_time()
+    {
+        // Long, but Hot has flipped NEGATIVE (thesis broke) — even EARLY in the hold, the close prob jumps sharply.
+        double flippedEarly = Hazard(side: +1, hot: -0.20, gap: -0.20, heldSec: 10, holdSec: 100000);
+        Assert.True(flippedEarly > 0.10, $"a thesis flip should strongly raise exit prob, got {flippedEarly}");
+        // Short mirror: a short is 'wrong' as Hot turns POSITIVE (bullish) ⇒ same spike.
+        double shortFlip = Hazard(side: -1, hot: +0.20, gap: +0.20, heldSec: 10, holdSec: 100000);
+        Assert.True(shortFlip > 0.10, $"a short's thesis flip should raise exit prob, got {shortFlip}");
+        // A short whose thesis is INTACT (Hot still negative = overvalued) early ⇒ holds.
+        Assert.InRange(Hazard(side: -1, hot: -0.30, gap: -0.20, heldSec: 10, holdSec: 100000), 0.0, 0.01);
+    }
+
+    [Fact]
+    public void ExitHazard_time_stop_raises_prob_past_the_horizon_and_satisfied_lifts_it()
+    {
+        // Same intact-ish thesis, but held well PAST HoldSec ⇒ the time-stop lifts the close prob far above the early case.
+        double early = Hazard(+1, 0.05, 0.10, heldSec: 100, holdSec: 1000);
+        double late  = Hazard(+1, 0.05, 0.10, heldSec: 3000, holdSec: 1000);
+        Assert.True(late > early * 20, $"time-stop should dominate past the horizon: early={early} late={late}");
+        // 'Satisfied' (gap collapsed to ~0 = price reached the estimate) raises the close prob vs a still-wide gap.
+        double wideGap = Hazard(+1, 0.05, 0.10, 500, 1000);
+        double reached = Hazard(+1, 0.05, 0.005, 500, 1000);
+        Assert.True(reached > wideGap, $"reaching fair value should raise exit prob: wide={wideGap} reached={reached}");
+    }
+
+    [Fact]
+    public void ExitHazard_is_a_probability_in_unit_range()
+    {
+        for (int i = 0; i <= 40; i++)
+        {
+            double hot = -0.5 + i * 0.025, gap = -0.3 + i * 0.015;
+            double h = Hazard(i % 2 == 0 ? +1 : -1, hot, gap, heldSec: 50 * i, holdSec: 1000);
+            Assert.InRange(h, 0.0, 1.0);
+        }
+    }
+    #endregion
 }
