@@ -668,7 +668,20 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         sizingGamma:        _configuration.GetValue("Bots:Conviction:SizingGamma", 3.0),
                         shortingEnabled:    _configuration.GetValue("Bots:Conviction:ShortingEnabled", false),
                         shortBar:           _configuration.GetValue("Bots:Conviction:ShortBar", 0.06),
-                        shortRiskFraction:  _configuration.GetValue("Bots:Conviction:ShortRiskFraction", 0.15));
+                        shortRiskFraction:  _configuration.GetValue("Bots:Conviction:ShortRiskFraction", 0.15),
+                        signedHotEnabled:   _configuration.GetValue("Bots:Conviction:SignedHotEnabled", false),
+                        wGap:               _configuration.GetValue("Bots:Conviction:Wgap", 1.0),
+                        wOwn:               _configuration.GetValue("Bots:Conviction:Wown", 0.1),
+                        wNoise:             _configuration.GetValue("Bots:Conviction:Wnoise", 0.2),
+                        reviewMeanSec:      _configuration.GetValue("Bots:Conviction:ReviewMeanSec", 300.0),
+                        exitBaseHazard:     _configuration.GetValue("Bots:Conviction:ExitBaseHazard", 0.02),
+                        exitFlipGain:       _configuration.GetValue("Bots:Conviction:ExitFlipGain", 2.0),
+                        exitSatisfyGain:    _configuration.GetValue("Bots:Conviction:ExitSatisfyGain", 0.15),
+                        exitTimeExp:        _configuration.GetValue("Bots:Conviction:ExitTimeExp", 2.5),
+                        satisfiedBand:      _configuration.GetValue("Bots:Conviction:SatisfiedBand", 0.02),
+                        minHoldSec:         _configuration.GetValue("Bots:Conviction:MinHoldSec", 120.0),
+                        maxExitFractionPerPass: _configuration.GetValue("Bots:Conviction:MaxExitFractionPerPass", 0.10),
+                        shortBarMult:       _configuration.GetValue("Bots:Conviction:ShortBarMult", 1.2));
         // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
         // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
         // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/

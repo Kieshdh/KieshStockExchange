@@ -75,7 +75,8 @@ internal sealed class ConvictionDecisionService
 
     // Distinct per-dial + fire-gate salts (mixed with the pass counter where a per-pass reshuffle is wanted).
     private const int CashFloorSalt = 0x0C01, RiskSalt = 0x0C02, BarSalt = 0x0C03, SensSalt = 0x0C04,
-                      LeanSalt = 0x0C05, CadenceSalt = 0x0C06, FireSalt = 0x0C07, HoldSalt = 0x0C08;
+                      LeanSalt = 0x0C05, CadenceSalt = 0x0C06, FireSalt = 0x0C07, HoldSalt = 0x0C08,
+                      ReviewSalt = 0x0C09, HazardSalt = 0x0C0A, NoiseSalt = 0x0C0B; // §P4 review gate / exit draw / entry noise
 
     private readonly double _wSec, _wMom, _wGlobal, _wIdio, _wOver; // Hot-signal weights (Wsec+Wmom ≫ Wover)
     private readonly double _convictionBarBase;                     // entry-bar low bound (dial spreads up)
@@ -105,6 +106,25 @@ internal sealed class ConvictionDecisionService
     // Default off ⇒ no short/cover requests are built (byte-identical long-only behaviour).
     private readonly bool   _shortingEnabled;
     private readonly double _shortBar, _shortRiskFraction;
+    // §P4 signed two-way Hot + conviction-led probabilistic lifecycle (the CRUX; supersedes the P1 hold-gate, the P3
+    // standalone short trigger and the deterministic exit scan when ON). Two clocks on one pass: entry-hunting stays
+    // on CheckInMeanSec; a FASTER review clock (ReviewMeanSec) re-evaluates ONLY held positions (cheap — walks the
+    // entry-record dict, no second board scan). Exits are hazard-driven (see ExitHazard) with three guardrails:
+    // the close probability is LOAD-SCALED, a per-pass cohort exit-rate cap bounds turnover, and a min-hold floor
+    // stops thrash. Default off ⇒ the v1/P1–P3 path runs byte-identical.
+    private readonly bool   _signedHotEnabled;
+    private readonly double _wGap, _wOwn, _wNoise;                  // signed-Hot weights (wSec/wMom/wGlobal shared with v1)
+    private readonly double _reviewMeanSec;                          // the fast position-review clock
+    private readonly double _exitBaseHazard, _exitFlipGain, _exitSatisfyGain, _exitTimeExp, _satisfiedBand;
+    private readonly double _minHoldSec;                             // hazard floor: no soft exit before this
+    private readonly double _maxExitFractionPerPass;                 // cohort-wide soft-exit cap per pass
+    private readonly double _shortBarMult;                           // short entry bar = long bar × this (slightly wider)
+    // §P4 per-position entry record (Fable review): heldSec anchors here (NOT Position.UpdatedAt, which moves on any
+    // write) and "satisfied" = the ENTRY gap closed (kills the born-satisfied churn). Keyed WITHOUT currency —
+    // Position is currency-agnostic (a cross-listed stock shares ONE Position) — the entry book is stored so the
+    // exit routes through the same book (a cover must be same-ccy for the collateral release). Loop-thread only.
+    internal readonly record struct EntryRec(DateTime EnteredAt, double EntryGap, int Side, CurrencyType Ccy);
+    private readonly Dictionary<(int UserId, int Sid), EntryRec> _entryRecs = new();
     private long _passCount;                                        // monotonic, reshuffles the fire subset each pass
     private DateTime _lastPassUtc = DateTime.MaxValue;              // inert until the first RunAsync arms the clock
 
@@ -117,7 +137,11 @@ internal sealed class ConvictionDecisionService
         decimal seedBalanceUsd = 200_000m, decimal seedBalanceEur = 180_000m, bool useLoadEwma = false,
         bool holdHorizonEnabled = false, double holdMinSec = 1800.0, double holdMaxSec = 172_800.0,
         bool convictionSizingEnabled = false, double convScale = 0.12, double maxDeploy = 0.90, double sizingGamma = 3.0,
-        bool shortingEnabled = false, double shortBar = 0.06, double shortRiskFraction = 0.15)
+        bool shortingEnabled = false, double shortBar = 0.06, double shortRiskFraction = 0.15,
+        bool signedHotEnabled = false, double wGap = 1.0, double wOwn = 0.1, double wNoise = 0.2,
+        double reviewMeanSec = 300.0, double exitBaseHazard = 0.02, double exitFlipGain = 2.0,
+        double exitSatisfyGain = 0.15, double exitTimeExp = 2.5, double satisfiedBand = 0.02,
+        double minHoldSec = 120.0, double maxExitFractionPerPass = 0.10, double shortBarMult = 1.2)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -148,9 +172,20 @@ internal sealed class ConvictionDecisionService
         _shortingEnabled    = shortingEnabled;
         _shortBar           = Math.Max(0.0, shortBar);
         _shortRiskFraction  = Math.Clamp(shortRiskFraction, 0.0, 1.0);
+        _signedHotEnabled   = signedHotEnabled;
+        _wGap = wGap; _wOwn = wOwn; _wNoise = Math.Max(0.0, wNoise);
+        _reviewMeanSec      = Math.Max(MinDtSec, reviewMeanSec);
+        _exitBaseHazard     = Math.Clamp(exitBaseHazard, 0.0, 1.0);
+        _exitFlipGain       = Math.Max(0.0, exitFlipGain);
+        _exitSatisfyGain    = Math.Max(0.0, exitSatisfyGain);
+        _exitTimeExp        = Math.Max(0.1, exitTimeExp);
+        _satisfiedBand      = Math.Max(0.0, satisfiedBand);
+        _minHoldSec         = Math.Max(0.0, minHoldSec);
+        _maxExitFractionPerPass = Math.Clamp(maxExitFractionPerPass, 0.0, 1.0);
+        _shortBarMult       = Math.Max(1.0, shortBarMult);
     }
 
-    internal void Reset() { _passCount = 0; _lastPassUtc = DateTime.MaxValue; }
+    internal void Reset() { _passCount = 0; _lastPassUtc = DateTime.MaxValue; _entryRecs.Clear(); }
     #endregion
 
     #region Pure decision math (unit-testable, RNG-free)
@@ -327,11 +362,38 @@ internal sealed class ConvictionDecisionService
             if (BotMath.HashUnit01(user.AiUserId, FireSalt ^ unchecked((int)_passCount)) < fireProb)
             { firing.Add(user); user.RecordDecision(now); }
         }
-        if (firing.Count == 0) return;
+
+        if (!_signedHotEnabled)
+        {
+            if (firing.Count == 0) return;
+            firing.Sort((a, b) => a.AiUserId.CompareTo(b.AiUserId)); // deterministic execution order
+            foreach (var ccy in Books)
+                await TradeBookAsync(ctx, firing, ccy, now, ct).ConfigureAwait(false);
+            return;
+        }
+
+        // §P4 second (FASTER) clock on the SAME pass: the review subset re-evaluates ONLY held positions (the entry-
+        // record walk — no board scan). reviewing ⊇ firing so a bot that hunts also reviews what it holds this pass.
+        var reviewing = new Dictionary<int, AIUser>();   // UserId → bot (entry records are keyed by UserId)
+        foreach (var user in firing) reviewing[user.UserId] = user;
+        foreach (var user in eligible)
+        {
+            double reviewProb = Math.Clamp(dt / _reviewMeanSec, 0.0, 1.0) * loadScale;
+            if (BotMath.HashUnit01(user.AiUserId, ReviewSalt ^ unchecked((int)_passCount)) < reviewProb)
+                reviewing[user.UserId] = user;
+        }
+        if (firing.Count == 0 && reviewing.Count == 0) return;
         firing.Sort((a, b) => a.AiUserId.CompareTo(b.AiUserId)); // deterministic execution order
 
+        // Per-pass cohort-wide SOFT-exit budget (hard exits are exempt): the hazard can RESHAPE the hold distribution
+        // but never inflate cohort turnover past this cap (council guardrail). Shared across both books.
+        int exitBudget = Math.Max(1, (int)Math.Ceiling(_maxExitFractionPerPass * eligible.Count));
         foreach (var ccy in Books)
-            await TradeBookAsync(ctx, firing, ccy, now, ct).ConfigureAwait(false);
+        {
+            int spent = await TradeBookSignedAsync(ctx, firing, reviewing, ccy, now, loadScale, exitBudget, ct)
+                              .ConfigureAwait(false);
+            exitBudget = Math.Max(0, exitBudget - spent);
+        }
     }
 
     private async Task TradeBookAsync(AiBotContext ctx, List<AIUser> firing, CurrencyType ccy, DateTime now, CancellationToken ct)
@@ -543,6 +605,235 @@ internal sealed class ConvictionDecisionService
             var shortResults = await _entry.PlaceMarketShortBatchAsync(shortReqs, ct).ConfigureAwait(false);
             for (int i = 0; i < shortOwners.Count; i++) RecordFills(shortOwners[i], shortResults[i]);
         }
+    }
+
+    /// <summary>§P4 the signed-Hot pass for one book. Returns the SOFT (hazard) exits spent against the per-pass
+    /// budget. (1) REVIEW: walk this book's entry records owned by reviewing bots — hard exits (gap far past the stop
+    /// against the position) fire immediately; soft exits draw a hashed U01 against the LOAD-SCALED ExitHazard,
+    /// bounded by the budget + the min-hold floor. (2) HUNT: firing bots scan the board with the SIGNED Hot (fresh
+    /// per-fire noise = mistakes) — the best candidate above the bar goes LONG, the best below the mirrored (wider)
+    /// bar goes SHORT (flat-only). (3) EXECUTE in the CK-safe order sells → covers → buys → shorts. (4) RECONCILE the
+    /// entry records from live positions for every (bot,sid) touched.</summary>
+    private async Task<int> TradeBookSignedAsync(AiBotContext ctx, List<AIUser> firing, Dictionary<int, AIUser> reviewing,
+        CurrencyType ccy, DateTime now, double loadScale, int exitBudget, CancellationToken ct)
+    {
+        // Board + per-sid shared signal (bot-independent, resolved once — same shape as the v1 path, plus own-name
+        // sentiment and the SIGNED log gap replacing the one-way overvaluation).
+        var board = new List<(int Sid, double Price, decimal Seed)>();
+        foreach (var sid in _stocks.ById.Keys)
+        {
+            if (!_stocks.IsListedIn(sid, ccy)) continue;
+            if (!ctx.StockPrices.TryGetValue((sid, ccy), out var price) || price <= 0m) continue;
+            decimal seed = SeedPrice(sid, ccy);
+            if (seed <= 0m) continue;
+            board.Add((sid, (double)price, seed));
+        }
+        if (board.Count == 0) return 0;
+
+        double global = (double)_sentiment.GlobalSignal();
+        decimal seedNotional = ccy == CurrencyType.USD ? _seedBalanceUsd : _seedBalanceEur;
+
+        bool realSectors = _sectorMap.HasRealSectors;
+        Dictionary<int, (double Sum, int N)>? sectorAcc = realSectors ? new() : null;
+        if (realSectors)
+            foreach (var (sid, _, _) in board)
+            {
+                int ord = _sectorMap.OrdinalOf(sid);
+                if (ord < 0) continue;
+                var cur = sectorAcc!.GetValueOrDefault(ord);
+                sectorAcc[ord] = (cur.Sum + (double)_sentiment.GetSentiment(sid), cur.N + 1);
+            }
+
+        var signal = new List<(int Sid, double Price, double SectorSent, double Mom, double OwnSent, double Gap)>(board.Count);
+        var sidToIdx = new Dictionary<int, int>(board.Count);
+        foreach (var (sid, price, seed) in board)
+        {
+            double dev = _bank.BankTarget(sid);
+            double est = (double)seed * (1.0 + dev);
+            if (est <= 0.0) continue;
+            double gap = LnGap(est, price);                          // SIGNED, log-symmetric (Fable fix)
+            double mom = (double)_sentiment.GetSentimentSlope(sid, fast: false);
+            double ownSent = (double)_sentiment.GetSentiment(sid);
+            double sectorSent;
+            if (realSectors)
+            {
+                int ord = _sectorMap.OrdinalOf(sid);
+                var a = ord >= 0 ? sectorAcc!.GetValueOrDefault(ord) : default;
+                sectorSent = a.N > 0 ? a.Sum / a.N : ownSent;
+            }
+            else sectorSent = ownSent;
+            sidToIdx[sid] = signal.Count;
+            signal.Add((sid, price, sectorSent, mom, ownSent, gap));
+        }
+        if (signal.Count == 0) return 0;
+
+        var sellReqs   = new List<TrueMarketSellBatchRequest>();
+        var sellOwners = new List<AIUser>();
+        var coverReqs   = new List<TrueMarketBuyBatchRequest>();
+        var coverOwners = new List<AIUser>();
+        var buyPlans   = new List<(AIUser User, int Sid, double Price, double Strength)>();
+        var shortReqs   = new List<MarketShortBatchRequest>();
+        var shortOwners = new List<AIUser>();
+        var touched    = new HashSet<(int UserId, int Sid)>();
+
+        // ── REVIEW: the fast clock walks ONLY this book's entry records (no board scan). Deterministic order.
+        int softSpent = 0;
+        var reviewKeys = new List<(int UserId, int Sid)>();
+        foreach (var kv in _entryRecs)
+            if (kv.Value.Ccy == ccy && reviewing.ContainsKey(kv.Key.UserId)) reviewKeys.Add(kv.Key);
+        reviewKeys.Sort();
+        foreach (var key in reviewKeys)
+        {
+            if (!sidToIdx.TryGetValue(key.Sid, out int idx)) continue;
+            var rec  = _entryRecs[key];
+            var user = reviewing[key.UserId];
+            var s    = signal[idx];
+            int side = rec.Side;
+
+            // HARD exit (bypasses budget + floor): the gap has run far past the stop AGAINST the position —
+            // a long deep overvalued (gap ≪ 0) / a short deep undervalued (gap ≫ 0).
+            bool hardExit = -side * s.Gap > _stopOvervaluation;
+
+            bool softExit = false;
+            if (!hardExit && softSpent < exitBudget)
+            {
+                double heldSec = (now - rec.EnteredAt).TotalSeconds;
+                if (heldSec >= _minHoldSec)  // min-hold floor: no soft churn right after entry
+                {
+                    int lean = Lean(user.AiUserId, ChaserProb);
+                    // Exit-side Hot EXCLUDES the noise term (a re-rolled noise is a hidden constant hazard — Fable).
+                    double hot = HotSigned(s.Gap, s.SectorSent, global, s.Mom, s.OwnSent, 0.0, lean,
+                                           _wGap, _wSec, _wGlobal, _wMom, _wOwn, 0.0);
+                    bool satisfied = GapSatisfied(s.Gap, rec.EntryGap, side, _satisfiedBand);
+                    double hazard = ExitHazard(side, hot, satisfied, heldSec, HoldSecOf(user.AiUserId),
+                                               _exitBaseHazard, _exitBar, _exitFlipGain, _exitSatisfyGain, _exitTimeExp)
+                                    * loadScale;   // council guardrail: the CLOSE probability is load-scaled too
+                    double draw = BotMath.HashUnit01(
+                        user.UserId ^ key.Sid * unchecked((int)0x9E3779B1) ^ unchecked((int)_passCount), HazardSalt);
+                    softExit = draw < hazard;
+                }
+            }
+            if (!hardExit && !softExit) continue;
+
+            var pos = _accounts.GetPosition(key.UserId, key.Sid);
+            if (side > 0)
+            {
+                int held = pos?.AvailableQuantity ?? 0;
+                if (held <= 0) { touched.Add(key); continue; }      // stale record — reconcile below
+                sellReqs.Add(new TrueMarketSellBatchRequest(key.UserId, key.Sid, held, ccy));
+                sellOwners.Add(user);
+            }
+            else
+            {
+                int shortQty = -(pos?.Quantity ?? 0);
+                if (shortQty <= 0) { touched.Add(key); continue; }  // stale record — reconcile below
+                decimal budget = (decimal)(shortQty * s.Price * 1.5);
+                coverReqs.Add(new TrueMarketBuyBatchRequest(key.UserId, key.Sid, shortQty, budget, ccy));
+                coverOwners.Add(user);
+            }
+            touched.Add(key);
+            if (softExit) softSpent++;
+        }
+
+        // ── HUNT: firing bots scan the board with the SIGNED Hot. One long + one short candidate max per fire.
+        foreach (var user in firing)
+        {
+            int lean = Lean(user.AiUserId, ChaserProb);
+            double sens = SentimentSensOf(user.AiUserId);
+            double bar  = ConvictionBarOf(user.AiUserId);
+
+            int longSid = 0; double longHot = double.NegativeInfinity, longPrice = 0;
+            int shortSid = 0; double shortHot = double.PositiveInfinity, shortPrice = 0;
+            foreach (var (sid, price, sectorSent, mom, ownSent, gap) in signal)
+            {
+                int qty = _accounts.GetPosition(user.UserId, sid)?.Quantity ?? 0;
+                // First-sight: a held name with no record (seeded inventory / legacy fills) becomes reviewable.
+                if (qty != 0 && !_entryRecs.ContainsKey((user.UserId, sid)))
+                    _entryRecs[(user.UserId, sid)] = new EntryRec(now, gap, Math.Sign(qty), ccy);
+
+                double noise = (BotMath.HashUnit01(
+                    user.AiUserId ^ sid * unchecked((int)0x9E3779B1) ^ unchecked((int)_passCount), NoiseSalt) * 2.0 - 1.0);
+                double hot = HotSigned(gap, sectorSent, global, mom, ownSent, noise, lean,
+                                       _wGap, _wSec, _wGlobal, _wMom, _wOwn, _wNoise);
+                if (qty >= 0 && hot > longHot)  { longHot = hot;  longSid = sid;  longPrice = price; }  // never buy into a short
+                if (qty == 0 && hot < shortHot) { shortHot = hot; shortSid = sid; shortPrice = price; } // flat-only shorts
+            }
+
+            double effBar = sens > 0.0 ? bar / sens : double.PositiveInfinity;
+            if (longSid > 0 && longHot >= effBar)
+                buyPlans.Add((user, longSid, longPrice, longHot - effBar));
+            if (shortSid > 0 && shortHot <= -effBar * _shortBarMult)
+            {
+                int qty = ShortQty(seedNotional, RiskAppetiteOf(user.AiUserId), _shortRiskFraction, shortPrice);
+                if (qty > 0)
+                {
+                    shortReqs.Add(new MarketShortBatchRequest(user.UserId, shortSid, qty, ccy));
+                    shortOwners.Add(user);
+                }
+            }
+        }
+
+        // ── EXECUTE: CK-safe order — cash-producing legs settle before the buys size off fresh AvailableBalance.
+        if (sellReqs.Count > 0)
+        {
+            var r = await _entry.PlaceTrueMarketSellBatchAsync(sellReqs, ct).ConfigureAwait(false);
+            for (int i = 0; i < sellOwners.Count; i++) RecordFills(sellOwners[i], r[i]);
+        }
+        if (coverReqs.Count > 0)
+        {
+            var r = await _entry.PlaceTrueMarketBuyBatchAsync(coverReqs, ct).ConfigureAwait(false);
+            for (int i = 0; i < coverOwners.Count; i++) RecordFills(coverOwners[i], r[i]);
+        }
+        var buyReqs   = new List<TrueMarketBuyBatchRequest>();
+        var buyOwners = new List<AIUser>();
+        foreach (var (user, sid, price, strength) in buyPlans)
+        {
+            if (price <= 0.0) continue;
+            decimal avail        = _accounts.GetFund(user.UserId, ccy)?.AvailableBalance ?? 0m;
+            decimal cashFloorAmt = (decimal)CashFloorPctOf(user.AiUserId) * seedNotional;
+            decimal budget;
+            if (_convictionSizingEnabled)
+            {
+                double deployFrac = ConvictionDeployFraction(strength, _convScale, _maxDeploy, _sizingGamma);
+                budget = DeployNotional((decimal)deployFrac * (avail - cashFloorAmt), avail, cashFloorAmt);
+            }
+            else
+            {
+                decimal riskNotional = (decimal)RiskAppetiteOf(user.AiUserId) * seedNotional;
+                budget = DeployNotional(riskNotional, avail, cashFloorAmt);
+            }
+            if (budget <= 0m) continue;
+            int qty = (int)Math.Floor((double)budget / price);
+            if (qty <= 0) continue;
+            buyReqs.Add(new TrueMarketBuyBatchRequest(user.UserId, sid, qty, budget, ccy));
+            buyOwners.Add(user);
+        }
+        if (buyReqs.Count > 0)
+        {
+            var r = await _entry.PlaceTrueMarketBuyBatchAsync(buyReqs, ct).ConfigureAwait(false);
+            for (int i = 0; i < buyOwners.Count; i++) RecordFills(buyOwners[i], r[i]);
+        }
+        if (shortReqs.Count > 0)
+        {
+            var r = await _entry.PlaceMarketShortBatchAsync(shortReqs, ct).ConfigureAwait(false);
+            for (int i = 0; i < shortOwners.Count; i++) RecordFills(shortOwners[i], r[i]);
+        }
+
+        // ── RECONCILE the entry records from LIVE positions for every (bot,sid) touched by any leg this pass:
+        // qty 0 ⇒ record gone; a new/flipped side ⇒ a fresh record (clock + entry gap anchor); an add-on to the
+        // SAME side keeps the original record (the hold clock does NOT reset — the thesis started at first entry).
+        foreach (var req in buyReqs)   touched.Add((req.UserId, req.StockId));
+        foreach (var req in shortReqs) touched.Add((req.UserId, req.StockId));
+        foreach (var key in touched)
+        {
+            int qty = _accounts.GetPosition(key.UserId, key.Sid)?.Quantity ?? 0;
+            if (qty == 0) { _entryRecs.Remove(key); continue; }
+            int side = Math.Sign(qty);
+            double gap = sidToIdx.TryGetValue(key.Sid, out int idx) ? signal[idx].Gap : 0.0;
+            if (!_entryRecs.TryGetValue(key, out var rec) || rec.Side != side)
+                _entryRecs[key] = new EntryRec(now, gap, side, ccy);
+        }
+        return softSpent;
     }
 
     private decimal SeedPrice(int stockId, CurrencyType ccy)
