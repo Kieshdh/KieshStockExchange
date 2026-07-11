@@ -93,6 +93,38 @@ public class BankEstimateServiceTests
     }
 
     [Fact]
+    public void SectorEvents_skew_the_sector_drift_downward_when_enabled()
+    {
+        var stocks = BuildStocks((1, 100m), (2, 50m), (3, 200m)).Object;
+        var profiles = new StockProfileService(enabled: false);
+        var sentiment = new BotSentimentService(stocks, profiles, NullLogger<BotSentimentService>.Instance);
+        // sectorCount 2 activates the sector walk; a high event prob + full down-bias must drag the estimates DOWN
+        // vs the no-event arm (the mixture step fires and is signed down). EventProb 0 = the byte-identical default
+        // (covered by the deterministic/bounded tests above, which run with the default draw sequence).
+        BankEstimateService With(double eventProb) => new(stocks, profiles, sentiment,
+            NullLogger<BankEstimateService>.Instance, enabled: true, alpha: 0.3,
+            poissonMeanIntervalSec: 5.0, wrongnessFraction: 0.5, sectorCount: 2,
+            sectorEventProb: eventProb, sectorEventMult: 10.0, sectorEventDownBias: 1.0);
+
+        double MeanEstimate(BankEstimateService svc)
+        {
+            svc.Reset(T0);
+            double sum = 0; int n = 0;
+            for (int i = 1; i <= 800; i++)
+            {
+                svc.Tick(T0.AddSeconds(i));
+                sum += svc.BankTarget(1) + svc.BankTarget(2) + svc.BankTarget(3); n += 3;
+            }
+            return sum / n;
+        }
+
+        double baseline = MeanEstimate(With(0.0));
+        double events   = MeanEstimate(With(0.5));
+        Assert.True(events < baseline,
+            $"down-skewed sector events should drag estimates below the no-event arm: events={events} baseline={baseline}");
+    }
+
+    [Fact]
     public void Deterministic_across_resets()
     {
         // Same seed + same Tick schedule ⇒ identical estimate sequence (replayable).

@@ -49,6 +49,13 @@ internal sealed class BankEstimateService
     private const double SectorDriftSoftWallK = 0.1;
     private readonly double _sectorDriftCap;        // historical 0.03
     private readonly double _sectorStepScale;       // multiplies the ±(wrongness·0.01) per-tick step; historical 1.0
+    // §tails: RARE heavy-tailed sector re-rating EVENTS (a mixture step: mostly the normal walk, occasionally a
+    // LARGE down-skewed step). Rides the validated sector→estimate→conviction-taker transmission, whose SUSTAINED
+    // flow survives the book-refill wall that absorbed one-shot jump injections ⇒ fat tails + "elevator down" +
+    // sector-wide correlation spikes in one lever. EventProb=0 (default) draws NO extra RNG ⇒ byte-identical.
+    private readonly double _sectorEventProb;       // per-sector per-tick probability of a re-rating event
+    private readonly double _sectorEventMult;       // event magnitude = |normal step| × this
+    private readonly double _sectorEventDownBias;   // P(event is a DOWNGRADE) — "correlated fear"
 
     private readonly IStockService _stocks;
     private readonly ISectorMap? _sectorMap;        // §sector: real stock→sector map; null/empty ⇒ modulo fallback
@@ -88,7 +95,8 @@ internal sealed class BankEstimateService
         bool enabled = false, double alpha = 0.3, double poissonMeanIntervalSec = 30.0,
         double wrongnessFraction = 0.15, ISectorMap? sectorMap = null, int sectorCount = 1,
         Func<int, double>? exogShock = null, bool useRealSectors = true, bool seedAllOnStart = false,
-        double sectorDriftCap = 0.03, double sectorStepScale = 1.0)
+        double sectorDriftCap = 0.03, double sectorStepScale = 1.0,
+        double sectorEventProb = 0.0, double sectorEventMult = 10.0, double sectorEventDownBias = 0.7)
     {
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _sectorMap = sectorMap;
@@ -105,6 +113,9 @@ internal sealed class BankEstimateService
         _seedAllOnStart = seedAllOnStart;
         _sectorDriftCap  = Math.Max(0.0, sectorDriftCap);
         _sectorStepScale = Math.Max(0.0, sectorStepScale);
+        _sectorEventProb     = Math.Clamp(sectorEventProb, 0.0, 1.0);
+        _sectorEventMult     = Math.Max(1.0, sectorEventMult);
+        _sectorEventDownBias = Math.Clamp(sectorEventDownBias, 0.0, 1.0);
     }
 
     // §sector: the real map supersedes the config modulo count once sectors are seeded. Built lazily, so it is
@@ -144,6 +155,12 @@ internal sealed class BankEstimateService
             {
                 double prev = _sectorDrift.GetValueOrDefault(sector);
                 double step = (_rng.NextDouble() * 2.0 - 1.0) * _wrongnessFraction * 0.01 * _sectorStepScale;
+                // §tails: rare heavy-tailed re-rating event — draws extra RNG ONLY when enabled (byte-identical off).
+                if (_sectorEventProb > 0.0 && _rng.NextDouble() < _sectorEventProb)
+                {
+                    double mag = Math.Abs(step) * _sectorEventMult;
+                    step = (_rng.NextDouble() < _sectorEventDownBias ? -1.0 : 1.0) * mag;
+                }
                 _sectorDrift[sector] = BotMath.SoftWallStep(prev, step, _sectorDriftCap, SectorDriftSoftWallK);
             }
         }

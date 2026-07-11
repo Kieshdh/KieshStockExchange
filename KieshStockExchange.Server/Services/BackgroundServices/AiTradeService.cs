@@ -555,7 +555,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // §soak: publish an estimate for EVERY stock on the first tick (default off = prod unchanged).
                         seedAllOnStart:         _configuration.GetValue("Bots:BankEstimate:SeedAllOnStart", false),
                         sectorDriftCap:         _configuration.GetValue("Bots:BankEstimate:SectorDriftCap", 0.03),
-                        sectorStepScale:        _configuration.GetValue("Bots:BankEstimate:SectorStepScale", 1.0));
+                        sectorStepScale:        _configuration.GetValue("Bots:BankEstimate:SectorStepScale", 1.0),
+                        sectorEventProb:        _configuration.GetValue("Bots:BankEstimate:SectorEventProb", 0.0),
+                        sectorEventMult:        _configuration.GetValue("Bots:BankEstimate:SectorEventMult", 10.0),
+                        sectorEventDownBias:    _configuration.GetValue("Bots:BankEstimate:SectorEventDownBias", 0.7));
         // §v2 emergent-correlation pillars (all default off / inert). The regime ticks only when at least one
         // of its consumers is enabled; the activity field is inert (every factor ≡ 1) until Bots:Activity:Enabled.
         _regime    = new BotRegimeService(new SeparatorLogger<BotRegimeService>(loggerFactory, loggerOptions),
