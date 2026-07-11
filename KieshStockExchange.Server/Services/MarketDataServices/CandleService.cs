@@ -863,7 +863,9 @@ public sealed class CandleService : ICandleService, IDisposable
         {
             StockId = stockId,                      CurrencyType = currency,
             BucketSeconds = targetBucketSeconds,    OpenTime = bucketOpenTime,
-            Open = ordered[0].Open,                 Close = ordered[^1].Close,
+            Open = ordered[0].Open,
+            // §bounce vwap: child closes are per-bucket VWAPs, so their volume-weighted mean IS the bucket VWAP.
+            Close = Candle.VwapClose ? WeightedClose(ordered) : ordered[^1].Close,
             High = ordered.Max(c => c.High),        Low = ordered.Min(c => c.Low),
             Volume = ordered.Sum(c => c.Volume),    TradeCount = ordered.Sum(c => c.TradeCount),
             MaxTransactionId = ordered.Max(c => c.MaxTransactionId),
@@ -874,6 +876,18 @@ public sealed class CandleService : ICandleService, IDisposable
             throw new InvalidOperationException("Aggregated candle failed validation.");
 
         return candle;
+    }
+
+    /// <summary>Volume-weighted mean of the child closes; zero total volume (gap-filled flats) ⇒ last close.</summary>
+    internal static decimal WeightedClose(IReadOnlyList<Candle> ordered)
+    {
+        long volume = 0; decimal notional = 0m;
+        foreach (var c in ordered)
+        {
+            volume += c.Volume;
+            notional += c.Close * c.Volume;
+        }
+        return volume > 0 ? notional / volume : ordered[^1].Close;
     }
 
     public List<Candle> AggregateMultipleCandles(IReadOnlyList<Candle> candles, CandleResolution targetResolution, 

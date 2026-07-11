@@ -28,22 +28,28 @@ def _has_midprice_column(db):
     return out.returncode == 0 and out.stdout.strip() == "1"
 
 
-def load_candles(db, since_epoch, bucket):
+def load_candles(db, since_epoch, bucket, close_mode="last"):
     # §bounce (Roll 1984): score the candle CLOSE on the bounce-free reference (mid/micro) when the
     # column is present, falling back to last-trade Price when it is absent (OFF/pre-migration DB) or
     # NULL (off arm) — byte-identical in that case. O/H/L stay on the real trade tape (mid on High/Low
     # would compress the range and delete genuine wicks). c_last is always the last-trade close, kept
     # alongside purely for the transparency readout (mid vs last-trade ret_acf), so the metric is never
-    # silently swapped.
-    has_mid = _has_midprice_column(db)
-    close_expr = 'COALESCE(t."MidPrice", t."Price")' if has_mid else 't."Price"'
-    print(f"[load_candles] close source = {'COALESCE(MidPrice,Price)' if has_mid else 'Price (no MidPrice column)'}")
+    # silently swapped. --close vwap scores the per-bucket VWAP instead (fully de-bounced close).
+    if close_mode == "vwap":
+        close_agg = 'sum(t."Price"*t."Quantity")/NULLIF(sum(t."Quantity"),0)'
+        close_label = "VWAP(Price*Quantity)"
+    else:
+        has_mid = _has_midprice_column(db)
+        close_expr = 'COALESCE(t."MidPrice", t."Price")' if has_mid else 't."Price"'
+        close_agg = f'(array_agg({close_expr} ORDER BY t."Timestamp" DESC))[1]'
+        close_label = "COALESCE(MidPrice,Price)" if has_mid else "Price (no MidPrice column)"
+    print(f"[load_candles] close source = {close_label}")
     sql = (
         'SELECT t."StockId", '
         f'floor(extract(epoch from t."Timestamp")/{bucket})*{bucket} AS b, '
         '(array_agg(t."Price" ORDER BY t."Timestamp" ASC))[1]  AS o, '
         'max(t."Price") AS h, min(t."Price") AS l, '
-        f'(array_agg({close_expr} ORDER BY t."Timestamp" DESC))[1] AS c, '
+        f'{close_agg} AS c, '
         'sum(t."Quantity") AS vol, count(*) AS trades, '
         '(array_agg(t."Price" ORDER BY t."Timestamp" DESC))[1] AS c_last '
         'FROM "Transactions" t '
@@ -279,6 +285,8 @@ def main():
                     help="Fixed UTC epoch start (overrides --window-min)")
     ap.add_argument("--per-class", type=int, default=4,
                     help="Stocks sampled per volatility class (default 4 = 16 total). Higher = less noise.")
+    ap.add_argument("--close", choices=["last", "vwap"], default="last",
+                    help="close source: last-in-bucket reference (default) or per-bucket VWAP")
     args = ap.parse_args()
 
     import datetime
@@ -286,7 +294,7 @@ def main():
         since = args.since_epoch
     else:
         since = datetime.datetime.now(datetime.timezone.utc).timestamp() - args.window_min * 60
-    series = load_candles(args.db, since, args.bucket_sec)
+    series = load_candles(args.db, since, args.bucket_sec, args.close)
     if not series:
         sys.exit("no candles in window")
 

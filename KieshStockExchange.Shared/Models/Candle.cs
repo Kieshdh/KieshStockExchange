@@ -4,6 +4,12 @@ namespace KieshStockExchange.Models;
 
 public class Candle : IValidatable
 {
+    // §bounce vwap: set once at startup by MidReference.Configure — the Shared model can't read server config.
+    public static bool VwapClose = false;
+
+    // Running Σ price·qty for the vwap close; transient (CandleMapper/CandleRow map explicitly, never persisted).
+    private decimal _vwapNotional = 0m;
+
     // Id, StockId, Currency
     private int _candleId = 0;
     public int CandleId
@@ -223,25 +229,40 @@ public class Candle : IValidatable
             throw new ArgumentException("Tick time is outside candle time range.");
         NoteTransactionId(tick.TransactionId);
 
-        // §bounce: when the trade carries a bounce-free reference (mid/micro), the candle is built off
-        // it instead of the last-trade price. The bar is seeded (NewCandle) with Open from the prior
-        // last-trade close, so on the FIRST mid trade we re-anchor Open=High=Low to the mid series too,
-        // otherwise a seed above the mid range would break the Low<=Open<=High invariant. Gated on
-        // MidPrice.HasValue so the off arm (px == tick.Price) is byte-identical to the legacy branch.
-        var px = tick.MidPrice ?? tick.Price;
-        if (tick.MidPrice.HasValue && TradeCount == 0)
+        if (VwapClose)
         {
-            Open = px; High = px; Low = px;
+            // §bounce vwap: O/H/L track the RAW tape (mid stamp ignored) so the running-VWAP close,
+            // a convex combination of raw trade prices, is guaranteed inside [Low, High].
+            var raw = tick.Price;
+            if (raw > High) High = raw;
+            if (raw < Low) Low = raw;
+            _vwapNotional += raw * tick.Quantity;
+            Volume += tick.Quantity;
+            TradeCount += 1;
+            Close = _vwapNotional / Volume;
         }
         else
         {
-            if (px > High) High = px;
-            if (px < Low) Low = px;
-        }
-        Close = px;
+            // §bounce: when the trade carries a bounce-free reference (mid/micro), the candle is built off
+            // it instead of the last-trade price. The bar is seeded (NewCandle) with Open from the prior
+            // last-trade close, so on the FIRST mid trade we re-anchor Open=High=Low to the mid series too,
+            // otherwise a seed above the mid range would break the Low<=Open<=High invariant. Gated on
+            // MidPrice.HasValue so the off arm (px == tick.Price) is byte-identical to the legacy branch.
+            var px = tick.MidPrice ?? tick.Price;
+            if (tick.MidPrice.HasValue && TradeCount == 0)
+            {
+                Open = px; High = px; Low = px;
+            }
+            else
+            {
+                if (px > High) High = px;
+                if (px < Low) Low = px;
+            }
+            Close = px;
 
-        Volume += tick.Quantity;
-        TradeCount += 1;
+            Volume += tick.Quantity;
+            TradeCount += 1;
+        }
 
         if (!IsValid())
             throw new InvalidOperationException("Candle is not valid after applying trade.");
@@ -256,14 +277,19 @@ public class Candle : IValidatable
             MaxTransactionId = transactionId;
     }
 
-    public Candle Clone() => new()
+    public Candle Clone()
     {
-        StockId = this.StockId, Currency = this.Currency,
-        BucketSeconds = this.BucketSeconds, OpenTime = this.OpenTime,
-        Open = this.Open, High = this.High, Low = this.Low, Close = this.Close,
-        Volume = this.Volume, TradeCount = this.TradeCount,
-        MinTransactionId = this.MinTransactionId, MaxTransactionId = this.MaxTransactionId,
-    };
+        var c = new Candle
+        {
+            StockId = this.StockId, Currency = this.Currency,
+            BucketSeconds = this.BucketSeconds, OpenTime = this.OpenTime,
+            Open = this.Open, High = this.High, Low = this.Low, Close = this.Close,
+            Volume = this.Volume, TradeCount = this.TradeCount,
+            MinTransactionId = this.MinTransactionId, MaxTransactionId = this.MaxTransactionId,
+        };
+        c._vwapNotional = this._vwapNotional; // keep the running vwap alive across live-snapshot clones
+        return c;
+    }
 
     public Candle CloneWithId()
     {

@@ -11,6 +11,8 @@ public enum MidRefMode
     Mid = 1,
     /// <summary>Size-weighted micro-price = (bid*askQty + ask*bidQty) / (askQty + bidQty).</summary>
     Micro = 2,
+    /// <summary>Trades stamped like Mid (data stays useful), but the candle CLOSE = per-bucket VWAP.</summary>
+    Vwap = 3,
 }
 
 /// <summary>
@@ -31,17 +33,28 @@ public static class MidReference
 {
     public static MidRefMode Mode { get; private set; } = MidRefMode.Off;
 
-    /// <summary>Wired from server startup (Program.cs). Reads "Bots:BounceReference" = off|mid|micro.</summary>
+    /// <summary>True when the candle layer should close on the per-bucket VWAP (mirrors Candle.VwapClose).</summary>
+    public static bool VwapClose => Mode == MidRefMode.Vwap;
+
+    /// <summary>Wired from server startup (Program.cs). Reads "Bots:BounceReference" = off|mid|micro|vwap.</summary>
     public static void Configure(IConfiguration config)
-        => Mode = Parse(config.GetValue<string?>("Bots:BounceReference", null));
+        => Apply(Parse(config.GetValue<string?>("Bots:BounceReference", null)));
 
     /// <summary>Test seam — flip the mode without an IConfiguration. Reset to Off in test teardown.</summary>
-    public static void ConfigureForTests(MidRefMode mode) => Mode = mode;
+    public static void ConfigureForTests(MidRefMode mode) => Apply(mode);
+
+    // The Shared Candle model can't read server config, so its static vwap flag is mirrored here.
+    private static void Apply(MidRefMode mode)
+    {
+        Mode = mode;
+        Models.Candle.VwapClose = mode == MidRefMode.Vwap;
+    }
 
     private static MidRefMode Parse(string? raw) => (raw ?? string.Empty).Trim().ToLowerInvariant() switch
     {
         "mid" => MidRefMode.Mid,
         "micro" => MidRefMode.Micro,
+        "vwap" => MidRefMode.Vwap,
         _ => MidRefMode.Off,
     };
 

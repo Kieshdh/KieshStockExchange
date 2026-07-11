@@ -52,7 +52,7 @@ KieshStockExchange.Services.MarketEngineServices.MatchSymmetryProbe.Configure(bu
 // Attributes the matcher-level sell-skew to the specific upstream surface.
 KieshStockExchange.Services.BackgroundServices.Helpers.BotDecisionProbe.Configure(builder.Configuration);
 
-// §bounce lever (a): bounce-free candle-close reference (Bots:BounceReference = off|mid|micro,
+// §bounce lever (a): bounce-free candle-close reference (Bots:BounceReference = off|mid|micro|vwap,
 // default off ⇒ byte-identical). §bounce lever (b): finer price-quote tick (Bots:PriceTickDecimals,
 // default 0 ⇒ RoundPrice ≡ RoundMoney). Both read once at startup; neither touches cash/conservation.
 KieshStockExchange.Services.MarketEngineServices.MidReference.Configure(builder.Configuration);

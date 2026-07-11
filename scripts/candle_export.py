@@ -44,6 +44,8 @@ def main():
     ap.add_argument("--label", default="")
     ap.add_argument("--out", default="")
     ap.add_argument("--window-min", type=float, default=0.0, help="0 = all data in the DB")
+    ap.add_argument("--close", choices=["last", "vwap"], default="last",
+                    help="close source: last trade in bucket (default) or per-bucket VWAP")
     args = ap.parse_args()
 
     where = ""
@@ -56,11 +58,13 @@ def main():
     join = ('JOIN "StockListings" sl ON sl."StockId"=t."StockId" '
             'AND sl."Currency"=t."Currency" AND sl."IsPrimary"=true ')
 
-    # 1-min OHLCV body.
+    # 1-min OHLCV body. --close vwap swaps the last-trade close for the per-bucket VWAP (de-bounced).
+    close_expr = ('sum(t."Price"*t."Quantity")/NULLIF(sum(t."Quantity"),0)' if args.close == "vwap"
+                  else '(array_agg(t."Price" ORDER BY t."Timestamp" DESC))[1]')
     sql = ('SELECT t."StockId", floor(extract(epoch from t."Timestamp")/60)*60 AS b, '
            '(array_agg(t."Price" ORDER BY t."Timestamp" ASC))[1]  AS o, '
            'max(t."Price") AS h, min(t."Price") AS l, '
-           '(array_agg(t."Price" ORDER BY t."Timestamp" DESC))[1] AS c, '
+           f'{close_expr} AS c, '
            'sum(t."Quantity") AS vol '
            f'FROM "Transactions" t {join}{where}GROUP BY t."StockId", b ORDER BY t."StockId", b;')
     body = [ln for ln in psql(args.db, sql).splitlines()[1:] if ln.count(",") >= 6]
@@ -91,6 +95,7 @@ def main():
         f.write(f"# db: {args.db}\n")
         if args.note:  f.write(f"# note: {args.note}\n")
         if args.label: f.write(f"# label: {args.label}\n")
+        if args.close != "last": f.write(f"# close_mode: {args.close}\n")
         f.write(f"# git_commit: {git('rev-parse','--short','HEAD')}\n")
         f.write(f"# git_branch: {git('rev-parse','--abbrev-ref','HEAD')}\n")
         f.write(f"# experiment_overrides ({len(env)} Bots__* env): "
