@@ -62,8 +62,10 @@ def sector_map():
     return smap, list(getattr(Config, "SECTORS", sorted(set(smap.values()))))
 
 
-def returns_on_grid(rows, horizon):
-    """Per-stock {grid_index: log-return over `horizon` buckets}, aligned on absolute bucket time."""
+def returns_on_grid(rows, horizon, demean=False):
+    """Per-stock {grid_index: log-return over `horizon` buckets}, aligned on absolute bucket time.
+    demean=True subtracts the per-bucket CROSS-STOCK mean return (market-mode removal) so the
+    intra-vs-inter gap isolates the SECTOR factor even in a strongly trending (bear/bull) window."""
     times = sorted({t for _, t, _ in rows})
     ti = {t: i for i, t in enumerate(times)}
     close = defaultdict(dict)
@@ -78,6 +80,15 @@ def returns_on_grid(rows, horizon):
                 rr[i] = math.log(c1 / c0)
         if rr:
             ret[sid] = rr
+    if demean:
+        bucket_sum = defaultdict(float); bucket_n = defaultdict(int)
+        for rr in ret.values():
+            for i, r in rr.items():
+                bucket_sum[i] += r; bucket_n[i] += 1
+        for rr in ret.values():
+            for i in rr:
+                if bucket_n[i] >= 3:  # need a real cross-section to define the market mode
+                    rr[i] -= bucket_sum[i] / bucket_n[i]
     return ret
 
 
@@ -135,6 +146,7 @@ def main():
     ap.add_argument("--horizons", default="1,5,10")
     ap.add_argument("--min-overlap", type=int, default=5)
     ap.add_argument("--bootstrap", type=int, default=1000, help="resamples for the CI + placebo (0 = skip)")
+    ap.add_argument("--demean", action="store_true", help="subtract per-bucket cross-stock mean return (market-mode removal)")
     args = ap.parse_args()
 
     rows = load(args.csv, args.currency)
@@ -153,7 +165,7 @@ def main():
         smap_int[sid] = sec
 
     for H in [int(h) for h in args.horizons.split(",")]:
-        ret = returns_on_grid(rows, H)
+        ret = returns_on_grid(rows, H, demean=args.demean)
         stocks = sorted(ret, key=lambda s: (int(s) if s.isdigit() else 1 << 30, s))
         pairs = []
         per_sector = defaultdict(list)
