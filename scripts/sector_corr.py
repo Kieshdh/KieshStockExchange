@@ -85,12 +85,56 @@ def mean(xs):
     return sum(xs) / len(xs) if xs else float("nan")
 
 
+def gap_of(pairs, sec_of):
+    """Mean intra − mean inter over a list of (a, b, r) pair correlations."""
+    intra = [r for a, b, r in pairs if sec_of(a) is not None and sec_of(a) == sec_of(b)]
+    inter = [r for a, b, r in pairs if not (sec_of(a) is not None and sec_of(a) == sec_of(b))]
+    return mean(intra) - mean(inter), intra, inter
+
+
+def bootstrap_ci(pairs, sec_of, B=1000, seed=42):
+    """Pair-resampling bootstrap 90% CI on the intra−inter gap (sampling error over pairs)."""
+    import random
+    rng = random.Random(seed)
+    n = len(pairs)
+    gaps = []
+    for _ in range(B):
+        sample = [pairs[rng.randrange(n)] for _ in range(n)]
+        g, _, _ = gap_of(sample, sec_of)
+        if not math.isnan(g):
+            gaps.append(g)
+    gaps.sort()
+    return (gaps[int(0.05 * len(gaps))], gaps[int(0.95 * len(gaps))]) if gaps else (float("nan"),) * 2
+
+
+def placebo_p(pairs, stocks, smap_int, B=1000, seed=42):
+    """Label-shuffle placebo: permute the sector labels across stocks; p = fraction of shuffled
+    gaps >= the observed gap. Real sector structure must VANISH under shuffled labels (small p)."""
+    import random
+    rng = random.Random(seed)
+    ids = [int(s) for s in stocks if s.isdigit() and int(s) in smap_int]
+    labels = [smap_int[i] for i in ids]
+    obs, _, _ = gap_of(pairs, lambda s: smap_int.get(int(s)) if s.isdigit() else None)
+    ge = 0; valid = 0
+    for _ in range(B):
+        rng.shuffle(labels)
+        shuffled = dict(zip(ids, labels))
+        g, _, _ = gap_of(pairs, lambda s: shuffled.get(int(s)) if s.isdigit() else None)
+        if math.isnan(g):
+            continue
+        valid += 1
+        if g >= obs:
+            ge += 1
+    return (ge / valid) if valid else float("nan")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", required=True)
     ap.add_argument("--currency", default="USD")
     ap.add_argument("--horizons", default="1,5,10")
     ap.add_argument("--min-overlap", type=int, default=5)
+    ap.add_argument("--bootstrap", type=int, default=1000, help="resamples for the CI + placebo (0 = skip)")
     args = ap.parse_args()
 
     rows = load(args.csv, args.currency)
@@ -104,10 +148,14 @@ def main():
 
     print("\n=== intra- vs inter-SECTOR correlation — %s ===" % os.path.basename(args.csv))
     print("sectors (%d): %s" % (len(sectors), ", ".join(sectors)))
+    smap_int = {}
+    for sid, sec in smap.items():
+        smap_int[sid] = sec
+
     for H in [int(h) for h in args.horizons.split(",")]:
         ret = returns_on_grid(rows, H)
         stocks = sorted(ret, key=lambda s: (int(s) if s.isdigit() else 1 << 30, s))
-        intra, inter = [], []
+        pairs = []
         per_sector = defaultdict(list)
         for i in range(len(stocks)):
             for j in range(i + 1, len(stocks)):
@@ -118,16 +166,22 @@ def main():
                 r = pearson([ret[a][t] for t in common], [ret[b][t] for t in common])
                 if r is None:
                     continue
+                pairs.append((a, b, r))
                 sa, sb = sec_of(a), sec_of(b)
                 if sa is not None and sa == sb:
-                    intra.append(r); per_sector[sa].append(r)
-                else:
-                    inter.append(r)
-        gap = mean(intra) - mean(inter)
+                    per_sector[sa].append(r)
+        gap, intra, inter = gap_of(pairs, sec_of)
+        mi, me = mean(intra), mean(inter)
+        ratio = (mi / me) if inter and me > 0 else float("nan")
         print("\n h=%2dmin  intra-pairs=%d inter-pairs=%d" % (H, len(intra), len(inter)))
-        print("   INTRA-sector mean corr = %+.3f   INTER-sector mean corr = %+.3f   GAP = %+.3f  %s"
-              % (mean(intra), mean(inter), gap,
-                 "(sectors co-move)" if gap > 0.02 else "(no sector structure)"))
+        print("   INTRA-sector mean corr = %+.3f   INTER-sector mean corr = %+.3f   GAP = %+.3f  ratio = %.2f  %s"
+              % (mi, me, gap, ratio, "(sectors co-move)" if gap > 0.02 else "(no sector structure)"))
+        if args.bootstrap > 0 and pairs:
+            lo, hi = bootstrap_ci(pairs, sec_of, B=args.bootstrap)
+            p = placebo_p(pairs, stocks, smap_int, B=args.bootstrap)
+            sig = "SIGNIFICANT" if lo > 0 and p < 0.05 else ("weak" if gap > 0 else "none")
+            print("   gap 90%% bootstrap CI = [%+.3f, %+.3f]   label-shuffle placebo p = %.3f   -> %s"
+                  % (lo, hi, p, sig))
         if H == max(int(h) for h in args.horizons.split(",")):
             print("   per-sector intra-corr (this horizon):")
             for s in sectors:
