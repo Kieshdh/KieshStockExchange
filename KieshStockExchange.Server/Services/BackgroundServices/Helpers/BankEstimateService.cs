@@ -42,9 +42,13 @@ internal sealed class BankEstimateService
     // Anti-pump: the estimate cannot move more than this fraction of seed per republish, so price-convergence
     // lag stays below the republish interval (no oscillation / synthetic pump).
     private const double AntiPumpMaxStepPerRepublish = 0.02;
-    // Sector shared-drift bounded walk (co-rerating). Only active when SectorCount > 1.
-    private const double SectorDriftCap = 0.03;
+    // Sector shared-drift bounded walk (co-rerating). Only active when SectorCount > 1. §P4: cap + step are
+    // config-tunable (defaults = the historical consts ⇒ byte-identical) — the sector step is the SHARED component
+    // of the gap signal the Conviction cohort chases, so it must dominate per-stock gap noise for sector-coherent
+    // taker flow (the correlation goal); too weak ⇒ the cohort's flow decoheres to per-stock noise.
     private const double SectorDriftSoftWallK = 0.1;
+    private readonly double _sectorDriftCap;        // historical 0.03
+    private readonly double _sectorStepScale;       // multiplies the ±(wrongness·0.01) per-tick step; historical 1.0
 
     private readonly IStockService _stocks;
     private readonly ISectorMap? _sectorMap;        // §sector: real stock→sector map; null/empty ⇒ modulo fallback
@@ -83,7 +87,8 @@ internal sealed class BankEstimateService
         BotSentimentService sentiment, ILogger<BankEstimateService> logger,
         bool enabled = false, double alpha = 0.3, double poissonMeanIntervalSec = 30.0,
         double wrongnessFraction = 0.15, ISectorMap? sectorMap = null, int sectorCount = 1,
-        Func<int, double>? exogShock = null, bool useRealSectors = true, bool seedAllOnStart = false)
+        Func<int, double>? exogShock = null, bool useRealSectors = true, bool seedAllOnStart = false,
+        double sectorDriftCap = 0.03, double sectorStepScale = 1.0)
     {
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _sectorMap = sectorMap;
@@ -98,6 +103,8 @@ internal sealed class BankEstimateService
         _sectorCount = Math.Max(1, sectorCount);
         _useRealSectors = useRealSectors;
         _seedAllOnStart = seedAllOnStart;
+        _sectorDriftCap  = Math.Max(0.0, sectorDriftCap);
+        _sectorStepScale = Math.Max(0.0, sectorStepScale);
     }
 
     // §sector: the real map supersedes the config modulo count once sectors are seeded. Built lazily, so it is
@@ -136,8 +143,8 @@ internal sealed class BankEstimateService
             for (int sector = 0; sector < sectorCount; sector++)
             {
                 double prev = _sectorDrift.GetValueOrDefault(sector);
-                double step = (_rng.NextDouble() * 2.0 - 1.0) * _wrongnessFraction * 0.01;
-                _sectorDrift[sector] = BotMath.SoftWallStep(prev, step, SectorDriftCap, SectorDriftSoftWallK);
+                double step = (_rng.NextDouble() * 2.0 - 1.0) * _wrongnessFraction * 0.01 * _sectorStepScale;
+                _sectorDrift[sector] = BotMath.SoftWallStep(prev, step, _sectorDriftCap, SectorDriftSoftWallK);
             }
         }
 
