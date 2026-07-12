@@ -67,3 +67,18 @@ soaks) · `779b756` heavy-tail sector events (default-off spare lever)
   rates + thinning depth — fixes the last kurtosis gap AND the #1 "sim tell" (flat unclustered volume).
 - **P5 basket** (more smaller plays): screened design ready; deliberately not built mid-certification.
 - Sector indices on the dashboard (legibility of the rotation narrative).
+
+## Prod-exact warm-up read (appended 2026-07-12 ~08:00)
+
+The exact flip-list (no soak accelerants: default cadence 20min–3h, default holds 30min–48h, no
+SeedAll, cold BankEstimate) was soaked 2h as the honest pre-prod check:
+
+| stat | prod-exact 2h | note |
+|---|---|---|
+| ret_acf (VWAP scorer) | **−0.094** | in-band at prod cadence |
+| sector gap @5min | **+0.056, p=0.028 (significant)** | emerges within the FIRST 2h from cold — prod will show it within hours, strengthening as the estimate warms |
+| sector gap @10min | +0.061, p=0.052 | borderline in-window; expect it to clear over longer prod horizons |
+| kurtosis | 2.01 | lower at prod cadence (fewer conviction events/window); the heavy-tail lever (`779b756`) is the spare dial |
+| CK / drift | 0 / −1.14% | the generic fresh-seed open transient (exonerated; prod is long-running) |
+
+Bottom line: the flip-list behaves at production settings — no accelerant was propping up the results.
