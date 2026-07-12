@@ -82,3 +82,11 @@ SeedAll, cold BankEstimate) was soaked 2h as the honest pre-prod check:
 | CK / drift | 0 / −1.14% | the generic fresh-seed open transient (exonerated; prod is long-running) |
 
 Bottom line: the flip-list behaves at production settings — no accelerant was propping up the results.
+
+## Heavy-tail sector-event lever — screen result (NOT in the bundle)
+
+Screened at `SectorEventProb=0.02` on the prod-exact base (45m): **over-dosed** — 0.02/tick/sector is
+constant churn, not rare events; the sector walk saturates at its cap, the persistent re-rating the
+cohort chases is destroyed (corr gap collapsed, ret_acf went positive, kurtosis unmoved). The lever
+stays a documented spare: if fatter tails are wanted later, retune at EventProb ≤ 0.001 (a handful of
+events per session) with a raised/event-exempt cap. The certified bundle needs no change.
