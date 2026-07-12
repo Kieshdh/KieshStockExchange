@@ -42,6 +42,7 @@ internal sealed class BotActivityService
     private readonly double _floor, _sMax;
     private readonly double _wNews, _wMoveUp, _wMoveDown, _wSent, _theta, _wSelf, _decay;
     private readonly double _bDriftAmp;
+    private readonly double _compGExp, _compFloor, _compCap;
     #endregion
 
     #region State
@@ -51,6 +52,7 @@ internal sealed class BotActivityService
     private readonly Dictionary<int, double> _sCache = new();    // per-stock clamped S (hot-path read)
     private readonly Dictionary<int, long>   _fills  = new();    // per-stock fills since last Tick (drained)
     private double _gCache = 1.0;                                // cached G (hot-path read)
+    private double _gNormCache = 1.0;                            // baseline-removed G (median 1) — the composition seam's global factor
 
     private DateTime _lastTickUtc = DateTime.MaxValue;           // inert until Reset arms the clock
     private DateTime _nextLogUtc  = DateTime.MaxValue;
@@ -75,7 +77,8 @@ internal sealed class BotActivityService
         double floor = 0.2, double sMax = 6.0,
         double wNews = 0.6, double wMoveUp = 1.0, double wMoveDown = 2.0,
         double wSent = 0.3, double theta = 0.3, double wSelf = 0.009, double decay = 0.99,
-        double bDriftAmp = 0.15)
+        double bDriftAmp = 0.15,
+        double compGExp = 0.5, double compFloor = 0.4, double compCap = 3.0)
     {
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
@@ -90,6 +93,8 @@ internal sealed class BotActivityService
         _wSent = wSent; _theta = Math.Max(0.0, theta);
         _wSelf = Math.Max(0.0, wSelf); _decay = Math.Clamp(decay, 0.0, 0.9999);
         _bDriftAmp = Math.Max(0.0, bDriftAmp);
+        _compGExp = Math.Max(0.0, compGExp);
+        _compFloor = Math.Max(0.0, compFloor); _compCap = Math.Max(_compFloor, compCap);
     }
 
     #region Tick / Reset
@@ -110,6 +115,9 @@ internal sealed class BotActivityService
         _g = gA * _g + _globalSigma * Math.Sqrt(1.0 - gA * gA) * UnitNoise();
         // exp(zero-mean) is biased high by σ²/2; subtract it so the median is the baseline (mean ≈ baseline).
         _gCache = _activityBaseline * Math.Exp(_g - 0.5 * _globalSigma * _globalSigma);
+        // Composition seam needs a MEDIAN-1 global factor: the gate's sub-1 Baseline is deliberate for cadence
+        // but would silently re-tune taker share if reused raw.
+        _gNormCache = Math.Exp(_g - 0.5 * _globalSigma * _globalSigma);
 
         double sA = Math.Exp(-dt / _perStockTauSec);
         double sNoise = _perStockSigma * Math.Sqrt(1.0 - sA * sA);
@@ -152,7 +160,7 @@ internal sealed class BotActivityService
     internal void Reset(DateTime now)
     {
         _rng = new Random(RngSeed);
-        _g = 0.0; _gCache = _enabled ? _activityBaseline : 1.0;
+        _g = 0.0; _gCache = _enabled ? _activityBaseline : 1.0; _gNormCache = 1.0;
         _sBase.Clear(); _h.Clear(); _sCache.Clear(); _fills.Clear();
         _lastTickUtc = now;
         _nextLogUtc  = now + TimeSpan.FromSeconds(60);
@@ -179,6 +187,21 @@ internal sealed class BotActivityService
     /// <summary>Per-stock activity multiplier S (1 when disabled or unknown).</summary>
     internal decimal S(int stockId)
         => _enabled && _sCache.TryGetValue(stockId, out var s) ? (decimal)s : 1m;
+
+    /// <summary>
+    /// §composition seam: median-1 activity for order-COMPOSITION consumers (taker share, limit distance) —
+    /// clamp(gNorm^GExp · S, Floor, Cap). Uses the baseline-REMOVED global factor so the typical minute is
+    /// composition-neutral, and its own (tighter) clamp so the field's SMax never reaches the consumers raw.
+    /// 1 when disabled. Cache-read only, no RNG.
+    /// </summary>
+    internal double CompositionActivity(int stockId)
+        => _enabled
+            ? ComposeClamped(_gNormCache, _compGExp, _sCache.TryGetValue(stockId, out var s) ? s : 1.0, _compFloor, _compCap)
+            : 1.0;
+
+    // Pure, testable core of the composition factor.
+    internal static double ComposeClamped(double gNorm, double gExp, double s, double floor, double cap)
+        => Math.Clamp((gExp == 1.0 ? gNorm : Math.Pow(gNorm, gExp)) * s, floor, cap);
 
     /// <summary>Mean S across a watchlist (1 when disabled / empty).</summary>
     internal decimal AverageWatchlistActivity(IReadOnlyCollection<int> watchlist)
@@ -231,12 +254,18 @@ internal sealed class BotActivityService
     private void LogSnapshot(DateTime now)
     {
         if (!_logger.IsEnabled(LogLevel.Information)) return;
-        // Report G and the few hottest names so the field is observable without an external monitor.
-        int top = 0; double maxS = 0; int maxSid = 0;
-        foreach (var kv in _sCache) { if (kv.Value > maxS) { maxS = kv.Value; maxSid = kv.Key; } top++; }
+        // Report G, the hottest name, and saturation stats so the field's health (pinning = the Hawkes
+        // failure mode) is observable without an external monitor.
+        int top = 0, pinned = 0; double maxS = 0, sumS = 0; int maxSid = 0;
+        foreach (var kv in _sCache)
+        {
+            if (kv.Value > maxS) { maxS = kv.Value; maxSid = kv.Key; }
+            if (kv.Value >= 0.95 * _sMax) pinned++;
+            sumS += kv.Value; top++;
+        }
         var sym = _stocks.TryGetSymbol(maxSid, out var s) ? s : maxSid.ToString();
-        _logger.LogInformation("Activity @ {Time} G={G:0.00} hottest={Sym}:{S:0.00} (of {N} names)",
-            now.ToLocalTime().ToString("HH:mm:ss"), _gCache, sym, maxS, top);
+        _logger.LogInformation("Activity @ {Time} G={G:0.00} gN={GN:0.00} hottest={Sym}:{S:0.00} meanS={MS:0.00} pin={P}/{N}",
+            now.ToLocalTime().ToString("HH:mm:ss"), _gCache, _gNormCache, sym, maxS, top > 0 ? sumS / top : 0.0, pinned, top);
     }
     #endregion
 }

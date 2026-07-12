@@ -336,6 +336,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // enabled, so the context holds a null gate by default and every call site is byte-identical and
         // draw-free when off. Bot-decision layer only (no engine change); CK-safe by construction.
         RefillThrottleProbe.Configure(_configuration.GetValue("Bots:RefillThrottle:Probe", false));
+        // §composition taker override telemetry: auto-armed whenever the lever is on (the liveliness read is
+        // the soak's "coupling actually fired" kill-check — an inert flag must be visible in the first minutes).
+        ActivityCompositionProbe.Configure(
+            _configuration.GetValue("Bots:Activity:Composition:TakerExp", 0.0) > 0.0);
         if (_configuration.GetValue("Bots:RefillThrottle:Enabled", false))
         {
             var rtSrcName = _configuration.GetValue("Bots:RefillThrottle:Signal:Source", "RealizedReturnFast");
@@ -584,7 +588,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         theta:            _configuration.GetValue("Bots:Activity:Theta", 0.3),
                         wSelf:            _configuration.GetValue("Bots:Activity:WSelf", 0.009),
                         decay:            _configuration.GetValue("Bots:Activity:Decay", 0.99),
-                        bDriftAmp:        _configuration.GetValue("Bots:Activity:BDriftAmp", 0.15));
+                        bDriftAmp:        _configuration.GetValue("Bots:Activity:BDriftAmp", 0.15),
+                        compGExp:         _configuration.GetValue("Bots:Activity:Composition:GExp", 0.5),
+                        compFloor:        _configuration.GetValue("Bots:Activity:Composition:Floor", 0.4),
+                        compCap:          _configuration.GetValue("Bots:Activity:Composition:Cap", 3.0));
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         // §3.7 arbitrage cohort: dedicated decision path, fully outside the sentiment/anchor/veto/
@@ -811,6 +818,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         anchorFastSlack:     _configuration.GetValue("Bots:Anchor:FastSlack", 0m),
                         activityEnabled:     _configuration.GetValue("Bots:Activity:Enabled", false),
                         activityGamma:       _configuration.GetValue("Bots:Activity:Gamma", 1.0),
+                        compTakerExp:        _configuration.GetValue("Bots:Activity:Composition:TakerExp", 0.0),
+                        compDistExpClose:    _configuration.GetValue("Bots:Activity:Composition:DistExpClose", 0.0),
+                        compDistExpMid:      _configuration.GetValue("Bots:Activity:Composition:DistExpMid", 0.0),
+                        compDistExpFar:      _configuration.GetValue("Bots:Activity:Composition:DistExpFar", 0.0),
                         rangeActivityImpact: _configuration.GetValue("Bots:Range:ActivityImpact", false),
                         rangeMaxSlippage:    _configuration.GetValue("Bots:Range:MaxSlippage", 0.02m),
                         fatImpactProb:       _configuration.GetValue("Bots:Range:FatImpactProb", 0m),
@@ -2217,6 +2228,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 _logger.LogInformation(
                     "REFILL widen={W} skips={Sk} skipDraws={Sd} resistBuy={Rb} resistSell={Rs}",
                     widen, skips, skipDraws, buySkips, sellSkips);
+            }
+            if (ActivityCompositionProbe.Enabled)
+            {
+                // §composition liveliness: eligible>0 + up/down>0 in the first minutes confirms the taker
+                // override reaches the hot path (the inert-flag trap); a sustained one-sided buy/sell upgrade
+                // split is the drift-lean tell to watch alongside the drift gate.
+                var (eligible, ups, downs, buyUps, sellUps) = ActivityCompositionProbe.Drain();
+                _logger.LogInformation(
+                    "ACTCOMP eligible={E} up={U} down={D} buyUp={Bu} sellUp={Su}",
+                    eligible, ups, downs, buyUps, sellUps);
             }
             _nextSentimentLogTime = now + _sentimentLogInterval;
         }

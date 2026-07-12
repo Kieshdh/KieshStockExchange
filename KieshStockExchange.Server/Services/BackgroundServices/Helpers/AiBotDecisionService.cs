@@ -179,6 +179,12 @@ internal sealed class AiBotDecisionService
     // §Pillar B selection
     private readonly bool    _activityEnabled;
     private readonly double  _activityGamma;
+    // §composition seam: activity → order composition. TakerExp = post-pick per-stock override exponent
+    // (hot ⇒ limit→taker upgrades, quiet ⇒ taker→limit downgrades). DistExp[tier] = limit-ladder band × act^-k
+    // per tier (Far stays 0 — StopOffset's far-wall clamp is computed WITHOUT this factor, so scaling Far
+    // breaks the stop→standing-wall invariant). Exponent 0 ⇒ seam fully skipped ⇒ byte-identical.
+    private readonly double   _compTakerExp;
+    private readonly double[] _compDistExp; // [close, mid, far]
     // §C1/C3 microstructure
     private readonly bool    _rangeActivityImpact;
     private readonly decimal _rangeMaxSlippage;
@@ -388,6 +394,8 @@ internal sealed class AiBotDecisionService
         bool roleSplit = false, decimal noiseDamp = 1.0m,
         decimal anchorFastSlack = 0m,
         bool activityEnabled = false, double activityGamma = 1.0,
+        double compTakerExp = 0.0, double compDistExpClose = 0.0,
+        double compDistExpMid = 0.0, double compDistExpFar = 0.0,
         bool rangeActivityImpact = false, decimal rangeMaxSlippage = 0.02m,
         decimal fatImpactProb = 0m,
         bool greedStyle = false, decimal greedSplit = 0.5m,
@@ -554,6 +562,8 @@ internal sealed class AiBotDecisionService
         _anchorFastSlack    = Math.Max(0m, anchorFastSlack);
         _activityEnabled    = activityEnabled;
         _activityGamma      = Math.Max(0.0, activityGamma);
+        _compTakerExp       = Math.Max(0.0, compTakerExp);
+        _compDistExp        = new[] { Math.Max(0.0, compDistExpClose), Math.Max(0.0, compDistExpMid), Math.Max(0.0, compDistExpFar) };
         _rangeActivityImpact = rangeActivityImpact;
         _rangeMaxSlippage   = Math.Max(0m, rangeMaxSlippage);
         _fatImpactProb      = Clamp01(fatImpactProb);
@@ -750,6 +760,31 @@ internal sealed class AiBotDecisionService
         // §direct-flow chaser: a chase order already carries its direction from the shock sign — skip the override.
         if (!isChase && !_sentimentDynamics)
             type = ApplyExtremeReaction(ctx, user, stockId, currency, type);
+
+        // §composition taker override: activity → taker SHARE, per-stock, post-pick (the only site where the
+        // chosen stock is known — pre-pick watchlist-mean dilutes the per-stock signal to noise). Hot names
+        // convert resting limits into slippage takers (impact couples to the activity that |moves| and news
+        // excite = vol~|ret|); quiet names convert takers back to limits (clean bars). MM excluded — its
+        // maker discount is the depth floor. One seeded draw, taken ONLY when the lever is on and the type is
+        // convertible ⇒ exponent 0 is byte-identical. Direction (isBuy) is never touched — no drift lean.
+        if (_activityEnabled && _compTakerExp > 0.0 && !isChase && user.Strategy != AiStrategy.MarketMaker &&
+            IsCompConvertible(type))
+        {
+            ActivityCompositionProbe.RecordEligible();
+            var act  = _activity.CompositionActivity(stockId);
+            var kind = ComposeTakerOverrideKind(IsSlippageOrder(type), act, _compTakerExp,
+                                                ctx.Decimal01(user.AiUserId));
+            if (kind > 0)
+            {
+                type = IsBuyOrder(type) ? OrderType.SlippageMarketBuy : OrderType.SlippageMarketSell;
+                ActivityCompositionProbe.RecordUpgrade(IsBuyOrder(type));
+            }
+            else if (kind < 0)
+            {
+                type = IsBuyOrder(type) ? OrderType.LimitBuy : OrderType.LimitSell;
+                ActivityCompositionProbe.RecordDowngrade();
+            }
+        }
 
         // Value-band veto: don't chase price past the band — refuse to buy a stock already far above
         // fundamental or sell one far below it. Cuts the fuel that lets a minority of stocks escape.
@@ -1746,13 +1781,24 @@ internal sealed class AiBotDecisionService
         // §P6 tiered ladder: pick Close / Mid / Far, then widen the chosen band by the liquidity
         // multiplier and add bidirectional jitter. Close churns at the touch; Far rests standing walls
         // that absorb fired (slippage-capped) stops instead of letting them sweep empty space.
-        var (tierMin, tierMax, isCloseTier) = PickLimitTier(ctx, user);
+        var (tierMin, tierMax, tier) = PickLimitTier(ctx, user);
+        var isCloseTier = tier == 0;
         // Microstructure bounce: pull the close-tier band (the non-MM orders nearest mid that set the touch)
         // toward mid by (1-prc). Close tier only — Mid/Far are standing-wall depth. Off ⇒ no-op, byte-identical.
         tierMin = TightenOffset(tierMin, isCloseTier, _touchTightenPrc);
         tierMax = TightenOffset(tierMax, isCloseTier, _touchTightenPrc);
         var minOff = tierMin * _limitOffsetMult * _distanceMult;
         var maxOff = tierMax * _limitOffsetMult * _distanceMult;
+        // §composition distance seam: the tier band × act^-k (hot ⇒ the ladder hugs mid, quiet ⇒ it relaxes).
+        // Per-tier exponent, Far MUST stay 0 (StopOffset's far-wall clamp ignores this factor — scaling Far
+        // strands armed stops outside the standing walls). Pure multiply before the Lerp/jitter draws ⇒ the
+        // seeded stream is positionally identical; exponent 0 ⇒ skipped ⇒ byte-identical.
+        if (_activityEnabled && _compDistExp[tier] > 0.0)
+        {
+            var distFactor = (decimal)Math.Pow(_activity.CompositionActivity(stockId), -_compDistExp[tier]);
+            minOff *= distFactor;
+            maxOff *= distFactor;
+        }
         var offset = Clamp01(Lerp(minOff, maxOff, ctx.Decimal01(user.AiUserId)));
         var jitter = (ctx.Decimal01(user.AiUserId) * 2m - 1m) * user.AggressivenessPrc;
         offset = Math.Max(minOff, Math.Min(maxOff, offset * (1m + jitter)));
@@ -2022,20 +2068,21 @@ internal sealed class AiBotDecisionService
     // §P6 tiered ladder: roll Close / Mid / Far and return that tier's (min,max) offset band. Mid/Far
     // fall back to the Close band if a bot pre-dates the tier columns (all-zero), so behaviour degrades
     // gracefully on an un-regenerated workbook.
-    private (decimal min, decimal max, bool isClose) PickLimitTier(AiBotContext ctx, AIUser user)
+    private (decimal min, decimal max, int tier) PickLimitTier(AiBotContext ctx, AIUser user)
     {
         var r = ctx.Decimal01(user.AiUserId);
-        // isClose flags the touch-churning tier (the only one the bounce-tighten touches). Mid/Far fall back to
-        // the Close band when their columns are unset, so the tier identity is reported here rather than inferred
+        // tier 0 = the touch-churning Close tier (the only one the bounce-tighten and the composition
+        // distance seam touch by default); 1 = Mid, 2 = Far. Mid/Far fall back to the Close BAND when their
+        // columns are unset, but keep their tier IDENTITY, so the tier is reported here rather than inferred
         // from the returned (min,max) at the call site (which would be ambiguous under that fallback).
-        if (r < _tierCloseProb) return (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, true);
+        if (r < _tierCloseProb) return (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, 0);
         if (r < _tierCloseProb + _tierMidProb)
             return user.MidLimitMaxPrc > 0m
-                ? (user.MidLimitMinPrc, user.MidLimitMaxPrc, false)
-                : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, false);
+                ? (user.MidLimitMinPrc, user.MidLimitMaxPrc, 1)
+                : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, 1);
         return user.FarLimitMaxPrc > 0m
-            ? (user.FarLimitMinPrc, user.FarLimitMaxPrc, false)
-            : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, false);
+            ? (user.FarLimitMinPrc, user.FarLimitMaxPrc, 2)
+            : (user.MinLimitOffsetPrc, user.MaxLimitOffsetPrc, 2);
     }
 
     // §P6: per-bot protective-stop distance — drawn from the bot's StopDistance band (config fallback
@@ -2737,6 +2784,26 @@ internal sealed class AiBotDecisionService
 
     private static bool IsTrueMarketOrder(OrderType t) =>
         t is OrderType.TrueMarketBuy or OrderType.TrueMarketSell;
+
+    // §composition: only plain limits and slippage takers convert — true-markets and chase orders never.
+    private static bool IsCompConvertible(OrderType t) =>
+        t is OrderType.LimitBuy or OrderType.LimitSell
+          or OrderType.SlippageMarketBuy or OrderType.SlippageMarketSell;
+
+    /// <summary>
+    /// §composition taker override, pure core: +1 = upgrade limit→taker, −1 = downgrade taker→limit, 0 = keep.
+    /// Hot (act&gt;1): a resting limit upgrades with prob 1−act^−k. Quiet (act&lt;1): a taker downgrades with
+    /// prob 1−act^k — exactly the multiplicative taker-share cut m·act^k. Monotone in act; act=1 or k=0 ⇒ 0.
+    /// </summary>
+    internal static int ComposeTakerOverrideKind(bool isTaker, double act, double k, decimal draw)
+    {
+        if (k <= 0.0 || act == 1.0) return 0;
+        if (act > 1.0 && !isTaker)
+            return (double)draw < 1.0 - Math.Pow(act, -k) ? 1 : 0;
+        if (act < 1.0 && isTaker)
+            return (double)draw < 1.0 - Math.Pow(act, k) ? -1 : 0;
+        return 0;
+    }
 
     private static string ToOrderTypeString(OrderType t) => t switch
     {
