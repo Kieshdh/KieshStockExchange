@@ -58,6 +58,10 @@ KieshStockExchange.Services.BackgroundServices.Helpers.BotDecisionProbe.Configur
 KieshStockExchange.Services.MarketEngineServices.MidReference.Configure(builder.Configuration);
 KieshStockExchange.Helpers.CurrencyHelper.PriceTickExtraDecimals =
     builder.Configuration.GetValue("Bots:PriceTickDecimals", 0);
+// §filtered-tape H/L (Candles:HLMinFillSize, default 0 ⇒ byte-identical): fills below this size are
+// volume-only for the candle range — the consolidated-tape odd-lot rule. Read once at startup.
+KieshStockExchange.Models.Candle.HLMinFillSize =
+    builder.Configuration.GetValue("Candles:HLMinFillSize", 0);
 
 // FX realism (Bots:Fx:* — damp the AR(1) mid-rate walker toward a mean-reverting bounded walk at
 // ~1% intraday vol). Defaults = the historical consts ⇒ byte-identical when the section is absent.

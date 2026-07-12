@@ -7,6 +7,20 @@ public class Candle : IValidatable
     // §bounce vwap: set once at startup by MidReference.Configure — the Shared model can't read server config.
     public static bool VwapClose = false;
 
+    // §filtered-tape H/L (the SIP odd-lot / TradingView analog): fills below this size still count toward
+    // volume/close/vwap but do NOT set High/Low — tiny prints sweeping thin levels are non-representative
+    // of the accessible market and real consolidated tapes exclude them from the official range. 0 = off
+    // (byte-identical). Set once at startup from config on BOTH server and client (the client builds the
+    // live in-progress bar via the shared CandleAggregator).
+    public static int HLMinFillSize = 0;
+
+    // §filtered-tape H/L: running extremes over ELIGIBLE prices (seeded from Open on the first trade).
+    // High/Low = these ∪ {current Close}, so an ineligible print at the extreme holds the wick only while
+    // it IS the live close and releases when price returns — at finalization H/L match the consolidated
+    // rule exactly. Transient like _vwapNotional (Clone carries them; never persisted).
+    private decimal _hlEligHigh = 0m;
+    private decimal _hlEligLow = 0m;
+
     // Running Σ price·qty for the vwap close; transient (CandleMapper/CandleRow map explicitly, never persisted).
     private decimal _vwapNotional = 0m;
 
@@ -229,13 +243,22 @@ public class Candle : IValidatable
             throw new ArgumentException("Tick time is outside candle time range.");
         NoteTransactionId(tick.TransactionId);
 
+        // §filtered-tape H/L: sub-threshold fills are H/L-INELIGIBLE (volume/close/vwap unaffected) —
+        // High/Low = extremes over (eligible prices ∪ {Open, current Close}), the consolidated-tape
+        // odd-lot rule. Off (threshold 0) every fill is eligible ⇒ values identical to the legacy update.
+        var setsHL = HLMinFillSize <= 0 || tick.Quantity >= HLMinFillSize;
+
         if (VwapClose)
         {
-            // §bounce vwap: O/H/L track the RAW tape (mid stamp ignored) so the running-VWAP close,
-            // a convex combination of raw trade prices, is guaranteed inside [Low, High].
+            // §bounce vwap: eligible-H/L track the RAW tape (mid stamp ignored) so the running-VWAP close,
+            // a convex combination of raw trade prices, stays inside the Close-enveloped [Low, High].
             var raw = tick.Price;
-            if (raw > High) High = raw;
-            if (raw < Low) Low = raw;
+            SeedEligibleRange();
+            if (setsHL)
+            {
+                if (raw > _hlEligHigh) _hlEligHigh = raw;
+                if (raw < _hlEligLow) _hlEligLow = raw;
+            }
             _vwapNotional += raw * tick.Quantity;
             Volume += tick.Quantity;
             TradeCount += 1;
@@ -252,11 +275,13 @@ public class Candle : IValidatable
             if (tick.MidPrice.HasValue && TradeCount == 0)
             {
                 Open = px; High = px; Low = px;
+                _hlEligHigh = px; _hlEligLow = px;   // re-anchor resets the eligible range too
             }
-            else
+            SeedEligibleRange();
+            if (setsHL)
             {
-                if (px > High) High = px;
-                if (px < Low) Low = px;
+                if (px > _hlEligHigh) _hlEligHigh = px;
+                if (px < _hlEligLow) _hlEligLow = px;
             }
             Close = px;
 
@@ -264,8 +289,24 @@ public class Candle : IValidatable
             TradeCount += 1;
         }
 
+        // H/L recompute: eligible extremes enveloped by the current Close (an ineligible print at the
+        // extreme holds the wick only while it IS the live close). Threshold 0 ⇒ every price fed the
+        // eligible extremes ⇒ identical to the legacy grow-only update.
+        High = Math.Max(_hlEligHigh, Close);
+        Low  = Math.Min(_hlEligLow, Close);
+
         if (!IsValid())
             throw new InvalidOperationException("Candle is not valid after applying trade.");
+    }
+
+    // §filtered-tape H/L: arm the eligible-range accumulators. On a fresh bar they seed from the
+    // (possibly re-anchored) Open; on a candle restored without its transient state (e.g. a live bar
+    // rehydrated after a restart) they conservatively adopt the already-recorded range.
+    private void SeedEligibleRange()
+    {
+        if (_hlEligHigh > 0m) return;
+        if (TradeCount > 0) { _hlEligHigh = High; _hlEligLow = Low; }
+        else                { _hlEligHigh = Open; _hlEligLow = Open; }
     }
 
     public void NoteTransactionId(int transactionId)
@@ -288,6 +329,8 @@ public class Candle : IValidatable
             MinTransactionId = this.MinTransactionId, MaxTransactionId = this.MaxTransactionId,
         };
         c._vwapNotional = this._vwapNotional; // keep the running vwap alive across live-snapshot clones
+        c._hlEligHigh = this._hlEligHigh;     // §filtered-tape H/L: eligible-range accumulators travel too
+        c._hlEligLow = this._hlEligLow;
         return c;
     }
 

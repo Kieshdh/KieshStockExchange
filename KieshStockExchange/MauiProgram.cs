@@ -268,6 +268,16 @@ public static class MauiProgram
             using var stream = FileSystem.OpenAppPackageFileAsync("appsettings.json").GetAwaiter().GetResult();
             using var reader = new StreamReader(stream);
             using var doc = System.Text.Json.JsonDocument.Parse(reader.ReadToEnd());
+
+            // §filtered-tape H/L: the client builds the live in-progress bar via the shared
+            // CandleAggregator, so it must apply the same odd-lot-analog rule the server uses for
+            // stored candles — else the forming bar's wicks disagree with history. Optional key;
+            // absent ⇒ 0 ⇒ off (today's behaviour).
+            if (doc.RootElement.TryGetProperty("Candles", out var candles) &&
+                candles.TryGetProperty("HLMinFillSize", out var minFill) &&
+                minFill.TryGetInt32(out var mf))
+                KieshStockExchange.Models.Candle.HLMinFillSize = mf;
+
             if (doc.RootElement.TryGetProperty("Server", out var server) &&
                 server.TryGetProperty("BaseUrl", out var url) &&
                 url.GetString() is { Length: > 0 } s)
