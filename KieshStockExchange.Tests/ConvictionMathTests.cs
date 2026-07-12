@@ -360,4 +360,32 @@ public class ConvictionMathTests
         }
     }
     #endregion
+
+    #region §P5 basket selection
+    [Fact]
+    public void TopKAboveBar_k1_picks_the_single_max_like_the_legacy_path()
+    {
+        var cands = new List<(int Sid, double Hot)> { (1, 0.05), (2, 0.20), (3, 0.11) };
+        var picks = ConvictionDecisionService.TopKAboveBar(cands, bar: 0.03, k: 1);
+        Assert.Single(picks);
+        Assert.Equal(2, picks[0].Sid);
+    }
+
+    [Fact]
+    public void TopKAboveBar_k3_returns_the_top_three_in_descending_hot_order()
+    {
+        var cands = new List<(int Sid, double Hot)> { (1, 0.05), (2, 0.20), (3, 0.11), (4, 0.08), (5, 0.15) };
+        var picks = ConvictionDecisionService.TopKAboveBar(cands, bar: 0.03, k: 3);
+        Assert.Equal(new[] { 2, 5, 3 }, picks.ConvertAll(p => p.Sid));
+    }
+
+    [Fact]
+    public void TopKAboveBar_excludes_below_bar_so_the_basket_shrinks_short_of_k()
+    {
+        // Only two clear the bar ⇒ basket of 2, not padded to K (Split = realized size keeps sizing honest).
+        var cands = new List<(int Sid, double Hot)> { (1, 0.02), (2, 0.20), (3, 0.011), (4, 0.08) };
+        var picks = ConvictionDecisionService.TopKAboveBar(cands, bar: 0.03, k: 3);
+        Assert.Equal(new[] { 2, 4 }, picks.ConvertAll(p => p.Sid));
+    }
+    #endregion
 }

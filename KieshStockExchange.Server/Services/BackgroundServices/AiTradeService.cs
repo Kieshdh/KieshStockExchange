@@ -686,7 +686,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         satisfiedBand:      _configuration.GetValue("Bots:Conviction:SatisfiedBand", 0.02),
                         minHoldSec:         _configuration.GetValue("Bots:Conviction:MinHoldSec", 120.0),
                         maxExitFractionPerPass: _configuration.GetValue("Bots:Conviction:MaxExitFractionPerPass", 0.10),
-                        shortBarMult:       _configuration.GetValue("Bots:Conviction:ShortBarMult", 1.2));
+                        shortBarMult:       _configuration.GetValue("Bots:Conviction:ShortBarMult", 1.2),
+                        maxEntriesPerFire:  _configuration.GetValue("Bots:Conviction:MaxEntriesPerFire", 1));
         // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
         // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
         // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/

@@ -119,6 +119,10 @@ internal sealed class ConvictionDecisionService
     private readonly double _minHoldSec;                             // hazard floor: no soft exit before this
     private readonly double _maxExitFractionPerPass;                 // cohort-wide soft-exit cap per pass
     private readonly double _shortBarMult;                           // short entry bar = long bar × this (slightly wider)
+    // §P5 basket entries: a fire may open the top-K names above the bar instead of only the single best; the per-fire
+    // deployment is SPLIT across the basket (budget ÷ basket size) so K>1 = many smaller plays, NOT K× the risk.
+    // 1 ⇒ the legacy single-best pick, byte-identical (single-candidate tracking, no list/sort).
+    private readonly int    _maxEntriesPerFire;
     // §P4 per-position entry record (Fable review): heldSec anchors here (NOT Position.UpdatedAt, which moves on any
     // write) and "satisfied" = the ENTRY gap closed (kills the born-satisfied churn). Keyed WITHOUT currency —
     // Position is currency-agnostic (a cross-listed stock shares ONE Position) — the entry book is stored so the
@@ -141,7 +145,8 @@ internal sealed class ConvictionDecisionService
         bool signedHotEnabled = false, double wGap = 1.0, double wOwn = 0.1, double wNoise = 0.2,
         double reviewMeanSec = 300.0, double exitBaseHazard = 0.02, double exitFlipGain = 2.0,
         double exitSatisfyGain = 0.15, double exitTimeExp = 2.5, double satisfiedBand = 0.02,
-        double minHoldSec = 120.0, double maxExitFractionPerPass = 0.10, double shortBarMult = 1.2)
+        double minHoldSec = 120.0, double maxExitFractionPerPass = 0.10, double shortBarMult = 1.2,
+        int maxEntriesPerFire = 1)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -183,6 +188,7 @@ internal sealed class ConvictionDecisionService
         _minHoldSec         = Math.Max(0.0, minHoldSec);
         _maxExitFractionPerPass = Math.Clamp(maxExitFractionPerPass, 0.0, 1.0);
         _shortBarMult       = Math.Max(1.0, shortBarMult);
+        _maxEntriesPerFire  = Math.Max(1, maxEntriesPerFire);
     }
 
     internal void Reset() { _passCount = 0; _lastPassUtc = DateTime.MaxValue; _entryRecs.Clear(); }
@@ -321,6 +327,17 @@ internal sealed class ConvictionDecisionService
         double against   = Math.Max(0.0, exitBar - alignment);           // 0 while intact; grows as conviction decays/flips
         double rate = baseHazard * timeTerm + flipGain * against + (satisfied ? satisfyGain : 0.0);
         return Math.Clamp(rate, 0.0, 1.0);
+    }
+
+    /// <summary>§P5 basket selection: the top-K candidates at/above the bar, descending by Hot (Sid tie-break for
+    /// replay determinism) — K=1 reproduces the single-best legacy pick. Pure ⇒ testable.</summary>
+    internal static List<(int Sid, double Hot)> TopKAboveBar(List<(int Sid, double Hot)> candidates, double bar, int k)
+    {
+        var above = new List<(int Sid, double Hot)>();
+        foreach (var c in candidates) if (c.Hot >= bar) above.Add(c);
+        above.Sort((a, b) => a.Hot != b.Hot ? b.Hot.CompareTo(a.Hot) : a.Sid.CompareTo(b.Sid));
+        if (above.Count > k) above.RemoveRange(k, above.Count - k);
+        return above;
     }
 
     private double CashFloorPctOf(int id)   => Dial(id, CashFloorSalt, _cashFloorBase, _cashFloorBase + CashFloorSpan);
@@ -671,10 +688,14 @@ internal sealed class ConvictionDecisionService
         var sellOwners = new List<AIUser>();
         var coverReqs   = new List<TrueMarketBuyBatchRequest>();
         var coverOwners = new List<AIUser>();
-        var buyPlans   = new List<(AIUser User, int Sid, double Price, double Strength)>();
+        // §P5: Split = basket size (1 legacy) — the sizing pass divides the budget by it, NOT the strength (which
+        // feeds the convex P2 curve non-linearly), so a basket deploys ONE fire's worth spread across K names.
+        var buyPlans   = new List<(AIUser User, int Sid, double Price, double Strength, int Split)>();
         var shortReqs   = new List<MarketShortBatchRequest>();
         var shortOwners = new List<AIUser>();
         var touched    = new HashSet<(int UserId, int Sid)>();
+        // §P5 scratch (reused per bot): allocated only when baskets are on ⇒ K=1 stays allocation-identical.
+        var basketScratch = _maxEntriesPerFire > 1 ? new List<(int Sid, double Hot)>() : null;
 
         // ── REVIEW: the fast clock walks ONLY this book's entry records (no board scan). Deterministic order.
         int softSpent = 0;
@@ -742,8 +763,10 @@ internal sealed class ConvictionDecisionService
             double sens = SentimentSensOf(user.AiUserId);
             double bar  = ConvictionBarOf(user.AiUserId);
 
+            double effBar = sens > 0.0 ? bar / sens : double.PositiveInfinity;
             int longSid = 0; double longHot = double.NegativeInfinity, longPrice = 0;
             int shortSid = 0; double shortHot = double.PositiveInfinity, shortPrice = 0;
+            basketScratch?.Clear();
             foreach (var (sid, price, sectorSent, mom, ownSent, gap) in signal)
             {
                 int qty = _accounts.GetPosition(user.UserId, sid)?.Quantity ?? 0;
@@ -757,11 +780,19 @@ internal sealed class ConvictionDecisionService
                                        _wGap, _wSec, _wGlobal, _wMom, _wOwn, _wNoise);
                 if (qty >= 0 && hot > longHot)  { longHot = hot;  longSid = sid;  longPrice = price; }  // never buy into a short
                 if (qty == 0 && hot < shortHot) { shortHot = hot; shortSid = sid; shortPrice = price; } // flat-only shorts
+                if (basketScratch is not null && qty >= 0 && hot >= effBar) basketScratch.Add((sid, hot)); // §P5
             }
 
-            double effBar = sens > 0.0 ? bar / sens : double.PositiveInfinity;
-            if (longSid > 0 && longHot >= effBar)
-                buyPlans.Add((user, longSid, longPrice, longHot - effBar));
+            if (basketScratch is not null)
+            {
+                // §P5 basket: top-K above the bar; Split = the REALIZED basket size so the sizing pass spreads one
+                // fire's deployment across it (fewer qualifiers ⇒ larger per-name slices, never K× the risk).
+                var picks = TopKAboveBar(basketScratch, effBar, _maxEntriesPerFire);
+                foreach (var (pSid, pHot) in picks)
+                    buyPlans.Add((user, pSid, signal[sidToIdx[pSid]].Price, pHot - effBar, picks.Count));
+            }
+            else if (longSid > 0 && longHot >= effBar)
+                buyPlans.Add((user, longSid, longPrice, longHot - effBar, 1));
             if (shortSid > 0 && shortHot <= -effBar * _shortBarMult)
             {
                 int qty = ShortQty(seedNotional, RiskAppetiteOf(user.AiUserId), _shortRiskFraction, shortPrice);
@@ -786,7 +817,7 @@ internal sealed class ConvictionDecisionService
         }
         var buyReqs   = new List<TrueMarketBuyBatchRequest>();
         var buyOwners = new List<AIUser>();
-        foreach (var (user, sid, price, strength) in buyPlans)
+        foreach (var (user, sid, price, strength, split) in buyPlans)
         {
             if (price <= 0.0) continue;
             decimal avail        = _accounts.GetFund(user.UserId, ccy)?.AvailableBalance ?? 0m;
@@ -802,6 +833,7 @@ internal sealed class ConvictionDecisionService
                 decimal riskNotional = (decimal)RiskAppetiteOf(user.AiUserId) * seedNotional;
                 budget = DeployNotional(riskNotional, avail, cashFloorAmt);
             }
+            if (split > 1) budget /= split;  // §P5: one fire's deployment SPLIT across the basket, not K× the risk
             if (budget <= 0m) continue;
             int qty = (int)Math.Floor((double)budget / price);
             if (qty <= 0) continue;
