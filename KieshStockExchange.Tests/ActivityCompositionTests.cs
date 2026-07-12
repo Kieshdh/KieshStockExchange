@@ -118,4 +118,40 @@ public class ActivityCompositionTests
     }
 
     #endregion
+
+    #region OpenTakerRampMult
+
+    [Fact]
+    public void Ramp_OffOrComplete_IsOne()
+    {
+        Assert.Equal(1.0, AiBotDecisionService.OpenTakerRampMult(1, uptimeMin: 0.0, rampMin: 0.0, staggerMin: 0.0));
+        Assert.Equal(1.0, AiBotDecisionService.OpenTakerRampMult(1, uptimeMin: 10.0, rampMin: 10.0, staggerMin: 0.0));
+        Assert.Equal(1.0, AiBotDecisionService.OpenTakerRampMult(1, uptimeMin: 99.0, rampMin: 10.0, staggerMin: 8.0));
+    }
+
+    [Fact]
+    public void Ramp_StartsAtZero_AndIsMonotone()
+    {
+        Assert.Equal(0.0, AiBotDecisionService.OpenTakerRampMult(1, 0.0, 10.0, 0.0));
+        var a = AiBotDecisionService.OpenTakerRampMult(1, 2.0, 10.0, 0.0);
+        var b = AiBotDecisionService.OpenTakerRampMult(1, 7.0, 10.0, 0.0);
+        Assert.Equal(0.2, a, precision: 12);
+        Assert.True(b > a);
+    }
+
+    [Fact]
+    public void Ramp_Stagger_DesynchronizesStocks()
+    {
+        // With a stagger window, different stocks sit at different ramp phases at the same uptime.
+        var vals = new HashSet<double>();
+        for (int sid = 1; sid <= 20; sid++)
+            vals.Add(AiBotDecisionService.OpenTakerRampMult(sid, 5.0, 10.0, 8.0));
+        Assert.True(vals.Count > 5);                       // genuinely dispersed onsets
+        Assert.All(vals, v => Assert.InRange(v, 0.0, 1.0));
+        // Deterministic: same stock, same inputs, same value.
+        Assert.Equal(AiBotDecisionService.OpenTakerRampMult(7, 5.0, 10.0, 8.0),
+                     AiBotDecisionService.OpenTakerRampMult(7, 5.0, 10.0, 8.0));
+    }
+
+    #endregion
 }

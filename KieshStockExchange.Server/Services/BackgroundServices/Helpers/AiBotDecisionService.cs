@@ -185,6 +185,13 @@ internal sealed class AiBotDecisionService
     // breaks the stop→standing-wall invariant). Exponent 0 ⇒ seam fully skipped ⇒ byte-identical.
     private readonly double   _compTakerExp;
     private readonly double[] _compDistExp; // [close, mid, far]
+    // §open taker ramp (seam council 5/5): after a (re)start the fresh fleet re-values; a blackout only
+    // STORES the imbalance (synchronized release at the lift edge) while a ramp bleeds it out — taker share
+    // × clamp((uptime − stagger(sid))/Ramp, 0, 1). Per-stock staggered onset kills the synchronized-kickoff
+    // tell. 0 = off. Flipped by the RESEED RUNBOOK, not baked — soak baselines keep the raw open.
+    private readonly double _openRampMin;
+    private readonly double _openRampStaggerMin;
+    internal DateTime LoopStartUtc { get; set; } = DateTime.MinValue; // set by AiTradeService.Reset
     // §C1/C3 microstructure
     private readonly bool    _rangeActivityImpact;
     private readonly decimal _rangeMaxSlippage;
@@ -396,6 +403,7 @@ internal sealed class AiBotDecisionService
         bool activityEnabled = false, double activityGamma = 1.0,
         double compTakerExp = 0.0, double compDistExpClose = 0.0,
         double compDistExpMid = 0.0, double compDistExpFar = 0.0,
+        double openRampMin = 0.0, double openRampStaggerMin = 0.0,
         bool rangeActivityImpact = false, decimal rangeMaxSlippage = 0.02m,
         decimal fatImpactProb = 0m,
         bool greedStyle = false, decimal greedSplit = 0.5m,
@@ -564,6 +572,8 @@ internal sealed class AiBotDecisionService
         _activityGamma      = Math.Max(0.0, activityGamma);
         _compTakerExp       = Math.Max(0.0, compTakerExp);
         _compDistExp        = new[] { Math.Max(0.0, compDistExpClose), Math.Max(0.0, compDistExpMid), Math.Max(0.0, compDistExpFar) };
+        _openRampMin        = Math.Max(0.0, openRampMin);
+        _openRampStaggerMin = Math.Max(0.0, openRampStaggerMin);
         _rangeActivityImpact = rangeActivityImpact;
         _rangeMaxSlippage   = Math.Max(0m, rangeMaxSlippage);
         _fatImpactProb      = Clamp01(fatImpactProb);
@@ -783,6 +793,23 @@ internal sealed class AiBotDecisionService
             {
                 type = IsBuyOrder(type) ? OrderType.LimitBuy : OrderType.LimitSell;
                 ActivityCompositionProbe.RecordDowngrade();
+            }
+        }
+
+        // §open taker ramp: runs LAST so it has the final word over any upgrade above — for the first
+        // OpenRampMin minutes after (re)start a taker converts to a resting limit with prob 1−rampMult,
+        // bleeding the fresh-fleet re-valuation out gradually instead of storing it (a blackout's
+        // synchronized-release trap). Per-stock staggered onset; one seeded draw only while ramping;
+        // OpenRampMin 0 (default) ⇒ block skipped ⇒ byte-identical. Flipped by the reseed runbook.
+        if (_openRampMin > 0.0 && !isChase && user.Strategy != AiStrategy.MarketMaker &&
+            LoopStartUtc != DateTime.MinValue && IsSlippageOrder(type))
+        {
+            var uptimeMin = (TimeHelper.NowUtc() - LoopStartUtc).TotalMinutes;
+            if (uptimeMin < _openRampMin + _openRampStaggerMin)
+            {
+                var mult = OpenTakerRampMult(stockId, uptimeMin, _openRampMin, _openRampStaggerMin);
+                if (mult < 1.0 && (double)ctx.Decimal01(user.AiUserId) < 1.0 - mult)
+                    type = IsBuyOrder(type) ? OrderType.LimitBuy : OrderType.LimitSell;
             }
         }
 
@@ -2803,6 +2830,21 @@ internal sealed class AiBotDecisionService
         if (act < 1.0 && isTaker)
             return (double)draw < 1.0 - Math.Pow(act, k) ? -1 : 0;
         return 0;
+    }
+
+    private const int OpenRampSalt = unchecked((int)0xA11C0FEE);
+
+    /// <summary>
+    /// §open taker ramp, pure core: the taker-share multiplier for a stock at a given uptime —
+    /// clamp((uptimeMin − stagger(sid))/rampMin, 0, 1). stagger is a per-stock hash offset in
+    /// [0, staggerMin] so the 50 charts don't all kick off their re-valuation on the same minute.
+    /// rampMin ≤ 0 ⇒ 1 (off).
+    /// </summary>
+    internal static double OpenTakerRampMult(int stockId, double uptimeMin, double rampMin, double staggerMin)
+    {
+        if (rampMin <= 0.0) return 1.0;
+        var offset = staggerMin > 0.0 ? BotMath.HashUnit01(stockId ^ OpenRampSalt) * staggerMin : 0.0;
+        return Math.Clamp((uptimeMin - offset) / rampMin, 0.0, 1.0);
     }
 
     private static string ToOrderTypeString(OrderType t) => t switch

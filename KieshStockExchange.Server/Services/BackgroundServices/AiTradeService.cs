@@ -822,6 +822,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         compDistExpClose:    _configuration.GetValue("Bots:Activity:Composition:DistExpClose", 0.0),
                         compDistExpMid:      _configuration.GetValue("Bots:Activity:Composition:DistExpMid", 0.0),
                         compDistExpFar:      _configuration.GetValue("Bots:Activity:Composition:DistExpFar", 0.0),
+                        openRampMin:         _configuration.GetValue("Bots:Activity:Composition:OpenRampMin", 0.0),
+                        openRampStaggerMin:  _configuration.GetValue("Bots:Activity:Composition:OpenRampStaggerMin", 0.0),
                         rangeActivityImpact: _configuration.GetValue("Bots:Range:ActivityImpact", false),
                         rangeMaxSlippage:    _configuration.GetValue("Bots:Range:MaxSlippage", 0.02m),
                         fatImpactProb:       _configuration.GetValue("Bots:Range:FatImpactProb", 0m),
@@ -1189,6 +1191,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _sentiment.Reset(TimeHelper.NowUtc());
         _regime.Reset(TimeHelper.NowUtc());    // §A2/A3/A4: open from a deterministic +1 regime
         _activity.Reset(TimeHelper.NowUtc());  // §Pillar B: open neutral (field ≡ baseline/1)
+        _decisions.LoopStartUtc = TimeHelper.NowUtc();  // §open taker ramp: arm the uptime clock
         _bank.Reset(TimeHelper.NowUtc()); // §bank-estimate: clear estimates + reseed RNG (before _funds reads them)
         _funds.Reset();   // §P6: re-seed fundamentals at the listing seed prices for this session
         _news.Reset(TimeHelper.NowUtc()); // §exogenous-information: clear shocks + reseed source (inert when off)

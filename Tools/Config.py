@@ -73,6 +73,24 @@ STOCKS = {
     50: {"ticker": "ALV",   "name": "Allianz SE",                           "price":  365.00, "sector": "Financials"},
 }
 
+# §reseed price injection (docs/RESEED_RUNBOOK.md step 2): when Tools/current_prices.csv exists
+# (stock_id,currency,price — exported from the live DB's last candle closes), overlay it over the
+# hardcoded prices above so a re-anchor reseed generates portfolios consistent with the market the
+# bots wake up in (kills the net-imbalance root of the post-reseed transient). USD rows drive the
+# per-stock "price"; absent file = no-op (normal fresh seeds unchanged). Delete the CSV after the
+# reseed so later runs don't silently inherit stale prices.
+import csv as _csv, os as _os
+_CUR_PRICES = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "current_prices.csv")
+if _os.path.exists(_CUR_PRICES):
+    with open(_CUR_PRICES, newline="") as _f:
+        _n = 0
+        for _row in _csv.DictReader(_f):
+            _sid = int(_row["stock_id"])
+            if _row.get("currency", "USD").strip().upper() == "USD" and _sid in STOCKS:
+                STOCKS[_sid]["price"] = float(_row["price"])
+                _n += 1
+    print(f"Config: overlaid {_n} live prices from current_prices.csv (reseed re-anchor mode)")
+
 # Canonical sector list (council 5/5, 2026-07-09). Order = the stable ordinal the BankEstimate
 # per-sector shared-drift walk keys off (must NOT be reordered — replay/RNG determinism). Uneven
 # by design. The C# `Sector` enum mirrors these names 1:1; a stock's "sector" must be one of these.
