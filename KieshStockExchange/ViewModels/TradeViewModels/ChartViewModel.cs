@@ -14,6 +14,7 @@ using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Storage;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -34,6 +35,53 @@ public partial class ChartViewModel : StockAwareViewModel
     };
 
     [ObservableProperty] private CandleResolution _selectedResolution = CandleResolution.FiveMinutes;
+
+    // Chart series style (TradingView-style type toggle). Options shown in the toolbar;
+    // the choice is a pure display preference persisted across sessions via Preferences.
+    public static IReadOnlyList<ChartStyle> ChartStyleOptions { get; } = new[]
+    {
+        ChartStyle.Candles, ChartStyle.HollowCandles, ChartStyle.Bars,
+        ChartStyle.Line, ChartStyle.Area, ChartStyle.HeikinAshi,
+    };
+
+    private const string ChartStylePrefKey = "chart_style";
+
+    [ObservableProperty] private ChartStyle _chartStyle = LoadSavedChartStyle();
+
+    private static ChartStyle LoadSavedChartStyle()
+        => Enum.TryParse(Preferences.Default.Get(ChartStylePrefKey, nameof(ChartStyle.Candles)),
+                         out ChartStyle s) ? s : ChartStyle.Candles;
+
+    // Short toolbar label for the current style (the full enum names read poorly on a button).
+    public string ChartStyleLabel => ChartStyle switch
+    {
+        ChartStyle.HollowCandles => "Hollow",
+        ChartStyle.Bars          => "Bars",
+        ChartStyle.Line          => "Line",
+        ChartStyle.Area          => "Area",
+        ChartStyle.HeikinAshi    => "Heikin-Ashi",
+        _                        => "Candles",
+    };
+
+    partial void OnChartStyleChanged(ChartStyle value)
+    {
+        Preferences.Default.Set(ChartStylePrefKey, value.ToString());
+        OnPropertyChanged(nameof(ChartStyleLabel));
+        RequestRedraw();
+    }
+
+    // Direct set (for a future dropdown) and cycle-on-tap (the current toolbar button).
+    [RelayCommand]
+    private void SelectChartStyle(ChartStyle style) => ChartStyle = style;
+
+    [RelayCommand]
+    private void CycleChartStyle()
+    {
+        int i = 0;
+        for (int k = 0; k < ChartStyleOptions.Count; k++)
+            if (ChartStyleOptions[k] == ChartStyle) { i = k; break; }
+        ChartStyle = ChartStyleOptions[(i + 1) % ChartStyleOptions.Count];
+    }
 
     private (int StockId, CurrencyType Currency, CandleResolution Res)? Key;
 

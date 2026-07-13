@@ -12,6 +12,13 @@ public readonly record struct ChartViewport(DateTime ViewStart, DateTime ViewEnd
 
 public readonly record struct CrosshairState(bool Visible, float X, float Y, int? CandleIndex);
 
+// Chart series style (the TradingView-style type toggle). Candles is the default.
+// HollowCandles = TradingView "hollow candles" (up bars are outlined not filled).
+// Bars = OHLC bars (left tick = open, right tick = close). Line/Area draw the close
+// series as a polyline / gradient-filled polyline. HeikinAshi renders smoothed candles
+// derived from the raw buffer (the raw OHLC is preserved for the crosshair readout).
+public enum ChartStyle { Candles, HollowCandles, Bars, Line, Area, HeikinAshi }
+
 public enum MaKind { Sma, Ema }
 
 // User-facing color choice for an MA row. Key references a Color resource in

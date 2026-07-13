@@ -114,6 +114,12 @@
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
+
+                <!-- Chart-type toggle (cycles Candles -> Hollow -> Bars -> Line -> Area -> Heikin-Ashi) -->
+                <BoxView WidthRequest="1" Color="{StaticResource ChartGrid}" Margin="4,4" VerticalOptions="Fill" />
+                <Button Text="{Binding ChartStyleLabel}"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding CycleChartStyleCommand}" />
             </HorizontalStackLayout>
 
             <!-- Spacer -->

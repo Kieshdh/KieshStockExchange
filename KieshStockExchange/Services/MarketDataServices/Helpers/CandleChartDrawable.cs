@@ -10,6 +10,9 @@ public sealed class CandleChartDrawable : IDrawable
 {
     #region Properties
     public IReadOnlyList<Candle> Candles { get; set; } = Array.Empty<Candle>();
+    // Series style (the TradingView-style chart-type toggle). Orders/markers/MAs/crosshair
+    // all key off the shared X/Y transform, so they work unchanged on every style.
+    public ChartStyle Style { get; set; } = ChartStyle.Candles;
     public double YPaddingPercent { get; set; } = 0.06;
     public double XPaddingPercent { get; set; } = 0.02;
 
@@ -722,6 +725,21 @@ public sealed class CandleChartDrawable : IDrawable
     #region Candle Drawing
     private void DrawCandles(ICanvas canvas, RectF plot, Func<DateTime, float> X, Func<double, float> Y)
     {
+        if (Candles.Count == 0) return;
+
+        // Line / Area draw the close series as a polyline (optionally gradient-filled).
+        if (Style == ChartStyle.Line || Style == ChartStyle.Area)
+        {
+            DrawCloseLine(canvas, plot, X, Y, filled: Style == ChartStyle.Area);
+            return;
+        }
+
+        // Heikin-Ashi smooths the OHLC off the raw buffer; every other style uses raw OHLC.
+        // The raw candle is still what feeds the crosshair OHLCV readout (handled in the VM).
+        double[]? haO = null, haH = null, haL = null, haC = null;
+        if (Style == ChartStyle.HeikinAshi)
+            ComputeHeikinAshi(out haO, out haH, out haL, out haC);
+
         for (int i = 0; i < Candles.Count; i++)
         {
             var c = Candles[i];
@@ -731,13 +749,30 @@ public sealed class CandleChartDrawable : IDrawable
             // Body takes 70% of the candle slot, leaving gaps between adjacent bars.
             float bodyW = Math.Max(1f, Math.Abs(xClose - xOpen) * 0.7f);
 
-            float yOpen = Y((double)c.Open);
-            float yClose = Y((double)c.Close);
-            float yHigh = Y((double)c.High);
-            float yLow = Y((double)c.Low);
+            double o = haO is null ? (double)c.Open : haO[i];
+            double h = haH is null ? (double)c.High : haH[i];
+            double l = haL is null ? (double)c.Low : haL[i];
+            double cl = haC is null ? (double)c.Close : haC[i];
 
-            bool bull = c.Close >= c.Open;
+            float yOpen = Y(o);
+            float yClose = Y(cl);
+            float yHigh = Y(h);
+            float yLow = Y(l);
+
+            bool bull = cl >= o;
             var bodyColor = bull ? Bull : Bear;
+
+            // OHLC bars: high-low stick with a left open-tick and a right close-tick.
+            if (Style == ChartStyle.Bars)
+            {
+                float tick = Math.Max(2f, bodyW * 0.5f);
+                canvas.StrokeColor = bodyColor;
+                canvas.StrokeSize = 1.4f;
+                canvas.DrawLine(cx, yHigh, cx, yLow);
+                canvas.DrawLine(cx - tick, yOpen, cx, yOpen);
+                canvas.DrawLine(cx, yClose, cx + tick, yClose);
+                continue;
+            }
 
             // Wick takes the body colour so the candle reads as one shape.
             canvas.StrokeColor = bodyColor;
@@ -746,9 +781,83 @@ public sealed class CandleChartDrawable : IDrawable
 
             // Body — clamp height to 1px minimum so doji candles are still visible.
             float top = Math.Min(yOpen, yClose);
-            float h = Math.Max(1f, Math.Abs(yClose - yOpen));
-            canvas.FillColor = bodyColor;
-            canvas.FillRectangle(cx - bodyW / 2f, top, bodyW, h);
+            float bh = Math.Max(1f, Math.Abs(yClose - yOpen));
+            var rect = new RectF(cx - bodyW / 2f, top, bodyW, bh);
+
+            // Hollow candles: up bars are outlined (background-filled), down bars stay solid.
+            if (Style == ChartStyle.HollowCandles && bull)
+            {
+                canvas.FillColor = Bg;
+                canvas.FillRectangle(rect);
+                canvas.StrokeColor = bodyColor;
+                canvas.StrokeSize = 1.2f;
+                canvas.DrawRectangle(rect);
+            }
+            else
+            {
+                canvas.FillColor = bodyColor;
+                canvas.FillRectangle(rect);
+            }
+        }
+    }
+
+    // Line / Area: the close-price polyline. Colour follows the visible window's direction
+    // (last close vs first close), matching the TradingView line-chart convention.
+    private void DrawCloseLine(ICanvas canvas, RectF plot, Func<DateTime, float> X, Func<double, float> Y, bool filled)
+    {
+        var lineColor = Candles[^1].Close >= Candles[0].Close ? Bull : Bear;
+        var stroke = new PathF();
+        float firstX = 0f, lastX = 0f;
+        for (int i = 0; i < Candles.Count; i++)
+        {
+            var c = Candles[i];
+            float x = (X(c.OpenTime) + X(c.CloseTime)) * 0.5f;
+            float y = Y((double)c.Close);
+            if (i == 0) { stroke.MoveTo(x, y); firstX = x; }
+            else stroke.LineTo(x, y);
+            lastX = x;
+        }
+
+        if (filled)
+        {
+            var fill = new PathF();
+            for (int i = 0; i < Candles.Count; i++)
+            {
+                var c = Candles[i];
+                float x = (X(c.OpenTime) + X(c.CloseTime)) * 0.5f;
+                float y = Y((double)c.Close);
+                if (i == 0) fill.MoveTo(x, y);
+                else fill.LineTo(x, y);
+            }
+            fill.LineTo(lastX, plot.Bottom);
+            fill.LineTo(firstX, plot.Bottom);
+            fill.Close();
+            canvas.FillColor = lineColor.WithAlpha(0.12f);
+            canvas.FillPath(fill);
+        }
+
+        canvas.StrokeColor = lineColor;
+        canvas.StrokeSize = 1.6f;
+        canvas.StrokeLineJoin = LineJoin.Round;
+        canvas.DrawPath(stroke);
+    }
+
+    // Heikin-Ashi transform of the raw buffer. HA_close = avg(O,H,L,C);
+    // HA_open = avg(prev HA open, prev HA close); HA high/low extend to the raw extremes.
+    private void ComputeHeikinAshi(out double[] o, out double[] h, out double[] l, out double[] c)
+    {
+        int n = Candles.Count;
+        o = new double[n]; h = new double[n]; l = new double[n]; c = new double[n];
+        for (int i = 0; i < n; i++)
+        {
+            var k = Candles[i];
+            double ro = (double)k.Open, rh = (double)k.High, rl = (double)k.Low, rc = (double)k.Close;
+            double haClose = (ro + rh + rl + rc) / 4.0;
+            double haOpen = i == 0 ? (ro + rc) / 2.0 : (o[i - 1] + c[i - 1]) / 2.0;
+            o[i] = haOpen;
+            c[i] = haClose;
+            h[i] = Math.Max(rh, Math.Max(haOpen, haClose));
+            l[i] = Math.Min(rl, Math.Min(haOpen, haClose));
         }
     }
 
