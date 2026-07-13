@@ -55,9 +55,17 @@ trims the extreme tail. **Flip = `10` in server appsettings AND client Resources
 
 Ramps taker share 0→1 over the first N min after (re)start, per-stock staggered, to bleed out the fresh-fleet
 re-valuation transient (seam council 5/5). Ships ARMED in `docs/RESEED_RUNBOOK.md`, NOT a steady-state flip.
-Isolated validation running (kse_rampctl vs kse_rampon). NOTE: the 4h bake conflated it with composition's
-+72% σ so its open-window number there is not a clean read. Reseed runbook also gained: gap-fill flat candles
-(`scripts/reanchor-gapfill.sql`) + live-price injection into the Tools seeder (kills the transient's root).
+
+**Isolated validation (kse_rampctl vs kse_rampon, 45m fresh seed) = PASS:**
+- open-18min excursion tail: max **4.9% → 3.5%** (30min max 4.9%→3.8%) — clips the tail (the reseed's 17%
+  outlier is where it helps most; this local fresh-seed transient was already mild at 4.9%).
+- p50/p90 excursion **unchanged** (0.8→0.7 / 2.6→2.6) — bounds the tail without flattening normal open
+  texture ("visible but bounded," per the Outsider).
+- first-10min volume **−5% only** (325k→308k) — NOT dead tape; the taker→limit downgrade keeps the tape
+  alive, vindicating ramp-over-blackout (a blackout would have gone silent).
+
+Reseed runbook also gained: gap-fill flat candles (`scripts/reanchor-gapfill.sql`) + live-price injection
+into the Tools seeder (kills the transient's root — portfolios born at market prices).
 
 ## Commits
 `05defb8` composition · `59db664` wick filter · `c13a707` ramp+runbook+gapfill+price-injection ·
