@@ -55,6 +55,9 @@ public sealed class CandleChartDrawable : IDrawable
 
     // Current live price; when set, drawn as a horizontal price line and tag in the right gutter.
     public decimal? CurrentPrice { get; set; }
+    // Session reference price (the current day's open) — when set, the price tag shows the
+    // session % change beneath the price, in the up/down colour (the TradingView axis convention).
+    public decimal? SessionOpenPrice { get; set; }
 
     // Palette — populated by ChartView at construction time. Defaults are intentionally stark so a
     // missing resource is obvious rather than silently themed.
@@ -890,16 +893,27 @@ public sealed class CandleChartDrawable : IDrawable
         canvas.StrokeDashPattern = null;
         canvas.RestoreState();
 
-        // Price tag in the right gutter, drawn as a filled pill with white text.
+        // Price tag in the right gutter. When a session reference is set, the tag grows to a
+        // second line showing the session % change (TradingView axis convention).
         var label = CurrencyHelper.Format(price, cur);
-        var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
+        bool hasPct = SessionOpenPrice is decimal so && so > 0m;
+        float tagH = hasPct ? 26f : 16f;
+        var tagRect = new RectF(plot.Right + 1, y - tagH / 2f, RightAxisW - 2, tagH);
         canvas.FillColor = color;
         canvas.FillRectangle(tagRect);
         canvas.FontColor = Colors.White;
         canvas.FontSize = PriceTagFont;
         canvas.DrawString(label,
-            new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
-            HorizontalAlignment.Left, VerticalAlignment.Center);
+            new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, hasPct ? 14f : tagRect.Height),
+            HorizontalAlignment.Left, hasPct ? VerticalAlignment.Top : VerticalAlignment.Center);
+        if (hasPct)
+        {
+            double pct = ((double)price / (double)SessionOpenPrice!.Value - 1.0) * 100.0;
+            canvas.FontSize = PriceTagFont - 1f;
+            canvas.DrawString($"{(pct >= 0 ? "+" : "")}{pct:0.00}%",
+                new RectF(tagRect.X + 3, tagRect.Y + 13f, tagRect.Width - 6, 12f),
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
     }
     #endregion
 

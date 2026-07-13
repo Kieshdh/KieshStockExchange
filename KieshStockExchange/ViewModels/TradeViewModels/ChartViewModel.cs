@@ -83,6 +83,45 @@ public partial class ChartViewModel : StockAwareViewModel
         ChartStyle = ChartStyleOptions[(i + 1) % ChartStyleOptions.Count];
     }
 
+    // Volume display mode (toolbar toggle: Overlay -> Pane -> Off), persisted.
+    private const string VolumeModePrefKey = "chart_volume_mode";
+
+    [ObservableProperty] private VolumeMode _volumeMode =
+        Enum.TryParse(Preferences.Default.Get(VolumeModePrefKey, nameof(VolumeMode.Overlay)), out VolumeMode v)
+            ? v : VolumeMode.Overlay;
+
+    public string VolumeModeLabel => VolumeMode switch
+    {
+        VolumeMode.Pane => "Vol ▤",   // separate sub-pane
+        VolumeMode.Off  => "Vol ∅",   // hidden
+        _               => "Vol ▧",   // overlay
+    };
+
+    partial void OnVolumeModeChanged(VolumeMode value)
+    {
+        Preferences.Default.Set(VolumeModePrefKey, value.ToString());
+        OnPropertyChanged(nameof(VolumeModeLabel));
+        RequestRedraw();
+    }
+
+    [RelayCommand]
+    private void CycleVolumeMode()
+        => VolumeMode = (VolumeMode)(((int)VolumeMode + 1) % 3);
+
+    // Session reference = the open of the first buffered candle on the latest candle's UTC day.
+    // Drives the price-axis % tag ("today's" change). Approximate when the buffer starts mid-day.
+    public decimal? SessionOpenPrice
+    {
+        get
+        {
+            if (_candleBuffer.Count == 0) return null;
+            var day = _candleBuffer[^1].OpenTime.Date;
+            for (int i = 0; i < _candleBuffer.Count; i++)
+                if (_candleBuffer[i].OpenTime.Date == day) return _candleBuffer[i].Open;
+            return _candleBuffer[0].Open;
+        }
+    }
+
     private (int StockId, CurrencyType Currency, CandleResolution Res)? Key;
 
     // Internal candle buffer — kept in ascending OpenTime order by every mutation path

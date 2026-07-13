@@ -120,6 +120,11 @@
                 <Button Text="{Binding ChartStyleLabel}"
                         Style="{StaticResource ChartResolutionButton.Unselected}"
                         Command="{Binding CycleChartStyleCommand}" />
+
+                <!-- Volume display toggle (cycles Overlay -> Pane -> Off) -->
+                <Button Text="{Binding VolumeModeLabel}"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding CycleVolumeModeCommand}" />
             </HorizontalStackLayout>
 
             <!-- Spacer -->

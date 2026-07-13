@@ -19,6 +19,10 @@ public readonly record struct CrosshairState(bool Visible, float X, float Y, int
 // derived from the raw buffer (the raw OHLC is preserved for the crosshair readout).
 public enum ChartStyle { Candles, HollowCandles, Bars, Line, Area, HeikinAshi }
 
+// Volume display mode (surfaced in the toolbar). Overlay = low-alpha bars in the bottom
+// of the price pane (TradingView style); Pane = a separate sub-pane below the price; Off = hidden.
+public enum VolumeMode { Overlay, Pane, Off }
+
 public enum MaKind { Sma, Ema }
 
 // User-facing color choice for an MA row. Key references a Color resource in
