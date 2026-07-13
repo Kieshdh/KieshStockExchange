@@ -109,6 +109,78 @@ public partial class ChartViewModel : StockAwareViewModel
     private void CycleVolumeMode()
         => VolumeMode = (VolumeMode)(((int)VolumeMode + 1) % 3);
 
+    // §market-mood: Fear/Greed sub-pane toggle (on/off), persisted. When on, the VM polls the server's
+    // ground-truth mood for the selected stock and accumulates a live series the drawable renders.
+    private const string MoodPanePrefKey = "chart_mood_pane";
+
+    [ObservableProperty] private bool _showMoodPane = Preferences.Default.Get(MoodPanePrefKey, false);
+
+    public string MoodPaneLabel => ShowMoodPane ? "Mood ◉" : "Mood ○";
+
+    partial void OnShowMoodPaneChanged(bool value)
+    {
+        Preferences.Default.Set(MoodPanePrefKey, value);
+        OnPropertyChanged(nameof(MoodPaneLabel));
+        RestartMoodPoll();  // start/stop accumulation to match the toggle
+        RequestRedraw();
+    }
+
+    [RelayCommand]
+    private void ToggleMoodPane() => ShowMoodPane = !ShowMoodPane;
+
+    // Live-accumulated mood series (there's no stored history server-side; we fill forward from open).
+    // Timestamps are UTC-now so they land on the same time axis as the candles. Reset on stock change.
+    private readonly List<(DateTime Time, double Value)> _moodSamples = new();
+    private const int MoodSamplesMax = 2000;
+    public IReadOnlyList<(DateTime Time, double Value)> MoodSeries => _moodSamples;
+
+    private static readonly TimeSpan MoodPollInterval = TimeSpan.FromSeconds(4);
+    private CancellationTokenSource? _moodCts;
+
+    // (Re)start the mood poll for the current selection. Cancels any prior loop, clears the series, and —
+    // only when the pane is on and a stock is selected — kicks off a fresh accumulation.
+    private void RestartMoodPoll()
+    {
+        var prev = Interlocked.Exchange(ref _moodCts, null);
+        if (prev is not null) { try { prev.Cancel(); } catch { } prev.Dispose(); }
+
+        _moodSamples.Clear();
+        if (!ShowMoodPane || !Selected.HasSelectedStock) { RequestRedraw(); return; }
+
+        var cts = new CancellationTokenSource();
+        _moodCts = cts;
+        _ = MoodPollLoopAsync(Selected.StockId!.Value, cts.Token);
+    }
+
+    private async Task MoodPollLoopAsync(int stockId, CancellationToken ct)
+    {
+        try
+        {
+            await SampleMoodAsync(stockId, ct).ConfigureAwait(false); // seed immediately, then on cadence
+            using var timer = new PeriodicTimer(MoodPollInterval);
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+                await SampleMoodAsync(stockId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { _logger.LogDebug(ex, "Mood poll loop error."); }
+    }
+
+    private async Task SampleMoodAsync(int stockId, CancellationToken ct)
+    {
+        var mood = await _mood.GetMoodAsync(stockId, ct).ConfigureAwait(false);
+        if (mood is not double v || ct.IsCancellationRequested) return;
+
+        void Apply()
+        {
+            _moodSamples.Add((TimeHelper.NowUtc(), v));
+            if (_moodSamples.Count > MoodSamplesMax)
+                _moodSamples.RemoveRange(0, _moodSamples.Count - MoodSamplesMax);
+            RequestRedraw();
+        }
+        if (MainThread.IsMainThread) Apply();
+        else MainThread.BeginInvokeOnMainThread(Apply);
+    }
+
     // Y-axis price scale (toolbar toggle: Linear -> Log -> Percent), persisted.
     private const string ScaleModePrefKey = "chart_scale_mode";
 
@@ -329,6 +401,7 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly IOrderEditService _editService;
     private readonly ITransactionService _transactions;
     private readonly IUserSessionService _session;
+    private readonly IMarketMoodService _mood;
 
     // §F7: one-shot viewport restore. Seeded from the session at construction and consumed once on the
     // first candle load so a later stock switch still snaps to live instead of re-applying a stale view.
@@ -343,7 +416,7 @@ public partial class ChartViewModel : StockAwareViewModel
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
         IOrderCacheService orderCache, IAuthService auth, IOrderEditService editService,
         ISelectedStockService selected, INotificationService notification, ITransactionService transactions,
-        IUserSessionService session)
+        IUserSessionService session, IMarketMoodService mood)
         : base(selected, notification, logger)
     {
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
@@ -353,6 +426,7 @@ public partial class ChartViewModel : StockAwareViewModel
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
         _transactions = transactions ?? throw new ArgumentNullException(nameof(transactions));
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _mood = mood ?? throw new ArgumentNullException(nameof(mood));
 
         // §F7: restore the saved resolution + viewport. Seed the resolution before InitializeSelection
         // kicks off the first stream so it loads at the remembered resolution; the viewport (count /
@@ -615,6 +689,8 @@ public partial class ChartViewModel : StockAwareViewModel
         RefreshPositionBasis();
         // Load this stock's saved drawings (horizontal lines + trendlines).
         LoadDrawingsForSelected();
+        // §market-mood: restart the mood accumulation for the new stock (no-op when the pane is off).
+        RestartMoodPoll();
         // Best-effort background pull — a transient transport fault (cancel/disconnect under load)
         // is non-fatal (fills also arrive via TransactionsChanged) and must not fault the
         // unobserved-task net. Genuine exceptions still propagate.
@@ -707,6 +783,9 @@ public partial class ChartViewModel : StockAwareViewModel
                 prev.Dispose();
             }
             StopCandleStream();
+            // §market-mood: stop the mood poll loop.
+            var moodPrev = Interlocked.Exchange(ref _moodCts, null);
+            if (moodPrev is not null) { try { moodPrev.Cancel(); } catch { } moodPrev.Dispose(); }
             _orderCache.OrdersChanged -= OnOrdersChanged;
             _transactions.TransactionsChanged -= OnTransactionsChanged;
         }

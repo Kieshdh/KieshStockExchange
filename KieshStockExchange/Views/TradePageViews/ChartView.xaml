@@ -126,6 +126,19 @@
                         Style="{StaticResource ChartResolutionButton.Unselected}"
                         Command="{Binding CycleVolumeModeCommand}" />
 
+                <!-- Market Mood (Fear/Greed) sub-pane toggle -->
+                <Button Text="{Binding MoodPaneLabel}"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding ToggleMoodPaneCommand}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding ShowMoodPane}" Value="True">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+
                 <!-- Price-scale toggle (cycles Linear -> Log -> Percent) -->
                 <Button Text="{Binding ScaleModeLabel}"
                         Style="{StaticResource ChartResolutionButton.Unselected}"

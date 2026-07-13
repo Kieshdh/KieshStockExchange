@@ -1089,6 +1089,35 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         lock (_activitySamplesLock) return _activitySamples.ToArray();
     }
 
+    // §market-mood: the bots' ground-truth mood surfaced as a 0..100 Fear/Greed gauge. Loop-thread reads
+    // (like GetSentiment) done off the HTTP thread — the dicts only gain keys at reset then update values,
+    // so a best-effort TryGetValue is safe here without a lock. Truthful (not a chart proxy): the real
+    // combined sentiment + activity fields that drive price.
+    public double MoodForStock(int stockId)
+        => MoodScore((double)_sentiment.GetSentiment(stockId), _activity.CompositionActivity(stockId));
+
+    public (double Global, IReadOnlyDictionary<int, double> Stocks) GetMarketMood()
+    {
+        var stocks = new Dictionary<int, double>(_stocks.ById.Count);
+        double sum = 0; int n = 0;
+        foreach (var sid in _stocks.ById.Keys)
+        {
+            double mood = MoodForStock(sid);
+            stocks[sid] = mood; sum += mood; n++;
+        }
+        // Global mood = the market-wide mean; if half the names are greedy and half fearful the market is
+        // neutral, which is the honest aggregate (it already folds in the shared common-mode sentiment).
+        return (n > 0 ? sum / n : 50.0, stocks);
+    }
+
+    // Map the raw fields to Fear(0)↔Greed(100): score = 50 + 50·tanh(k·sentiment·activity). Sentiment
+    // (~[-1,1]) sets the DIRECTION (greed = positive, fear = negative); activity (~1, [0.4,3]) is the
+    // INTENSITY gain, so a busy market amplifies the tilt while a quiet/neutral one sits near 50. tanh
+    // bounds it into (0,100). Pure ⇒ deterministic and unit-testable.
+    internal const double MoodGreedScale = 1.2;
+    internal static double MoodScore(double sentiment, double activity)
+        => Math.Clamp(50.0 + 50.0 * Math.Tanh(MoodGreedScale * sentiment * Math.Max(0.0, activity)), 0.0, 100.0);
+
     // 10s cadence × 8640 = 24h history (matches longest dashboard range).
     private const int MaxActivitySamples = 8640;
     private static readonly TimeSpan ActivitySampleInterval = TimeSpan.FromSeconds(10);

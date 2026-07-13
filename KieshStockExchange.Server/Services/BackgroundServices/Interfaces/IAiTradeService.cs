@@ -200,6 +200,14 @@ public interface IAiTradeService
     /// <summary> Bounded ring of per-tick activity samples; survives bot stop/restart. </summary>
     IReadOnlyList<BotActivitySample> GetActivitySamples();
 
+    /// <summary>§market-mood: current Fear/Greed score (0 = extreme fear, 50 = neutral, 100 = extreme greed)
+    /// for one stock, mapped from the bots' live sentiment + activity fields. Loop-thread read; safe off-loop.</summary>
+    double MoodForStock(int stockId);
+
+    /// <summary>§market-mood: the market-wide mood (mean across stocks) plus each stock's current 0..100 score.
+    /// Backs the public /api/market/mood endpoint that feeds the chart's Fear/Greed sub-pane.</summary>
+    (double Global, IReadOnlyDictionary<int, double> Stocks) GetMarketMood();
+
     /// <summary>
     /// Starts the background trading loop if it is not already running.
     /// Safe to call multiple times.

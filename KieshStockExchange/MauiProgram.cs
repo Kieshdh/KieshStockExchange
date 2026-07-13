@@ -122,6 +122,8 @@ public static class MauiProgram
         builder.Services.AddSingleton<IMarketDataService, SignalRMarketDataClient>();
         builder.Services.AddSingleton<IFxRateService, ApiFxRateClient>();
         builder.Services.AddSingleton<ICandleService, SignalRCandleService>();
+        // §market-mood: HTTP read of the bots' ground-truth Fear/Greed field for the chart sub-pane.
+        builder.Services.AddSingleton<IMarketMoodService, ApiMarketMoodClient>();
         builder.Services.AddSingleton<IUserPortfolioService, ApiPortfolioClient>();
         builder.Services.AddSingleton<IOrderCacheService, OrderCacheService>();
         builder.Services.AddSingleton<ISelectedStockService, SelectedStockService>();

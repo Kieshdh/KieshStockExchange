@@ -274,6 +274,9 @@ public partial class ChartView : ContentView
         _drawable.SessionOpenPrice = _vm.SessionOpenPrice;
         _drawable.ShowVolume = _vm.VolumeMode != VolumeMode.Off;
         _drawable.OverlayVolume = _vm.VolumeMode == VolumeMode.Overlay;
+        // §market-mood: feed the accumulated Fear/Greed series + pane visibility.
+        _drawable.ShowMoodPane = _vm.ShowMoodPane;
+        _drawable.MoodSeries = _vm.MoodSeries.ToArray();
         _drawable.Viewport = _vm.GetViewport();
         _drawable.YPaddingPercent = _vm.YPaddingPercent;
         _drawable.XPaddingPercent = _vm.XPaddingPercent;

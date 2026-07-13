@@ -125,6 +125,13 @@ public sealed class CandleChartDrawable : IDrawable
     public Color VolumeBullTint = Colors.Transparent;
     public Color VolumeBearTint = Colors.Transparent;
 
+    // §market-mood: an always-separate sub-pane (below price + volume) plotting the live Fear/Greed series
+    // (0..100) the VM accumulates from the server's ground-truth field, against the SAME time axis as the
+    // candles. Off by default. The zones reuse Bull/Bear (greed/fear); the line is its own distinct accent.
+    public bool ShowMoodPane { get; set; } = false;
+    public IReadOnlyList<(DateTime Time, double Value)> MoodSeries { get; set; } = Array.Empty<(DateTime, double)>();
+    public Color MoodLineColor = Color.FromArgb("#B39DDB"); // soft violet, distinct from candle/volume palette
+
     public float AxisFont = 10f;
     public float PriceTagFont = 10f;
 
@@ -136,6 +143,8 @@ public sealed class CandleChartDrawable : IDrawable
     const float VolumePaneRatio = 0.18f;  // 18% of total plot height
     const float VolumePaneGap = 4f;
     const float VolumePaneMinChartHeight = 80f;  // skip volume pane on tiny charts
+    const float MoodPaneRatio = 0.16f;    // 16% of total plot height for the mood sub-pane
+    const float MoodPaneGap = 4f;
     #endregion
 
     #region IDrawable Implementation
@@ -152,28 +161,41 @@ public sealed class CandleChartDrawable : IDrawable
         // (TradingView-style) the plot keeps its full height and volume bars are
         // drawn at low alpha inside the bottom strip of the same rectangle.
         var fullPlot = ComputePlotRect(dirtyRect);
-        RectF plot = fullPlot;
-        RectF volRect = default;
-        if (ShowVolume && fullPlot.Height >= VolumePaneMinChartHeight)
+        // §market-mood: reserve the mood strip off the BOTTOM first (always a separate pane, never overlay),
+        // then run the existing volume split against the remaining area so volume behaviour is byte-identical
+        // when the mood pane is off (baseArea == fullPlot).
+        RectF baseArea = fullPlot;
+        RectF moodRect = default;
+        if (ShowMoodPane && fullPlot.Height >= VolumePaneMinChartHeight)
         {
-            float volH = fullPlot.Height * VolumePaneRatio;
+            float moodH = fullPlot.Height * MoodPaneRatio;
+            moodRect = new RectF(fullPlot.X, fullPlot.Bottom - moodH, fullPlot.Width, moodH);
+            baseArea = new RectF(fullPlot.X, fullPlot.Y, fullPlot.Width, fullPlot.Height - moodH - MoodPaneGap);
+        }
+
+        RectF plot = baseArea;
+        RectF volRect = default;
+        if (ShowVolume && baseArea.Height >= VolumePaneMinChartHeight)
+        {
+            float volH = baseArea.Height * VolumePaneRatio;
             if (OverlayVolume)
             {
                 // Bars share the bottom strip of the price plot. plot is unchanged
                 // so candle/MA scaling uses the full chart height.
-                volRect = new RectF(fullPlot.X, fullPlot.Bottom - volH,
-                                    fullPlot.Width, volH);
+                volRect = new RectF(baseArea.X, baseArea.Bottom - volH,
+                                    baseArea.Width, volH);
             }
             else
             {
-                plot = new RectF(fullPlot.X, fullPlot.Y,
-                                 fullPlot.Width, fullPlot.Height - volH - VolumePaneGap);
-                volRect = new RectF(fullPlot.X, plot.Bottom + VolumePaneGap,
-                                    fullPlot.Width, volH);
+                plot = new RectF(baseArea.X, baseArea.Y,
+                                 baseArea.Width, baseArea.Height - volH - VolumePaneGap);
+                volRect = new RectF(baseArea.X, plot.Bottom + VolumePaneGap,
+                                    baseArea.Width, volH);
             }
         }
         _lastPlot = plot;
         _lastVolRect = volRect;
+        _lastMoodRect = moodRect;
 
         // Visible time-range. Prefer the explicit viewport when set so that
         // empty pre-history / post-future space scales correctly. Fall back
@@ -295,6 +317,10 @@ public sealed class CandleChartDrawable : IDrawable
 
         if (volRect.Height > 0 && !OverlayVolume)
             DrawVolume(canvas, volRect, X);
+
+        // §market-mood: the Fear/Greed sub-pane, plotted against the same X() time transform as the candles.
+        if (moodRect.Height > 0)
+            DrawMood(canvas, moodRect, X, tMin, tMax);
 
         // Crosshair sits on top of everything else so it stays visible against candles.
         DrawCrosshair(canvas, plot, currency, X);
@@ -855,6 +881,76 @@ public sealed class CandleChartDrawable : IDrawable
     }
 
     /// <summary>
+    /// §market-mood: draw the accumulated Fear/Greed series in its own sub-pane on a FIXED 0..100 scale.
+    /// Red band below 30 (fear) and green band above 70 (greed) wash the zones; 0/50/100 gridlines label
+    /// the axis; the line is plotted against the shared X() time transform so it lines up with the candles.
+    /// A current-value pill (score + label) sits top-left of the strip.
+    /// </summary>
+    private void DrawMood(ICanvas canvas, RectF r, Func<DateTime, float> X, DateTime tMin, DateTime tMax)
+    {
+        // Sub-pane border, matching the volume sub-pane.
+        canvas.StrokeColor = Grid;
+        canvas.StrokeSize = 1f;
+        canvas.DrawRectangle(r);
+
+        float MoodY(double v) => r.Bottom - (float)(Math.Clamp(v, 0, 100) / 100.0 * r.Height);
+
+        // Fear (<30) / greed (>70) zone washes so the strip reads at a glance.
+        float y30 = MoodY(30), y70 = MoodY(70);
+        canvas.FillColor = Bear.WithAlpha(0.10f);
+        canvas.FillRectangle(r.X, y30, r.Width, r.Bottom - y30);
+        canvas.FillColor = Bull.WithAlpha(0.10f);
+        canvas.FillRectangle(r.X, r.Y, r.Width, y70 - r.Y);
+
+        // 0 / 50 / 100 gridlines + right-gutter labels.
+        canvas.FontColor = Axis;
+        canvas.FontSize = AxisFont;
+        foreach (var lvl in new[] { 0.0, 50.0, 100.0 })
+        {
+            float y = MoodY(lvl);
+            canvas.StrokeColor = Grid.WithAlpha(0.5f);
+            canvas.StrokeSize = 1f;
+            canvas.DrawLine(r.Left, y, r.Right, y);
+            canvas.DrawString($"{lvl:0}",
+                new RectF(r.Right + 4, y - 7, RightAxisW - 8, 14),
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+
+        // Accumulated series polyline. Clipped to the visible time window; values map on the fixed scale.
+        if (MoodSeries.Count > 0)
+        {
+            var path = new PathF();
+            bool started = false;
+            for (int i = 0; i < MoodSeries.Count; i++)
+            {
+                var (t, v) = MoodSeries[i];
+                if (t < tMin || t > tMax) { started = false; continue; }
+                float px = X(t), py = MoodY(v);
+                if (!started) { path.MoveTo(px, py); started = true; }
+                else path.LineTo(px, py);
+            }
+            canvas.StrokeColor = MoodLineColor;
+            canvas.StrokeSize = 1.6f;
+            canvas.StrokeLineJoin = LineJoin.Round;
+            canvas.DrawPath(path);
+
+            // Current-value pill top-left: latest score + fear/greed word, tinted by zone.
+            double latest = MoodSeries[^1].Value;
+            var (word, tint) = latest >= 70 ? ("Greed", Bull)
+                             : latest <= 30 ? ("Fear", Bear)
+                             : ("Neutral", MoodLineColor);
+            string label = $"Mood {latest:0}  {word}";
+            var pill = new RectF(r.Left + 4, r.Top + 3, Math.Max(96f, label.Length * 6.5f), 15f);
+            canvas.FillColor = tint.WithAlpha(0.85f);
+            canvas.FillRectangle(pill);
+            canvas.FontColor = Colors.White;
+            canvas.FontSize = AxisFont;
+            canvas.DrawString(label, new RectF(pill.X + 4, pill.Y, pill.Width - 6, pill.Height),
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+    }
+
+    /// <summary>
     /// Layout helper exposed so view-side code (pointer hit-testing, alert drag)
     /// can map control-space pixels into the plot area without re-implementing
     /// the gutter math.
@@ -869,6 +965,7 @@ public sealed class CandleChartDrawable : IDrawable
     // consistent with the most recent paint, even between frames.
     private RectF _lastPlot;
     private RectF _lastVolRect;
+    private RectF _lastMoodRect;
     private double _lastYMin;
     private double _lastYMax = 1.0;
     private DateTime _lastTMin;
@@ -876,6 +973,8 @@ public sealed class CandleChartDrawable : IDrawable
 
     /// <summary>Rectangle reserved for the volume sub-pane in the most recent paint.</summary>
     public RectF VolumeRect => _lastVolRect;
+    /// <summary>Rectangle reserved for the mood sub-pane in the most recent paint.</summary>
+    public RectF MoodRect => _lastMoodRect;
     /// <summary>Price-plot rectangle from the most recent paint — lets view-side code
     /// (cursor-anchored zoom) map a pointer X to a plot-width fraction without redoing the gutter math.</summary>
     public RectF PlotRect => _lastPlot;
