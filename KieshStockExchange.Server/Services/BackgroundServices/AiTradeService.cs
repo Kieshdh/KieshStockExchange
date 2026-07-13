@@ -822,6 +822,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         compDistExpClose:    _configuration.GetValue("Bots:Activity:Composition:DistExpClose", 0.0),
                         compDistExpMid:      _configuration.GetValue("Bots:Activity:Composition:DistExpMid", 0.0),
                         compDistExpFar:      _configuration.GetValue("Bots:Activity:Composition:DistExpFar", 0.0),
+                        compSizeExp:         _configuration.GetValue("Bots:Activity:Composition:SizeExp", 0.0),
+                        compSizeCap:         _configuration.GetValue("Bots:Activity:Composition:SizeCap", 3.0),
                         openRampMin:         _configuration.GetValue("Bots:Activity:Composition:OpenRampMin", 0.0),
                         openRampStaggerMin:  _configuration.GetValue("Bots:Activity:Composition:OpenRampStaggerMin", 0.0),
                         rangeActivityImpact: _configuration.GetValue("Bots:Range:ActivityImpact", false),

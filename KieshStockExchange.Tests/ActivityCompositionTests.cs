@@ -119,6 +119,34 @@ public class ActivityCompositionTests
 
     #endregion
 
+    #region CompositionSizeMult
+
+    [Fact]
+    public void Size_Off_Or_Neutral_IsOne()
+    {
+        Assert.Equal(1.0, AiBotDecisionService.CompositionSizeMult(act: 3.0, k: 0.0, cap: 3.0)); // k=0 off
+        Assert.Equal(1.0, AiBotDecisionService.CompositionSizeMult(act: 1.0, k: 1.0, cap: 3.0)); // act=1 median
+    }
+
+    [Fact]
+    public void Size_HotBigger_QuietSmaller_Monotone()
+    {
+        var hot   = AiBotDecisionService.CompositionSizeMult(2.0, 1.0, 3.0);
+        var quiet = AiBotDecisionService.CompositionSizeMult(0.5, 1.0, 3.0);
+        Assert.True(hot > 1.0 && quiet < 1.0);
+        Assert.Equal(2.0, hot, precision: 12);
+        Assert.Equal(0.5, quiet, precision: 12);
+    }
+
+    [Fact]
+    public void Size_ClampsBothWays()
+    {
+        Assert.Equal(3.0, AiBotDecisionService.CompositionSizeMult(10.0, 1.0, 3.0));       // hot cap
+        Assert.Equal(1.0 / 3.0, AiBotDecisionService.CompositionSizeMult(0.01, 1.0, 3.0)); // quiet floor
+    }
+
+    #endregion
+
     #region OpenTakerRampMult
 
     [Fact]

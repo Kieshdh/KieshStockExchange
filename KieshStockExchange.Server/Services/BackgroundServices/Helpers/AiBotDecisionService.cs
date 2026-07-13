@@ -185,6 +185,14 @@ internal sealed class AiBotDecisionService
     // breaks the stop→standing-wall invariant). Exponent 0 ⇒ seam fully skipped ⇒ byte-identical.
     private readonly double   _compTakerExp;
     private readonly double[] _compDistExp; // [close, mid, far]
+    // §composition SIZE coupling (prototype): order notional × clamp(act^k, 1/Cap, Cap) — hot names trade
+    // BIGGER, quiet names smaller (median-1 ⇒ typical minute unchanged). This is the COUNT-immune volume
+    // lever (the load-scaler pins order count; taker-share changes mix; size changes per-order volume =>
+    // the vol-CV gap). Runaway-safe on the shipped config: WSelf 0 severs the fills->S->size Hawkes loop,
+    // RecordFill excites on fill-COUNT not notional, the hard Cap bounds one order, and every downstream
+    // cash/room/position/depth clamp truncates to real capacity (CK-safe, no naked flow). Exp 0 => off.
+    private readonly double _compSizeExp;
+    private readonly double _compSizeCap;
     // §open taker ramp (seam council 5/5): after a (re)start the fresh fleet re-values; a blackout only
     // STORES the imbalance (synchronized release at the lift edge) while a ramp bleeds it out — taker share
     // × clamp((uptime − stagger(sid))/Ramp, 0, 1). Per-stock staggered onset kills the synchronized-kickoff
@@ -403,6 +411,7 @@ internal sealed class AiBotDecisionService
         bool activityEnabled = false, double activityGamma = 1.0,
         double compTakerExp = 0.0, double compDistExpClose = 0.0,
         double compDistExpMid = 0.0, double compDistExpFar = 0.0,
+        double compSizeExp = 0.0, double compSizeCap = 3.0,
         double openRampMin = 0.0, double openRampStaggerMin = 0.0,
         bool rangeActivityImpact = false, decimal rangeMaxSlippage = 0.02m,
         decimal fatImpactProb = 0m,
@@ -572,6 +581,8 @@ internal sealed class AiBotDecisionService
         _activityGamma      = Math.Max(0.0, activityGamma);
         _compTakerExp       = Math.Max(0.0, compTakerExp);
         _compDistExp        = new[] { Math.Max(0.0, compDistExpClose), Math.Max(0.0, compDistExpMid), Math.Max(0.0, compDistExpFar) };
+        _compSizeExp        = Math.Max(0.0, compSizeExp);
+        _compSizeCap        = Math.Max(1.0, compSizeCap);
         _openRampMin        = Math.Max(0.0, openRampMin);
         _openRampStaggerMin = Math.Max(0.0, openRampStaggerMin);
         _rangeActivityImpact = rangeActivityImpact;
@@ -1936,6 +1947,12 @@ internal sealed class AiBotDecisionService
                 tradePrc *= _blockTradeMultiple;
             if (tradePrc <= 0m) return 0;
             rawTrade = tradePrc * portfolio;
+            // §composition SIZE: hot names trade bigger, quiet smaller (median-1, clamped). NO RNG draw
+            // (pure multiply on the cached activity field); MM exempt (its depth is the liquidity floor).
+            // Downstream clamps keep it CK-safe. Exp 0 / off ⇒ skipped ⇒ byte-identical.
+            if (_activityEnabled && _compSizeExp > 0.0 && user.Strategy != AiStrategy.MarketMaker)
+                rawTrade *= (decimal)CompositionSizeMult(
+                    _activity.CompositionActivity(stockId), _compSizeExp, _compSizeCap);
         }
 
         var marketPrice = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);
@@ -2830,6 +2847,18 @@ internal sealed class AiBotDecisionService
         if (act < 1.0 && isTaker)
             return (double)draw < 1.0 - Math.Pow(act, k) ? -1 : 0;
         return 0;
+    }
+
+    /// <summary>
+    /// §composition SIZE multiplier, pure core: clamp(act^k, 1/cap, cap). Median-1 (act≈1 ⇒ 1); hot names
+    /// (act&gt;1) size up, quiet (act&lt;1) size down; the symmetric [1/cap, cap] clamp bounds one order both
+    /// ways. k≤0 ⇒ 1 (off).
+    /// </summary>
+    internal static double CompositionSizeMult(double act, double k, double cap)
+    {
+        if (k <= 0.0) return 1.0;
+        var c = Math.Max(1.0, cap);
+        return Math.Clamp(Math.Pow(act, k), 1.0 / c, c);
     }
 
     private const int OpenRampSalt = unchecked((int)0xA11C0FEE);
