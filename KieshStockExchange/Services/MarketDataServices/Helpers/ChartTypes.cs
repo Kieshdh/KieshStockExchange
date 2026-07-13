@@ -111,6 +111,11 @@ public readonly record struct FillMarker(DateTime AtTime, decimal Price, bool Is
 public readonly record struct PositionLine(
     decimal AvgPrice, decimal Quantity, decimal UnrealizedPnl, double UnrealizedPct);
 
+// §depth-overlay: one resting-liquidity level for the order-book depth heatmap. Price maps through the
+// chart's Y transform; Quantity drives the horizontal bar length (normalized against the snapshot's
+// largest level). IsBid picks the green (bid) vs red (ask) tint. Built by the VM from the live book feed.
+public readonly record struct DepthLevel(decimal Price, decimal Quantity, bool IsBid);
+
 // §F2: a fired trigger's activation point, drawn as a blue directional arrow at (AtTime, Price).
 // Price is the trigger level (Order.StopPrice). Distinct from FillMarker, which sits at the *fill*
 // price — for a stop-market the two differ, conveying "crossed here" vs "filled here". IsBuy → up

@@ -277,6 +277,10 @@ public partial class ChartView : ContentView
         // §market-mood: feed the accumulated Fear/Greed series + pane visibility.
         _drawable.ShowMoodPane = _vm.ShowMoodPane;
         _drawable.MoodSeries = _vm.MoodSeries.ToArray();
+        // §depth-overlay: order-book resting-liquidity heatmap (levels are reassigned wholesale, so the
+        // VM's list reference is a stable snapshot for the paint).
+        _drawable.DepthLevels = _vm.DepthLevels;
+        _drawable.ShowDepth = _vm.ShowDepth;
         _drawable.Viewport = _vm.GetViewport();
         _drawable.YPaddingPercent = _vm.YPaddingPercent;
         _drawable.XPaddingPercent = _vm.XPaddingPercent;

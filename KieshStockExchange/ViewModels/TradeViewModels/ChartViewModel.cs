@@ -16,6 +16,9 @@ using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Storage;
 using System.Text.Json;
+// §depth-overlay: alias the engine namespace so its OrderBookSnapshot/DepthLevel don't collide with the
+// chart's own DepthLevel record (MarketDataServices.Helpers) imported above.
+using MEngine = KieshStockExchange.Services.MarketEngineServices;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -179,6 +182,69 @@ public partial class ChartViewModel : StockAwareViewModel
         }
         if (MainThread.IsMainThread) Apply();
         else MainThread.BeginInvokeOnMainThread(Apply);
+    }
+
+    // §depth-overlay: order-book resting-liquidity toggle (on/off), persisted. When on, the VM mirrors the
+    // live book feed's levels for the selected stock+currency into DepthLevels for the drawable's heatmap.
+    private const string DepthOverlayPrefKey = "chart_depth_overlay";
+
+    [ObservableProperty] private bool _showDepth = Preferences.Default.Get(DepthOverlayPrefKey, false);
+
+    public string DepthLabel => ShowDepth ? "Depth ◨" : "Depth ▢";
+
+    partial void OnShowDepthChanged(bool value)
+    {
+        Preferences.Default.Set(DepthOverlayPrefKey, value);
+        OnPropertyChanged(nameof(DepthLabel));
+        // Seed from the feed cache when switched on; drop the levels when off so the drawable clears.
+        if (value) RefreshDepthLevels();
+        else _depthLevels = Array.Empty<DepthLevel>();
+        RequestRedraw();
+    }
+
+    [RelayCommand]
+    private void ToggleDepth() => ShowDepth = !ShowDepth;
+
+    // Latest resting-liquidity levels mirrored from the book feed for the selected stock+currency.
+    // Reassigned (never mutated in place) so the drawable's snapshot stays consistent mid-paint.
+    private IReadOnlyList<DepthLevel> _depthLevels = Array.Empty<DepthLevel>();
+    public IReadOnlyList<DepthLevel> DepthLevels => _depthLevels;
+
+    // Cache-first seed of the depth overlay for the current selection; HTTP-fetches when nothing is cached
+    // yet (that fetch raises SnapshotChanged → OnDepthSnapshot). No-op when the overlay is off / no stock.
+    private void RefreshDepthLevels()
+    {
+        _depthLevels = Array.Empty<DepthLevel>();
+        if (!ShowDepth || !Selected.HasSelectedStock) return;
+
+        var sid = Selected.StockId!.Value;
+        var cached = _orderBook.TryGetCached(sid, Selected.Currency);
+        if (cached is not null) ApplyDepthSnapshot(cached);
+        else _ = _orderBook.GetSnapshotAsync(sid, Selected.Currency);
+    }
+
+    // Feed push handler — mirror the book snapshot into DepthLevels. Filters to the selected key and skips
+    // work entirely while the overlay is off. Marshals to the UI thread (the redraw touches shared state).
+    private void OnDepthSnapshot(object? sender, MEngine.OrderBookSnapshot snap)
+    {
+        if (!ShowDepth) return;
+        if (snap.StockId != (Selected.StockId ?? 0) || snap.Currency != Selected.Currency) return;
+
+        if (MainThread.IsMainThread) ApplyDepthSnapshot(snap);
+        else MainThread.BeginInvokeOnMainThread(() => ApplyDepthSnapshot(snap));
+    }
+
+    // Flatten the snapshot's bid/ask levels into chart DepthLevels (raw resting quantity per level; the
+    // drawable normalizes to the max). IsBid drives the green/red tint. Rebuilt as a fresh list each tick.
+    private void ApplyDepthSnapshot(MEngine.OrderBookSnapshot snap)
+    {
+        if (snap.StockId != (Selected.StockId ?? 0) || snap.Currency != Selected.Currency) return;
+
+        var levels = new List<DepthLevel>(snap.Bids.Count + snap.Asks.Count);
+        foreach (var b in snap.Bids) levels.Add(new DepthLevel(b.Price, b.Quantity, IsBid: true));
+        foreach (var a in snap.Asks) levels.Add(new DepthLevel(a.Price, a.Quantity, IsBid: false));
+        _depthLevels = levels;
+        RequestRedraw();
     }
 
     // Y-axis price scale (toolbar toggle: Linear -> Log -> Percent), persisted.
@@ -402,6 +468,7 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly ITransactionService _transactions;
     private readonly IUserSessionService _session;
     private readonly IMarketMoodService _mood;
+    private readonly IOrderBookFeed _orderBook;
 
     // §F7: one-shot viewport restore. Seeded from the session at construction and consumed once on the
     // first candle load so a later stock switch still snaps to live instead of re-applying a stale view.
@@ -416,7 +483,7 @@ public partial class ChartViewModel : StockAwareViewModel
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
         IOrderCacheService orderCache, IAuthService auth, IOrderEditService editService,
         ISelectedStockService selected, INotificationService notification, ITransactionService transactions,
-        IUserSessionService session, IMarketMoodService mood)
+        IUserSessionService session, IMarketMoodService mood, IOrderBookFeed orderBook)
         : base(selected, notification, logger)
     {
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
@@ -427,6 +494,7 @@ public partial class ChartViewModel : StockAwareViewModel
         _transactions = transactions ?? throw new ArgumentNullException(nameof(transactions));
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _mood = mood ?? throw new ArgumentNullException(nameof(mood));
+        _orderBook = orderBook ?? throw new ArgumentNullException(nameof(orderBook));
 
         // §F7: restore the saved resolution + viewport. Seed the resolution before InitializeSelection
         // kicks off the first stream so it loads at the remembered resolution; the viewport (count /
@@ -455,6 +523,8 @@ public partial class ChartViewModel : StockAwareViewModel
         _orderCache.OrdersChanged += OnOrdersChanged;
         // Fill markers track the user's transaction history (refreshed elsewhere too).
         _transactions.TransactionsChanged += OnTransactionsChanged;
+        // §depth-overlay: mirror the live order-book feed into the depth heatmap (no-op while toggled off).
+        _orderBook.SnapshotChanged += OnDepthSnapshot;
 
         InitializeSelection();
     }
@@ -691,6 +761,8 @@ public partial class ChartViewModel : StockAwareViewModel
         LoadDrawingsForSelected();
         // §market-mood: restart the mood accumulation for the new stock (no-op when the pane is off).
         RestartMoodPoll();
+        // §depth-overlay: reseed the depth heatmap for the new stock (no-op when the overlay is off).
+        RefreshDepthLevels();
         // Best-effort background pull — a transient transport fault (cancel/disconnect under load)
         // is non-fatal (fills also arrive via TransactionsChanged) and must not fault the
         // unobserved-task net. Genuine exceptions still propagate.
@@ -788,6 +860,7 @@ public partial class ChartViewModel : StockAwareViewModel
             if (moodPrev is not null) { try { moodPrev.Cancel(); } catch { } moodPrev.Dispose(); }
             _orderCache.OrdersChanged -= OnOrdersChanged;
             _transactions.TransactionsChanged -= OnTransactionsChanged;
+            _orderBook.SnapshotChanged -= OnDepthSnapshot;   // §depth-overlay
         }
         base.Dispose(disposing);
     }

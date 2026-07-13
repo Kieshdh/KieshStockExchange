@@ -132,6 +132,13 @@ public sealed class CandleChartDrawable : IDrawable
     public IReadOnlyList<(DateTime Time, double Value)> MoodSeries { get; set; } = Array.Empty<(DateTime, double)>();
     public Color MoodLineColor = Color.FromArgb("#B39DDB"); // soft violet, distinct from candle/volume palette
 
+    // §depth-overlay: live order-book resting liquidity, drawn as a horizontal histogram anchored at the
+    // plot's right edge — each level a thin bar at Y(price) whose length ∝ its quantity (normalized to the
+    // snapshot's largest level). Bids paint green / asks red at low alpha so candles stay readable. Off by
+    // default; the VM mirrors the book feed's levels here and toggles ShowDepth from the toolbar.
+    public bool ShowDepth { get; set; } = false;
+    public IReadOnlyList<DepthLevel> DepthLevels { get; set; } = Array.Empty<DepthLevel>();
+
     public float AxisFont = 10f;
     public float PriceTagFont = 10f;
 
@@ -321,6 +328,10 @@ public sealed class CandleChartDrawable : IDrawable
         // §market-mood: the Fear/Greed sub-pane, plotted against the same X() time transform as the candles.
         if (moodRect.Height > 0)
             DrawMood(canvas, moodRect, X, tMin, tMax);
+
+        // §depth-overlay: resting-liquidity heatmap in the right portion of the price plot.
+        if (ShowDepth)
+            DrawDepth(canvas, plot, Y);
 
         // Crosshair sits on top of everything else so it stays visible against candles.
         DrawCrosshair(canvas, plot, currency, X);
@@ -948,6 +959,44 @@ public sealed class CandleChartDrawable : IDrawable
             canvas.DrawString(label, new RectF(pill.X + 4, pill.Y, pill.Width - 6, pill.Height),
                 HorizontalAlignment.Left, VerticalAlignment.Center);
         }
+    }
+
+    /// <summary>
+    /// §depth-overlay: draw the live order-book resting liquidity as a horizontal histogram in the right
+    /// portion of the price plot. Each level is a thin bar at Y(price), anchored at the plot's right edge
+    /// and extending left by (level.Quantity / maxQuantity) × a fraction of the plot width. Bids paint
+    /// green, asks red, both at low alpha so the candles underneath stay legible. Levels whose price is
+    /// outside the visible Y range are skipped (they'd land off-plot anyway).
+    /// </summary>
+    private void DrawDepth(ICanvas canvas, RectF plot, Func<double, float> Y)
+    {
+        if (DepthLevels.Count == 0) return;
+
+        // Normalize against the largest level so the biggest bar spans MaxDepthBarFrac of the plot width
+        // and every other bar scales in proportion — a relative "where's the liquidity" read.
+        decimal maxQty = 0m;
+        for (int i = 0; i < DepthLevels.Count; i++)
+            if (DepthLevels[i].Quantity > maxQty) maxQty = DepthLevels[i].Quantity;
+        if (maxQty <= 0m) return;
+
+        const float MaxDepthBarFrac = 0.30f;  // biggest bar reaches 30% of the plot width in from the right
+        const float BarHalfH = 1.5f;          // half the bar thickness (px)
+        float maxW = plot.Width * MaxDepthBarFrac;
+
+        canvas.SaveState();
+        for (int i = 0; i < DepthLevels.Count; i++)
+        {
+            var lvl = DepthLevels[i];
+            float y = Y((double)lvl.Price);
+            if (y < plot.Top || y > plot.Bottom) continue;  // off-screen level
+
+            float w = (float)((double)(lvl.Quantity / maxQty) * maxW);
+            if (w < 1f) w = 1f;
+            // Low alpha keeps price legible; bids green, asks red (Binance/TradingView convention).
+            canvas.FillColor = (lvl.IsBid ? Bull : Bear).WithAlpha(0.22f);
+            canvas.FillRectangle(plot.Right - w, y - BarHalfH, w, BarHalfH * 2f);
+        }
+        canvas.RestoreState();
     }
 
     /// <summary>
