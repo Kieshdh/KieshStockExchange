@@ -49,6 +49,14 @@ public sealed class CandleChartDrawable : IDrawable
     public IReadOnlyList<PriceMarker> Markers { get; set; } = Array.Empty<PriceMarker>();
     public Guid? DraggingMarkerId { get; set; }
 
+    // User drawings (horizontal lines + trendlines), anchored in data space so they hold their
+    // place through pan/zoom. The currently-dragged drawing (if any) paints with extra emphasis.
+    public IReadOnlyList<DrawingObject> Drawings { get; set; } = Array.Empty<DrawingObject>();
+    public Guid? DraggingDrawingId { get; set; }
+    // A calm blue distinct from the green/red order lines and the goldenrod markers. Theme-
+    // overridable via a ChartDrawing resource; the default is intentionally visible everywhere.
+    public Color DrawingColor = Color.FromArgb("#4C9AFF");
+
     // Set by ChartView while the user drags an open-order line. The line whose
     // OrderId matches DraggingOrderId is drawn at DraggingOrderPrice instead of
     // its stored price so the user sees the level follow the cursor live.
@@ -278,6 +286,7 @@ public sealed class CandleChartDrawable : IDrawable
         DrawTriggerMarkers(canvas, plot, X, Y);
         DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
         DrawMarkers(canvas, plot, Y, currency);
+        DrawDrawings(canvas, plot, X, Y, currency);
 
         // Border around the plot area.
         canvas.StrokeColor = Grid;
@@ -591,6 +600,145 @@ public sealed class CandleChartDrawable : IDrawable
             return (m, closeHit);
         }
         return null;
+    }
+
+    // Drawing geometry — shared by the render pass and the hit-test so the visible shape and its
+    // clickable zones never drift apart.
+    const float DrawHandleR = 4f;    // endpoint drag-handle radius
+    const float DrawHitTol = 5f;     // extra pixel slack when hit-testing a line/handle
+    const float DrawCloseHalf = 7f;  // half-size of the ✕ remove glyph
+
+    /// <summary>
+    /// Draw the user's horizontal lines + trendlines. HLine spans the plot at its price with a
+    /// right-gutter price tag; Trend is a segment with a draggable handle at each end. Both carry a
+    /// ✕ remove glyph. Anchored in data space via the shared X/Y transforms, so they hold position
+    /// through pan/zoom. Off-screen shapes are clipped by the same range checks the candles use.
+    /// </summary>
+    private void DrawDrawings(ICanvas canvas, RectF plot, Func<DateTime, float> X, Func<double, float> Y, CurrencyType cur)
+    {
+        if (Drawings.Count == 0) return;
+        canvas.SaveState();
+        for (int i = 0; i < Drawings.Count; i++)
+        {
+            var d = Drawings[i];
+            bool active = DraggingDrawingId == d.Id;
+            canvas.StrokeColor = DrawingColor;
+            canvas.StrokeSize = active ? 2f : 1.5f;
+
+            if (d.Kind == DrawTool.HLine)
+            {
+                float y = Y((double)d.P1);
+                if (y < plot.Top || y > plot.Bottom) continue;
+                canvas.DrawLine(plot.Left, y, plot.Right, y);
+
+                // Right-gutter price tag, matching the marker/order-line convention.
+                var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
+                canvas.FillColor = DrawingColor;
+                canvas.FillRectangle(tagRect);
+                canvas.FontColor = Colors.White;
+                canvas.FontSize = PriceTagFont;
+                canvas.DrawString(CurrencyHelper.Format(d.P1, cur),
+                    new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+
+                DrawCloseGlyph(canvas, plot.Left + 10f, y);
+            }
+            else // Trend
+            {
+                float x1 = X(d.T1), y1 = Y((double)d.P1);
+                float x2 = X(d.T2), y2 = Y((double)d.P2);
+                canvas.DrawLine(x1, y1, x2, y2);
+                DrawHandle(canvas, x1, y1);
+                DrawHandle(canvas, x2, y2);
+                DrawCloseGlyph(canvas, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f);
+            }
+        }
+        canvas.RestoreState();
+    }
+
+    private void DrawHandle(ICanvas canvas, float x, float y)
+    {
+        canvas.FillColor = DrawingColor;
+        canvas.FillCircle(x, y, DrawHandleR);
+        canvas.StrokeColor = OutlineForBackground();
+        canvas.StrokeSize = 1f;
+        canvas.DrawCircle(x, y, DrawHandleR);
+    }
+
+    private void DrawCloseGlyph(ICanvas canvas, float cx, float cy)
+    {
+        var r = new RectF(cx - DrawCloseHalf, cy - DrawCloseHalf, DrawCloseHalf * 2, DrawCloseHalf * 2);
+        canvas.FillColor = DrawingColor;
+        canvas.FillRectangle(r);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = PriceTagFont;
+        canvas.DrawString("✕", r, HorizontalAlignment.Center, VerticalAlignment.Center);
+    }
+
+    // Forward data->pixel transforms rebuilt from the last paint's cached geometry, so hit-testing
+    // maps a drawing's data anchors back to the exact pixels the render pass used. Y routes through
+    // PriceToFrac so the log scale is honoured just like the axes.
+    private float PriceToPixelY(decimal price)
+        => (float)(_lastPlot.Bottom - PriceToFrac((double)price, _lastYMin, _lastYMax) * _lastPlot.Height);
+
+    private float TimeToPixelX(DateTime t)
+    {
+        if (_lastTMax <= _lastTMin) return _lastPlot.Left;
+        double frac = (t - _lastTMin).TotalSeconds / (_lastTMax - _lastTMin).TotalSeconds;
+        return (float)(_lastPlot.Left + frac * _lastPlot.Width);
+    }
+
+    /// <summary>
+    /// Returns the drawing hit by the pointer and which part (an endpoint, the body, or the ✕
+    /// remove glyph). Searches topmost-first so the most recently added drawing wins overlaps.
+    /// </summary>
+    public (DrawingObject Drawing, DrawingHitPart Part)? HitDrawing(PointF p)
+    {
+        if (Drawings.Count == 0) return null;
+        if (_lastPlot.Width <= 0 || _lastYMax <= _lastYMin) return null;
+
+        for (int i = Drawings.Count - 1; i >= 0; i--)
+        {
+            var d = Drawings[i];
+            if (d.Kind == DrawTool.HLine)
+            {
+                float y = PriceToPixelY(d.P1);
+                if (y < _lastPlot.Top || y > _lastPlot.Bottom) continue;
+                if (WithinBox(p, _lastPlot.Left + 10f, y, DrawCloseHalf)) return (d, DrawingHitPart.Close);
+                if (p.X >= _lastPlot.Left && p.X <= _lastPlot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
+                    return (d, DrawingHitPart.Body);
+            }
+            else
+            {
+                float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
+                float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
+                if (WithinBox(p, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f, DrawCloseHalf))
+                    return (d, DrawingHitPart.Close);
+                if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                if (PointSegDist(p.X, p.Y, x1, y1, x2, y2) <= DrawHitTol
+                    && p.X >= _lastPlot.Left - 2 && p.X <= _lastPlot.Right + 2
+                    && p.Y >= _lastPlot.Top - 2 && p.Y <= _lastPlot.Bottom + 2)
+                    return (d, DrawingHitPart.Body);
+            }
+        }
+        return null;
+    }
+
+    private static bool WithinBox(PointF p, float cx, float cy, float half)
+        => Math.Abs(p.X - cx) <= half && Math.Abs(p.Y - cy) <= half;
+
+    private static float Dist(float ax, float ay, float bx, float by)
+        => (float)Math.Sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
+
+    // Shortest distance from point (px,py) to the segment (ax,ay)-(bx,by).
+    private static float PointSegDist(float px, float py, float ax, float ay, float bx, float by)
+    {
+        float dx = bx - ax, dy = by - ay;
+        float len2 = dx * dx + dy * dy;
+        if (len2 <= 1e-6f) return Dist(px, py, ax, ay);
+        float t = Math.Clamp(((px - ax) * dx + (py - ay) * dy) / len2, 0f, 1f);
+        return Dist(px, py, ax + t * dx, ay + t * dy);
     }
 
     /// <summary>

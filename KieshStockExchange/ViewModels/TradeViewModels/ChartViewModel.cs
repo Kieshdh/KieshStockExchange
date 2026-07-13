@@ -15,6 +15,7 @@ using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Storage;
+using System.Text.Json;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -132,6 +133,32 @@ public partial class ChartViewModel : StockAwareViewModel
     [RelayCommand]
     private void CycleScaleMode()
         => ScaleMode = (PriceScaleMode)(((int)ScaleMode + 1) % 3);
+
+    // Drawing tool (toolbar cycle: None -> Horizontal line -> Trendline). A transient UI mode —
+    // not persisted; only the drawings it produces are. While a tool is active a chart press
+    // places/starts a drawing instead of free-panning (handled in ChartView).
+    [ObservableProperty] private DrawTool _drawTool = DrawTool.None;
+
+    public string DrawToolLabel => DrawTool switch
+    {
+        DrawTool.HLine => "Draw ─",
+        DrawTool.Trend => "Draw ╱",
+        _              => "Draw",
+    };
+
+    partial void OnDrawToolChanged(DrawTool value) => OnPropertyChanged(nameof(DrawToolLabel));
+
+    [RelayCommand]
+    private void CycleDrawTool()
+        => DrawTool = (DrawTool)(((int)DrawTool + 1) % 3);
+
+    // User drawings for the selected stock, anchored in (time, price) so they survive pan/zoom.
+    // Persisted to Preferences per stock+currency (see PersistDrawings); reloaded on stock change.
+    public ObservableCollection<DrawingObject> Drawings { get; } = new();
+
+    private const string DrawingsPrefKeyBase = "chart_drawings_";
+    // Preferences key for the currently loaded stock+currency, or null when nothing is selected.
+    private string? _drawingsKey;
 
     // Session reference = the open of the first buffered candle on the latest candle's UTC day.
     // Drives the price-axis % tag ("today's" change). Approximate when the buffer starts mid-day.
@@ -344,6 +371,7 @@ public partial class ChartViewModel : StockAwareViewModel
         }
 
         Markers.CollectionChanged += (_, __) => RequestRedraw();
+        Drawings.CollectionChanged += (_, __) => RequestRedraw();
         OpenOrderLines.CollectionChanged += (_, __) => RequestRedraw();
         FillMarkers.CollectionChanged += (_, __) => RequestRedraw();
         TriggerMarkers.CollectionChanged += (_, __) => RequestRedraw();
@@ -585,6 +613,8 @@ public partial class ChartViewModel : StockAwareViewModel
         SyncFillMarkers();
         // Rebuild the position line's (qty, avg) basis for the new stock from the same tape.
         RefreshPositionBasis();
+        // Load this stock's saved drawings (horizontal lines + trendlines).
+        LoadDrawingsForSelected();
         // Best-effort background pull — a transient transport fault (cancel/disconnect under load)
         // is non-fatal (fills also arrive via TransactionsChanged) and must not fault the
         // unobserved-task net. Genuine exceptions still propagate.
@@ -822,6 +852,61 @@ public partial class ChartViewModel : StockAwareViewModel
             RequestRedraw();
             return;
         }
+    }
+
+    // --- Drawings (horizontal lines + trendlines) ------------------------------------------------
+
+    /// <summary>Adds a drawing and persists the set. Called by ChartView when a tool places one.</summary>
+    public void AddDrawing(DrawingObject d)
+    {
+        Drawings.Add(d);
+        PersistDrawings();
+    }
+
+    /// <summary>Removes a drawing by id (✕ glyph or right-click) and persists.</summary>
+    public void RemoveDrawing(Guid id)
+    {
+        for (int i = Drawings.Count - 1; i >= 0; i--)
+            if (Drawings[i].Id == id) { Drawings.RemoveAt(i); break; }
+        PersistDrawings();
+    }
+
+    /// <summary>
+    /// Replaces a drawing in place during a drag (repositioning an endpoint or the whole shape).
+    /// The indexer set raises CollectionChanged → RequestRedraw. Persistence is deferred to
+    /// drag-release (ChartView calls PersistDrawings) so a fast drag doesn't hammer Preferences.
+    /// </summary>
+    public void UpdateDrawing(DrawingObject d)
+    {
+        for (int i = 0; i < Drawings.Count; i++)
+            if (Drawings[i].Id == d.Id) { Drawings[i] = d; return; }
+    }
+
+    /// <summary>Serializes the current drawings to Preferences under the selected stock's key.</summary>
+    public void PersistDrawings()
+    {
+        if (_drawingsKey is null) return;
+        try { Preferences.Default.Set(_drawingsKey, JsonSerializer.Serialize(Drawings.ToList())); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Saving chart drawings failed."); }
+    }
+
+    // Clear + reload the drawing set for the currently selected stock+currency. The key folds in
+    // the currency so USD/EUR price levels don't bleed across each other on the same stock.
+    private void LoadDrawingsForSelected()
+    {
+        Drawings.Clear();
+        if (!Selected.HasSelectedStock) { _drawingsKey = null; return; }
+
+        _drawingsKey = $"{DrawingsPrefKeyBase}{Selected.StockId!.Value}_{Selected.Currency}";
+        var json = Preferences.Default.Get(_drawingsKey, string.Empty);
+        if (string.IsNullOrEmpty(json)) return;
+        try
+        {
+            var saved = JsonSerializer.Deserialize<List<DrawingObject>>(json);
+            if (saved is not null)
+                foreach (var d in saved) Drawings.Add(d);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Loading chart drawings failed."); }
     }
 
     /// <summary>

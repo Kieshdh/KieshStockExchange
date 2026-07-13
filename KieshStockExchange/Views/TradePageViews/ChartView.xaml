@@ -130,6 +130,26 @@
                 <Button Text="{Binding ScaleModeLabel}"
                         Style="{StaticResource ChartResolutionButton.Unselected}"
                         Command="{Binding CycleScaleModeCommand}" />
+
+                <!-- Drawing-tool toggle (cycles None -> Horizontal line -> Trendline) -->
+                <Button Text="{Binding DrawToolLabel}"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding CycleDrawToolCommand}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding DrawTool}"
+                                     Value="{x:Static helpers:DrawTool.HLine}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding DrawTool}"
+                                     Value="{x:Static helpers:DrawTool.Trend}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
             </HorizontalStackLayout>
 
             <!-- Spacer -->

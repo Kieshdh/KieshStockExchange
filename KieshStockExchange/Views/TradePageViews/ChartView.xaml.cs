@@ -20,7 +20,7 @@ public partial class ChartView : ContentView
     // Active platform-pointer drag (Windows-side). Cross-platform so the
     // (cross-platform) PanGestureRecognizer can suppress its updates while a
     // marker / Y-axis / free-pan drag is in flight.
-    private enum DragMode { None, Marker, OpenOrder, YAxis, FreePan, Measure }
+    private enum DragMode { None, Marker, OpenOrder, YAxis, FreePan, Measure, Drawing }
     private DragMode _dragMode = DragMode.None;
 
     // Inertial-pan state. During a free-pan drag we smooth a velocity (candles/sec)
@@ -38,6 +38,19 @@ public partial class ChartView : ContentView
 
     // Marker-drag state — set when _dragMode == Marker.
     private Guid? _draggingMarkerId;
+
+    // Drawing-drag state — set when _dragMode == Drawing. Which part is being moved (endpoint vs
+    // whole shape), the drawing snapshot + data-space grab point at press (so a body move applies
+    // an absolute delta), whether this drag created a brand-new drawing, and whether the pointer
+    // actually travelled (a click that never moved leaves a degenerate trendline we discard).
+    private Guid? _draggingDrawingId;
+    private DrawingHitPart _draggingDrawingPart;
+    private DrawingObject _drawDragOrig;
+    private DateTime _drawDragStartTime;
+    private decimal _drawDragStartPrice;
+    private PointF _drawDragStartPixel;
+    private bool _drawDragIsNew;
+    private bool _drawDragMoved;
 
     // Open-order-drag state — set when _dragMode == OpenOrder.
     private int? _draggingOrderId;
@@ -212,6 +225,7 @@ public partial class ChartView : ContentView
         if (TryGetColor("ChartPriceLineDown", out var lineDown)) _drawable.PriceLineDown = lineDown;
         if (TryGetColor("ChartCrosshair",     out var ch))       _drawable.CrosshairColor = ch;
         if (TryGetColor("ChartMarker",        out var marker))   _drawable.MarkerColor   = marker;
+        if (TryGetColor("ChartDrawing",       out var drawing))  _drawable.DrawingColor  = drawing;
         if (TryGetColor("ChartTrigger",       out var trig))     _drawable.TriggerColor  = trig;   // §F2
         if (TryGetColor("ChartPositionLine",  out var posLine))  _drawable.PositionLineColor = posLine;
     }
@@ -272,6 +286,7 @@ public partial class ChartView : ContentView
         // ObservableCollection enumeration with concurrent edits would still be
         // brittle if a future feature mutates from a different thread.
         _drawable.Markers = _vm.Markers.ToArray();
+        _drawable.Drawings = _vm.Drawings.ToArray();
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
         _drawable.OpenOrderSellColor = ResolveColor(_vm.SellOrderColorOption.Key);
@@ -445,6 +460,47 @@ public partial class ChartView : ContentView
             return;
         }
 
+        // Priority 0.5: an existing drawing (horizontal line / trendline). Grabbable regardless of
+        // the active tool so the user can always move or remove one. A ✕ hit removes it outright.
+        var drawHit = _drawable.HitDrawing(p);
+        if (drawHit is { } dh)
+        {
+            if (dh.Part == DrawingHitPart.Close)
+            {
+                _vm.RemoveDrawing(dh.Drawing.Id);
+                e.Handled = true;
+                return;
+            }
+            BeginDrawingDrag(dh.Drawing, dh.Part, p, isNew: false);
+            (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        // Priority 0.6: with a draw tool active, a press in the chart body places a new drawing
+        // instead of free-panning. HLine commits on the single click; Trend anchors here and drags
+        // its second endpoint to the release point.
+        if (_vm.DrawTool != DrawTool.None && _drawable.IsInChartArea(p)
+            && _drawable.PixelToPrice(p.Y) is decimal newPrice && newPrice > 0m)
+        {
+            var t = _drawable.PixelToTime(p.X);
+            var id = Guid.NewGuid();
+            if (_vm.DrawTool == DrawTool.HLine)
+            {
+                _vm.AddDrawing(new DrawingObject(id, DrawTool.HLine, t, newPrice, t, newPrice));
+                e.Handled = true;
+                return;
+            }
+            var trend = new DrawingObject(id, DrawTool.Trend, t, newPrice, t, newPrice);
+            _vm.AddDrawing(trend);
+            BeginDrawingDrag(trend, DrawingHitPart.Anchor2, p, isNew: true);
+            (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
+
         // Priority 1: marker line — drags only the marker.
         var markerHit = _drawable.HitMarker(p);
         if (markerHit is not null)
@@ -584,6 +640,10 @@ public partial class ChartView : ContentView
                     _vm.UpdateMarkerPrice(mid, newPrice);
                 break;
 
+            case DragMode.Drawing:
+                DragDrawing(p);
+                break;
+
             case DragMode.OpenOrder:
                 if (_draggingOrderId is int oid &&
                     _drawable.PixelToPrice(p.Y) is decimal orderPrice && orderPrice > 0m)
@@ -704,6 +764,18 @@ public partial class ChartView : ContentView
             Chart.Invalidate();
         }
 
+        if (_dragMode == DragMode.Drawing)
+        {
+            // A tool-placed trendline the user clicked without dragging is a degenerate dot — drop
+            // it rather than leave an invisible zero-length line on the chart.
+            if (_drawDragIsNew && !_drawDragMoved && _draggingDrawingId is Guid nid)
+                _vm?.RemoveDrawing(nid);
+            _vm?.PersistDrawings();
+            _draggingDrawingId = null;
+            _drawable.DraggingDrawingId = null;
+            Chart.Invalidate();
+        }
+
         if (_dragMode == DragMode.FreePan)
         {
             // Coast only on a genuine flick — a stale sample (paused before release)
@@ -734,18 +806,77 @@ public partial class ChartView : ContentView
         _drawable.DraggingOrderId = null;
         _drawable.DraggingOrderPrice = null;
         _drawable.Measure = default;
+        // An aborted new-drawing drag would otherwise leave a degenerate line behind.
+        if (_dragMode == DragMode.Drawing && _drawDragIsNew && _draggingDrawingId is Guid nid)
+            _vm?.RemoveDrawing(nid);
+        _draggingDrawingId = null;
+        _drawable.DraggingDrawingId = null;
         _dragMode = DragMode.None;
 
         Chart.Invalidate();
     }
 
+    // Seed the drawing-drag state from the grabbed drawing and the press point. The data-space grab
+    // point lets a whole-shape (body) move apply an absolute delta off the original anchors.
+    private void BeginDrawingDrag(DrawingObject d, DrawingHitPart part, PointF p, bool isNew)
+    {
+        _dragMode = DragMode.Drawing;
+        _draggingDrawingId = d.Id;
+        _draggingDrawingPart = part;
+        _drawDragOrig = d;
+        _drawDragStartTime = _drawable.PixelToTime(p.X);
+        _drawDragStartPrice = _drawable.PixelToPrice(p.Y) ?? d.P1;
+        _drawDragStartPixel = p;
+        _drawDragIsNew = isNew;
+        _drawDragMoved = false;
+        _drawable.DraggingDrawingId = d.Id;
+    }
+
+    // Reposition the drawing under the cursor: an endpoint follows the cursor directly; the body
+    // shifts by the data-space delta from the press. HLine is horizontal, so only price matters.
+    private void DragDrawing(PointF p)
+    {
+        if (_vm == null || _draggingDrawingId is not Guid id) return;
+        if (Math.Abs(p.X - _drawDragStartPixel.X) > OpenOrderDragThresholdPx
+            || Math.Abs(p.Y - _drawDragStartPixel.Y) > OpenOrderDragThresholdPx)
+            _drawDragMoved = true;
+
+        if (_drawable.PixelToPrice(p.Y) is not decimal price || price <= 0m) return;
+        var time = _drawable.PixelToTime(p.X);
+        var d = _drawDragOrig;
+
+        DrawingObject upd = _draggingDrawingPart switch
+        {
+            DrawingHitPart.Anchor1 => d with { T1 = time, P1 = price },
+            DrawingHitPart.Anchor2 => d with { T2 = time, P2 = price },
+            // Body: HLine just tracks the cursor price; Trend shifts both anchors by the delta.
+            _ when d.Kind == DrawTool.HLine => d with { P1 = price },
+            _ => ShiftTrend(d, time - _drawDragStartTime, price - _drawDragStartPrice),
+        };
+        upd = upd with { Id = id };
+        _vm.UpdateDrawing(upd);
+    }
+
+    private static DrawingObject ShiftTrend(DrawingObject d, TimeSpan dt, decimal dPrice)
+        => d with { T1 = d.T1 + dt, P1 = d.P1 + dPrice, T2 = d.T2 + dt, P2 = d.P2 + dPrice };
+
     private void OnPlatformRightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
     {
         if (_vm == null || sender is not Microsoft.UI.Xaml.UIElement el) return;
         var pos = e.GetPosition(el);
-        var price = _drawable.PixelToPrice((float)pos.Y);
-        if (price is decimal p && _vm.AddMarkerAtCommand.CanExecute(p))
-            _vm.AddMarkerAtCommand.Execute(p);
+        var p = new PointF((float)pos.X, (float)pos.Y);
+
+        // Right-click on a drawing removes it (before the marker-add path claims the click).
+        if (_drawable.HitDrawing(p) is { } dh)
+        {
+            _vm.RemoveDrawing(dh.Drawing.Id);
+            e.Handled = true;
+            return;
+        }
+
+        var price = _drawable.PixelToPrice(p.Y);
+        if (price is decimal mp && _vm.AddMarkerAtCommand.CanExecute(mp))
+            _vm.AddMarkerAtCommand.Execute(mp);
         e.Handled = true;
     }
 

@@ -35,6 +35,21 @@ public enum PriceScaleMode { Linear, Logarithmic, Percent }
 
 public enum MaKind { Sma, Ema }
 
+// Active chart drawing tool (toolbar cycle). None = normal pan/interact; HLine = one-click
+// horizontal line at a price; Trend = a click-drag two-anchor line segment. The tool is a
+// transient UI mode; the drawings it produces are what get persisted.
+public enum DrawTool { None, HLine, Trend }
+
+// Which part of a drawing a pointer hit — drives drag behaviour (move an endpoint vs the whole
+// shape) and the ✕-remove hit-zone.
+public enum DrawingHitPart { Body, Anchor1, Anchor2, Close }
+
+// A user drawing anchored in DATA space (time + price) so it survives pan/zoom through the same
+// X/Y transforms the candles use. HLine uses only P1 (spans the plot; T-anchors are ignored). A
+// Trend segment runs from (T1,P1) to (T2,P2). Id keys drag/remove and JSON-persists per stock.
+public readonly record struct DrawingObject(
+    Guid Id, DrawTool Kind, DateTime T1, decimal P1, DateTime T2, decimal P2);
+
 // User-facing color choice for an MA row. Key references a Color resource in
 // Resources/Styles/Colors.xaml; Name is the label shown in the settings picker.
 public readonly record struct MaColorOption(string Key, string Name)
