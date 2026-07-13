@@ -948,8 +948,13 @@ public partial class ChartViewModel : StockAwareViewModel
 
         // OffsetFromLatest=0 → latest candle's CloseTime sits at the right edge.
         // Negative offsets push the right edge into the future, exposing blank space.
-        var viewEnd = anchor + bucket - TimeSpan.FromTicks(bucket.Ticks * OffsetFromLatest);
-        var viewStart = viewEnd - TimeSpan.FromTicks(bucket.Ticks * Math.Max(1, VisibleCount));
+        var lastEdge = anchor + bucket - TimeSpan.FromTicks(bucket.Ticks * OffsetFromLatest);
+        // Right-edge whitespace (TradingView convention): keep a few empty buckets after
+        // the latest candle so the live bar breathes off the price axis instead of jamming
+        // into it. The visible candle count is preserved — the pad is added as blank space.
+        int rightPad = Math.Clamp(VisibleCount / 12, 2, 8);
+        var viewEnd = lastEdge + TimeSpan.FromTicks(bucket.Ticks * rightPad);
+        var viewStart = lastEdge - TimeSpan.FromTicks(bucket.Ticks * Math.Max(1, VisibleCount));
         return new ChartViewport(viewStart, viewEnd, bucket);
     }
 
