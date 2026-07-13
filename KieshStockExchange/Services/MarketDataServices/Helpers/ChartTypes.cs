@@ -88,6 +88,14 @@ public readonly record struct OpenOrderLine(
 // just above it — the active-trader "filled here" convention.
 public readonly record struct FillMarker(DateTime AtTime, decimal Price, bool IsBuy);
 
+// The user's open position in the shown stock+currency, drawn TradingView-style as a
+// solid horizontal line at the average entry price plus a floating P&L tag. Quantity is
+// signed (+ long, − short). UnrealizedPnl / UnrealizedPct are recomputed by the VM on each
+// live-price tick so the gutter tag ticks live: long P&L = (price − avg)·qty, short =
+// (avg − price)·|qty| (both fall out of (price − avg)·signedQty). No line when flat.
+public readonly record struct PositionLine(
+    decimal AvgPrice, decimal Quantity, decimal UnrealizedPnl, double UnrealizedPct);
+
 // §F2: a fired trigger's activation point, drawn as a blue directional arrow at (AtTime, Price).
 // Price is the trigger level (Order.StopPrice). Distinct from FillMarker, which sits at the *fill*
 // price — for a stop-market the two differ, conveying "crossed here" vs "filled here". IsBuy → up

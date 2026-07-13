@@ -253,6 +253,19 @@ public partial class ChartViewModel : StockAwareViewModel
     // lives in ClosedOrders; ActivatedAt carries the firing moment.
     public ObservableCollection<TriggerMarker> TriggerMarkers { get; } = new();
 
+    // The user's open position in the selected stock+currency, rendered as a solid line at the
+    // average entry price with a live unrealized-P&L tag. Null when flat. The (qty, avg) basis is
+    // reconstructed from the fill tape on stock/transaction change; the P&L is refreshed from the
+    // live price on every tick (see UpdatePositionLine). Plain property — UpdateDrawable pulls it
+    // each redraw, mirroring the CurrentPrice pattern.
+    public PositionLine? PositionLine { get; private set; }
+
+    // Cached weighted-average-cost basis for the selected stock+currency: signed net quantity
+    // (+ long / − short) and the current open lot's average entry price. Recomputed only when the
+    // fill tape or the selected stock changes, so a price tick just re-evaluates the P&L cheaply.
+    private int _posQty;
+    private decimal _posAvg;
+
     // User-configurable line colour per side. Defaults to ChartBull / ChartBear
     // (the Binance + TradingView convention) but selectable from the same palette
     // the MA color picker uses, surfaced in the chart settings overlay.
@@ -427,7 +440,14 @@ public partial class ChartViewModel : StockAwareViewModel
 
     private void OnTransactionsChanged(object? sender, EventArgs e)
     {
-        try { MainThread.BeginInvokeOnMainThread(SyncFillMarkers); }
+        try
+        {
+            MainThread.BeginInvokeOnMainThread(() =>
+            {
+                SyncFillMarkers();
+                RefreshPositionBasis(); // a new fill changes the qty/avg basis
+            });
+        }
         catch (Exception ex) { _logger.LogError(ex, "Failed to sync chart fill markers."); }
     }
 
@@ -475,6 +495,72 @@ public partial class ChartViewModel : StockAwareViewModel
         }
     }
 
+    /// <summary>
+    /// Reconstruct the (signed qty, average entry) basis for the selected stock+currency from the
+    /// user's fill tape, then refresh the position line. The Position model stores no average cost,
+    /// so we walk the tape oldest-first with the running weighted-average-cost method used by the
+    /// account P&L view: buys blend into the open lot, sells reduce it, and crossing through zero
+    /// rebases the average to the new trade price. Shorts are best-effort (mirrors the account view).
+    /// </summary>
+    private void RefreshPositionBasis()
+    {
+        int qty = 0;
+        decimal avg = 0m;
+        if (Selected.HasSelectedStock && _auth.CurrentUserId > 0)
+        {
+            var stockId = Selected.StockId!.Value;
+            var currency = Selected.Currency;
+            var userId = _auth.CurrentUserId;
+
+            // AllTransactions is newest-first; walk it in reverse so lots build oldest-first.
+            var tape = _transactions.AllTransactions;
+            for (int i = tape.Count - 1; i >= 0; i--)
+            {
+                var t = tape[i];
+                if (t.StockId != stockId || t.CurrencyType != currency) continue;
+                if (!t.InvolvesUser(userId)) continue;
+
+                int q = t.Quantity;
+                if (t.BuyerId == userId) // buy
+                {
+                    if (qty >= 0) { avg = (avg * qty + t.Price * q) / (qty + q); qty += q; }
+                    else { qty += q; if (qty > 0) avg = t.Price; } // covered the short and flipped long
+                }
+                else // sell
+                {
+                    if (qty <= 0) { int abs = -qty; avg = (avg * abs + t.Price * q) / (abs + q); qty -= q; }
+                    else { qty -= q; if (qty < 0) avg = t.Price; } // sold through the long and flipped short
+                }
+            }
+        }
+
+        _posQty = qty;
+        _posAvg = avg;
+        UpdatePositionLine();
+    }
+
+    /// <summary>
+    /// Rebuild <see cref="PositionLine"/> from the cached basis and the live price. Cheap enough to
+    /// call on every price tick. Long P&L = (price − avg)·qty; a short's negative qty makes the same
+    /// expression yield (avg − price)·|qty|. % is the return on the position's cost basis.
+    /// </summary>
+    private void UpdatePositionLine()
+    {
+        if (_posQty == 0 || _posAvg <= 0m)
+        {
+            if (PositionLine is not null) { PositionLine = null; RequestRedraw(); }
+            return;
+        }
+
+        var price = GetCurrentPrice() ?? _posAvg;
+        decimal pnl = (price - _posAvg) * _posQty;
+        decimal basis = _posAvg * Math.Abs(_posQty);
+        double pct = basis > 0m ? (double)(pnl / basis) * 100.0 : 0.0;
+
+        PositionLine = new PositionLine(_posAvg, _posQty, pnl, pct);
+        RequestRedraw();
+    }
+
     private void OnMaSeriesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.NewItems != null)
@@ -497,6 +583,8 @@ public partial class ChartViewModel : StockAwareViewModel
         // Render fills already cached for the new stock, then pull the latest in the background
         // (RefreshAsync raises TransactionsChanged → SyncFillMarkers when it completes).
         SyncFillMarkers();
+        // Rebuild the position line's (qty, avg) basis for the new stock from the same tape.
+        RefreshPositionBasis();
         // Best-effort background pull — a transient transport fault (cancel/disconnect under load)
         // is non-fatal (fills also arrive via TransactionsChanged) and must not fault the
         // unobserved-task net. Genuine exceptions still propagate.
@@ -524,6 +612,8 @@ public partial class ChartViewModel : StockAwareViewModel
         // so the server's authoritative closed candle replaces this on close and repeated ticks
         // replace it in place — no duplicates.
         TrySyncLiveCandle(stockId, currency, price, updatedAt);
+        // Re-evaluate the position's unrealized P&L against the new live price so the tag ticks live.
+        UpdatePositionLine();
         RequestRedraw();
         return Task.CompletedTask;
     }

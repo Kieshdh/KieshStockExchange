@@ -29,4 +29,8 @@
          fill triangles and the amber armed-trigger line. -->
     <Color x:Key="ChartTrigger">#3B82F6</Color>
 
+    <!-- Open-position average-entry line. Teal so it reads distinctly from the green/red order
+         lines and the blue trigger arrows; the attached P&L tag paints green/red by profit/loss. -->
+    <Color x:Key="ChartPositionLine">#26C6DA</Color>
+
 </ResourceDictionary>

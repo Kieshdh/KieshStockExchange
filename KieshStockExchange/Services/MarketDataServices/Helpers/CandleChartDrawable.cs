@@ -60,6 +60,11 @@ public sealed class CandleChartDrawable : IDrawable
     // the live-price line so the live tag stays the most prominent.
     public IReadOnlyList<OpenOrderLine> OpenOrderLines { get; set; } = Array.Empty<OpenOrderLine>();
 
+    // The user's open position in the visible stock+currency (null when flat), drawn as a
+    // solid line at the average entry price with a floating size + live-P&L tag. Distinct from
+    // the dashed order/live lines so "my position" reads as its own thing.
+    public PositionLine? Position { get; set; }
+
     // Current live price; when set, drawn as a horizontal price line and tag in the right gutter.
     public decimal? CurrentPrice { get; set; }
     // Session reference price (the current day's open) — when set, the price tag shows the
@@ -86,6 +91,10 @@ public sealed class CandleChartDrawable : IDrawable
     // §3.6 P3: armed-stop trigger lines paint in a muted amber so they read distinctly
     // from the green/red resting-limit lines, regardless of buy/sell direction.
     public Color OpenOrderStopColor = Color.FromArgb("#E0A030");
+    // Position line: a teal accent distinct from the green/red order lines and the blue trigger
+    // arrows, so the average-entry level reads as "my open position". Theme-overridable via
+    // ChartPositionLine. The P&L tag itself paints green/red (Bull/Bear) by profit/loss.
+    public Color PositionLineColor = Color.FromArgb("#26C6DA");
 
     // The user's executed fills, drawn as small triangles (buy up/below, sell down/above).
     public IReadOnlyList<FillMarker> FillMarkers { get; set; } = Array.Empty<FillMarker>();
@@ -264,6 +273,7 @@ public sealed class CandleChartDrawable : IDrawable
         DrawCandles(canvas, plot, X, Y);
         DrawMovingAverages(canvas, plot, tMin, tMax, yMin, yMax, X, Y);
         DrawOpenOrderLines(canvas, plot, Y, currency);
+        DrawPositionLine(canvas, plot, Y, currency);
         DrawFillMarkers(canvas, plot, X, Y);
         DrawTriggerMarkers(canvas, plot, X, Y);
         DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
@@ -343,6 +353,54 @@ public sealed class CandleChartDrawable : IDrawable
             canvas.DrawString(labelText, labelRect,
                 HorizontalAlignment.Center, VerticalAlignment.Center);
         }
+        canvas.RestoreState();
+    }
+
+    /// <summary>
+    /// Draw the user's open position TradingView-style: a solid horizontal line at the average
+    /// entry price in the teal position colour, an inline LONG/SHORT + size pill hugged to the
+    /// right edge, and a right-gutter tag showing the live unrealized P&L (currency on top, % below)
+    /// tinted green when in profit / red when in loss. Skipped when flat or off-screen.
+    /// </summary>
+    private void DrawPositionLine(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)
+    {
+        if (Position is not PositionLine pos || pos.Quantity == 0m) return;
+        float y = Y((double)pos.AvgPrice);
+        if (y < plot.Top || y > plot.Bottom) return;
+
+        bool profit = pos.UnrealizedPnl >= 0m;
+        var pnlColor = profit ? Bull : Bear;
+
+        canvas.SaveState();
+        // Solid line — contrasts with the dashed order / live-price lines.
+        canvas.StrokeColor = PositionLineColor;
+        canvas.StrokeSize = 1.5f;
+        canvas.DrawLine(plot.Left, y, plot.Right, y);
+
+        // Inline size pill in the position colour, hugged to the right edge of the plot.
+        bool isLong = pos.Quantity > 0m;
+        string sizeText = $"{(isLong ? "LONG" : "SHORT")} {Math.Abs(pos.Quantity):0.####}";
+        float sizeW = Math.Max(52f, sizeText.Length * 7f);
+        var sizeRect = new RectF(plot.Right - sizeW - 4f, y - 8, sizeW, 16);
+        canvas.FillColor = PositionLineColor;
+        canvas.FillRectangle(sizeRect);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = PriceTagFont;
+        canvas.DrawString(sizeText, sizeRect, HorizontalAlignment.Center, VerticalAlignment.Center);
+
+        // Right-gutter P&L tag: currency on top, % below, tinted by profit/loss.
+        var tagRect = new RectF(plot.Right + 1, y - 13, RightAxisW - 2, 26);
+        canvas.FillColor = pnlColor;
+        canvas.FillRectangle(tagRect);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = PriceTagFont;
+        canvas.DrawString($"{(pos.UnrealizedPnl >= 0m ? "+" : "")}{CurrencyHelper.Format(pos.UnrealizedPnl, cur)}",
+            new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, 14f),
+            HorizontalAlignment.Left, VerticalAlignment.Top);
+        canvas.FontSize = PriceTagFont - 1f;
+        canvas.DrawString($"{(pos.UnrealizedPct >= 0 ? "+" : "")}{pos.UnrealizedPct:0.00}%",
+            new RectF(tagRect.X + 3, tagRect.Y + 13f, tagRect.Width - 6, 12f),
+            HorizontalAlignment.Left, VerticalAlignment.Center);
         canvas.RestoreState();
     }
 
