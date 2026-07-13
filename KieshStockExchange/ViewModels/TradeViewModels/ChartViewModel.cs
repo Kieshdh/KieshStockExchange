@@ -108,6 +108,31 @@ public partial class ChartViewModel : StockAwareViewModel
     private void CycleVolumeMode()
         => VolumeMode = (VolumeMode)(((int)VolumeMode + 1) % 3);
 
+    // Y-axis price scale (toolbar toggle: Linear -> Log -> Percent), persisted.
+    private const string ScaleModePrefKey = "chart_scale_mode";
+
+    [ObservableProperty] private PriceScaleMode _scaleMode =
+        Enum.TryParse(Preferences.Default.Get(ScaleModePrefKey, nameof(PriceScaleMode.Linear)), out PriceScaleMode s)
+            ? s : PriceScaleMode.Linear;
+
+    public string ScaleModeLabel => ScaleMode switch
+    {
+        PriceScaleMode.Logarithmic => "Log",
+        PriceScaleMode.Percent     => "%",
+        _                          => "Lin",
+    };
+
+    partial void OnScaleModeChanged(PriceScaleMode value)
+    {
+        Preferences.Default.Set(ScaleModePrefKey, value.ToString());
+        OnPropertyChanged(nameof(ScaleModeLabel));
+        RequestRedraw();
+    }
+
+    [RelayCommand]
+    private void CycleScaleMode()
+        => ScaleMode = (PriceScaleMode)(((int)ScaleMode + 1) % 3);
+
     // Session reference = the open of the first buffered candle on the latest candle's UTC day.
     // Drives the price-axis % tag ("today's" change). Approximate when the buffer starts mid-day.
     public decimal? SessionOpenPrice

@@ -23,6 +23,11 @@ public enum ChartStyle { Candles, HollowCandles, Bars, Line, Area, HeikinAshi }
 // of the price pane (TradingView style); Pane = a separate sub-pane below the price; Off = hidden.
 public enum VolumeMode { Overlay, Pane, Off }
 
+// Y-axis price scale. Linear = equal price = equal pixels; Logarithmic = equal RATIO = equal
+// pixels (the transform changes); Percent = linear transform but the axis labels show % change
+// from the leftmost visible bar (the TradingView "%" scale).
+public enum PriceScaleMode { Linear, Logarithmic, Percent }
+
 public enum MaKind { Sma, Ema }
 
 // User-facing color choice for an MA row. Key references a Color resource in

@@ -204,6 +204,7 @@ public partial class ChartView : ContentView
         if (_vm == null) return;
         _drawable.Candles = _vm.GetVisibleCandles();
         _drawable.Style = _vm.ChartStyle;
+        _drawable.ScaleMode = _vm.ScaleMode;
         _drawable.SessionOpenPrice = _vm.SessionOpenPrice;
         _drawable.ShowVolume = _vm.VolumeMode != VolumeMode.Off;
         _drawable.OverlayVolume = _vm.VolumeMode == VolumeMode.Overlay;

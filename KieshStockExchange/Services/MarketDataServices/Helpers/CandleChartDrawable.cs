@@ -13,6 +13,9 @@ public sealed class CandleChartDrawable : IDrawable
     // Series style (the TradingView-style chart-type toggle). Orders/markers/MAs/crosshair
     // all key off the shared X/Y transform, so they work unchanged on every style.
     public ChartStyle Style { get; set; } = ChartStyle.Candles;
+    // Y-axis price scale. Log changes the price<->pixel transform (via the shared PriceToFrac/
+    // FracToPrice helpers, so hit-testing and gridlines stay consistent); Percent only relabels.
+    public PriceScaleMode ScaleMode { get; set; } = PriceScaleMode.Linear;
     public double YPaddingPercent { get; set; } = 0.06;
     public double XPaddingPercent { get; set; } = 0.02;
 
@@ -238,9 +241,10 @@ public sealed class CandleChartDrawable : IDrawable
         _lastTMin = tMin;
         _lastTMax = tMax;
 
-        // Coordinate transforms from data-space to plot-space.
+        // Coordinate transforms from data-space to plot-space. Y routes through PriceToFrac so
+        // the log scale (and its inverse in PixelToPrice) share one definition.
         float X(DateTime utc) => plot.Left + (float)(((utc - tMin).TotalSeconds / spanSec) * plot.Width);
-        float Y(double price) => plot.Bottom - (float)(((price - yMin) / (yMax - yMin)) * plot.Height);
+        float Y(double price) => plot.Bottom - (float)(PriceToFrac(price, yMin, yMax) * plot.Height);
 
         var currency = Candles.Count > 0 ? Candles[0].CurrencyType : CurrencyType.USD;
 
@@ -672,22 +676,57 @@ public sealed class CandleChartDrawable : IDrawable
     #endregion
 
     #region Axes and Grid
+    // Price <-> normalized vertical fraction (0 = plot bottom, 1 = plot top), keyed on ScaleMode.
+    // Log mode maps equal RATIOS to equal pixels; Linear/Percent are plain linear. PixelToPrice
+    // inverts this so hit-testing stays exact under every scale.
+    private double PriceToFrac(double price, double lo, double hi)
+    {
+        if (ScaleMode == PriceScaleMode.Logarithmic)
+        {
+            double a = Math.Log(Math.Max(lo, 1e-9)), b = Math.Log(Math.Max(hi, 1e-9));
+            return b <= a ? 0.0 : (Math.Log(Math.Max(price, 1e-9)) - a) / (b - a);
+        }
+        return hi <= lo ? 0.0 : (price - lo) / (hi - lo);
+    }
+
+    private double FracToPrice(double frac, double lo, double hi)
+    {
+        if (ScaleMode == PriceScaleMode.Logarithmic)
+        {
+            double a = Math.Log(Math.Max(lo, 1e-9)), b = Math.Log(Math.Max(hi, 1e-9));
+            return Math.Exp(a + frac * (b - a));
+        }
+        return lo + frac * (hi - lo);
+    }
+
     private void DrawYGridAndLabels(ICanvas canvas, RectF plot, double yMin, double yMax, CurrencyType cur)
     {
         var (niceMin, niceMax, step) = NiceRange(yMin, yMax, maxTicks: 6);
         canvas.FontColor = Axis;
         canvas.FontSize = AxisFont;
 
+        // Percent scale labels tick levels as % change from the leftmost visible bar.
+        double? pctRef = ScaleMode == PriceScaleMode.Percent && Candles.Count > 0
+            ? (double)Candles[0].Close : (double?)null;
+
         for (double v = niceMin; v <= niceMax + 1e-9; v += step)
         {
-            float y = plot.Bottom - (float)((v - yMin) / (yMax - yMin) * plot.Height);
+            float y = plot.Bottom - (float)(PriceToFrac(v, yMin, yMax) * plot.Height);
+            if (y < plot.Top - 1 || y > plot.Bottom + 1) continue;
 
             // Horizontal grid line
             canvas.StrokeColor = Grid; canvas.StrokeSize = 1f;
             canvas.DrawLine(plot.Left, y, plot.Right, y);
 
             // Label in the right gutter, aligned to the gridline.
-            var label = CurrencyHelper.Format((decimal)v, cur);
+            string label;
+            if (pctRef is double r && r > 0)
+            {
+                double pc = (v / r - 1.0) * 100.0;
+                label = $"{(pc >= 0 ? "+" : "")}{pc:0.0}%";
+            }
+            else label = CurrencyHelper.Format((decimal)v, cur);
+
             canvas.DrawString(label,
                 new RectF(plot.Right + 4, y - 7, RightAxisW - 8, 14),
                 HorizontalAlignment.Left, VerticalAlignment.Center);
@@ -928,7 +967,7 @@ public sealed class CandleChartDrawable : IDrawable
         if (_lastPlot.Height <= 0 || _lastYMax <= _lastYMin) return null;
         if (yInControl < _lastPlot.Top || yInControl > _lastPlot.Bottom) return null;
         double frac = (_lastPlot.Bottom - yInControl) / (double)_lastPlot.Height;
-        double price = _lastYMin + frac * (_lastYMax - _lastYMin);
+        double price = FracToPrice(frac, _lastYMin, _lastYMax);
         return (decimal)price;
     }
 

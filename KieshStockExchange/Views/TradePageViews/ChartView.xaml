@@ -125,6 +125,11 @@
                 <Button Text="{Binding VolumeModeLabel}"
                         Style="{StaticResource ChartResolutionButton.Unselected}"
                         Command="{Binding CycleVolumeModeCommand}" />
+
+                <!-- Price-scale toggle (cycles Linear -> Log -> Percent) -->
+                <Button Text="{Binding ScaleModeLabel}"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding CycleScaleModeCommand}" />
             </HorizontalStackLayout>
 
             <!-- Spacer -->
