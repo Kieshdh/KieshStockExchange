@@ -41,7 +41,7 @@ with open(path) as f:
 
 # trim first/last 10 min (open transient / partial buckets)
 buckets = sorted({r[1] for r in rows})
-lo, hi = buckets[10], buckets[-10]
+lo, hi = buckets[10], buckets[-2]
 rows = [r for r in rows if lo <= r[1] <= hi]
 
 # 1) total per-minute volume series (fill missing buckets with 0)
@@ -60,7 +60,7 @@ per = defaultdict(dict)
 for sid, b, c, v in rows: per[sid][b] = (c, v)
 for sid, d in per.items():
     bs = sorted(d)
-    if len(bs) < 60: continue
+    if len(bs) < 20: continue
     vols = [d[b][1] for b in bs]
     rets = []
     for i in range(1, len(bs)):
