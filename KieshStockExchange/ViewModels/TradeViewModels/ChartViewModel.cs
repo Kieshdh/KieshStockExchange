@@ -629,6 +629,38 @@ public partial class ChartViewModel : StockAwareViewModel
         if (next != VisibleCount) VisibleCount = next;
     }
 
+    // Rightmost blank-bucket pad the viewport adds after the latest candle. Kept in one
+    // place so cursor-anchored zoom can reproduce the exact time->pixel mapping GetViewport uses.
+    private static int RightPad(int visible) => Math.Clamp(Math.Max(1, visible) / 12, 2, 8);
+
+    /// <summary>
+    /// Cursor-anchored X zoom: applies the same ×0.8/×1.25 VisibleCount step as
+    /// ZoomIn/ZoomOut, then compensates OffsetFromLatest so the time under the
+    /// cursor stays pinned to the same pixel. cursorFraction is the pointer's
+    /// position across the plot width (0 = left edge, 1 = right edge).
+    /// </summary>
+    public void ZoomAtCursor(double cursorFraction, bool zoomIn)
+    {
+        double f = Math.Clamp(cursorFraction, 0.0, 1.0);
+        int v0 = Math.Max(1, VisibleCount);
+        int off0 = OffsetFromLatest;
+        double t0 = v0 + RightPad(v0);           // total buckets spanned by the current viewport
+
+        int v1 = zoomIn
+            ? Math.Max(MinVisible, (int)Math.Round(v0 * 0.8))
+            : Math.Min(MaxVisible, (int)Math.Round(v0 * 1.25));
+        if (v1 == v0) return;
+        double t1 = v1 + RightPad(v1);
+
+        // Bucket index (relative to the latest candle's OpenTime) currently under the cursor;
+        // solve for the new offset that keeps that same bucket under the cursor after the zoom.
+        double gCursor = (1 - off0 - v0) + f * t0;
+        int off1 = (int)Math.Round(1 - v1 + f * t1 - gCursor);
+
+        VisibleCount = v1;          // OnVisibleCountChanged re-clamps offset against the new bounds
+        OffsetFromLatest = off1;    // OnOffsetFromLatestChanged clamps into [MinOffset, MaxOffset]
+    }
+
     [RelayCommand]
     private void GoLive()
     {

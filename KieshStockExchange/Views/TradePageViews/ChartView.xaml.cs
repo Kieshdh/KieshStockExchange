@@ -20,8 +20,21 @@ public partial class ChartView : ContentView
     // Active platform-pointer drag (Windows-side). Cross-platform so the
     // (cross-platform) PanGestureRecognizer can suppress its updates while a
     // marker / Y-axis / free-pan drag is in flight.
-    private enum DragMode { None, Marker, OpenOrder, YAxis, FreePan }
+    private enum DragMode { None, Marker, OpenOrder, YAxis, FreePan, Measure }
     private DragMode _dragMode = DragMode.None;
+
+    // Inertial-pan state. During a free-pan drag we smooth a velocity (candles/sec)
+    // from the recent cursor motion; on release the chart coasts on a dispatcher
+    // timer, decaying the velocity each tick until it drops below a floor.
+    private IDispatcherTimer? _inertiaTimer;
+    private double _panVelocity;        // smoothed candles/sec while free-panning
+    private double _inertiaResidual;    // fractional-candle carry between coast ticks
+    private long _panLastSampleMs;
+    private float _panLastSampleX;
+    private const double InertiaDecay = 0.92;     // per ~16 ms tick
+    private const double InertiaMinVel = 3.0;     // candles/sec floor to start / keep coasting
+    private const double InertiaTickSec = 0.016;
+    private const long InertiaStaleMs = 60;       // ignore velocity if the last sample is older
 
     // Marker-drag state — set when _dragMode == Marker.
     private Guid? _draggingMarkerId;
@@ -91,8 +104,46 @@ public partial class ChartView : ContentView
 
     private void OnUnloaded(object? sender, EventArgs e)
     {
+        StopInertia();
         if (_theme != null) _theme.ThemeChanged -= OnThemeChanged;
         if (_editService != null) _editService.PropertyChanged -= OnEditServiceChanged;
+    }
+
+    // Inertial pan: coast OffsetFromLatest on a dispatcher timer, decaying the
+    // release velocity each tick. Kept cross-platform (MAUI dispatcher timer) so
+    // OnUnloaded can stop it; it's only ever armed from the Windows pan handler.
+    private void StartInertia(double velocityCandlesPerSec)
+    {
+        StopInertia();
+        _panVelocity = velocityCandlesPerSec;
+        _inertiaResidual = 0;
+        _inertiaTimer = Dispatcher.CreateTimer();
+        _inertiaTimer.Interval = TimeSpan.FromMilliseconds(16);
+        _inertiaTimer.Tick += OnInertiaTick;
+        _inertiaTimer.Start();
+    }
+
+    private void StopInertia()
+    {
+        if (_inertiaTimer is null) return;
+        _inertiaTimer.Stop();
+        _inertiaTimer.Tick -= OnInertiaTick;
+        _inertiaTimer = null;
+    }
+
+    private void OnInertiaTick(object? sender, EventArgs e)
+    {
+        if (_vm == null) { StopInertia(); return; }
+        _panVelocity *= InertiaDecay;
+        if (Math.Abs(_panVelocity) < InertiaMinVel) { StopInertia(); return; }
+
+        // Accumulate the sub-candle remainder so slow coasts still advance eventually.
+        _inertiaResidual += _panVelocity * InertiaTickSec;
+        int step = (int)_inertiaResidual;
+        if (step == 0) return;
+        _inertiaResidual -= step;
+        if (_vm.PanCommand.CanExecute(step)) _vm.PanCommand.Execute(step);
+        else StopInertia();  // hit an edge — stop coasting rather than spin
     }
 
     // Keep the drawable's transient drag state synced with the modify panel:
@@ -372,7 +423,25 @@ public partial class ChartView : ContentView
         var pp = e.GetCurrentPoint(el);
         if (!pp.Properties.IsLeftButtonPressed) return;
 
+        // Any fresh press cancels an in-flight inertial coast (user grabbed the chart again).
+        StopInertia();
+
         var p = PlatformPointerToControl(el, e);
+
+        // Priority 0: Shift-drag starts the measure ruler and owns the gesture, so it
+        // never falls through to marker/order/pan. Only inside the chart area (not the gutters).
+        bool shiftDown = (Microsoft.UI.Input.InputKeyboardSource
+                           .GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift)
+                           & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+        if (shiftDown && _drawable.IsInChartArea(p))
+        {
+            _dragMode = DragMode.Measure;
+            _drawable.Measure = new MeasureState(true, p.X, p.Y, p.X, p.Y);
+            (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
 
         // Priority 1: marker line — drags only the marker.
         var markerHit = _drawable.HitMarker(p);
@@ -480,6 +549,10 @@ public partial class ChartView : ContentView
             _freePanStartYMax = _drawable.LastYMax;
             _freePanPxPerCandle = pxPerCandle;
             _freePanPricePerPixel = (_freePanStartYMax - _freePanStartYMin) / plotHeight;
+            // Seed inertia velocity sampling from this press.
+            _panVelocity = 0;
+            _panLastSampleX = p.X;
+            _panLastSampleMs = Environment.TickCount64;
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             e.Handled = true;
             return;
@@ -495,6 +568,14 @@ public partial class ChartView : ContentView
 
         switch (_dragMode)
         {
+            case DragMode.Measure:
+                if (_drawable.Measure.Active)
+                {
+                    _drawable.Measure = _drawable.Measure with { X1 = p.X, Y1 = p.Y };
+                    Chart.Invalidate();
+                }
+                break;
+
             case DragMode.Marker:
                 if (_draggingMarkerId is Guid mid &&
                     _drawable.PixelToPrice(p.Y) is decimal newPrice)
@@ -544,6 +625,18 @@ public partial class ChartView : ContentView
                 double newMax = _freePanStartYMax + dy * _freePanPricePerPixel;
                 if (newMax > newMin)
                     _vm.SetManualYRange((decimal)newMin, (decimal)newMax);
+
+                // Sample horizontal velocity (candles/sec) for release-time inertia,
+                // exponentially smoothed so a jittery last frame doesn't dominate.
+                long nowMs = Environment.TickCount64;
+                double dtSec = (nowMs - _panLastSampleMs) / 1000.0;
+                if (dtSec > 0 && _freePanPxPerCandle > 0)
+                {
+                    double instVel = ((p.X - _panLastSampleX) / _freePanPxPerCandle) / dtSec;
+                    _panVelocity = _panVelocity * 0.6 + instVel * 0.4;
+                    _panLastSampleX = p.X;
+                    _panLastSampleMs = nowMs;
+                }
                 break;
             }
         }
@@ -595,11 +688,27 @@ public partial class ChartView : ContentView
             return;
         }
 
+        if (_dragMode == DragMode.Measure)
+        {
+            // Clear-on-release (v1): the ruler vanishes when the drag ends.
+            _drawable.Measure = default;
+            Chart.Invalidate();
+        }
+
         if (_dragMode == DragMode.Marker)
         {
             _draggingMarkerId = null;
             _drawable.DraggingMarkerId = null;
             Chart.Invalidate();
+        }
+
+        if (_dragMode == DragMode.FreePan)
+        {
+            // Coast only on a genuine flick — a stale sample (paused before release)
+            // means the user let go static, so don't fling the chart.
+            long sinceMs = Environment.TickCount64 - _panLastSampleMs;
+            if (sinceMs <= InertiaStaleMs && Math.Abs(_panVelocity) > InertiaMinVel)
+                StartInertia(_panVelocity);
         }
 
         _dragMode = DragMode.None;
@@ -622,6 +731,7 @@ public partial class ChartView : ContentView
         _draggingOrderStartY = 0f;
         _drawable.DraggingOrderId = null;
         _drawable.DraggingOrderPrice = null;
+        _drawable.Measure = default;
         _dragMode = DragMode.None;
 
         Chart.Invalidate();
@@ -726,7 +836,15 @@ public partial class ChartView : ContentView
             return;
         }
 
-        if (delta > 0)
+        // Cursor-anchored X zoom: keep the time under the cursor pinned to the same
+        // pixel by compensating OffsetFromLatest. Fall back to plain zoom when the
+        // pointer sits outside the plot (e.g. over the bottom axis) or before first paint.
+        var plot = _drawable.PlotRect;
+        if (plot.Width > 0 && pCtrl.X >= plot.Left && pCtrl.X <= plot.Right)
+        {
+            _vm.ZoomAtCursor((pCtrl.X - plot.Left) / plot.Width, delta > 0);
+        }
+        else if (delta > 0)
         {
             if (_vm.ZoomInCommand.CanExecute(null)) _vm.ZoomInCommand.Execute(null);
         }

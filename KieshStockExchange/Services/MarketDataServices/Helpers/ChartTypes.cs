@@ -12,6 +12,11 @@ public readonly record struct ChartViewport(DateTime ViewStart, DateTime ViewEnd
 
 public readonly record struct CrosshairState(bool Visible, float X, float Y, int? CandleIndex);
 
+// Drag-to-measure ruler (Shift-drag on Windows). X0/Y0 = anchor pixel, X1/Y1 = live
+// cursor pixel; the drawable inverts them through PixelToPrice/PixelToTime to show the
+// Δprice / Δ% / Δtime / #bars readout. Active gates the overlay so it's a no-op when off.
+public readonly record struct MeasureState(bool Active, float X0, float Y0, float X1, float Y1);
+
 // Chart series style (the TradingView-style type toggle). Candles is the default.
 // HollowCandles = TradingView "hollow candles" (up bars are outlined not filled).
 // Bars = OHLC bars (left tick = open, right tick = close). Line/Area draw the close
