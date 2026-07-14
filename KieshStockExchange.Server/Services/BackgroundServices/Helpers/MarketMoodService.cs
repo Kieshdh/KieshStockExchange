@@ -31,7 +31,13 @@ public sealed class MarketMoodService
     // ---- config (bound from Bots:Mood:* in the AiTradeService ctor) ----
     private readonly bool _enabled;
     private readonly MoodWeights _w;
-    private readonly double _anchorTau, _volTau, _volBaselineTau, _flowTau, _smoothTau;
+    private readonly double _anchorTau, _volTau, _volBaselineTau, _flowTau, _smoothTau, _globalEmaTau;
+
+    // §reflexive-coupling: the LAGGED market-wide mood (5-min EMA of the global mean), read pre-pick by the
+    // reflexive taker lever. The lag is load-bearing — it low-passes the mood→taker→price→mood loop to ~0 at
+    // tick frequency so reflexivity only acts at regime timescale. A runtime kill-switch (no restart) trips it off.
+    private double _laggedGlobal = 50.0;
+    internal static volatile bool ReflexiveKillSwitch = false;
 
     // ---- per-stock state (mutable in place on the loop thread) ----
     private sealed class State
@@ -76,6 +82,7 @@ public sealed class MarketMoodService
         _volBaselineTau = Math.Max(1.0, config.GetValue("Bots:Mood:VolBaselineTauSec", 900.0));
         _flowTau        = Math.Max(1.0, config.GetValue("Bots:Mood:FlowTauSec", 300.0));
         _smoothTau      = Math.Max(0.0, config.GetValue("Bots:Mood:SmoothTauSec", 60.0));   // 0 = no output smoothing
+        _globalEmaTau   = Math.Max(1.0, config.GetValue("Bots:Mood:MoodEmaSeconds", 300.0)); // lag for the reflexive lever
 
         _state = new Dictionary<int, State>();
         foreach (var sid in stocks.ById.Keys) _state[sid] = new State();
@@ -189,6 +196,18 @@ public sealed class MarketMoodService
 
     /// <summary>Off-thread read: the last cached composite score for a stock, or 50 if unknown.</summary>
     public double MoodFor(int stockId) => _state.TryGetValue(stockId, out var s) ? s.Score : 50.0;
+
+    /// <summary>Loop thread: fold the current global mean mood into the lagged (5-min EMA) global mood that the
+    /// reflexive taker lever reads. Called once per tick after all stocks are scored.</summary>
+    public void UpdateLaggedGlobal()
+    {
+        var (mean, _, _, _) = Distribution();
+        double k = Keep(_dt, _globalEmaTau);
+        _laggedGlobal = k * _laggedGlobal + (1 - k) * mean;
+    }
+
+    /// <summary>Loop-thread read: the lagged market-wide mood (0..100) for the reflexive taker lever.</summary>
+    public double LaggedGlobalMood() => _laggedGlobal;
 
     /// <summary>Loop-thread snapshot of the mood distribution for the periodic soak log (mean + range + 5 buckets).</summary>
     public (double mean, double min, double max, int[] hist) Distribution()

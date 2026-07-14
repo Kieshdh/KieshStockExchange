@@ -834,6 +834,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         compDistExpFar:      _configuration.GetValue("Bots:Activity:Composition:DistExpFar", 0.0),
                         compSizeExp:         _configuration.GetValue("Bots:Activity:Composition:SizeExp", 0.0),
                         compSizeCap:         _configuration.GetValue("Bots:Activity:Composition:SizeCap", 3.0),
+                        // §reflexive-coupling (P4): lagged global mood → taker-share. Default off ⇒ byte-identical.
+                        moodTakerCoupling:   _configuration.GetValue("Bots:Mood:TakerCoupling", false),
+                        moodGainGreed:       _configuration.GetValue("Bots:Mood:MoodTakerGainGreed", 0.10),
+                        moodGainFear:        _configuration.GetValue("Bots:Mood:MoodTakerGainFear", 0.07),
+                        moodTakerCap:        _configuration.GetValue("Bots:Mood:MoodTakerCap", 0.15),
+                        mood:                _mood,
                         openRampMin:         _configuration.GetValue("Bots:Activity:Composition:OpenRampMin", 0.0),
                         openRampStaggerMin:  _configuration.GetValue("Bots:Activity:Composition:OpenRampStaggerMin", 0.0),
                         rangeActivityImpact: _configuration.GetValue("Bots:Range:ActivityImpact", false),
@@ -2194,6 +2200,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             double breadth = _mood.ComputeBreadth();
             double pooledSigma = _mood.ComputePooledSigma();
             foreach (var sid in _stocks.ById.Keys) _mood.Score(sid, breadth, pooledSigma, (double)_sentiment.GetSentiment(sid));
+            _mood.UpdateLaggedGlobal();   // §reflexive-coupling: advance the lagged global mood the taker lever reads
             if (now >= _nextMoodLog)
             {
                 var (mean, mn, mx, hist) = _mood.Distribution();

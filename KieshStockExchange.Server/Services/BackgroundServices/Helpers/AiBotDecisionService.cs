@@ -185,6 +185,9 @@ internal sealed class AiBotDecisionService
     // breaks the stop→standing-wall invariant). Exponent 0 ⇒ seam fully skipped ⇒ byte-identical.
     private readonly double   _compTakerExp;
     private readonly double[] _compDistExp; // [close, mid, far]
+    private readonly MarketMoodService? _mood;          // §reflexive-coupling: lagged global mood source (null in tests)
+    private readonly bool     _moodTakerCoupling;
+    private readonly double   _moodGainGreed, _moodGainFear, _moodTakerCap;
     // §composition SIZE coupling (prototype): order notional × clamp(act^k, 1/Cap, Cap) — hot names trade
     // BIGGER, quiet names smaller (median-1 ⇒ typical minute unchanged). This is the COUNT-immune volume
     // lever (the load-scaler pins order count; taker-share changes mix; size changes per-order volume =>
@@ -412,6 +415,10 @@ internal sealed class AiBotDecisionService
         double compTakerExp = 0.0, double compDistExpClose = 0.0,
         double compDistExpMid = 0.0, double compDistExpFar = 0.0,
         double compSizeExp = 0.0, double compSizeCap = 3.0,
+        // §reflexive-coupling: lagged global-mood → taker-share (intensity only). Asymmetric-V:
+        // greed and fear both raise taker-share (fear down-weighted); GainFear<0 = the owner's monotonic variant.
+        bool moodTakerCoupling = false, double moodGainGreed = 0.10,
+        double moodGainFear = 0.07, double moodTakerCap = 0.15,
         double openRampMin = 0.0, double openRampStaggerMin = 0.0,
         bool rangeActivityImpact = false, decimal rangeMaxSlippage = 0.02m,
         decimal fatImpactProb = 0m,
@@ -500,7 +507,10 @@ internal sealed class AiBotDecisionService
         // §source-cap: per-bot armed-stop CAP (Bots:MaxArmedStopsPerBot; 0 = off). BuildProtectiveStopAsync
         // rejects a new protective-stop arm once the bot already holds this many armed stops. leanReload
         // selects the count source (ctx.ArmedStopCount vs an OpenOrders scan). Off ⇒ no gate ⇒ byte-identical.
-        int maxArmedStopsPerBot = 0, bool leanReload = false)
+        int maxArmedStopsPerBot = 0, bool leanReload = false,
+        // §reflexive-coupling: the mood source for the lagged-global taker lever. Trailing + optional so existing
+        // positional constructors (tests) are unaffected; null ⇒ the coupling is inert regardless of the flags.
+        MarketMoodService? mood = null)
     {
         _market      = market      ?? throw new ArgumentNullException(nameof(market));
         _accounts    = accounts    ?? throw new ArgumentNullException(nameof(accounts));
@@ -581,6 +591,11 @@ internal sealed class AiBotDecisionService
         _activityGamma      = Math.Max(0.0, activityGamma);
         _compTakerExp       = Math.Max(0.0, compTakerExp);
         _compDistExp        = new[] { Math.Max(0.0, compDistExpClose), Math.Max(0.0, compDistExpMid), Math.Max(0.0, compDistExpFar) };
+        _mood               = mood;   // null in unit tests ⇒ coupling inert (guarded below)
+        _moodTakerCoupling  = moodTakerCoupling;
+        _moodGainGreed      = moodGainGreed;
+        _moodGainFear       = moodGainFear;   // may be negative (the owner's monotonic "fear→withdrawn" variant)
+        _moodTakerCap       = Math.Max(0.0, moodTakerCap);
         _compSizeExp        = Math.Max(0.0, compSizeExp);
         _compSizeCap        = Math.Max(1.0, compSizeCap);
         _openRampMin        = Math.Max(0.0, openRampMin);
@@ -1554,6 +1569,23 @@ internal sealed class AiBotDecisionService
                     effectiveUseMarket = Math.Max(0m, effectiveUseMarket - 0.15m);
                     break;
             }
+        }
+
+        // §reflexive-coupling (P4): the lagged GLOBAL mood scales taker-share — INTENSITY ONLY (it multiplies the
+        // already-chosen effectiveUseMarket, never the direction, which stays from the buyProb tilt). Asymmetric-V:
+        // greed (tilt>0) and fear (tilt<0) BOTH raise aggression, fear down-weighted (GainFear<GainGreed); a
+        // NEGATIVE GainFear = the owner's monotonic "fear→withdrawn" variant. The 5-min lag low-passes the
+        // mood→taker→price→mood loop so reflexivity acts only at regime timescale (bubbles/capitulation), not tick.
+        // Global (shared) mood ⇒ shared taker flow ⇒ the cross-stock-correlation channel. Pre-stock-pick + only
+        // reached for non-chase orders (ChooseOrderType is skipped for chasers); MM excluded via notMM. A runtime
+        // kill-switch trips it off with no restart. Off ⇒ block skipped ⇒ same isMarket draw ⇒ byte-identical.
+        if (_moodTakerCoupling && _mood is not null && notMM && !MarketMoodService.ReflexiveKillSwitch)
+        {
+            double tilt = (_mood.LaggedGlobalMood() - 50.0) / 50.0;   // lagged global mood in [-1,+1]
+            double mult = Math.Clamp(
+                1.0 + _moodGainGreed * Math.Max(tilt, 0.0) + _moodGainFear * Math.Max(-tilt, 0.0),
+                1.0 - _moodTakerCap, 1.0 + _moodTakerCap);
+            effectiveUseMarket = Math.Min(1m, Math.Max(0m, effectiveUseMarket * (decimal)mult));
         }
 
         // §reaction-persistence: the bot's current directional PRESSURE (0 unless the lever is on and the bot is
