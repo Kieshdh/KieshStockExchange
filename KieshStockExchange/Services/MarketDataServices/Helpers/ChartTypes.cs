@@ -57,8 +57,8 @@ public enum LineEnding { None, End, Start, BothOut, BothForward }
 
 // Head shape drawn wherever a LineEnding places a head. FilledTriangle = the classic solid ▶ (order 0
 // so legacy drawings with no persisted head default to it); Open = two barb strokes forming a hollow
-// "V"; Dot = a small filled ● terminator.
-public enum ArrowHeadStyle { FilledTriangle, Open, Dot }
+// "V"; Outline = the same triangle stroked as an outline with no fill.
+public enum ArrowHeadStyle { FilledTriangle, Open, Outline }
 
 // Per-drawing styling picked from the pen tray. Colour + thickness + dash + a line-ending + a head
 // shape. Persisted with the drawing (Color round-trips as a hex string via ColorJsonConverter). Arrow

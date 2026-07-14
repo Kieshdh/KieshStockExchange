@@ -17,9 +17,9 @@ public sealed class StylePreviewDrawable : IDrawable
         var color = Color ?? Colors.Gray;
         float th = Thickness > 0f ? Thickness : 1.5f;
         float y = r.Center.Y;
-        // Cap the head by BOTH the strip height and ~28% of its width so a bold ending never eats the
+        // Cap the head by BOTH the strip height and ~24% of its width so a bold ending never eats the
         // whole line — there must always be a visible segment between/before the heads (esp. BothOut).
-        float size = Math.Min(Math.Min(12f + 3f * th, r.Height * 0.9f), r.Width * 0.28f);
+        float size = Math.Min(Math.Min(12f + 3f * th, r.Height * 0.9f), r.Width * 0.24f);
         float pad = 4f + size;
         float ax = r.Left + pad, bx = r.Right - pad;
         if (bx <= ax) { ax = r.Left + 2f; bx = r.Right - 2f; }
@@ -66,17 +66,10 @@ public sealed class StylePreviewDrawable : IDrawable
     }
 
     // A head at (tipX,tipY) pointing along (dirX,dirY): FilledTriangle = a solid barbed triangle; Open =
-    // two barb strokes forming a hollow "V"; Dot = a small filled circle terminator (direction ignored).
+    // two barb strokes forming a hollow "V"; Outline = the same triangle stroked as an outline, no fill.
     public static void DrawArrowHead(ICanvas canvas, float tipX, float tipY, float dirX, float dirY,
         Color color, float size, ArrowHeadStyle head, float strokeWidth)
     {
-        if (head == ArrowHeadStyle.Dot)
-        {
-            canvas.FillColor = color;
-            canvas.FillCircle(tipX, tipY, Math.Max(2f, size * 0.34f));
-            return;
-        }
-
         float len = (float)Math.Sqrt(dirX * dirX + dirY * dirY);
         if (len < 1e-4f) return;
         float ux = dirX / len, uy = dirY / len;   // unit direction
@@ -102,7 +95,17 @@ public sealed class StylePreviewDrawable : IDrawable
         path.LineTo(cx1, cy1);
         path.LineTo(cx2, cy2);
         path.Close();
-        canvas.FillColor = color;
-        canvas.FillPath(path);
+        if (head == ArrowHeadStyle.Outline)
+        {
+            canvas.StrokeColor = color;
+            canvas.StrokeSize = Math.Max(1.5f, strokeWidth);
+            canvas.StrokeLineJoin = LineJoin.Miter;
+            canvas.DrawPath(path);
+        }
+        else   // FilledTriangle
+        {
+            canvas.FillColor = color;
+            canvas.FillPath(path);
+        }
     }
 }

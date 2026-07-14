@@ -480,13 +480,13 @@
                     </HorizontalStackLayout>
                 </VerticalStackLayout>
 
-                <!-- COLOR (2×5 swatch grid) -->
+                <!-- COLOR (2×5 swatch grid; 18% basis = 5 per row, SpaceBetween = flush to both edges) -->
                 <Label Text="COLOR" Style="{StaticResource ChartOhlcKey}" />
-                <FlexLayout Wrap="Wrap" Direction="Row"
+                <FlexLayout Wrap="Wrap" Direction="Row" JustifyContent="SpaceBetween"
                             BindableLayout.ItemsSource="{Binding PenColorTiles}">
                     <BindableLayout.ItemTemplate>
                         <DataTemplate x:DataType="vm:PenColorTile">
-                            <Border WidthRequest="48" HeightRequest="22" Margin="2"
+                            <Border FlexLayout.Basis="18%" HeightRequest="22" Margin="0,2"
                                     BackgroundColor="{Binding Color}"
                                     Stroke="Transparent" StrokeThickness="2"
                                     StrokeShape="RoundRectangle 3">
@@ -504,12 +504,12 @@
                     </BindableLayout.ItemTemplate>
                 </FlexLayout>
 
-                <!-- WIDTH + DASH (live line specimens in the current colour) -->
-                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="4">
+                <!-- WIDTH | DASH — two groups on one row; * columns + SpaceBetween span to the right edge -->
+                <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6">
                     <Label Grid.Column="0" Text="WIDTH" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" Margin="0,0,2,0" />
-                    <HorizontalStackLayout Grid.Column="1" Spacing="2"
-                                           BindableLayout.ItemsSource="{Binding PenWidthTiles}">
+                           VerticalOptions="Center" />
+                    <FlexLayout Grid.Column="1" Direction="Row" JustifyContent="SpaceBetween"
+                                BindableLayout.ItemsSource="{Binding PenWidthTiles}">
                         <BindableLayout.ItemTemplate>
                             <DataTemplate x:DataType="vm:PenWidthTile">
                                 <Border WidthRequest="26" HeightRequest="24"
@@ -531,11 +531,11 @@
                                 </Border>
                             </DataTemplate>
                         </BindableLayout.ItemTemplate>
-                    </HorizontalStackLayout>
+                    </FlexLayout>
                     <Label Grid.Column="2" Text="DASH" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" Margin="4,0,2,0" />
-                    <HorizontalStackLayout Grid.Column="3" Spacing="2"
-                                           BindableLayout.ItemsSource="{Binding PenDashTiles}">
+                           VerticalOptions="Center" />
+                    <FlexLayout Grid.Column="3" Direction="Row" JustifyContent="SpaceBetween"
+                                BindableLayout.ItemsSource="{Binding PenDashTiles}">
                         <BindableLayout.ItemTemplate>
                             <DataTemplate x:DataType="vm:PenDashTile">
                                 <Border WidthRequest="26" HeightRequest="24"
@@ -557,64 +557,66 @@
                                 </Border>
                             </DataTemplate>
                         </BindableLayout.ItemTemplate>
-                    </HorizontalStackLayout>
+                    </FlexLayout>
                 </Grid>
 
-                <!-- ENDING (3 live specimens: none / end / both-out). Wide tiles so the line segment
-                     stays visible between the heads (BothOut never collapses to a bowtie). -->
-                <Label Text="ENDING" Style="{StaticResource ChartOhlcKey}" />
-                <HorizontalStackLayout Spacing="6"
-                                       BindableLayout.ItemsSource="{Binding PenEndingTiles}">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate x:DataType="vm:PenEndingTile">
-                            <Border WidthRequest="92" HeightRequest="30"
-                                    Stroke="Transparent" StrokeThickness="2"
-                                    StrokeShape="RoundRectangle 3"
-                                    BackgroundColor="{DynamicResource ChartBg}">
-                                <Border.GestureRecognizers>
-                                    <TapGestureRecognizer Command="{Binding Command}"
-                                                          CommandParameter="{Binding Ending}" />
-                                </Border.GestureRecognizers>
-                                <GraphicsView Drawable="{Binding Specimen}"
-                                              HorizontalOptions="Fill" VerticalOptions="Fill"
-                                              InputTransparent="True" />
-                                <Border.Triggers>
-                                    <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                        <Setter Property="Stroke" Value="{StaticResource White}" />
-                                    </DataTrigger>
-                                </Border.Triggers>
-                            </Border>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
-                </HorizontalStackLayout>
-
-                <!-- HEAD (3 live specimens: filled triangle / open V / dot) — the shape drawn at any
-                     end that gets a head per the ENDING choice. -->
-                <Label Text="HEAD" Style="{StaticResource ChartOhlcKey}" />
-                <HorizontalStackLayout Spacing="6"
-                                       BindableLayout.ItemsSource="{Binding PenHeadTiles}">
-                    <BindableLayout.ItemTemplate>
-                        <DataTemplate x:DataType="vm:PenHeadTile">
-                            <Border WidthRequest="92" HeightRequest="30"
-                                    Stroke="Transparent" StrokeThickness="2"
-                                    StrokeShape="RoundRectangle 3"
-                                    BackgroundColor="{DynamicResource ChartBg}">
-                                <Border.GestureRecognizers>
-                                    <TapGestureRecognizer Command="{Binding Command}"
-                                                          CommandParameter="{Binding Head}" />
-                                </Border.GestureRecognizers>
-                                <GraphicsView Drawable="{Binding Specimen}"
-                                              HorizontalOptions="Fill" VerticalOptions="Fill"
-                                              InputTransparent="True" />
-                                <Border.Triggers>
-                                    <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                        <Setter Property="Stroke" Value="{StaticResource White}" />
-                                    </DataTrigger>
-                                </Border.Triggers>
-                            </Border>
-                        </DataTemplate>
-                    </BindableLayout.ItemTemplate>
-                </HorizontalStackLayout>
+                <!-- ENDING | HEAD — the two head-related pickers on ONE row (mirrors WIDTH | DASH). Ending
+                     = none / end / both-out; Head = filled / outline / open. Tiles stay wide enough that
+                     BothOut keeps a visible segment between its heads. -->
+                <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6">
+                    <Label Grid.Column="0" Text="END" Style="{StaticResource ChartOhlcKey}"
+                           VerticalOptions="Center" />
+                    <FlexLayout Grid.Column="1" Direction="Row" JustifyContent="SpaceBetween"
+                                BindableLayout.ItemsSource="{Binding PenEndingTiles}">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PenEndingTile">
+                                <Border WidthRequest="34" HeightRequest="24"
+                                        Stroke="Transparent" StrokeThickness="2"
+                                        StrokeShape="RoundRectangle 3"
+                                        BackgroundColor="{DynamicResource ChartBg}">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding Command}"
+                                                              CommandParameter="{Binding Ending}" />
+                                    </Border.GestureRecognizers>
+                                    <GraphicsView Drawable="{Binding Specimen}"
+                                                  HorizontalOptions="Fill" VerticalOptions="Fill"
+                                                  InputTransparent="True" />
+                                    <Border.Triggers>
+                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                            <Setter Property="Stroke" Value="{StaticResource White}" />
+                                        </DataTrigger>
+                                    </Border.Triggers>
+                                </Border>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </FlexLayout>
+                    <Label Grid.Column="2" Text="HEAD" Style="{StaticResource ChartOhlcKey}"
+                           VerticalOptions="Center" />
+                    <FlexLayout Grid.Column="3" Direction="Row" JustifyContent="SpaceBetween"
+                                BindableLayout.ItemsSource="{Binding PenHeadTiles}">
+                        <BindableLayout.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PenHeadTile">
+                                <Border WidthRequest="34" HeightRequest="24"
+                                        Stroke="Transparent" StrokeThickness="2"
+                                        StrokeShape="RoundRectangle 3"
+                                        BackgroundColor="{DynamicResource ChartBg}">
+                                    <Border.GestureRecognizers>
+                                        <TapGestureRecognizer Command="{Binding Command}"
+                                                              CommandParameter="{Binding Head}" />
+                                    </Border.GestureRecognizers>
+                                    <GraphicsView Drawable="{Binding Specimen}"
+                                                  HorizontalOptions="Fill" VerticalOptions="Fill"
+                                                  InputTransparent="True" />
+                                    <Border.Triggers>
+                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                            <Setter Property="Stroke" Value="{StaticResource White}" />
+                                        </DataTrigger>
+                                    </Border.Triggers>
+                                </Border>
+                            </DataTemplate>
+                        </BindableLayout.ItemTemplate>
+                    </FlexLayout>
+                </Grid>
 
                 <!-- Footer: default mode = add a line; selected mode = set-as-default + delete -->
                 <Button Text="+ Line at current price"

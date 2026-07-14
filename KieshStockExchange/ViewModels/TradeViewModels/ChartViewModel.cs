@@ -510,8 +510,9 @@ public partial class ChartViewModel : StockAwareViewModel
     // Fixed tile sets — only each tile's Specimen + IsSelected mutate (see RefreshPenTiles).
     public IReadOnlyList<PenColorTile> PenColorTiles { get; } =
         PenPalette.Select(c => new PenColorTile(c)).ToList();
+    // Three thinnest widths (owner dropped the thickest tile).
     public IReadOnlyList<PenWidthTile> PenWidthTiles { get; } =
-        new[] { 1.0, 2.0, 3.0, 4.0 }.Select(w => new PenWidthTile(w)).ToList();
+        new[] { 1.0, 1.5, 2.0 }.Select(w => new PenWidthTile(w)).ToList();
     public IReadOnlyList<PenDashTile> PenDashTiles { get; } =
         new[] { DashKind.Solid, DashKind.Dash, DashKind.Dot }.Select(d => new PenDashTile(d)).ToList();
     // Owner-trimmed to three: none / end / both-out (Start + BothForward stay in the enum for back-compat).
@@ -519,7 +520,7 @@ public partial class ChartViewModel : StockAwareViewModel
         new[] { LineEnding.None, LineEnding.End, LineEnding.BothOut }
             .Select(e => new PenEndingTile(e)).ToList();
     public IReadOnlyList<PenHeadTile> PenHeadTiles { get; } =
-        new[] { ArrowHeadStyle.FilledTriangle, ArrowHeadStyle.Open, ArrowHeadStyle.Dot }
+        new[] { ArrowHeadStyle.FilledTriangle, ArrowHeadStyle.Outline, ArrowHeadStyle.Open }
             .Select(h => new PenHeadTile(h)).ToList();
 
     public ObservableCollection<MaConfig> MaSeries { get; } = new()
