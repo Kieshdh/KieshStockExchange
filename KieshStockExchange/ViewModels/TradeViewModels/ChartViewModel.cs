@@ -281,9 +281,9 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         DrawTool.HLine    => "Draw ─",
         DrawTool.Trend    => "Draw ╱",
-        DrawTool.Ray      => "Draw →",
-        DrawTool.HRay     => "Draw ─→",
-        DrawTool.Polyline => "Draw ╱╲",
+        DrawTool.Ray      => "Draw ↗",
+        DrawTool.HRay     => "Draw ↦",
+        DrawTool.Polyline => "Draw ⋀⋁",
         _                 => "Draw",
     };
 
