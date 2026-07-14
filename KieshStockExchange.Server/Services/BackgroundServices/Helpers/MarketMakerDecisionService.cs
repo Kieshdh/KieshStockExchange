@@ -34,6 +34,9 @@ internal sealed class MarketMakerDecisionService
     private readonly IStockService _stocks;
     private readonly ILogger<MarketMakerDecisionService> _logger;
     private readonly MmConfig _cfg;
+    // §mood fear-widen (Feature 2): lagged global-mood source for the fear factor. Null (tests) or MoodWiden off
+    // ⇒ fear 0 ⇒ byte-identical quoting.
+    private readonly MarketMoodService? _mood;
 
     // Per-bot resting-quote state, keyed by (stockId, ccy). Touched ONLY by the single bot-loop thread, so no
     // locking is needed. Deliberately NOT ctx.OpenOrders ⇒ prune-immune + invisible to the open-order cap.
@@ -46,7 +49,7 @@ internal sealed class MarketMakerDecisionService
 
     internal MarketMakerDecisionService(IOrderEntryService entry, IOrderBookEngine books,
         IAccountsCache accounts, IStockService stocks,
-        ILogger<MarketMakerDecisionService> logger, MmConfig cfg)
+        ILogger<MarketMakerDecisionService> logger, MmConfig cfg, MarketMoodService? mood = null)
     {
         _entry    = entry    ?? throw new ArgumentNullException(nameof(entry));
         _books    = books    ?? throw new ArgumentNullException(nameof(books));
@@ -54,6 +57,7 @@ internal sealed class MarketMakerDecisionService
         _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
         _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
         _cfg      = cfg;
+        _mood     = mood;
     }
     #endregion
 
@@ -116,7 +120,11 @@ internal sealed class MarketMakerDecisionService
 
         int inv = _accounts.GetPosition(user.UserId, stockId)?.Quantity ?? 0;
         int cap = user.MaxInventoryPerStock;
-        var quote = MarketMakerMath.Quote(reference, oneSided, inv, cap, ccy, _cfg, user.AiUserId, stockId);
+        // §mood fear-widen (Feature 2): fear = max(0, (50 − laggedGlobalMood)/50). 0 when disabled / no mood source /
+        // greed ⇒ the quote math is byte-identical.
+        double fear = (_cfg.MoodWiden && _mood is not null)
+            ? Math.Max(0.0, (50.0 - _mood.LaggedGlobalMood()) / 50.0) : 0.0;
+        var quote = MarketMakerMath.Quote(reference, oneSided, inv, cap, ccy, _cfg, user.AiUserId, stockId, fear);
 
         var st = StateFor(user.AiUserId, stockId, ccy);
         await SyncSideAsync(user, stockId, ccy, isBuy: true,  desiredPx: quote.Bid.Price, desiredQty: quote.Bid.Qty, reference, st, ct).ConfigureAwait(false);

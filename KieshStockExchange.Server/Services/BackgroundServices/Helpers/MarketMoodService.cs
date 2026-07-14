@@ -50,6 +50,11 @@ public sealed class MarketMoodService
     private double _laggedGlobal = 50.0;
     internal static volatile bool ReflexiveKillSwitch = false;
 
+    // §mood-latch telemetry: a cheap rolling counter of how often the lagged global mood sits in an EXTREME band
+    // (<30 fear / >70 greed) since the last log drain — a fear-spiral / latch indicator for the soak. Loop-thread
+    // only (bumped in UpdateLaggedGlobal, drained by the periodic MOOD log).
+    private long _latchTicks, _totalLatchTicks;
+
     // ---- per-stock state (mutable in place on the loop thread) ----
     // Per-band derived state: each band has its own trend anchor + vol EWMAs + smoothed score.
     private sealed class Band
@@ -259,10 +264,21 @@ public sealed class MarketMoodService
         var (mean, _, _, _) = Distribution(BandFast);
         double k = Keep(_dt, _globalEmaTau);
         _laggedGlobal = k * _laggedGlobal + (1 - k) * mean;
+        _totalLatchTicks++;
+        if (_laggedGlobal < 30.0 || _laggedGlobal > 70.0) _latchTicks++;   // §mood-latch: extreme-band dwell fraction
     }
 
     /// <summary>Loop-thread read: the lagged market-wide mood (0..100) for the reflexive taker lever.</summary>
     public double LaggedGlobalMood() => _laggedGlobal;
+
+    /// <summary>§mood-latch telemetry: fraction of ticks since the last drain that the lagged global mood was in an
+    /// extreme band (&lt;30 or &gt;70) — a latch/fear-spiral indicator for the periodic MOOD log. Resets on read.</summary>
+    public double DrainLatchFraction()
+    {
+        double f = _totalLatchTicks > 0 ? (double)_latchTicks / _totalLatchTicks : 0.0;
+        _latchTicks = 0; _totalLatchTicks = 0;
+        return f;
+    }
 
     /// <summary>Loop-thread snapshot of a band's mood distribution for the periodic soak log (mean + range + 5 buckets).</summary>
     public (double mean, double min, double max, int[] hist) Distribution(int band = BandFast)

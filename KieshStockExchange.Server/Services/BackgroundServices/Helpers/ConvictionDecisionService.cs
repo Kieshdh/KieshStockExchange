@@ -51,6 +51,7 @@ internal sealed class ConvictionDecisionService
     private readonly BotSentimentService _sentiment;
     private readonly BotEconomyTelemetry _economy;
     private readonly BotScalerService _scaler;
+    private readonly MarketMoodService? _mood;   // §mood fear-bid (Feature 3): lagged global-mood source (null in tests)
     private readonly ILogger<ConvictionDecisionService> _logger;
 
     // Both books the sim runs; a Conviction bot trades each book independently so cash/price/holdings stay
@@ -129,6 +130,11 @@ internal sealed class ConvictionDecisionService
     // exit routes through the same book (a cover must be same-ccy for the collateral release). Loop-thread only.
     internal readonly record struct EntryRec(DateTime EnteredAt, double EntryGap, int Side, CurrencyType Ccy);
     private readonly Dictionary<(int UserId, int Sid), EntryRec> _entryRecs = new();
+    // §mood fear-bid (Feature 3): a BOUNDED, FEAR-ONLY, BUY-ONLY nudge to the conviction score — the cohort BUYS the
+    // panic (adds to LONG conviction, never forces a short). Flows through the existing conviction→order path so
+    // fund/position reservation + CK gating are INHERITED. Default off ⇒ byte-identical.
+    private readonly bool   _moodFearBid;
+    private readonly double _moodFearBidGain;
     private long _passCount;                                        // monotonic, reshuffles the fire subset each pass
     private DateTime _lastPassUtc = DateTime.MaxValue;              // inert until the first RunAsync arms the clock
 
@@ -146,7 +152,10 @@ internal sealed class ConvictionDecisionService
         double reviewMeanSec = 300.0, double exitBaseHazard = 0.02, double exitFlipGain = 2.0,
         double exitSatisfyGain = 0.15, double exitTimeExp = 2.5, double satisfiedBand = 0.02,
         double minHoldSec = 120.0, double maxExitFractionPerPass = 0.10, double shortBarMult = 1.2,
-        int maxEntriesPerFire = 1)
+        int maxEntriesPerFire = 1,
+        // §mood fear-bid (Feature 3): the mood source + fear-bid gain. Trailing/optional so existing callers are
+        // unaffected; null mood or flag off ⇒ inert (byte-identical long-only behaviour).
+        MarketMoodService? mood = null, bool moodFearBid = false, double moodFearBidGain = 0.10)
     {
         _entry     = entry     ?? throw new ArgumentNullException(nameof(entry));
         _accounts  = accounts  ?? throw new ArgumentNullException(nameof(accounts));
@@ -189,6 +198,9 @@ internal sealed class ConvictionDecisionService
         _maxExitFractionPerPass = Math.Clamp(maxExitFractionPerPass, 0.0, 1.0);
         _shortBarMult       = Math.Max(1.0, shortBarMult);
         _maxEntriesPerFire  = Math.Max(1, maxEntriesPerFire);
+        _mood               = mood;
+        _moodFearBid        = moodFearBid;
+        _moodFearBidGain    = Math.Max(0.0, moodFearBidGain);   // buy-only: a NEGATIVE gain would fade — disallow
     }
 
     internal void Reset() { _passCount = 0; _lastPassUtc = DateTime.MaxValue; _entryRecs.Clear(); }
@@ -340,6 +352,15 @@ internal sealed class ConvictionDecisionService
         return above;
     }
 
+    /// <summary>§mood fear-bid (Feature 3): a FEAR-ONLY (mood&lt;50), BUY-ONLY additive nudge to the conviction score —
+    /// kFear·max(0,(50−laggedGlobalMood)/50). 0 when mood≥50 (never negative ⇒ can't force a short). Pure ⇒ testable.</summary>
+    internal static double FearBid(double laggedGlobalMood, double kFear)
+        => kFear * Math.Max(0.0, (50.0 - laggedGlobalMood) / 50.0);
+
+    /// <summary>The current fear-bid to add to the conviction score (0 when the lever is off / no mood source).</summary>
+    private double FearBidNow()
+        => (_moodFearBid && _mood is not null) ? FearBid(_mood.LaggedGlobalMood(), _moodFearBidGain) : 0.0;
+
     private double CashFloorPctOf(int id)   => Dial(id, CashFloorSalt, _cashFloorBase, _cashFloorBase + CashFloorSpan);
     private double RiskAppetiteOf(int id)   => Math.Min(RiskAppetiteHardCap,
                                                    Dial(id, RiskSalt, _riskAppetiteBase, _riskAppetiteBase + RiskAppetiteSpan));
@@ -474,6 +495,9 @@ internal sealed class ConvictionDecisionService
         var shortReqs   = new List<MarketShortBatchRequest>();
         var shortOwners = new List<AIUser>();
 
+        // §mood fear-bid (Feature 3): a bot-independent, fear-only, buy-only additive to the conviction score.
+        double fearBid = FearBidNow();
+
         // §perf: one reusable scratch buffer for the per-bot ranking (single loop thread ⇒ no aliasing).
         var scored = new List<(int Sid, double Price, double Hot, double Mom, double Overval)>(signal.Count);
         foreach (var user in firing)
@@ -488,6 +512,7 @@ internal sealed class ConvictionDecisionService
             {
                 double idio = (BotMath.HashUnit01(user.AiUserId, sid) * 2.0 - 1.0) * IdioScale;
                 double hot  = Hot(sectorSent, mom, global, idio, gap, lean, _wSec, _wMom, _wGlobal, _wIdio, _wOver);
+                if (_moodFearBid) hot += fearBid;   // BUY the panic (raises long conviction; shorts read overval/mom only)
                 scored.Add((sid, price, hot, mom, overval));
                 if (hot > bestHot) { bestHot = hot; bestIdx = scored.Count - 1; }
             }
@@ -757,6 +782,9 @@ internal sealed class ConvictionDecisionService
         }
 
         // ── HUNT: firing bots scan the board with the SIGNED Hot. One long + one short candidate max per fire.
+        // §mood fear-bid (Feature 3): fear-only, buy-only additive applied to the ENTRY score (raises long conviction
+        // and lowers the chance of opening a short — never forces one). Exit hazards (above) read the pure thesis.
+        double fearBid = FearBidNow();
         foreach (var user in firing)
         {
             int lean = Lean(user.AiUserId, ChaserProb);
@@ -778,6 +806,7 @@ internal sealed class ConvictionDecisionService
                     user.AiUserId ^ sid * unchecked((int)0x9E3779B1) ^ unchecked((int)_passCount), NoiseSalt) * 2.0 - 1.0);
                 double hot = HotSigned(gap, sectorSent, global, mom, ownSent, noise, lean,
                                        _wGap, _wSec, _wGlobal, _wMom, _wOwn, _wNoise);
+                if (_moodFearBid) hot += fearBid;   // BUY the panic: raises long conviction / trims short candidacy
                 if (qty >= 0 && hot > longHot)  { longHot = hot;  longSid = sid;  longPrice = price; }  // never buy into a short
                 if (qty == 0 && hot < shortHot) { shortHot = hot; shortSid = sid; shortPrice = price; } // flat-only shorts
                 if (basketScratch is not null && qty >= 0 && hot >= effBar) basketScratch.Add((sid, hot)); // §P5

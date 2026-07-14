@@ -388,4 +388,33 @@ public class ConvictionMathTests
         Assert.Equal(new[] { 2, 4 }, picks.ConvertAll(p => p.Sid));
     }
     #endregion
+
+    #region §mood fear-bid (Feature 3)
+    [Fact]
+    public void FearBid_is_zero_at_or_above_neutral_mood()
+    {
+        // Fear-only: no effect when the market is neutral or greedy (mood ≥ 50).
+        Assert.Equal(0.0, ConvictionDecisionService.FearBid(50.0, 0.10), 12);
+        Assert.Equal(0.0, ConvictionDecisionService.FearBid(80.0, 0.10), 12);
+        Assert.Equal(0.0, ConvictionDecisionService.FearBid(100.0, 0.10), 12);
+    }
+
+    [Fact]
+    public void FearBid_is_positive_and_grows_as_mood_falls()
+    {
+        // Buy-only: strictly positive additive to the LONG conviction, never negative.
+        Assert.True(ConvictionDecisionService.FearBid(40.0, 0.10) > 0.0);
+        Assert.True(ConvictionDecisionService.FearBid(0.0, 0.10) > ConvictionDecisionService.FearBid(25.0, 0.10));
+        // Exact scale: at mood 0 the fear factor is 1 ⇒ the bid equals kFear; at mood 25 it is half.
+        Assert.Equal(0.10, ConvictionDecisionService.FearBid(0.0, 0.10), 12);
+        Assert.Equal(0.05, ConvictionDecisionService.FearBid(25.0, 0.10), 12);
+    }
+
+    [Fact]
+    public void FearBid_never_goes_negative_even_in_full_greed()
+    {
+        foreach (var mood in new[] { 50.0, 60.0, 75.0, 100.0 })
+            Assert.True(ConvictionDecisionService.FearBid(mood, 0.10) >= 0.0);
+    }
+    #endregion
 }

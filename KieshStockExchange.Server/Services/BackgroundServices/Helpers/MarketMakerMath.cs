@@ -15,7 +15,13 @@ internal readonly record struct MmConfig(
     decimal MaxCashFrac,
     decimal PriceJitterBps,
     decimal OneSidedWidenMult,
-    bool UseMicro);
+    bool UseMicro,
+    // §mood fear-widen (Feature 2): in FEAR (global mood < 50) widen the spread + shrink size. Default off ⇒
+    // fear=0 passed at the call site ⇒ byte-identical. SpreadMax = max spread multiplier at full fear (mood 0),
+    // SizeMin = min size multiplier at full fear.
+    bool MoodWiden = false,
+    decimal MoodWidenSpreadMax = 1.5m,
+    decimal MoodWidenSizeMin = 0.6m);
 
 /// <summary>One side of a quote. A side with <see cref="Qty"/> 0 or <see cref="Price"/> 0 means "post nothing".</summary>
 internal readonly record struct MmSide(decimal Price, int Qty);
@@ -78,13 +84,31 @@ internal static class MarketMakerMath
     /// Returns <c>default</c> (no quote) when there is no reference, no inventory room, or the rounded pair
     /// would lock/cross.
     /// </summary>
+    /// <summary>§mood fear-widen: half-spread × (1 + (SpreadMax−1)·fear). fear 0 ⇒ unchanged, fear 1 ⇒ ×SpreadMax. Pure.</summary>
+    internal static decimal MoodWidenSpread(decimal halfSpread, double fear, decimal spreadMax)
+        => halfSpread * (1m + (spreadMax - 1m) * (decimal)Math.Clamp(fear, 0.0, 1.0));
+
+    /// <summary>§mood fear-widen: quote size × (1 − (1−SizeMin)·fear), floored at the tick. fear 0 ⇒ unchanged,
+    /// fear 1 ⇒ ×SizeMin. Pure.</summary>
+    internal static int MoodWidenSize(int quoteSize, double fear, decimal sizeMin)
+        => (int)Math.Floor(quoteSize * (1m - (1m - sizeMin) * (decimal)Math.Clamp(fear, 0.0, 1.0)));
+
     internal static MmQuote Quote(decimal reference, bool oneSided, int inv, int cap, CurrencyType ccy,
-        in MmConfig cfg, int aiUserId, int stockId)
+        in MmConfig cfg, int aiUserId, int stockId, double fear = 0.0)
     {
         if (reference <= 0m || cap <= 0) return default;
 
         decimal h = cfg.HalfSpreadBps / 10000m;
         if (oneSided && cfg.OneSidedWidenMult > 0m) h *= cfg.OneSidedWidenMult;
+
+        // §mood fear-widen (Feature 2): thin the book in fear — a wider spread + smaller size. Quote PLACEMENT only
+        // (no taker) ⇒ trivially CK-safe. fear 0 (default / off) ⇒ no change ⇒ byte-identical.
+        int quoteSize = cfg.QuoteSize;
+        if (cfg.MoodWiden && fear > 0.0)
+        {
+            h = MoodWidenSpread(h, fear, cfg.MoodWidenSpreadMax);
+            quoteSize = MoodWidenSize(quoteSize, fear, cfg.MoodWidenSizeMin);
+        }
 
         decimal q = (decimal)inv / cap;
         if (q > 1m) q = 1m; else if (q < -1m) q = -1m;
@@ -103,8 +127,8 @@ internal static class MarketMakerMath
 
         decimal qPos = q > 0m ? q : 0m;   // long  ⇒ shrink bid
         decimal qNeg = q < 0m ? q : 0m;   // short ⇒ shrink ask
-        int bidQty = (int)Math.Floor(cfg.QuoteSize * (1m - qPos));
-        int askQty = (int)Math.Floor(cfg.QuoteSize * (1m + qNeg));
+        int bidQty = (int)Math.Floor(quoteSize * (1m - qPos));
+        int askQty = (int)Math.Floor(quoteSize * (1m + qNeg));
 
         int bidRoom = cap - inv; if (bidRoom < 0) bidRoom = 0;
         int askRoom = cap + inv; if (askRoom < 0) askRoom = 0;

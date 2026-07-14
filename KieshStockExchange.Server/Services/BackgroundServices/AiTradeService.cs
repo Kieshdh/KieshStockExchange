@@ -628,9 +628,13 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             MaxCashFrac:         _configuration.GetValue("Bots:MarketMaker:MaxCashFrac", 0.5m),
             PriceJitterBps:      _configuration.GetValue("Bots:MarketMaker:PriceJitterBps", 2m),
             OneSidedWidenMult:   _configuration.GetValue("Bots:MarketMaker:OneSidedWidenMult", 2.0m),
-            UseMicro:            _configuration.GetValue("Bots:MarketMaker:UseMicro", false));
+            UseMicro:            _configuration.GetValue("Bots:MarketMaker:UseMicro", false),
+            // §mood fear-widen (Feature 2): thin the MM book in fear. Default off ⇒ byte-identical quoting.
+            MoodWiden:           _configuration.GetValue("Bots:Mood:MMWiden", false),
+            MoodWidenSpreadMax:  _configuration.GetValue("Bots:Mood:MMWidenSpreadMax", 1.5m),
+            MoodWidenSizeMin:    _configuration.GetValue("Bots:Mood:MMWidenSizeMin", 0.6m));
         _marketMaker = new MarketMakerDecisionService(entry, books, accounts, stocks,
-                        new SeparatorLogger<MarketMakerDecisionService>(loggerFactory, loggerOptions), mmCfg);
+                        new SeparatorLogger<MarketMakerDecisionService>(loggerFactory, loggerOptions), mmCfg, _mood);
         // §rotator: the estimate-driven rotational cohort (AiStrategy.Rotator). Dedicated decision path OUT of the
         // normal flow; reads the bank estimate + rotates capital via batched market orders. Default OFF + (with no
         // strategy-7 bots seeded) byte-identical. ParticipationFraction is the runtime correlation/flow valve.
@@ -704,7 +708,11 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         minHoldSec:         _configuration.GetValue("Bots:Conviction:MinHoldSec", 120.0),
                         maxExitFractionPerPass: _configuration.GetValue("Bots:Conviction:MaxExitFractionPerPass", 0.10),
                         shortBarMult:       _configuration.GetValue("Bots:Conviction:ShortBarMult", 1.2),
-                        maxEntriesPerFire:  _configuration.GetValue("Bots:Conviction:MaxEntriesPerFire", 1));
+                        maxEntriesPerFire:  _configuration.GetValue("Bots:Conviction:MaxEntriesPerFire", 1),
+                        // §mood fear-bid (Feature 3): the Conviction cohort BUYS the panic. Default off ⇒ byte-identical.
+                        mood:               _mood,
+                        moodFearBid:        _configuration.GetValue("Bots:Mood:ConvictionFearBid", false),
+                        moodFearBidGain:    _configuration.GetValue("Bots:Mood:ConvictionFearBidGain", 0.10));
         // §fat-tail jumps: a RARE per-stock Poisson price JUMP realized via REAL marketable orders from a
         // dedicated house aggressor (CK=0), self-bounded per event so it momentarily exceeds the per-tick band,
         // then mean-reverts against the un-moved anchor + AbsoluteCapMax. Runs OUT of the normal sentiment/
@@ -764,6 +772,27 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         leanReload: leanReload,
                         // §source-cap: the +1 increment (NoteArmedStopPlaced) is gated on this being > 0.
                         maxArmedStopsPerBot: maxArmedStopsPerBot);
+        // §per-strategy mood coupling (Feature 1): the taker-intensity table, keyed by AiStrategy and read from
+        // Bots:Mood:PerStrategyGains:{Strategy}:{GainGreed,GainFear,Sign} (config wins; code defaults mirror the
+        // council spec). Momentum=TrendFollower, Noise=Random. The house/liquidity cohorts (MarketMaker(House),
+        // Rotator, Arbitrage) are EXEMPT — absent from the table ⇒ NO mood taker coupling.
+        var moodStratDefaults = new (AiStrategy Strat, string Key, double GGreed, double GFear, int Sign)[]
+        {
+            (AiStrategy.TrendFollower, "TrendFollower", 0.12, 0.10, +1),  // pro-cyclical: chases both tails
+            (AiStrategy.MeanReversion, "MeanReversion", 0.08, 0.08, +1),  // more taker at extremes; native fade = stabilizer
+            (AiStrategy.Scalper,       "Scalper",       0.05, 0.05, +1),
+            (AiStrategy.Conviction,    "Conviction",    0.05, 0.00, -1),  // FADE greed; the FEAR side is Feature 3
+            (AiStrategy.Random,        "Random",        0.10, 0.07, +1),  // the current uniform baseline
+        };
+        var moodPerStrategyGains = new Dictionary<AiStrategy, (double GGreed, double GFear, int Sign)>();
+        foreach (var d in moodStratDefaults)
+        {
+            string p = $"Bots:Mood:PerStrategyGains:{d.Key}:";
+            moodPerStrategyGains[d.Strat] = (
+                _configuration.GetValue(p + "GainGreed", d.GGreed),
+                _configuration.GetValue(p + "GainFear", d.GFear),
+                _configuration.GetValue(p + "Sign", d.Sign));
+        }
         _decisions = new AiBotDecisionService(market, accounts, books, stocks, _sentiment, _funds, _profiles,
                         _regime, _activity, _priceMemory,
                         new SeparatorLogger<AiBotDecisionService>(loggerFactory, loggerOptions),
@@ -839,6 +868,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         moodGainGreed:       _configuration.GetValue("Bots:Mood:MoodTakerGainGreed", 0.10),
                         moodGainFear:        _configuration.GetValue("Bots:Mood:MoodTakerGainFear", 0.07),
                         moodTakerCap:        _configuration.GetValue("Bots:Mood:MoodTakerCap", 0.15),
+                        // §per-strategy mood coupling (Feature 1) + §joint taker-share cap (guardrail). Default off.
+                        moodPerStrategy:      _configuration.GetValue("Bots:Mood:PerStrategy", false),
+                        moodPerStrategyGains: moodPerStrategyGains,
+                        jointTakerCapMult:    _configuration.GetValue("Bots:Mood:JointTakerCapMult", 1.5),
                         mood:                _mood,
                         openRampMin:         _configuration.GetValue("Bots:Activity:Composition:OpenRampMin", 0.0),
                         openRampStaggerMin:  _configuration.GetValue("Bots:Activity:Composition:OpenRampStaggerMin", 0.0),
@@ -2210,8 +2243,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             {
                 double breadth = _mood.ComputeBreadth(MarketMoodService.BandFast);
                 var (mean, mn, mx, hist) = _mood.Distribution();   // Fast band
-                _logger.LogInformation("MOOD mean={Mean:0.0} min={Min:0.0} max={Max:0.0} breadth={Breadth:0.00} hist=[{H0},{H1},{H2},{H3},{H4}]",
-                    mean, mn, mx, breadth, hist[0], hist[1], hist[2], hist[3], hist[4]);
+                double latch = _mood.DrainLatchFraction();          // §mood-latch: extreme-band dwell since last log
+                _logger.LogInformation("MOOD mean={Mean:0.0} min={Min:0.0} max={Max:0.0} breadth={Breadth:0.00} latch={Latch:0.00} hist=[{H0},{H1},{H2},{H3},{H4}]",
+                    mean, mn, mx, breadth, latch, hist[0], hist[1], hist[2], hist[3], hist[4]);
                 _nextMoodLog = now + TimeSpan.FromSeconds(60);
             }
         }

@@ -188,6 +188,15 @@ internal sealed class AiBotDecisionService
     private readonly MarketMoodService? _mood;          // §reflexive-coupling: lagged global mood source (null in tests)
     private readonly bool     _moodTakerCoupling;
     private readonly double   _moodGainGreed, _moodGainFear, _moodTakerCap;
+    // §per-strategy mood coupling (Feature 1): when on, the uniform (GainGreed,GainFear) is replaced by PER-STRATEGY
+    // gains + a chase/fade Sign looked up by AiStrategy (a strategy absent from the table gets NO coupling). Supersedes
+    // the uniform TakerCoupling when set (works whether or not that flag is set). Default off ⇒ uniform / byte-identical.
+    private readonly bool _moodPerStrategy;
+    private readonly IReadOnlyDictionary<AiStrategy, (double GGreed, double GFear, int Sign)> _moodPerStrategyGains;
+    // §joint taker-share cap (guardrail): bound the mood amplification of the taker share to ≤ this × the pre-coupling
+    // base. NOTE: the activity composition-taker coupling is POST-pick (per-stock factor unknown at this pre-pick
+    // site), so only the mood multiplier scales effectiveUseMarket here; this backstops that single amplification.
+    private readonly double _jointTakerCapMult;
     // §composition SIZE coupling (prototype): order notional × clamp(act^k, 1/Cap, Cap) — hot names trade
     // BIGGER, quiet names smaller (median-1 ⇒ typical minute unchanged). This is the COUNT-immune volume
     // lever (the load-scaler pins order count; taker-share changes mix; size changes per-order volume =>
@@ -419,6 +428,10 @@ internal sealed class AiBotDecisionService
         // greed and fear both raise taker-share (fear down-weighted); GainFear<0 = the owner's monotonic variant.
         bool moodTakerCoupling = false, double moodGainGreed = 0.10,
         double moodGainFear = 0.07, double moodTakerCap = 0.15,
+        // §per-strategy mood coupling + joint taker-share cap (Feature 1 + guardrail). Default off/null ⇒ byte-identical.
+        bool moodPerStrategy = false,
+        IReadOnlyDictionary<AiStrategy, (double GGreed, double GFear, int Sign)>? moodPerStrategyGains = null,
+        double jointTakerCapMult = 1.5,
         double openRampMin = 0.0, double openRampStaggerMin = 0.0,
         bool rangeActivityImpact = false, decimal rangeMaxSlippage = 0.02m,
         decimal fatImpactProb = 0m,
@@ -596,6 +609,9 @@ internal sealed class AiBotDecisionService
         _moodGainGreed      = moodGainGreed;
         _moodGainFear       = moodGainFear;   // may be negative (the owner's monotonic "fear→withdrawn" variant)
         _moodTakerCap       = Math.Max(0.0, moodTakerCap);
+        _moodPerStrategy    = moodPerStrategy;
+        _moodPerStrategyGains = moodPerStrategyGains ?? new Dictionary<AiStrategy, (double, double, int)>();
+        _jointTakerCapMult  = Math.Max(1.0, jointTakerCapMult);   // never a cap below the base itself
         _compSizeExp        = Math.Max(0.0, compSizeExp);
         _compSizeCap        = Math.Max(1.0, compSizeCap);
         _openRampMin        = Math.Max(0.0, openRampMin);
@@ -1579,7 +1595,19 @@ internal sealed class AiBotDecisionService
         // Global (shared) mood ⇒ shared taker flow ⇒ the cross-stock-correlation channel. Pre-stock-pick + only
         // reached for non-chase orders (ChooseOrderType is skipped for chasers); MM excluded via notMM. A runtime
         // kill-switch trips it off with no restart. Off ⇒ block skipped ⇒ same isMarket draw ⇒ byte-identical.
-        if (_moodTakerCoupling && _mood is not null && notMM && !MarketMoodService.ReflexiveKillSwitch)
+        // §per-strategy mood coupling (Feature 1) — supersedes the uniform gains when on (works with or without the
+        // old TakerCoupling flag). PER-STRATEGY (GainGreed,GainFear,Sign) looked up by AiStrategy: Sign +1 chases /
+        // −1 fades; a strategy absent from the table gets NO coupling (gain 0). The guardrail joint cap bounds the
+        // amplified taker share ≤ JointTakerCapMult × the pre-coupling base (activity factor is post-pick ⇒ 1.0 here).
+        if (_moodPerStrategy && _mood is not null && notMM && !MarketMoodService.ReflexiveKillSwitch)
+        {
+            double tilt = (_mood.LaggedGlobalMood() - 50.0) / 50.0;   // lagged global mood in [-1,+1]
+            var (gGreed, gFear, sign) = _moodPerStrategyGains.TryGetValue(user.Strategy, out var g)
+                ? g : (0.0, 0.0, 1);   // not in the table ⇒ no coupling
+            double mult = MoodTakerMult(tilt, gGreed, gFear, sign, _moodTakerCap);
+            effectiveUseMarket = (decimal)JointTakerShare((double)effectiveUseMarket, mult, 1.0, _jointTakerCapMult);
+        }
+        else if (_moodTakerCoupling && _mood is not null && notMM && !MarketMoodService.ReflexiveKillSwitch)
         {
             double tilt = (_mood.LaggedGlobalMood() - 50.0) / 50.0;   // lagged global mood in [-1,+1]
             double mult = Math.Clamp(
@@ -2541,6 +2569,24 @@ internal sealed class AiBotDecisionService
         decimal mag    = Math.Min(1m, Math.Abs(pressure));
         decimal target = pressure > 0m ? 1m - leak : leak;
         return buyProb + mag * (target - buyProb);
+    }
+
+    /// <summary>§mood taker mult (Feature 1): asymmetric-V taker-share multiplier from the lagged global-mood `tilt`
+    /// (∈[−1,+1]). `sign` (+1 chase / −1 fade) flips the whole response so a fader trims aggression at the extremes.
+    /// Clamped to 1±cap. Uniform coupling is this with sign=+1 and the uniform gains. Pure ⇒ testable.</summary>
+    internal static double MoodTakerMult(double tilt, double gainGreed, double gainFear, int sign, double cap)
+        => Math.Clamp(
+               1.0 + sign * gainGreed * Math.Max(tilt, 0.0) + sign * gainFear * Math.Max(-tilt, 0.0),
+               1.0 - cap, 1.0 + cap);
+
+    /// <summary>§joint taker-share cap (guardrail): the taker share after the mood (and, conceptually, activity)
+    /// multipliers stack — bounded to ≤ jointCapMult × the pre-coupling base so two independently-safe multipliers
+    /// can't compound past a hot-name-during-fear ceiling — then clamped to [0,1]. Pure ⇒ testable.</summary>
+    internal static double JointTakerShare(double baseShare, double moodMult, double activityMult, double jointCapMult)
+    {
+        double combined = baseShare * moodMult * activityMult;
+        double capped   = Math.Min(combined, baseShare * jointCapMult);
+        return Math.Clamp(capped, 0.0, 1.0);
     }
 
     /// <summary>

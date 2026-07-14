@@ -131,4 +131,51 @@ public class MarketMakerMathTests
         Assert.Equal(default, MarketMakerMath.Quote(0m, false, 0, 100, CurrencyType.USD, Cfg(), 1, 1));
         Assert.Equal(default, MarketMakerMath.Quote(100m, false, 0, 0, CurrencyType.USD, Cfg(), 1, 1));
     }
+
+    // ---- §mood fear-widen (Feature 2) ------------------------------------------------------------
+
+    private static MmConfig WidenCfg(decimal halfBps = 100m, int size = 100, decimal spreadMax = 1.5m,
+        decimal sizeMin = 0.6m) =>
+        new(Enabled: true, HalfSpreadBps: halfBps, QuoteSize: size, SkewBps: 0m, RequoteThresholdBps: 5m,
+            MaxCashFrac: 0.5m, PriceJitterBps: 0m, OneSidedWidenMult: 0m, UseMicro: false,
+            MoodWiden: true, MoodWidenSpreadMax: spreadMax, MoodWidenSizeMin: sizeMin);
+
+    [Fact]
+    public void Widen_spread_scales_from_one_at_no_fear_to_spreadmax_at_full_fear()
+    {
+        Assert.Equal(0.01m, MarketMakerMath.MoodWidenSpread(0.01m, fear: 0.0, spreadMax: 1.5m));   // fear 0 ⇒ unchanged
+        Assert.Equal(0.015m, MarketMakerMath.MoodWidenSpread(0.01m, fear: 1.0, spreadMax: 1.5m));  // fear 1 ⇒ ×1.5
+        Assert.Equal(0.0125m, MarketMakerMath.MoodWidenSpread(0.01m, fear: 0.5, spreadMax: 1.5m)); // halfway
+    }
+
+    [Fact]
+    public void Widen_size_scales_from_one_at_no_fear_to_sizemin_at_full_fear()
+    {
+        Assert.Equal(100, MarketMakerMath.MoodWidenSize(100, fear: 0.0, sizeMin: 0.6m));   // fear 0 ⇒ unchanged
+        Assert.Equal(60,  MarketMakerMath.MoodWidenSize(100, fear: 1.0, sizeMin: 0.6m));   // fear 1 ⇒ ×0.6
+        Assert.Equal(80,  MarketMakerMath.MoodWidenSize(100, fear: 0.5, sizeMin: 0.6m));   // halfway
+    }
+
+    [Fact]
+    public void Quote_fear_zero_is_byte_identical_to_the_default_overload()
+    {
+        var off  = MarketMakerMath.Quote(100m, false, 0, 100, CurrencyType.USD, WidenCfg(), 1, 1);
+        var zero = MarketMakerMath.Quote(100m, false, 0, 100, CurrencyType.USD, WidenCfg(), 1, 1, fear: 0.0);
+        Assert.Equal(off, zero);
+    }
+
+    [Fact]
+    public void Quote_in_full_fear_widens_the_spread_and_shrinks_the_size()
+    {
+        var calm = MarketMakerMath.Quote(100m, false, 0, 1000, CurrencyType.USD, WidenCfg(), 1, 1, fear: 0.0);
+        var fear = MarketMakerMath.Quote(100m, false, 0, 1000, CurrencyType.USD, WidenCfg(), 1, 1, fear: 1.0);
+        // Spread ×1.5: the touch pulls away from the reference on both sides.
+        decimal calmSpread = calm.Ask.Price - calm.Bid.Price;
+        decimal fearSpread = fear.Ask.Price - fear.Bid.Price;
+        Assert.True(fearSpread > calmSpread);
+        Assert.Equal(calmSpread * 1.5m, fearSpread);
+        // Size ×0.6 (100 → 60), symmetric from flat inventory.
+        Assert.Equal(60, fear.Bid.Qty);
+        Assert.Equal(60, fear.Ask.Qty);
+    }
 }
