@@ -34,12 +34,11 @@
                    VerticalOptions="Center" />
             <Label Text="Kiesh Stock Exchange"
                    Style="{StaticResource BrandLabel}" />
-            <!-- §navbar-title: the containing page's Title, pulled up the visual tree so the redundant
-                 Shell nav bar (which used to show it ABOVE this bar) can be hidden — saves vertical space. -->
-            <BoxView WidthRequest="1" HeightRequest="18" Opacity="0.5"
+            <!-- §navbar-title: the containing page's Title, set in code-behind (walks up to the parent Page)
+                 so the redundant Shell nav bar that used to show it ABOVE this bar can be hidden — saves space. -->
+            <BoxView x:Name="PageTitleDivider" WidthRequest="1" HeightRequest="18" Opacity="0.5"
                      Color="{DynamicResource Divider}" VerticalOptions="Center" />
-            <Label Style="{StaticResource NavPageTitleLabel}"
-                   Text="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=Title}" />
+            <Label x:Name="PageTitleLabel" Style="{StaticResource NavPageTitleLabel}" />
         </HorizontalStackLayout>
 
         <!-- Centered nav links -->

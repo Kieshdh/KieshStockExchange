@@ -7,7 +7,23 @@ public partial class TopNavBarView : ContentView
     {
         InitializeComponent();
         WireActiveState();
+        Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+    }
+    #endregion
+
+    #region Page title (mirrors the containing page's Title into the nav bar; the Shell title bar is hidden)
+    private void OnLoaded(object? sender, EventArgs e) => UpdatePageTitle();
+
+    private void UpdatePageTitle()
+    {
+        Element? el = Parent;
+        while (el is not null && el is not Page) el = el.Parent;
+        var title = (el as Page)?.Title;
+        bool has = !string.IsNullOrWhiteSpace(title);
+        PageTitleLabel.Text = title ?? string.Empty;
+        PageTitleLabel.IsVisible = has;
+        PageTitleDivider.IsVisible = has;
     }
     #endregion
 
