@@ -71,17 +71,17 @@ public sealed class MarketMoodService
     public MarketMoodService(IStockService stocks, IConfiguration config)
     {
         _enabled = config.GetValue("Bots:Mood:Enabled", false);
-        _w = new MoodWeights(
-            Mom:     config.GetValue("Bots:Mood:WMom", 0.9),
-            Breadth: config.GetValue("Bots:Mood:WBreadth", 0.35),
-            Vol:     config.GetValue("Bots:Mood:WVol", 0.2),
-            Flow:    config.GetValue("Bots:Mood:WFlow", 0.15),
-            Sent:    config.GetValue("Bots:Mood:WSent", 0.2));
+        _w = new MoodWeights(   // ×1.5 the validated baseline = the swingier 'Medium' index (council-tuned)
+            Mom:     config.GetValue("Bots:Mood:WMom", 1.35),
+            Breadth: config.GetValue("Bots:Mood:WBreadth", 0.5),
+            Vol:     config.GetValue("Bots:Mood:WVol", 0.3),
+            Flow:    config.GetValue("Bots:Mood:WFlow", 0.2),
+            Sent:    config.GetValue("Bots:Mood:WSent", 0.3));
         _anchorTau      = Math.Max(1.0, config.GetValue("Bots:Mood:AnchorTauSec", 600.0));
         _volTau         = Math.Max(1.0, config.GetValue("Bots:Mood:VolTauSec", 60.0));
         _volBaselineTau = Math.Max(1.0, config.GetValue("Bots:Mood:VolBaselineTauSec", 900.0));
         _flowTau        = Math.Max(1.0, config.GetValue("Bots:Mood:FlowTauSec", 300.0));
-        _smoothTau      = Math.Max(0.0, config.GetValue("Bots:Mood:SmoothTauSec", 60.0));   // 0 = no output smoothing
+        _smoothTau      = Math.Max(0.0, config.GetValue("Bots:Mood:SmoothTauSec", 45.0));   // 0 = no output smoothing
         _globalEmaTau   = Math.Max(1.0, config.GetValue("Bots:Mood:MoodEmaSeconds", 300.0)); // lag for the reflexive lever
 
         _state = new Dictionary<int, State>();
