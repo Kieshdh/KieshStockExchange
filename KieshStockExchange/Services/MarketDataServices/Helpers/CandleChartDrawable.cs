@@ -1706,8 +1706,8 @@ public sealed class CandleChartDrawable : IDrawable
     // Autofit smoothing tunables.
     const double AutoFitMargin = 0.08;         // 8% top/bottom breathing room around the candles
     const double AutoFitContractRatio = 0.90;  // contract only when the tight fit < 90% of the range
-    const int AutoFitContractHold = 8;         // frames the tight fit must stay small before shrinking
-    const double AutoFitContractLerp = 0.25;   // per-frame lerp toward the tight target while shrinking
+    const int AutoFitContractHold = 2;         // frames the tight fit must stay small before shrinking (small debounce)
+    const double AutoFitContractLerp = 0.60;   // per-frame lerp toward the tight target while shrinking (fast glide)
 
     // Turns a raw tight [lo,hi] target into a stable committed axis range: expand IMMEDIATELY when
     // candles exceed the range, but contract only after the tight fit has sat < 90% of the range for
