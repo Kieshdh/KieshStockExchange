@@ -7,7 +7,8 @@
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:views="clr-namespace:KieshStockExchange.Views.TradePageViews"
              x:DataType="local:TradeViewModel"
-             Title="TradePage" >
+             Title="Trade"
+             Shell.NavBarIsVisible="False">
         <!-- No page-level ScrollView: the grid fills the page so the chart row is a real height
              constraint (the panel's inner ScrollView only works when its cell is bounded). Below the
              nav + picker, the chart area gets 70% and the tables 30% of the remaining height. -->

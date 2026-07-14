@@ -8,6 +8,7 @@
              x:Class="KieshStockExchange.Views.AdminPageViews.BotDashboardPage"
              x:Name="BotDashboardPageRoot"
              Title="Bot Dashboard"
+             Shell.NavBarIsVisible="False"
              x:DataType="vm:BotDashboardViewModel">
 
     <Grid Style="{StaticResource MainGrid}"

@@ -7,7 +7,8 @@
              x:Class="KieshStockExchange.Views.MarketPageViews.MarketPage"
              x:Name="MarketPageRoot"
              x:DataType="vm:MarketViewModel"
-             Title="Market">
+             Title="Market"
+             Shell.NavBarIsVisible="False">
 
     <Grid Style="{StaticResource MainGrid}"
           RowDefinitions="Auto,Auto,Auto,*"

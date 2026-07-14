@@ -36,6 +36,15 @@
         <Setter Property="VerticalTextAlignment" Value="Center" />
     </Style>
 
+    <!-- Current page title shown in the nav bar after the brand (replaces the old Shell title bar). -->
+    <Style x:Key="NavPageTitleLabel" TargetType="Label">
+        <Setter Property="FontFamily"            Value="OpenSansSemibold" />
+        <Setter Property="FontSize"              Value="15" />
+        <Setter Property="TextColor"             Value="{DynamicResource TextSecondary}" />
+        <Setter Property="VerticalTextAlignment" Value="Center" />
+        <Setter Property="VerticalOptions"       Value="Center" />
+    </Style>
+
     <!-- Navigation link buttons (Trending / Trade / Portfolio / Account / Admin) -->
     <Style x:Key="NavLinkButton" TargetType="Button">
         <Setter Property="Padding"         Value="14,8" />

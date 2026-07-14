@@ -8,6 +8,7 @@
              xmlns:navbar="clr-namespace:KieshStockExchange.Views.OtherViews"
              xmlns:other="clr-namespace:KieshStockExchange.Views.OtherViews"
              Title="Admin"
+             Shell.NavBarIsVisible="False"
              x:DataType="local:AdminViewModel">
 
     <Grid Style="{StaticResource MainGrid}"

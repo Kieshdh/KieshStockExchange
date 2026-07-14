@@ -8,7 +8,8 @@
              x:Class="KieshStockExchange.Views.PortfolioPageViews.PortfolioPage"
              x:Name="PortfolioPageRoot"
              x:DataType="vm:PortfolioViewModel"
-             Title="Portfolio">
+             Title="Portfolio"
+             Shell.NavBarIsVisible="False">
 
     <Grid Style="{StaticResource MainGrid}"
           RowDefinitions="Auto,Auto,*"

@@ -6,7 +6,8 @@
              xmlns:theme="clr-namespace:KieshStockExchange.Services.OtherServices.Interfaces"
              x:Class="KieshStockExchange.Views.AccountPageViews.AccountPage"
              x:DataType="vm:AccountViewModel"
-             Title="Account">
+             Title="Account"
+             Shell.NavBarIsVisible="False">
 
     <Grid Style="{StaticResource MainGrid}"
           RowDefinitions="Auto,*"
