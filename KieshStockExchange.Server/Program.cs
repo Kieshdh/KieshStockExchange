@@ -254,6 +254,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<StopTriggerWatcher
 builder.Services.AddSingleton<IEngineAdminService, EngineAdminService>();
 
 // Phase 3 Step 5: bot loop + helpers move server-side.
+// §fear-greed: MarketMoodService is a shared singleton — one instance injected into both AiTradeService
+// (the writer) and CandleService (flush-time stamper). Reads Bots:Mood:* + the stock universe itself, so
+// it depends only on IStockService + IConfiguration (a DI leaf — no CandleService cycle).
+builder.Services.AddSingleton<MarketMoodService>();
 builder.Services.AddSingleton<IAiTradeService, AiTradeService>();
 
 // BotDashboard telemetry cache: TTL+single-flight wrapper around the two

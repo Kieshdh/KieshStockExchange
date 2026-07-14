@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using KieshStockExchange.Services.DataServices.Interfaces;
+using Microsoft.Extensions.Configuration;
 
 namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 
@@ -22,7 +24,9 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// the cached <see cref="MoodFor"/>. Per-stock state keys are populated once at construction, so a lock-free
 /// TryGetValue is safe off-thread (mirrors BotActivityService and the existing MoodForStock read).
 /// </summary>
-internal sealed class MarketMoodService
+// Public so DI can inject the singleton into the public ctors of AiTradeService + CandleService (an internal
+// type in a public constructor signature is a CS0051 accessibility error). Members stay internal.
+public sealed class MarketMoodService
 {
     // ---- config (bound from Bots:Mood:* in the AiTradeService ctor) ----
     private readonly bool _enabled;
@@ -56,22 +60,25 @@ internal sealed class MarketMoodService
     // anchor / vol baseline unstable, so the gauge reports neutral (50) until then.
     private const long WarmupObs = 20;
 
-    public MarketMoodService(
-        IEnumerable<int> stockIds,
-        bool enabled,
-        MoodWeights weights,
-        double anchorTauSec, double volTauSec, double volBaselineTauSec, double flowTauSec, double smoothTauSec)
+    // DI singleton: reads all Bots:Mood:* config + the stock universe itself so the same instance can be
+    // injected into both AiTradeService (writer) and CandleService (flush-time reader) with no DI cycle.
+    public MarketMoodService(IStockService stocks, IConfiguration config)
     {
-        _enabled        = enabled;
-        _w              = weights;
-        _anchorTau      = Math.Max(1.0, anchorTauSec);
-        _volTau         = Math.Max(1.0, volTauSec);
-        _volBaselineTau = Math.Max(1.0, volBaselineTauSec);
-        _flowTau        = Math.Max(1.0, flowTauSec);
-        _smoothTau      = Math.Max(0.0, smoothTauSec);   // 0 = no output smoothing
+        _enabled = config.GetValue("Bots:Mood:Enabled", false);
+        _w = new MoodWeights(
+            Mom:     config.GetValue("Bots:Mood:WMom", 0.9),
+            Breadth: config.GetValue("Bots:Mood:WBreadth", 0.35),
+            Vol:     config.GetValue("Bots:Mood:WVol", 0.2),
+            Flow:    config.GetValue("Bots:Mood:WFlow", 0.15),
+            Sent:    config.GetValue("Bots:Mood:WSent", 0.2));
+        _anchorTau      = Math.Max(1.0, config.GetValue("Bots:Mood:AnchorTauSec", 600.0));
+        _volTau         = Math.Max(1.0, config.GetValue("Bots:Mood:VolTauSec", 60.0));
+        _volBaselineTau = Math.Max(1.0, config.GetValue("Bots:Mood:VolBaselineTauSec", 900.0));
+        _flowTau        = Math.Max(1.0, config.GetValue("Bots:Mood:FlowTauSec", 300.0));
+        _smoothTau      = Math.Max(0.0, config.GetValue("Bots:Mood:SmoothTauSec", 60.0));   // 0 = no output smoothing
 
         _state = new Dictionary<int, State>();
-        foreach (var sid in stockIds) _state[sid] = new State();
+        foreach (var sid in stocks.ById.Keys) _state[sid] = new State();
     }
 
     /// <summary>Gate for the live composite path. When false the endpoint uses the v1 sentiment×activity fallback.</summary>

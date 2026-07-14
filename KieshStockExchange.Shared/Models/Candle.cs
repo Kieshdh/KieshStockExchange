@@ -172,6 +172,11 @@ public class Candle : IValidatable
         }
     }
 
+    // §fear-greed: per-candle Fear/Greed composite (0..100), stamped at flush only when the composite gauge is
+    // enabled — null otherwise. Nullable + unvalidated (like Min/MaxTransactionId): carried by Clone, never gates IsValid.
+    private double? _marketMood = null;
+    public double? MarketMood { get => _marketMood; set => _marketMood = value; }
+
     public bool IsValid() => StockId > 0 && IsValidCurrency() && Resolution != CandleResolution.None &&
         IsValidTimestamp() && IsValidPrice() && IsValidVolume();
 
@@ -327,6 +332,7 @@ public class Candle : IValidatable
             Open = this.Open, High = this.High, Low = this.Low, Close = this.Close,
             Volume = this.Volume, TradeCount = this.TradeCount,
             MinTransactionId = this.MinTransactionId, MaxTransactionId = this.MaxTransactionId,
+            MarketMood = this.MarketMood,
         };
         c._vwapNotional = this._vwapNotional; // keep the running vwap alive across live-snapshot clones
         c._hlEligHigh = this._hlEligHigh;     // §filtered-tape H/L: eligible-range accumulators travel too

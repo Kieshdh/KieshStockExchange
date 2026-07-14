@@ -281,6 +281,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         IFxRateService fxRates,
         FxDeskTelemetry fxDesk,
         IBracketCoordinator bracket,
+        MarketMoodService mood,
         ILogger<AiTradeService> logger,
         ILoggerFactory loggerFactory,
         IOptions<SeparatorLoggerOptions> loggerOptions,
@@ -295,6 +296,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _fxRates      = fxRates      ?? throw new ArgumentNullException(nameof(fxRates));
         _fxDesk       = fxDesk       ?? throw new ArgumentNullException(nameof(fxDesk));
         _bracket      = bracket      ?? throw new ArgumentNullException(nameof(bracket));
+        _mood         = mood         ?? throw new ArgumentNullException(nameof(mood));
         _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         // Cash-injection cadence: was a hard-coded 1h const; now config (default 30m) so "more money" is a live dial.
@@ -597,21 +599,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         compCap:          _configuration.GetValue("Bots:Activity:Composition:Cap", 3.0));
         // §fear-greed: composite Fear/Greed index (fast layer of the one-axis-three-timescales model). Read-only
         // projection; default-off so the live gauge keeps the v1 sentiment×activity fallback until it is wired +
-        // soak-validated. Momentum-dominant weights; sentiment demoted to a small slow anchor.
+        // soak-validated. Now a DI singleton (shared with CandleService for flush-time stamping); this ctor only
+        // keeps the v1-fallback gain read (Bots:Mood:GreedScale) that MoodForStock still needs.
         _moodGreedScale = _configuration.GetValue("Bots:Mood:GreedScale", 1.2);
-        _mood      = new MarketMoodService(stocks.ById.Keys,
-                        enabled:           _configuration.GetValue("Bots:Mood:Enabled", false),
-                        weights:           new MoodWeights(
-                            Mom:     _configuration.GetValue("Bots:Mood:WMom", 0.9),
-                            Breadth: _configuration.GetValue("Bots:Mood:WBreadth", 0.35),
-                            Vol:     _configuration.GetValue("Bots:Mood:WVol", 0.2),
-                            Flow:    _configuration.GetValue("Bots:Mood:WFlow", 0.15),
-                            Sent:    _configuration.GetValue("Bots:Mood:WSent", 0.2)),
-                        anchorTauSec:      _configuration.GetValue("Bots:Mood:AnchorTauSec", 600.0),
-                        volTauSec:         _configuration.GetValue("Bots:Mood:VolTauSec", 60.0),
-                        volBaselineTauSec: _configuration.GetValue("Bots:Mood:VolBaselineTauSec", 900.0),
-                        flowTauSec:        _configuration.GetValue("Bots:Mood:FlowTauSec", 300.0),
-                        smoothTauSec:      _configuration.GetValue("Bots:Mood:SmoothTauSec", 60.0));
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         // §3.7 arbitrage cohort: dedicated decision path, fully outside the sentiment/anchor/veto/

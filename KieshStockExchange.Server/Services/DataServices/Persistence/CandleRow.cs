@@ -32,6 +32,8 @@ public class CandleRow
 
     [Column("MinTransactionId")] public int? MinTransactionId { get; set; }
     [Column("MaxTransactionId")] public int? MaxTransactionId { get; set; }
+
+    [Column("MarketMood")] public double? MarketMood { get; set; }
 }
 
 public static class CandleMapper
@@ -52,6 +54,7 @@ public static class CandleMapper
             TradeCount = r.TradeCount,
             MinTransactionId = r.MinTransactionId,
             MaxTransactionId = r.MaxTransactionId,
+            MarketMood = r.MarketMood,
         };
         c.CandleId = r.CandleId;
         return c;
@@ -72,5 +75,6 @@ public static class CandleMapper
         TradeCount = c.TradeCount,
         MinTransactionId = c.MinTransactionId,
         MaxTransactionId = c.MaxTransactionId,
+        MarketMood = c.MarketMood,
     };
 }

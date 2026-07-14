@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Services.BackgroundServices.Helpers;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
@@ -62,12 +63,16 @@ public sealed class CandleService : ICandleService, IDisposable
     private readonly IDataBaseService _db;
     private readonly ILogger<CandleService> _logger;
     private readonly IStockService _stock;
+    // §fear-greed: shared singleton (also injected into AiTradeService). Read at flush to stamp the composite
+    // onto each closed candle. Depends only on IStockService + IConfiguration ⇒ no DI cycle back into CandleService.
+    private readonly MarketMoodService _mood;
 
-    public CandleService(IDataBaseService db, ILogger<CandleService> logger, IStockService stock)
+    public CandleService(IDataBaseService db, ILogger<CandleService> logger, IStockService stock, MarketMoodService mood)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _stock = stock ?? throw new ArgumentNullException(nameof(stock));
+        _mood = mood ?? throw new ArgumentNullException(nameof(mood));
     }
     #endregion
 
@@ -745,7 +750,13 @@ public sealed class CandleService : ICandleService, IDisposable
             for (int i = 0; i < closed.Count; i++)
             {
                 var c = closed[i];
-                if (c.IsValid()) batch.Add(c);
+                if (c.IsValid())
+                {
+                    // §fear-greed: stamp the composite ONLY when the gauge is on (else leave null — the column
+                    // stays honest/unpopulated until the composite is flipped on and soak-validated).
+                    if (_mood.Enabled) c.MarketMood = _mood.MoodFor(c.StockId);
+                    batch.Add(c);
+                }
                 else _logger.LogError("Dropping invalid candle in flush loop: {Summary}", c.Summary);
             }
         }
@@ -870,6 +881,8 @@ public sealed class CandleService : ICandleService, IDisposable
             Volume = ordered.Sum(c => c.Volume),    TradeCount = ordered.Sum(c => c.TradeCount),
             MaxTransactionId = ordered.Max(c => c.MaxTransactionId),
             MinTransactionId = ordered.Min(c => c.MinTransactionId),
+            // §fear-greed: mood is a LEVEL (like Close) — carry the last child's value into the aggregate.
+            MarketMood = ordered[^1].MarketMood,
         };
 
         if (!candle.IsValid())
