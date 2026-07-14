@@ -962,11 +962,12 @@ public partial class ChartView : ContentView
         var pos = e.GetPosition(el);
         var p = new PointF((float)pos.X, (float)pos.Y);
 
-        // Priority 1: right-click is the universal "cancel the current gesture". Abort an in-progress
-        // polyline or a mid-drag draw (and DON'T drop a stray line anymore).
+        // Priority 1: right-click is the universal "stop drawing". Abort an in-progress polyline or a
+        // mid-drag draw (dropping a brand-new stray line), then disarm the tool back to pan mode.
         if (_polyBuilding)
         {
             CancelPolyline();
+            _vm.DrawTool = DrawTool.None;
             e.Handled = true;
             return;
         }
@@ -976,6 +977,7 @@ public partial class ChartView : ContentView
             _draggingDrawingId = null;
             _drawable.DraggingDrawingId = null;
             _dragMode = DragMode.None;
+            _vm.DrawTool = DrawTool.None;
             Chart.Invalidate();
             e.Handled = true;
             return;
@@ -989,7 +991,9 @@ public partial class ChartView : ContentView
             return;
         }
 
-        // Priority 3: empty chart — right-click is now a deselect gesture, not a create gesture.
+        // Priority 3: empty chart — right-click disarms the active tool (back to pan mode) and clears
+        // any selection.
+        _vm.DrawTool = DrawTool.None;
         _vm.SelectedDrawingId = null;
         e.Handled = true;
     }

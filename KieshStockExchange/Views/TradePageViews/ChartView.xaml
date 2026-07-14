@@ -465,7 +465,7 @@
                                 </DataTrigger>
                             </Button.Triggers>
                         </Button>
-                        <Button Text="⋀⋁" Style="{StaticResource PenToolTile}"
+                        <Button Text="/\/▸" Style="{StaticResource PenToolTile}"
                                 Command="{Binding SelectDrawToolCommand}"
                                 CommandParameter="{x:Static helpers:DrawTool.Polyline}">
                             <Button.Triggers>
@@ -504,118 +504,168 @@
                     </BindableLayout.ItemTemplate>
                 </FlexLayout>
 
-                <!-- WIDTH | DASH — two groups on one row; * columns + SpaceBetween span to the right edge -->
-                <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6">
-                    <Label Grid.Column="0" Text="WIDTH" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" />
-                    <FlexLayout Grid.Column="1" Direction="Row" JustifyContent="SpaceBetween"
-                                BindableLayout.ItemsSource="{Binding PenWidthTiles}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate x:DataType="vm:PenWidthTile">
-                                <Border WidthRequest="26" HeightRequest="24"
-                                        Stroke="Transparent" StrokeThickness="2"
-                                        StrokeShape="RoundRectangle 3"
-                                        BackgroundColor="{DynamicResource ChartBg}">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Command="{Binding Command}"
-                                                              CommandParameter="{Binding Thickness}" />
-                                    </Border.GestureRecognizers>
-                                    <GraphicsView Drawable="{Binding Specimen}"
-                                                  HorizontalOptions="Fill" VerticalOptions="Fill"
-                                                  InputTransparent="True" />
-                                    <Border.Triggers>
-                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="Stroke" Value="{StaticResource White}" />
-                                        </DataTrigger>
-                                    </Border.Triggers>
-                                </Border>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </FlexLayout>
-                    <Label Grid.Column="2" Text="DASH" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" />
-                    <FlexLayout Grid.Column="3" Direction="Row" JustifyContent="SpaceBetween"
-                                BindableLayout.ItemsSource="{Binding PenDashTiles}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate x:DataType="vm:PenDashTile">
-                                <Border WidthRequest="26" HeightRequest="24"
-                                        Stroke="Transparent" StrokeThickness="2"
-                                        StrokeShape="RoundRectangle 3"
-                                        BackgroundColor="{DynamicResource ChartBg}">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Command="{Binding Command}"
-                                                              CommandParameter="{Binding Dash}" />
-                                    </Border.GestureRecognizers>
-                                    <GraphicsView Drawable="{Binding Specimen}"
-                                                  HorizontalOptions="Fill" VerticalOptions="Fill"
-                                                  InputTransparent="True" />
-                                    <Border.Triggers>
-                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="Stroke" Value="{StaticResource White}" />
-                                        </DataTrigger>
-                                    </Border.Triggers>
-                                </Border>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </FlexLayout>
-                </Grid>
+                <!-- WIDTH·DASH / END·HEAD — one aligned 2×8 grid. Labels sit in col0 + col4; the six *
+                     columns hold uniformly-sized, evenly-spaced image tiles that fill their column. Row 0
+                     = width dots | dash lines; row 1 = ending specimens | head specimens. Each cell binds
+                     its tile by index (full path from the VM) so the compiled bindings stay warning-free. -->
+                <Grid ColumnDefinitions="Auto,*,*,*,Auto,*,*,*"
+                      RowDefinitions="Auto,Auto" ColumnSpacing="4" RowSpacing="4">
 
-                <!-- ENDING | HEAD — the two head-related pickers on ONE row (mirrors WIDTH | DASH). Ending
-                     = none / end / both-out; Head = filled / outline / open. Tiles stay wide enough that
-                     BothOut keeps a visible segment between its heads. -->
-                <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6">
-                    <Label Grid.Column="0" Text="END" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" />
-                    <FlexLayout Grid.Column="1" Direction="Row" JustifyContent="SpaceBetween"
-                                BindableLayout.ItemsSource="{Binding PenEndingTiles}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate x:DataType="vm:PenEndingTile">
-                                <Border WidthRequest="34" HeightRequest="24"
-                                        Stroke="Transparent" StrokeThickness="2"
-                                        StrokeShape="RoundRectangle 3"
-                                        BackgroundColor="{DynamicResource ChartBg}">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Command="{Binding Command}"
-                                                              CommandParameter="{Binding Ending}" />
-                                    </Border.GestureRecognizers>
-                                    <GraphicsView Drawable="{Binding Specimen}"
-                                                  HorizontalOptions="Fill" VerticalOptions="Fill"
-                                                  InputTransparent="True" />
-                                    <Border.Triggers>
-                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="Stroke" Value="{StaticResource White}" />
-                                        </DataTrigger>
-                                    </Border.Triggers>
-                                </Border>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </FlexLayout>
-                    <Label Grid.Column="2" Text="HEAD" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" />
-                    <FlexLayout Grid.Column="3" Direction="Row" JustifyContent="SpaceBetween"
-                                BindableLayout.ItemsSource="{Binding PenHeadTiles}">
-                        <BindableLayout.ItemTemplate>
-                            <DataTemplate x:DataType="vm:PenHeadTile">
-                                <Border WidthRequest="34" HeightRequest="24"
-                                        Stroke="Transparent" StrokeThickness="2"
-                                        StrokeShape="RoundRectangle 3"
-                                        BackgroundColor="{DynamicResource ChartBg}">
-                                    <Border.GestureRecognizers>
-                                        <TapGestureRecognizer Command="{Binding Command}"
-                                                              CommandParameter="{Binding Head}" />
-                                    </Border.GestureRecognizers>
-                                    <GraphicsView Drawable="{Binding Specimen}"
-                                                  HorizontalOptions="Fill" VerticalOptions="Fill"
-                                                  InputTransparent="True" />
-                                    <Border.Triggers>
-                                        <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                            <Setter Property="Stroke" Value="{StaticResource White}" />
-                                        </DataTrigger>
-                                    </Border.Triggers>
-                                </Border>
-                            </DataTemplate>
-                        </BindableLayout.ItemTemplate>
-                    </FlexLayout>
+                    <!-- Row 0: WIDTH (dots) | DASH -->
+                    <Label Grid.Row="0" Grid.Column="0" Text="Width" Style="{StaticResource ChartOhlcKey}"
+                           VerticalOptions="Center" Margin="0,0,4,0" />
+                    <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenWidthTiles[0].Command}"
+                                                  CommandParameter="{Binding PenWidthTiles[0].Thickness}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenWidthTiles[0].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenWidthTiles[0].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenWidthTiles[1].Command}"
+                                                  CommandParameter="{Binding PenWidthTiles[1].Thickness}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenWidthTiles[1].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenWidthTiles[1].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenWidthTiles[2].Command}"
+                                                  CommandParameter="{Binding PenWidthTiles[2].Thickness}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenWidthTiles[2].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenWidthTiles[2].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Label Grid.Row="0" Grid.Column="4" Text="Dash" Style="{StaticResource ChartOhlcKey}"
+                           VerticalOptions="Center" Margin="4,0,4,0" />
+                    <Border Grid.Row="0" Grid.Column="5" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenDashTiles[0].Command}"
+                                                  CommandParameter="{Binding PenDashTiles[0].Dash}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenDashTiles[0].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenDashTiles[0].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border Grid.Row="0" Grid.Column="6" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenDashTiles[1].Command}"
+                                                  CommandParameter="{Binding PenDashTiles[1].Dash}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenDashTiles[1].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenDashTiles[1].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border Grid.Row="0" Grid.Column="7" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenDashTiles[2].Command}"
+                                                  CommandParameter="{Binding PenDashTiles[2].Dash}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenDashTiles[2].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenDashTiles[2].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+
+                    <!-- Row 1: END (ending specimens) | HEAD (head specimens) -->
+                    <Label Grid.Row="1" Grid.Column="0" Text="End" Style="{StaticResource ChartOhlcKey}"
+                           VerticalOptions="Center" Margin="0,0,4,0" />
+                    <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenEndingTiles[0].Command}"
+                                                  CommandParameter="{Binding PenEndingTiles[0].Ending}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenEndingTiles[0].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenEndingTiles[0].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenEndingTiles[1].Command}"
+                                                  CommandParameter="{Binding PenEndingTiles[1].Ending}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenEndingTiles[1].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenEndingTiles[1].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border Grid.Row="1" Grid.Column="3" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenEndingTiles[2].Command}"
+                                                  CommandParameter="{Binding PenEndingTiles[2].Ending}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenEndingTiles[2].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenEndingTiles[2].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Label Grid.Row="1" Grid.Column="4" Text="Head" Style="{StaticResource ChartOhlcKey}"
+                           VerticalOptions="Center" Margin="4,0,4,0" />
+                    <Border Grid.Row="1" Grid.Column="5" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenHeadTiles[0].Command}"
+                                                  CommandParameter="{Binding PenHeadTiles[0].Head}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenHeadTiles[0].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenHeadTiles[0].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border Grid.Row="1" Grid.Column="6" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenHeadTiles[1].Command}"
+                                                  CommandParameter="{Binding PenHeadTiles[1].Head}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenHeadTiles[1].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenHeadTiles[1].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
+                    <Border Grid.Row="1" Grid.Column="7" Style="{StaticResource PenSpecimenTile}">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding PenHeadTiles[2].Command}"
+                                                  CommandParameter="{Binding PenHeadTiles[2].Head}" />
+                        </Border.GestureRecognizers>
+                        <GraphicsView Drawable="{Binding PenHeadTiles[2].Specimen}" Style="{StaticResource PenSpecimenView}" />
+                        <Border.Triggers>
+                            <DataTrigger TargetType="Border" Binding="{Binding PenHeadTiles[2].IsSelected}" Value="True">
+                                <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                        </Border.Triggers>
+                    </Border>
                 </Grid>
 
                 <!-- Footer: default mode = add a line; selected mode = set-as-default + delete -->

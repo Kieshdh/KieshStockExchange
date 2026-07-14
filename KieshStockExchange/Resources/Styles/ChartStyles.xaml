@@ -77,6 +77,23 @@
         <Setter Property="BorderWidth"     Value="0" />
     </Style>
 
+    <!-- Pen-tray specimen tile: a bordered cell hosting a live GraphicsView specimen. Fills its grid
+         * column; the selected tile swaps Stroke to white via a DataTrigger. -->
+    <Style x:Key="PenSpecimenTile" TargetType="Border">
+        <Setter Property="HeightRequest"    Value="26" />
+        <Setter Property="Stroke"           Value="Transparent" />
+        <Setter Property="StrokeThickness"  Value="2" />
+        <Setter Property="StrokeShape"      Value="RoundRectangle 3" />
+        <Setter Property="BackgroundColor"  Value="{DynamicResource ChartBg}" />
+        <Setter Property="HorizontalOptions" Value="Fill" />
+    </Style>
+
+    <Style x:Key="PenSpecimenView" TargetType="GraphicsView">
+        <Setter Property="HorizontalOptions" Value="Fill" />
+        <Setter Property="VerticalOptions"   Value="Fill" />
+        <Setter Property="InputTransparent"  Value="True" />
+    </Style>
+
     <!-- Pen-tray TOOL tile: a glyph button; selected tile gets the ChartGrid fill + white ring. -->
     <Style x:Key="PenToolTile" TargetType="Button">
         <Setter Property="Padding"         Value="0" />

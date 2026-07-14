@@ -310,7 +310,7 @@ public partial class ChartViewModel : StockAwareViewModel
         DrawTool.Trend    => "Line ╱",
         DrawTool.Ray      => "Line ↗",
         DrawTool.HRay     => "Line ↦",
-        DrawTool.Polyline => "Line ⋀⋁",
+        DrawTool.Polyline => "Line /\\/▸",
         _                 => "Line",
     };
 
@@ -1230,12 +1230,14 @@ public partial class ChartViewModel : StockAwareViewModel
             ? DrawStyle.Default with { Dash = s.Dash, Ending = s.Ending }
             : s;
 
-    private static StylePreviewDrawable MakeSpecimen(Color c, float th, DashKind dash, LineEnding end, ArrowHeadStyle head)
-        => new() { Color = c, Thickness = th, Dash = dash, Ending = end, Head = head };
+    private static StylePreviewDrawable MakeSpecimen(Color c, float th, DashKind dash, LineEnding end,
+        ArrowHeadStyle head, StylePreviewMode mode = StylePreviewMode.Line)
+        => new() { Color = c, Thickness = th, Dash = dash, Ending = end, Head = head, Mode = mode };
 
     // Rebuild every pen-tray specimen + selection flag from the effective style. Fresh specimen
-    // instances make each hosting GraphicsView repaint through its Drawable binding. Ending + head
-    // specimens reflect the current colour/width/dash so every tile previews itself in context.
+    // instances make each hosting GraphicsView repaint through its Drawable binding. Width tiles preview
+    // as sized dots, dash tiles as a near-full-width line; ending + head tiles reflect the current
+    // colour/width/dash so every tile previews itself in context.
     private void RefreshPenTiles()
     {
         var s = EffectivePenStyle();
@@ -1247,12 +1249,13 @@ public partial class ChartViewModel : StockAwareViewModel
         foreach (var t in PenColorTiles) t.IsSelected = t.Color.ToArgbHex(true) == colHex;
         foreach (var t in PenWidthTiles)
         {
-            t.Specimen = MakeSpecimen(col, (float)t.Thickness, DashKind.Solid, LineEnding.None, s.Head);
+            t.Specimen = MakeSpecimen(col, (float)t.Thickness, DashKind.Solid, LineEnding.None, s.Head,
+                StylePreviewMode.Dot);
             t.IsSelected = Math.Abs(t.Thickness - th) < 0.01;
         }
         foreach (var t in PenDashTiles)
         {
-            t.Specimen = MakeSpecimen(col, th, t.Dash, LineEnding.None, s.Head);
+            t.Specimen = MakeSpecimen(col, th, t.Dash, LineEnding.None, s.Head, StylePreviewMode.Dash);
             t.IsSelected = t.Dash == s.Dash;
         }
         foreach (var t in PenEndingTiles)

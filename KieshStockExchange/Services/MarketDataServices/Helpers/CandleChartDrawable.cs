@@ -612,19 +612,21 @@ public sealed class CandleChartDrawable : IDrawable
             // legacy drawing carries no colour. A selected/active line paints a touch thicker.
             var color = d.Style.Color ?? DrawingColor;
             float thickness = d.Style.Thickness > 0f ? d.Style.Thickness : 1.5f;
+            // A selected/active line paints a touch thicker. DrawStraightSegment sets its own stroke, so
+            // this pre-set only serves the polyline branch (which draws its own multi-segment line).
+            float stroke = (active || selected) ? thickness + 1f : thickness;
+            var dashPattern = DashPattern(d.Style.Dash);
             canvas.StrokeColor = color;
-            canvas.StrokeSize = (active || selected) ? thickness + 1f : thickness;
-            canvas.StrokeDashPattern = DashPattern(d.Style.Dash);
+            canvas.StrokeSize = stroke;
+            canvas.StrokeDashPattern = dashPattern;
 
             if (d.Kind == DrawTool.HLine)
             {
                 float y = Y((double)d.P1);
                 if (y < plot.Top || y > plot.Bottom) { canvas.StrokeDashPattern = null; continue; }
-                canvas.DrawLine(plot.Left, y, plot.Right, y);
-                canvas.StrokeDashPattern = null;
                 // Endings ride the plot edges (forward = right), so they pan with the viewport.
-                StylePreviewDrawable.DrawEndings(canvas, plot.Left, y, 1f, 0f, plot.Right, y, 1f, 0f,
-                    d.Style.Ending, color, EndSize(thickness), d.Style.Head, thickness);
+                StylePreviewDrawable.DrawStraightSegment(canvas, plot.Left, y, plot.Right, y,
+                    d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
 
                 // Right-gutter price tag in the line's colour, matching the order-line convention.
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
@@ -642,11 +644,9 @@ public sealed class CandleChartDrawable : IDrawable
                 float y = Y((double)d.P1);
                 if (y < plot.Top || y > plot.Bottom) { canvas.StrokeDashPattern = null; continue; }
                 float x1 = X(d.T1);
-                canvas.DrawLine(x1, y, plot.Right, y);
-                canvas.StrokeDashPattern = null;
                 // Origin = click; terminal = plot right edge (forward = right).
-                StylePreviewDrawable.DrawEndings(canvas, x1, y, 1f, 0f, plot.Right, y, 1f, 0f,
-                    d.Style.Ending, color, EndSize(thickness), d.Style.Head, thickness);
+                StylePreviewDrawable.DrawStraightSegment(canvas, x1, y, plot.Right, y,
+                    d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
                 DrawHandle(canvas, x1, y, color);
                 DrawCloseGlyph(canvas, x1, y - 12f, color);
@@ -655,23 +655,50 @@ public sealed class CandleChartDrawable : IDrawable
             {
                 var pts = d.Points;
                 if (pts is null || pts.Count == 0) { canvas.StrokeDashPattern = null; continue; }
-                float lastX = X(pts[0].T), lastY = Y((double)pts[0].P);
-                for (int k = 1; k < pts.Count; k++)
+                int n = pts.Count;
+                // Endings apply only to the first + last vertex. Terminate the first/last segment at the
+                // head base (like the straight kinds) so the hollow head reads clean; clamp so a 2-point
+                // polyline (one segment shared by both heads) keeps a visible middle gap.
+                bool polyHeadStart = d.Style.Ending is LineEnding.Start or LineEnding.BothOut;
+                bool polyHeadEnd = d.Style.Ending is LineEnding.End or LineEnding.BothOut or LineEnding.BothForward;
+                float polyEff = EndSize(thickness), startCut = 0f, endCut = 0f;
+                if (n >= 2)
                 {
-                    float nx = X(pts[k].T), ny = Y((double)pts[k].P);
-                    canvas.DrawLine(lastX, lastY, nx, ny);
-                    lastX = nx; lastY = ny;
+                    float seg0 = Dist(X(pts[0].T), Y((double)pts[0].P), X(pts[1].T), Y((double)pts[1].P));
+                    float segN = Dist(X(pts[n - 2].T), Y((double)pts[n - 2].P), X(pts[n - 1].T), Y((double)pts[n - 1].P));
+                    float lim = float.MaxValue;
+                    if (polyHeadStart) lim = Math.Min(lim, seg0 * (n == 2 && polyHeadEnd ? 0.30f : 0.6f));
+                    if (polyHeadEnd) lim = Math.Min(lim, segN * (n == 2 && polyHeadStart ? 0.30f : 0.6f));
+                    polyEff = Math.Min(EndSize(thickness), lim);
+                    startCut = polyHeadStart ? polyEff : 0f;
+                    endCut = polyHeadEnd ? polyEff : 0f;
+                }
+                for (int k = 1; k < n; k++)
+                {
+                    float axk = X(pts[k - 1].T), ayk = Y((double)pts[k - 1].P);
+                    float bxk = X(pts[k].T), byk = Y((double)pts[k].P);
+                    if (k == 1 && startCut > 0f)
+                    {
+                        float ddx = bxk - axk, ddy = byk - ayk, dl = (float)Math.Sqrt(ddx * ddx + ddy * ddy);
+                        if (dl > 1e-4f) { axk += ddx / dl * startCut; ayk += ddy / dl * startCut; }
+                    }
+                    if (k == n - 1 && endCut > 0f)
+                    {
+                        float ddx = bxk - axk, ddy = byk - ayk, dl = (float)Math.Sqrt(ddx * ddx + ddy * ddy);
+                        if (dl > 1e-4f) { bxk -= ddx / dl * endCut; byk -= ddy / dl * endCut; }
+                    }
+                    canvas.DrawLine(axk, ayk, bxk, byk);
                 }
                 canvas.StrokeDashPattern = null;
                 // Endings: the start head follows the first→second segment, the end head the last one.
-                if (pts.Count >= 2)
+                if (n >= 2)
                 {
                     float fx0 = X(pts[0].T), fy0 = Y((double)pts[0].P);
                     float sx = X(pts[1].T), sy = Y((double)pts[1].P);
                     float slx = X(pts[^2].T), sly = Y((double)pts[^2].P);
+                    float lx = X(pts[^1].T), ly = Y((double)pts[^1].P);
                     StylePreviewDrawable.DrawEndings(canvas, fx0, fy0, sx - fx0, sy - fy0,
-                        lastX, lastY, lastX - slx, lastY - sly, d.Style.Ending, color, EndSize(thickness),
-                        d.Style.Head, thickness);
+                        lx, ly, lx - slx, ly - sly, d.Style.Ending, color, polyEff, d.Style.Head, thickness);
                 }
                 for (int k = 0; k < pts.Count; k++)
                     DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
@@ -684,11 +711,9 @@ public sealed class CandleChartDrawable : IDrawable
                 float farX = x2, farY = y2;
                 if (d.Kind == DrawTool.Ray)
                     (farX, farY) = RayExit(x1, y1, x2 - x1, y2 - y1, plot);
-                canvas.DrawLine(x1, y1, farX, farY);
-                canvas.StrokeDashPattern = null;
                 // Origin = anchor1; terminal = anchor2 (Trend) / ray-exit (Ray). Forward = origin→terminal.
-                StylePreviewDrawable.DrawEndings(canvas, x1, y1, farX - x1, farY - y1, farX, farY,
-                    farX - x1, farY - y1, d.Style.Ending, color, EndSize(thickness), d.Style.Head, thickness);
+                StylePreviewDrawable.DrawStraightSegment(canvas, x1, y1, farX, farY,
+                    d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
                 DrawHandle(canvas, x1, y1, color);
                 DrawHandle(canvas, x2, y2, color);
                 DrawCloseGlyph(canvas, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f, color);
