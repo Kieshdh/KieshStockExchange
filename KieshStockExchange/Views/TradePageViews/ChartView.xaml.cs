@@ -601,13 +601,9 @@ public partial class ChartView : ContentView
             double plotHeight = Math.Max(1.0, Chart.Height - 30.0);
             if (pxPerCandle <= 0 || _drawable.LastYMax <= _drawable.LastYMin) return;
 
-            // Auto-flip to manual mode and seed the range from the current
-            // auto-fit values so vertical drag starts at the right place.
-            if (_vm.IsYAutoFit)
-            {
-                _vm.SetManualYRange((decimal)_drawable.LastYMin, (decimal)_drawable.LastYMax);
-                _vm.IsYAutoFit = false;
-            }
+            // Body-drag pans time and (when already manual) price, but must NOT leave autofit:
+            // panning is an X gesture, so Y keeps auto-fitting. Only the Y-gutter drag / Y-zoom /
+            // toolbar toggle flip to manual. The move handler skips the vertical drag while autofit.
 
             _dragMode = DragMode.FreePan;
             _freePanStartCursor = p;
@@ -684,12 +680,16 @@ public partial class ChartView : ContentView
                 if (newOffset != _vm.OffsetFromLatest)
                     _vm.OffsetFromLatest = newOffset;
 
-                // Y: drag down (dy > 0) = both bounds rise = candles move down
-                // with the cursor.
-                double newMin = _freePanStartYMin + dy * _freePanPricePerPixel;
-                double newMax = _freePanStartYMax + dy * _freePanPricePerPixel;
-                if (newMax > newMin)
-                    _vm.SetManualYRange((decimal)newMin, (decimal)newMax);
+                // Y: drag down (dy > 0) = both bounds rise = candles move down with the cursor —
+                // but only in manual mode. While auto-fitting, the pan stays purely horizontal so
+                // the vertical drag doesn't kick the chart out of autofit (Y keeps fitting live).
+                if (!_vm.IsYAutoFit)
+                {
+                    double newMin = _freePanStartYMin + dy * _freePanPricePerPixel;
+                    double newMax = _freePanStartYMax + dy * _freePanPricePerPixel;
+                    if (newMax > newMin)
+                        _vm.SetManualYRange((decimal)newMin, (decimal)newMax);
+                }
 
                 // Sample horizontal velocity (candles/sec) for release-time inertia,
                 // exponentially smoothed so a jittery last frame doesn't dominate.

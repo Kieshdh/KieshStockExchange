@@ -1588,38 +1588,33 @@ public sealed class CandleChartDrawable : IDrawable
     private (double lo, double hi) SmoothAutoFit(double targetLo, double targetHi)
     {
         if (targetHi <= targetLo) targetHi = targetLo + 1.0;
+        var (snapLo, snapHi) = SnapRange(targetLo, targetHi);   // snap the TARGET once (nice ticks)
 
         if (!_autoFitInit)
         {
-            (_autoFitLo, _autoFitHi) = SnapRange(targetLo, targetHi);
-            _autoFitContractFrames = 0;
-            _autoFitInit = true;
+            (_autoFitLo, _autoFitHi) = (snapLo, snapHi);
+            _autoFitContractFrames = 0; _autoFitInit = true;
             return (_autoFitLo, _autoFitHi);
         }
 
         double eps = (_autoFitHi - _autoFitLo) * 1e-4;
-        if (targetLo < _autoFitLo - eps || targetHi > _autoFitHi + eps)
+        // Expand IMMEDIATELY to cover a breakout (union with the snapped target).
+        if (snapLo < _autoFitLo - eps || snapHi > _autoFitHi + eps)
         {
-            // Candles broke out of the range — grow at once to cover them (union), snapped to ticks.
-            (_autoFitLo, _autoFitHi) = SnapRange(
-                Math.Min(_autoFitLo, targetLo), Math.Max(_autoFitHi, targetHi));
+            (_autoFitLo, _autoFitHi) = SnapRange(Math.Min(_autoFitLo, snapLo), Math.Max(_autoFitHi, snapHi));
             _autoFitContractFrames = 0;
             return (_autoFitLo, _autoFitHi);
         }
-
-        double curRange = _autoFitHi - _autoFitLo;
-        double tgtRange = targetHi - targetLo;
-        if (tgtRange < AutoFitContractRatio * curRange) _autoFitContractFrames++;
-        else _autoFitContractFrames = 0;
-
+        // Contract only after the tight fit has sat < ratio·range for a spell, then lerp toward the
+        // SNAPPED target (no per-frame re-snap → the bounds actually converge and shrink), snapping exact at the end.
+        double curRange = _autoFitHi - _autoFitLo, tgtRange = snapHi - snapLo;
+        if (tgtRange < AutoFitContractRatio * curRange) _autoFitContractFrames++; else _autoFitContractFrames = 0;
         if (_autoFitContractFrames >= AutoFitContractHold)
         {
-            double nlo = _autoFitLo + (targetLo - _autoFitLo) * AutoFitContractLerp;
-            double nhi = _autoFitHi + (targetHi - _autoFitHi) * AutoFitContractLerp;
-            (_autoFitLo, _autoFitHi) = SnapRange(nlo, nhi);
-            // Re-arm the counter once we've essentially reached the target.
-            if (Math.Abs(_autoFitHi - targetHi) < eps && Math.Abs(_autoFitLo - targetLo) < eps)
-                _autoFitContractFrames = 0;
+            _autoFitLo += (snapLo - _autoFitLo) * AutoFitContractLerp;
+            _autoFitHi += (snapHi - _autoFitHi) * AutoFitContractLerp;
+            if (Math.Abs(_autoFitHi - snapHi) < eps && Math.Abs(_autoFitLo - snapLo) < eps)
+            { _autoFitLo = snapLo; _autoFitHi = snapHi; _autoFitContractFrames = 0; }
         }
         return (_autoFitLo, _autoFitHi);
     }
