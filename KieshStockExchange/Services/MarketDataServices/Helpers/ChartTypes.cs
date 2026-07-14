@@ -50,11 +50,19 @@ public enum DrawingHitPart { Body, Anchor1, Anchor2, Close }
 // canvas.StrokeDashPattern in the render pass; Solid uses no pattern.
 public enum DashKind { Solid, Dash, Dot }
 
-// Per-drawing styling picked from the floating style-bar. Colour + thickness + dash + an optional
-// arrowhead on the line's END. Persisted with the drawing (Color round-trips as a hex string via
-// ColorJsonConverter; Arrow rides the same JSON, defaulting false for legacy drawings). Default is
-// the calm blue at 1.5 px solid so a freshly-placed line matches the previous single-colour look.
-public readonly record struct DrawStyle(Color Color, float Thickness, DashKind Dash, bool Arrow = false)
+// TradingView-style line endings (the pen tray's ENDING row). None = plain; End = head at the far/
+// terminal end pointing outward; Start = head at the origin end pointing OUTWARD (mirror of End);
+// BothOut = outward heads at both ends; BothForward = heads at both ends BOTH pointing the forward
+// (start→end) direction. Supersedes the old bool Arrow (== End).
+public enum LineEnding { None, End, Start, BothOut, BothForward }
+
+// Per-drawing styling picked from the pen tray. Colour + thickness + dash + a line-ending. Persisted
+// with the drawing (Color round-trips as a hex string via ColorJsonConverter). Arrow is the LEGACY
+// bool kept only so pre-Ending JSON still deserializes; the load path migrates a set Arrow to
+// Ending=End (see LoadDrawingsForSelected) and nothing writes Arrow anymore. Default is the calm blue
+// at 1.5 px solid with no ending, so a freshly-placed line matches the previous single-colour look.
+public readonly record struct DrawStyle(
+    Color Color, float Thickness, DashKind Dash, bool Arrow = false, LineEnding Ending = LineEnding.None)
 {
     public static readonly DrawStyle Default = new(Color.FromArgb("#4C9AFF"), 1.5f, DashKind.Solid);
 }

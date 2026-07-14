@@ -298,28 +298,21 @@ public partial class ChartViewModel : StockAwareViewModel
     private void CycleScaleMode()
         => ScaleMode = (PriceScaleMode)(((int)ScaleMode + 1) % 3);
 
-    // Drawing tool (toolbar cycle: None -> Horizontal line -> Trendline). A transient UI mode —
-    // not persisted; only the drawings it produces are. While a tool is active a chart press
-    // places/starts a drawing instead of free-panning (handled in ChartView).
+    // Drawing tool (pen-tray TOOL row). A transient UI mode — not persisted; only the drawings it
+    // produces are. Always boots to None (we never arm a tool at startup). While a tool is active a
+    // chart press places/starts a drawing instead of free-panning (handled in ChartView).
     [ObservableProperty] private DrawTool _drawTool = DrawTool.None;
 
-    public string DrawToolLabel => DrawTool switch
-    {
-        DrawTool.HLine    => "Draw ─",
-        DrawTool.Trend    => "Draw ╱",
-        DrawTool.Ray      => "Draw ↗",
-        DrawTool.HRay     => "Draw ↦",
-        DrawTool.Polyline => "Draw ⋀⋁",
-        _                 => "Draw",
-    };
+    private const string DrawToolLastPrefKey = "chart_draw_tool_last";
 
-    partial void OnDrawToolChanged(DrawTool value) => OnPropertyChanged(nameof(DrawToolLabel));
-
-    // Cycles None -> HLine -> Trend -> Ray -> HRay -> Polyline -> None. Switching tools mid-build
-    // clears any in-progress polyline (ChartView listens for the change).
+    // Pen-tray TOOL tile: arm a tool (or None = cursor). The panel stays open so the user can keep
+    // tuning the pen; the pick is remembered for a future pre-highlight but never re-armed at startup.
     [RelayCommand]
-    private void CycleDrawTool()
-        => DrawTool = (DrawTool)(((int)DrawTool + 1) % 6);
+    private void SelectDrawTool(DrawTool tool)
+    {
+        DrawTool = tool;
+        Preferences.Default.Set(DrawToolLastPrefKey, tool.ToString());
+    }
 
     // User drawings for the selected stock, anchored in (time, price) so they survive pan/zoom.
     // Persisted to Preferences per stock+currency (see PersistDrawings); reloaded on stock change.
@@ -330,10 +323,30 @@ public partial class ChartViewModel : StockAwareViewModel
     [ObservableProperty] private Guid? _selectedDrawingId;
 
     public bool HasSelectedDrawing => SelectedDrawingId is not null;
+    // The pen panel is unified: no selection edits the saved default pen; a selection edits that
+    // drawing. These drive the panel's mode (TOOL row + "+ Line" vs "Set as default" + "Delete") and header.
+    public bool IsDefaultPenMode => !HasSelectedDrawing;
+    public string PenPanelHeader => HasSelectedDrawing ? "Selected line" : "Pen";
 
-    partial void OnSelectedDrawingIdChanged(Guid? value)
+    // Remembered so a deselect restores the panel to whatever it was before the selection opened it.
+    private bool _penPanelWasOpenBeforeSelect;
+
+    partial void OnSelectedDrawingIdChanged(Guid? oldValue, Guid? newValue)
     {
         OnPropertyChanged(nameof(HasSelectedDrawing));
+        OnPropertyChanged(nameof(IsDefaultPenMode));
+        OnPropertyChanged(nameof(PenPanelHeader));
+        // Selecting a drawing opens the panel in "selected" mode; deselecting reverts to how it was.
+        if (newValue is not null && oldValue is null)
+        {
+            _penPanelWasOpenBeforeSelect = IsPenPanelOpen;
+            IsPenPanelOpen = true;
+        }
+        else if (newValue is null && oldValue is not null && !_penPanelWasOpenBeforeSelect)
+        {
+            IsPenPanelOpen = false;
+        }
+        RefreshPenTiles();   // the effective (selected-vs-default) style changed
         RequestRedraw();
     }
 
@@ -427,6 +440,70 @@ public partial class ChartViewModel : StockAwareViewModel
     // Moving averages — user-configurable. Defaults are the standard MA20/50/200,
     // all disabled until the user toggles them on in the settings overlay.
     [ObservableProperty] private bool _isMaSettingsOpen;
+
+    // The two chart overlays are mutually exclusive so they never stack on the same corner.
+    partial void OnIsMaSettingsOpenChanged(bool value)
+    {
+        if (value && IsPenPanelOpen) IsPenPanelOpen = false;
+    }
+
+    // --- Pen tray ----------------------------------------------------------------------------------
+    // The default pen: the style a freshly-placed drawing gets. Persisted as JSON (Color via the same
+    // hex converter as the drawings) so the user's pen survives restarts.
+    private const string DefaultDrawStylePrefKey = "chart_draw_style_default";
+    [ObservableProperty] private DrawStyle _defaultDrawStyle = LoadDefaultDrawStyle();
+
+    partial void OnDefaultDrawStyleChanged(DrawStyle value)
+    {
+        try { Preferences.Default.Set(DefaultDrawStylePrefKey, JsonSerializer.Serialize(value, _drawingJson)); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Saving default pen style failed."); }
+        RefreshPenTiles();
+    }
+
+    private static DrawStyle LoadDefaultDrawStyle()
+    {
+        var json = Preferences.Default.Get(DefaultDrawStylePrefKey, string.Empty);
+        if (string.IsNullOrEmpty(json)) return DrawStyle.Default;
+        try
+        {
+            var s = JsonSerializer.Deserialize<DrawStyle>(json, _drawingJson);
+            return (s.Color is null || s.Thickness <= 0f) ? DrawStyle.Default : s;
+        }
+        catch { return DrawStyle.Default; }
+    }
+
+    [ObservableProperty] private bool _isPenPanelOpen;
+    partial void OnIsPenPanelOpenChanged(bool value)
+    {
+        if (value && IsMaSettingsOpen) IsMaSettingsOpen = false;
+    }
+
+    [RelayCommand] private void TogglePenPanel() => IsPenPanelOpen = !IsPenPanelOpen;
+    [RelayCommand] private void ClosePenPanel() => IsPenPanelOpen = false;
+
+    // The live specimen of the current pen (or selected line), bound by the toolbar pen button and the
+    // panel preview. Rebuilt as a fresh instance on every effective-style change so its hosts repaint.
+    [ObservableProperty] private StylePreviewDrawable _penSpecimen = new();
+
+    // The pen-tray palette (10 swatches, 2×5). Order matches the design spec.
+    private static readonly Color[] PenPalette =
+    {
+        Color.FromArgb("#2962FF"), Color.FromArgb("#F23645"), Color.FromArgb("#089981"),
+        Color.FromArgb("#FF9800"), Color.FromArgb("#B39DDB"), Color.FromArgb("#4C9AFF"),
+        Color.FromArgb("#FFFFFF"), Color.FromArgb("#FFD54F"), Color.FromArgb("#26C6DA"),
+        Color.FromArgb("#9E9E9E"),
+    };
+
+    // Fixed tile sets — only each tile's Specimen + IsSelected mutate (see RefreshPenTiles).
+    public IReadOnlyList<PenColorTile> PenColorTiles { get; } =
+        PenPalette.Select(c => new PenColorTile(c)).ToList();
+    public IReadOnlyList<PenWidthTile> PenWidthTiles { get; } =
+        new[] { 1.0, 2.0, 3.0, 4.0 }.Select(w => new PenWidthTile(w)).ToList();
+    public IReadOnlyList<PenDashTile> PenDashTiles { get; } =
+        new[] { DashKind.Solid, DashKind.Dash, DashKind.Dot }.Select(d => new PenDashTile(d)).ToList();
+    public IReadOnlyList<PenEndingTile> PenEndingTiles { get; } =
+        new[] { LineEnding.None, LineEnding.End, LineEnding.Start, LineEnding.BothOut, LineEnding.BothForward }
+            .Select(e => new PenEndingTile(e)).ToList();
 
     public ObservableCollection<MaConfig> MaSeries { get; } = new()
     {
@@ -555,6 +632,16 @@ public partial class ChartViewModel : StockAwareViewModel
         OpenOrderLines.CollectionChanged += (_, __) => RequestRedraw();
         FillMarkers.CollectionChanged += (_, __) => RequestRedraw();
         TriggerMarkers.CollectionChanged += (_, __) => RequestRedraw();
+
+        // Stamp the shared pen-style commands onto each tile (mirrors MaConfig.RemoveCommand) so the
+        // DataTemplate binds Command directly + passes the tile's own value as the parameter.
+        foreach (var t in PenColorTiles)  t.Command = SetDefaultColorCommand;
+        foreach (var t in PenWidthTiles)  t.Command = SetDefaultThicknessCommand;
+        foreach (var t in PenDashTiles)   t.Command = SetDefaultDashCommand;
+        foreach (var t in PenEndingTiles) t.Command = SetDefaultEndingCommand;
+
+        // Seed the pen-tray specimens + selection flags from the loaded default pen.
+        RefreshPenTiles();
 
         // Keep open-order overlays in sync with the cache. Rebuild on selection
         // change too so switching stocks shows the right user lines.
@@ -1021,7 +1108,7 @@ public partial class ChartViewModel : StockAwareViewModel
         if (price is null || price.Value <= 0m) return;
         var now = TimeHelper.NowUtc();
         AddDrawing(new DrawingObject(
-            Guid.NewGuid(), DrawTool.HLine, now, price.Value, now, price.Value, DrawStyle.Default));
+            Guid.NewGuid(), DrawTool.HLine, now, price.Value, now, price.Value, DefaultDrawStyle));
     }
 
     // --- Drawings (horizontal lines + trendlines) ------------------------------------------------
@@ -1042,7 +1129,7 @@ public partial class ChartViewModel : StockAwareViewModel
         PersistDrawings();
     }
 
-    // --- Style-bar: mutate the SELECTED drawing's style, persist + redraw ------------------------
+    // --- Pen tray: unified style editing (default pen when nothing selected, else the selection) ---
 
     // Applies a style transform to the selected drawing in place, then persists + repaints.
     private void MutateSelectedStyle(Func<DrawStyle, DrawStyle> transform)
@@ -1053,40 +1140,102 @@ public partial class ChartViewModel : StockAwareViewModel
             if (Drawings[i].Id != id) continue;
             Drawings[i] = Drawings[i] with { Style = transform(Drawings[i].Style) };
             PersistDrawings();
+            RefreshPenTiles();   // the selected style is the effective style
             RequestRedraw();
             return;
         }
     }
 
+    // Each setter edits the SELECTED drawing when there is one, else the saved default pen. The
+    // default write routes through the DefaultDrawStyle setter (persist + tile refresh); the selected
+    // write through MutateSelectedStyle.
+    private void ApplyPenStyle(Func<DrawStyle, DrawStyle> transform)
+    {
+        if (HasSelectedDrawing) MutateSelectedStyle(transform);
+        else DefaultDrawStyle = transform(DefaultDrawStyle);
+    }
+
     [RelayCommand]
-    private void SetDrawingColor(Color color)
+    private void SetDefaultColor(Color color)
     {
         if (color is null) return;
-        MutateSelectedStyle(s => s with { Color = color });
+        ApplyPenStyle(s => s with { Color = color });
     }
 
-    // Thickness comes from the XAML preset buttons as a string ("1"/"2"/"3") — cleanest way to pass
-    // a numeric literal through CommandParameter.
     [RelayCommand]
-    private void SetDrawingThickness(string px)
+    private void SetDefaultThickness(double px)
     {
-        if (!float.TryParse(px, out var t) || t <= 0f) return;
-        MutateSelectedStyle(s => s with { Thickness = t });
+        if (px <= 0) return;
+        ApplyPenStyle(s => s with { Thickness = (float)px });
     }
 
     [RelayCommand]
-    private void CycleDrawingDash()
-        => MutateSelectedStyle(s => s with { Dash = (DashKind)(((int)s.Dash + 1) % 3) });
+    private void SetDefaultDash(DashKind dash)
+        => ApplyPenStyle(s => s with { Dash = dash });
 
-    // Style-bar toggle: put / remove an arrowhead on the END of the selected line.
     [RelayCommand]
-    private void ToggleDrawingArrow()
-        => MutateSelectedStyle(s => s with { Arrow = !s.Arrow });
+    private void SetDefaultEnding(LineEnding ending)
+        => ApplyPenStyle(s => s with { Ending = ending });
+
+    // "Set as default ✓": copy the selected line's style to the default pen.
+    [RelayCommand]
+    private void SetSelectedAsDefault()
+    {
+        if (SelectedDrawingId is not Guid id) return;
+        for (int i = 0; i < Drawings.Count; i++)
+            if (Drawings[i].Id == id) { DefaultDrawStyle = NormalizeStyle(Drawings[i].Style); return; }
+    }
 
     [RelayCommand]
     private void DeleteSelectedDrawing()
     {
         if (SelectedDrawingId is Guid id) RemoveDrawing(id);
+    }
+
+    // The effective style the pen tray edits/previews: the selected drawing's, else the default pen.
+    private DrawStyle EffectivePenStyle()
+    {
+        if (SelectedDrawingId is Guid id)
+            for (int i = 0; i < Drawings.Count; i++)
+                if (Drawings[i].Id == id) return NormalizeStyle(Drawings[i].Style);
+        return DefaultDrawStyle;
+    }
+
+    // Legacy/blank drawings persisted without a colour fall back to the default pen colour + thickness.
+    private static DrawStyle NormalizeStyle(DrawStyle s)
+        => (s.Color is null || s.Thickness <= 0f)
+            ? DrawStyle.Default with { Dash = s.Dash, Ending = s.Ending }
+            : s;
+
+    private static StylePreviewDrawable MakeSpecimen(Color c, float th, DashKind dash, LineEnding end)
+        => new() { Color = c, Thickness = th, Dash = dash, Ending = end };
+
+    // Rebuild every pen-tray specimen + selection flag from the effective style. Fresh specimen
+    // instances make each hosting GraphicsView repaint through its Drawable binding.
+    private void RefreshPenTiles()
+    {
+        var s = EffectivePenStyle();
+        var col = s.Color ?? DrawStyle.Default.Color;
+        float th = s.Thickness > 0f ? s.Thickness : DrawStyle.Default.Thickness;
+        string colHex = col.ToArgbHex(true);
+
+        PenSpecimen = MakeSpecimen(col, th, s.Dash, s.Ending);
+        foreach (var t in PenColorTiles) t.IsSelected = t.Color.ToArgbHex(true) == colHex;
+        foreach (var t in PenWidthTiles)
+        {
+            t.Specimen = MakeSpecimen(col, (float)t.Thickness, DashKind.Solid, LineEnding.None);
+            t.IsSelected = Math.Abs(t.Thickness - th) < 0.01;
+        }
+        foreach (var t in PenDashTiles)
+        {
+            t.Specimen = MakeSpecimen(col, th, t.Dash, LineEnding.None);
+            t.IsSelected = t.Dash == s.Dash;
+        }
+        foreach (var t in PenEndingTiles)
+        {
+            t.Specimen = MakeSpecimen(col, th, s.Dash, t.Ending);
+            t.IsSelected = t.Ending == s.Ending;
+        }
     }
 
     /// <summary>
@@ -1137,6 +1286,10 @@ public partial class ChartViewModel : StockAwareViewModel
                     var style = (d.Style.Color is null || d.Style.Thickness <= 0f)
                         ? DrawStyle.Default
                         : d.Style;
+                    // Migrate the legacy arrowhead bool to a line-ending, then retire Arrow on the record.
+                    if (style.Ending == LineEnding.None && style.Arrow)
+                        style = style with { Ending = LineEnding.End };
+                    if (style.Arrow) style = style with { Arrow = false };
                     Drawings.Add(d with { Style = style });
                 }
         }

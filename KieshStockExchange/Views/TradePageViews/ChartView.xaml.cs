@@ -548,7 +548,7 @@ public partial class ChartView : ContentView
             var id = Guid.NewGuid();
             if (_vm.DrawTool == DrawTool.HLine || _vm.DrawTool == DrawTool.HRay)
             {
-                _vm.AddDrawing(new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, DrawStyle.Default));
+                _vm.AddDrawing(new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, _vm.DefaultDrawStyle));
                 _vm.SelectedDrawingId = id;   // a freshly-placed line is selected for immediate styling
                 e.Handled = true;
                 return;
@@ -567,7 +567,7 @@ public partial class ChartView : ContentView
                 return;
             }
             // Trend or Ray: a two-anchor segment; the second anchor drags to the release point.
-            var seg = new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, DrawStyle.Default);
+            var seg = new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, _vm.DefaultDrawStyle);
             _vm.AddDrawing(seg);
             _vm.SelectedDrawingId = id;
             BeginDrawingDrag(seg, DrawingHitPart.Anchor2, p, isNew: true);
@@ -937,7 +937,7 @@ public partial class ChartView : ContentView
         {
             var id = Guid.NewGuid();
             _vm.AddDrawing(new DrawingObject(
-                id, DrawTool.Polyline, default, 0m, default, 0m, DrawStyle.Default, _polyPoints.ToList()));
+                id, DrawTool.Polyline, default, 0m, default, 0m, _vm.DefaultDrawStyle, _polyPoints.ToList()));
             _vm.SelectedDrawingId = id;
         }
         CancelPolyline();

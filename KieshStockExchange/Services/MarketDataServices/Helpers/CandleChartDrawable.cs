@@ -590,7 +590,6 @@ public sealed class CandleChartDrawable : IDrawable
     const float DrawHandleR = 4f;    // endpoint drag-handle radius
     const float DrawHitTol = 5f;     // extra pixel slack when hit-testing a line/handle
     const float DrawCloseHalf = 7f;  // half-size of the ✕ remove glyph
-    const float ArrowSize = 10f;     // barb length of an end-of-line arrowhead
 
     /// <summary>
     /// Draw the user's horizontal lines + trendlines. HLine spans the plot at its price with a
@@ -623,6 +622,9 @@ public sealed class CandleChartDrawable : IDrawable
                 if (y < plot.Top || y > plot.Bottom) { canvas.StrokeDashPattern = null; continue; }
                 canvas.DrawLine(plot.Left, y, plot.Right, y);
                 canvas.StrokeDashPattern = null;
+                // Endings ride the plot edges (forward = right), so they pan with the viewport.
+                StylePreviewDrawable.DrawEndings(canvas, plot.Left, y, 1f, 0f, plot.Right, y, 1f, 0f,
+                    d.Style.Ending, color, EndSize(thickness));
 
                 // Right-gutter price tag in the line's colour, matching the order-line convention.
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
@@ -642,7 +644,9 @@ public sealed class CandleChartDrawable : IDrawable
                 float x1 = X(d.T1);
                 canvas.DrawLine(x1, y, plot.Right, y);
                 canvas.StrokeDashPattern = null;
-                if (d.Style.Arrow) DrawArrowHead(canvas, plot.Right, y, 1f, 0f, color, ArrowSize);
+                // Origin = click; terminal = plot right edge (forward = right).
+                StylePreviewDrawable.DrawEndings(canvas, x1, y, 1f, 0f, plot.Right, y, 1f, 0f,
+                    d.Style.Ending, color, EndSize(thickness));
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
                 DrawHandle(canvas, x1, y, color);
                 DrawCloseGlyph(canvas, x1, y - 12f, color);
@@ -659,11 +663,14 @@ public sealed class CandleChartDrawable : IDrawable
                     lastX = nx; lastY = ny;
                 }
                 canvas.StrokeDashPattern = null;
-                // Arrowhead on the final segment, pointing along its direction.
-                if (d.Style.Arrow && pts.Count >= 2)
+                // Endings: the start head follows the first→second segment, the end head the last one.
+                if (pts.Count >= 2)
                 {
-                    float px = X(pts[^2].T), py = Y((double)pts[^2].P);
-                    DrawArrowHead(canvas, lastX, lastY, lastX - px, lastY - py, color, ArrowSize);
+                    float fx0 = X(pts[0].T), fy0 = Y((double)pts[0].P);
+                    float sx = X(pts[1].T), sy = Y((double)pts[1].P);
+                    float slx = X(pts[^2].T), sly = Y((double)pts[^2].P);
+                    StylePreviewDrawable.DrawEndings(canvas, fx0, fy0, sx - fx0, sy - fy0,
+                        lastX, lastY, lastX - slx, lastY - sly, d.Style.Ending, color, EndSize(thickness));
                 }
                 for (int k = 0; k < pts.Count; k++)
                     DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
@@ -678,7 +685,9 @@ public sealed class CandleChartDrawable : IDrawable
                     (farX, farY) = RayExit(x1, y1, x2 - x1, y2 - y1, plot);
                 canvas.DrawLine(x1, y1, farX, farY);
                 canvas.StrokeDashPattern = null;
-                if (d.Style.Arrow) DrawArrowHead(canvas, farX, farY, farX - x1, farY - y1, color, ArrowSize);
+                // Origin = anchor1; terminal = anchor2 (Trend) / ray-exit (Ray). Forward = origin→terminal.
+                StylePreviewDrawable.DrawEndings(canvas, x1, y1, farX - x1, farY - y1, farX, farY,
+                    farX - x1, farY - y1, d.Style.Ending, color, EndSize(thickness));
                 DrawHandle(canvas, x1, y1, color);
                 DrawHandle(canvas, x2, y2, color);
                 DrawCloseGlyph(canvas, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f, color);
@@ -806,23 +815,9 @@ public sealed class CandleChartDrawable : IDrawable
         return (ox + dx * t, oy + dy * t);
     }
 
-    // Filled triangle arrowhead with its tip at (tipX,tipY) pointing along (dirX,dirY); size = barb length.
-    private void DrawArrowHead(ICanvas canvas, float tipX, float tipY, float dirX, float dirY, Color color, float size)
-    {
-        float len = (float)Math.Sqrt(dirX * dirX + dirY * dirY);
-        if (len < 1e-4f) return;
-        float ux = dirX / len, uy = dirY / len;   // unit direction
-        float px = -uy, py = ux;                   // perpendicular
-        float baseX = tipX - ux * size, baseY = tipY - uy * size;
-        float half = size * 0.5f;
-        var path = new PathF();
-        path.MoveTo(tipX, tipY);
-        path.LineTo(baseX + px * half, baseY + py * half);
-        path.LineTo(baseX - px * half, baseY - py * half);
-        path.Close();
-        canvas.FillColor = color;
-        canvas.FillPath(path);
-    }
+    // Bigger, thickness-scaled line-ending head (3 px → ~21 px); arrowhead geometry itself lives on
+    // StylePreviewDrawable so the chart and the pen-tray specimens draw identical heads.
+    private static float EndSize(float thickness) => 12f + 3f * thickness;
 
     private void DrawHandle(ICanvas canvas, float x, float y, Color color)
     {
