@@ -45,3 +45,12 @@ public partial class PenEndingTile : ObservableObject
     [ObservableProperty] private StylePreviewDrawable _specimen = new();
     public PenEndingTile(LineEnding ending) => Ending = ending;
 }
+
+public partial class PenHeadTile : ObservableObject
+{
+    public ArrowHeadStyle Head { get; }
+    public ICommand? Command { get; set; }
+    [ObservableProperty] private bool _isSelected;
+    [ObservableProperty] private StylePreviewDrawable _specimen = new();
+    public PenHeadTile(ArrowHeadStyle head) => Head = head;
+}

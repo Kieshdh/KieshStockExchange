@@ -624,7 +624,7 @@ public sealed class CandleChartDrawable : IDrawable
                 canvas.StrokeDashPattern = null;
                 // Endings ride the plot edges (forward = right), so they pan with the viewport.
                 StylePreviewDrawable.DrawEndings(canvas, plot.Left, y, 1f, 0f, plot.Right, y, 1f, 0f,
-                    d.Style.Ending, color, EndSize(thickness));
+                    d.Style.Ending, color, EndSize(thickness), d.Style.Head, thickness);
 
                 // Right-gutter price tag in the line's colour, matching the order-line convention.
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
@@ -646,7 +646,7 @@ public sealed class CandleChartDrawable : IDrawable
                 canvas.StrokeDashPattern = null;
                 // Origin = click; terminal = plot right edge (forward = right).
                 StylePreviewDrawable.DrawEndings(canvas, x1, y, 1f, 0f, plot.Right, y, 1f, 0f,
-                    d.Style.Ending, color, EndSize(thickness));
+                    d.Style.Ending, color, EndSize(thickness), d.Style.Head, thickness);
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
                 DrawHandle(canvas, x1, y, color);
                 DrawCloseGlyph(canvas, x1, y - 12f, color);
@@ -670,7 +670,8 @@ public sealed class CandleChartDrawable : IDrawable
                     float sx = X(pts[1].T), sy = Y((double)pts[1].P);
                     float slx = X(pts[^2].T), sly = Y((double)pts[^2].P);
                     StylePreviewDrawable.DrawEndings(canvas, fx0, fy0, sx - fx0, sy - fy0,
-                        lastX, lastY, lastX - slx, lastY - sly, d.Style.Ending, color, EndSize(thickness));
+                        lastX, lastY, lastX - slx, lastY - sly, d.Style.Ending, color, EndSize(thickness),
+                        d.Style.Head, thickness);
                 }
                 for (int k = 0; k < pts.Count; k++)
                     DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
@@ -687,7 +688,7 @@ public sealed class CandleChartDrawable : IDrawable
                 canvas.StrokeDashPattern = null;
                 // Origin = anchor1; terminal = anchor2 (Trend) / ray-exit (Ray). Forward = origin→terminal.
                 StylePreviewDrawable.DrawEndings(canvas, x1, y1, farX - x1, farY - y1, farX, farY,
-                    farX - x1, farY - y1, d.Style.Ending, color, EndSize(thickness));
+                    farX - x1, farY - y1, d.Style.Ending, color, EndSize(thickness), d.Style.Head, thickness);
                 DrawHandle(canvas, x1, y1, color);
                 DrawHandle(canvas, x2, y2, color);
                 DrawCloseGlyph(canvas, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f, color);

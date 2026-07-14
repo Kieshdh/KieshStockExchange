@@ -548,8 +548,9 @@ public partial class ChartView : ContentView
             var id = Guid.NewGuid();
             if (_vm.DrawTool == DrawTool.HLine || _vm.DrawTool == DrawTool.HRay)
             {
+                // Stay in pen mode after placing (no auto-select) so the pen panel's tool row remains
+                // visible and the user can keep placing lines / switching tool type. Click the line to edit it.
                 _vm.AddDrawing(new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, _vm.DefaultDrawStyle));
-                _vm.SelectedDrawingId = id;   // a freshly-placed line is selected for immediate styling
                 e.Handled = true;
                 return;
             }
@@ -569,7 +570,7 @@ public partial class ChartView : ContentView
             // Trend or Ray: a two-anchor segment; the second anchor drags to the release point.
             var seg = new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, _vm.DefaultDrawStyle);
             _vm.AddDrawing(seg);
-            _vm.SelectedDrawingId = id;
+            // No auto-select — the drag below positions anchor2; the tool row stays visible for the next line.
             BeginDrawingDrag(seg, DrawingHitPart.Anchor2, p, isNew: true);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             Chart.Invalidate();
@@ -938,7 +939,7 @@ public partial class ChartView : ContentView
             var id = Guid.NewGuid();
             _vm.AddDrawing(new DrawingObject(
                 id, DrawTool.Polyline, default, 0m, default, 0m, _vm.DefaultDrawStyle, _polyPoints.ToList()));
-            _vm.SelectedDrawingId = id;
+            // No auto-select — stay in pen mode so the tool row stays visible.
         }
         CancelPolyline();
     }

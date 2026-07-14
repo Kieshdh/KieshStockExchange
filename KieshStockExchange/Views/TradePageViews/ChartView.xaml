@@ -157,27 +157,19 @@
                         Style="{StaticResource ChartResolutionButton.Unselected}"
                         Command="{Binding CycleScaleModeCommand}" />
 
-                <!-- Pen tray: a live specimen of the current pen (exact colour/width/dash/ending) + a
-                     ▾; tapping toggles the pen panel. Replaces the old cycle + "+ Line" buttons. -->
-                <Border Style="{StaticResource ChartPenButton}">
-                    <Border.GestureRecognizers>
-                        <TapGestureRecognizer Command="{Binding TogglePenPanelCommand}" />
-                    </Border.GestureRecognizers>
-                    <Border.Triggers>
-                        <DataTrigger TargetType="Border"
+                <!-- Pen tray: a plain text label ("Line" + the current tool glyph) + ▾; tapping toggles
+                     the pen panel. Replaces the old cycle + "+ Line" buttons. -->
+                <Button Text="{Binding PenToolLabel, StringFormat='{0} ▾'}"
+                        Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding TogglePenPanelCommand}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button"
                                      Binding="{Binding IsPenPanelOpen}" Value="True">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
-                    </Border.Triggers>
-                    <HorizontalStackLayout Spacing="4" VerticalOptions="Center">
-                        <GraphicsView Drawable="{Binding PenSpecimen}"
-                                      WidthRequest="34" HeightRequest="14"
-                                      VerticalOptions="Center" InputTransparent="True" />
-                        <Label Text="▾" FontSize="9"
-                               TextColor="{DynamicResource ChartAxis}"
-                               VerticalOptions="Center" />
-                    </HorizontalStackLayout>
-                </Border>
+                    </Button.Triggers>
+                </Button>
             </HorizontalStackLayout>
 
             <!-- Spacer -->
@@ -393,7 +385,7 @@
                 Margin="0,10,72,0"
                 VerticalOptions="Start"
                 HorizontalOptions="End"
-                WidthRequest="300">
+                WidthRequest="340">
             <VerticalStackLayout Spacing="8">
 
                 <!-- Header + close -->
@@ -513,14 +505,14 @@
                 </FlexLayout>
 
                 <!-- WIDTH + DASH (live line specimens in the current colour) -->
-                <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6">
+                <Grid ColumnDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="4">
                     <Label Grid.Column="0" Text="WIDTH" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" />
-                    <HorizontalStackLayout Grid.Column="1" Spacing="4"
+                           VerticalOptions="Center" Margin="0,0,2,0" />
+                    <HorizontalStackLayout Grid.Column="1" Spacing="2"
                                            BindableLayout.ItemsSource="{Binding PenWidthTiles}">
                         <BindableLayout.ItemTemplate>
                             <DataTemplate x:DataType="vm:PenWidthTile">
-                                <Border WidthRequest="34" HeightRequest="26"
+                                <Border WidthRequest="26" HeightRequest="24"
                                         Stroke="Transparent" StrokeThickness="2"
                                         StrokeShape="RoundRectangle 3"
                                         BackgroundColor="{DynamicResource ChartBg}">
@@ -541,12 +533,12 @@
                         </BindableLayout.ItemTemplate>
                     </HorizontalStackLayout>
                     <Label Grid.Column="2" Text="DASH" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" />
-                    <HorizontalStackLayout Grid.Column="3" Spacing="4"
+                           VerticalOptions="Center" Margin="4,0,2,0" />
+                    <HorizontalStackLayout Grid.Column="3" Spacing="2"
                                            BindableLayout.ItemsSource="{Binding PenDashTiles}">
                         <BindableLayout.ItemTemplate>
                             <DataTemplate x:DataType="vm:PenDashTile">
-                                <Border WidthRequest="34" HeightRequest="26"
+                                <Border WidthRequest="26" HeightRequest="24"
                                         Stroke="Transparent" StrokeThickness="2"
                                         StrokeShape="RoundRectangle 3"
                                         BackgroundColor="{DynamicResource ChartBg}">
@@ -568,19 +560,48 @@
                     </HorizontalStackLayout>
                 </Grid>
 
-                <!-- ENDING (5 live specimens: none / end / start / both-out / both-forward) -->
+                <!-- ENDING (3 live specimens: none / end / both-out). Wide tiles so the line segment
+                     stays visible between the heads (BothOut never collapses to a bowtie). -->
                 <Label Text="ENDING" Style="{StaticResource ChartOhlcKey}" />
-                <HorizontalStackLayout Spacing="4"
+                <HorizontalStackLayout Spacing="6"
                                        BindableLayout.ItemsSource="{Binding PenEndingTiles}">
                     <BindableLayout.ItemTemplate>
                         <DataTemplate x:DataType="vm:PenEndingTile">
-                            <Border WidthRequest="46" HeightRequest="28"
+                            <Border WidthRequest="92" HeightRequest="30"
                                     Stroke="Transparent" StrokeThickness="2"
                                     StrokeShape="RoundRectangle 3"
                                     BackgroundColor="{DynamicResource ChartBg}">
                                 <Border.GestureRecognizers>
                                     <TapGestureRecognizer Command="{Binding Command}"
                                                           CommandParameter="{Binding Ending}" />
+                                </Border.GestureRecognizers>
+                                <GraphicsView Drawable="{Binding Specimen}"
+                                              HorizontalOptions="Fill" VerticalOptions="Fill"
+                                              InputTransparent="True" />
+                                <Border.Triggers>
+                                    <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                        <Setter Property="Stroke" Value="{StaticResource White}" />
+                                    </DataTrigger>
+                                </Border.Triggers>
+                            </Border>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </HorizontalStackLayout>
+
+                <!-- HEAD (3 live specimens: filled triangle / open V / dot) — the shape drawn at any
+                     end that gets a head per the ENDING choice. -->
+                <Label Text="HEAD" Style="{StaticResource ChartOhlcKey}" />
+                <HorizontalStackLayout Spacing="6"
+                                       BindableLayout.ItemsSource="{Binding PenHeadTiles}">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PenHeadTile">
+                            <Border WidthRequest="92" HeightRequest="30"
+                                    Stroke="Transparent" StrokeThickness="2"
+                                    StrokeShape="RoundRectangle 3"
+                                    BackgroundColor="{DynamicResource ChartBg}">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding Command}"
+                                                          CommandParameter="{Binding Head}" />
                                 </Border.GestureRecognizers>
                                 <GraphicsView Drawable="{Binding Specimen}"
                                               HorizontalOptions="Fill" VerticalOptions="Fill"

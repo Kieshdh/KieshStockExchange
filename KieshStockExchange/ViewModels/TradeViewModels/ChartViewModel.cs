@@ -303,6 +303,19 @@ public partial class ChartViewModel : StockAwareViewModel
     // chart press places/starts a drawing instead of free-panning (handled in ChartView).
     [ObservableProperty] private DrawTool _drawTool = DrawTool.None;
 
+    // Toolbar pen button text: the word "Line" + the current tool's glyph (the old DrawToolLabel set).
+    public string PenToolLabel => DrawTool switch
+    {
+        DrawTool.HLine    => "Line ─",
+        DrawTool.Trend    => "Line ╱",
+        DrawTool.Ray      => "Line ↗",
+        DrawTool.HRay     => "Line ↦",
+        DrawTool.Polyline => "Line ⋀⋁",
+        _                 => "Line",
+    };
+
+    partial void OnDrawToolChanged(DrawTool value) => OnPropertyChanged(nameof(PenToolLabel));
+
     private const string DrawToolLastPrefKey = "chart_draw_tool_last";
 
     // Pen-tray TOOL tile: arm a tool (or None = cursor). The panel stays open so the user can keep
@@ -501,9 +514,13 @@ public partial class ChartViewModel : StockAwareViewModel
         new[] { 1.0, 2.0, 3.0, 4.0 }.Select(w => new PenWidthTile(w)).ToList();
     public IReadOnlyList<PenDashTile> PenDashTiles { get; } =
         new[] { DashKind.Solid, DashKind.Dash, DashKind.Dot }.Select(d => new PenDashTile(d)).ToList();
+    // Owner-trimmed to three: none / end / both-out (Start + BothForward stay in the enum for back-compat).
     public IReadOnlyList<PenEndingTile> PenEndingTiles { get; } =
-        new[] { LineEnding.None, LineEnding.End, LineEnding.Start, LineEnding.BothOut, LineEnding.BothForward }
+        new[] { LineEnding.None, LineEnding.End, LineEnding.BothOut }
             .Select(e => new PenEndingTile(e)).ToList();
+    public IReadOnlyList<PenHeadTile> PenHeadTiles { get; } =
+        new[] { ArrowHeadStyle.FilledTriangle, ArrowHeadStyle.Open, ArrowHeadStyle.Dot }
+            .Select(h => new PenHeadTile(h)).ToList();
 
     public ObservableCollection<MaConfig> MaSeries { get; } = new()
     {
@@ -639,6 +656,7 @@ public partial class ChartViewModel : StockAwareViewModel
         foreach (var t in PenWidthTiles)  t.Command = SetDefaultThicknessCommand;
         foreach (var t in PenDashTiles)   t.Command = SetDefaultDashCommand;
         foreach (var t in PenEndingTiles) t.Command = SetDefaultEndingCommand;
+        foreach (var t in PenHeadTiles)   t.Command = SetDefaultHeadCommand;
 
         // Seed the pen-tray specimens + selection flags from the loaded default pen.
         RefreshPenTiles();
@@ -1177,6 +1195,10 @@ public partial class ChartViewModel : StockAwareViewModel
     private void SetDefaultEnding(LineEnding ending)
         => ApplyPenStyle(s => s with { Ending = ending });
 
+    [RelayCommand]
+    private void SetDefaultHead(ArrowHeadStyle head)
+        => ApplyPenStyle(s => s with { Head = head });
+
     // "Set as default ✓": copy the selected line's style to the default pen.
     [RelayCommand]
     private void SetSelectedAsDefault()
@@ -1207,11 +1229,12 @@ public partial class ChartViewModel : StockAwareViewModel
             ? DrawStyle.Default with { Dash = s.Dash, Ending = s.Ending }
             : s;
 
-    private static StylePreviewDrawable MakeSpecimen(Color c, float th, DashKind dash, LineEnding end)
-        => new() { Color = c, Thickness = th, Dash = dash, Ending = end };
+    private static StylePreviewDrawable MakeSpecimen(Color c, float th, DashKind dash, LineEnding end, ArrowHeadStyle head)
+        => new() { Color = c, Thickness = th, Dash = dash, Ending = end, Head = head };
 
     // Rebuild every pen-tray specimen + selection flag from the effective style. Fresh specimen
-    // instances make each hosting GraphicsView repaint through its Drawable binding.
+    // instances make each hosting GraphicsView repaint through its Drawable binding. Ending + head
+    // specimens reflect the current colour/width/dash so every tile previews itself in context.
     private void RefreshPenTiles()
     {
         var s = EffectivePenStyle();
@@ -1219,22 +1242,28 @@ public partial class ChartViewModel : StockAwareViewModel
         float th = s.Thickness > 0f ? s.Thickness : DrawStyle.Default.Thickness;
         string colHex = col.ToArgbHex(true);
 
-        PenSpecimen = MakeSpecimen(col, th, s.Dash, s.Ending);
+        PenSpecimen = MakeSpecimen(col, th, s.Dash, s.Ending, s.Head);
         foreach (var t in PenColorTiles) t.IsSelected = t.Color.ToArgbHex(true) == colHex;
         foreach (var t in PenWidthTiles)
         {
-            t.Specimen = MakeSpecimen(col, (float)t.Thickness, DashKind.Solid, LineEnding.None);
+            t.Specimen = MakeSpecimen(col, (float)t.Thickness, DashKind.Solid, LineEnding.None, s.Head);
             t.IsSelected = Math.Abs(t.Thickness - th) < 0.01;
         }
         foreach (var t in PenDashTiles)
         {
-            t.Specimen = MakeSpecimen(col, th, t.Dash, LineEnding.None);
+            t.Specimen = MakeSpecimen(col, th, t.Dash, LineEnding.None, s.Head);
             t.IsSelected = t.Dash == s.Dash;
         }
         foreach (var t in PenEndingTiles)
         {
-            t.Specimen = MakeSpecimen(col, th, s.Dash, t.Ending);
+            t.Specimen = MakeSpecimen(col, th, s.Dash, t.Ending, s.Head);
             t.IsSelected = t.Ending == s.Ending;
+        }
+        foreach (var t in PenHeadTiles)
+        {
+            // Always show a head so the shape reads (use End even if the pen's ending is None).
+            t.Specimen = MakeSpecimen(col, th, s.Dash, LineEnding.End, t.Head);
+            t.IsSelected = t.Head == s.Head;
         }
     }
 

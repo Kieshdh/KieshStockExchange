@@ -77,17 +77,6 @@
         <Setter Property="BorderWidth"     Value="0" />
     </Style>
 
-    <!-- Pen-tray toolbar button: hosts the live pen specimen + a ▾. Sized like a resolution pill. -->
-    <Style x:Key="ChartPenButton" TargetType="Border">
-        <Setter Property="BackgroundColor"  Value="Transparent" />
-        <Setter Property="Stroke"           Value="{DynamicResource ChartGrid}" />
-        <Setter Property="StrokeThickness"  Value="1" />
-        <Setter Property="StrokeShape"      Value="RoundRectangle 3" />
-        <Setter Property="Padding"          Value="5,0" />
-        <Setter Property="HeightRequest"    Value="18" />
-        <Setter Property="VerticalOptions"  Value="Center" />
-    </Style>
-
     <!-- Pen-tray TOOL tile: a glyph button; selected tile gets the ChartGrid fill + white ring. -->
     <Style x:Key="PenToolTile" TargetType="Button">
         <Setter Property="Padding"         Value="0" />

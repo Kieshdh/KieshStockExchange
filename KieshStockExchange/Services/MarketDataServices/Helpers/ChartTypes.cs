@@ -51,18 +51,24 @@ public enum DrawingHitPart { Body, Anchor1, Anchor2, Close }
 public enum DashKind { Solid, Dash, Dot }
 
 // TradingView-style line endings (the pen tray's ENDING row). None = plain; End = head at the far/
-// terminal end pointing outward; Start = head at the origin end pointing OUTWARD (mirror of End);
-// BothOut = outward heads at both ends; BothForward = heads at both ends BOTH pointing the forward
-// (start→end) direction. Supersedes the old bool Arrow (== End).
+// terminal end pointing outward; BothOut = outward heads at both ends. Start / BothForward remain for
+// legacy-JSON back-compat but are no longer offered in the picker. Supersedes the old bool Arrow (== End).
 public enum LineEnding { None, End, Start, BothOut, BothForward }
 
-// Per-drawing styling picked from the pen tray. Colour + thickness + dash + a line-ending. Persisted
-// with the drawing (Color round-trips as a hex string via ColorJsonConverter). Arrow is the LEGACY
-// bool kept only so pre-Ending JSON still deserializes; the load path migrates a set Arrow to
-// Ending=End (see LoadDrawingsForSelected) and nothing writes Arrow anymore. Default is the calm blue
-// at 1.5 px solid with no ending, so a freshly-placed line matches the previous single-colour look.
+// Head shape drawn wherever a LineEnding places a head. FilledTriangle = the classic solid ▶ (order 0
+// so legacy drawings with no persisted head default to it); Open = two barb strokes forming a hollow
+// "V"; Dot = a small filled ● terminator.
+public enum ArrowHeadStyle { FilledTriangle, Open, Dot }
+
+// Per-drawing styling picked from the pen tray. Colour + thickness + dash + a line-ending + a head
+// shape. Persisted with the drawing (Color round-trips as a hex string via ColorJsonConverter). Arrow
+// is the LEGACY bool kept only so pre-Ending JSON still deserializes; the load path migrates a set
+// Arrow to Ending=End (see LoadDrawingsForSelected) and nothing writes Arrow anymore. Head defaults to
+// FilledTriangle so pre-Head JSON keeps the classic look. Default is the calm blue at 1.5 px solid
+// with no ending, so a freshly-placed line matches the previous single-colour look.
 public readonly record struct DrawStyle(
-    Color Color, float Thickness, DashKind Dash, bool Arrow = false, LineEnding Ending = LineEnding.None)
+    Color Color, float Thickness, DashKind Dash, bool Arrow = false, LineEnding Ending = LineEnding.None,
+    ArrowHeadStyle Head = ArrowHeadStyle.FilledTriangle)
 {
     public static readonly DrawStyle Default = new(Color.FromArgb("#4C9AFF"), 1.5f, DashKind.Solid);
 }
