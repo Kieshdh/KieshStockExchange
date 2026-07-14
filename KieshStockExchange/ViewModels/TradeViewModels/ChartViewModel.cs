@@ -150,9 +150,35 @@ public partial class ChartViewModel : StockAwareViewModel
         _moodSamples.Clear();
         if (!ShowMoodPane || !Selected.HasSelectedStock) { RequestRedraw(); return; }
 
+        SeedMoodFromCandles();   // fill a back-history so the pane isn't empty before the live poll accumulates
+
         var cts = new CancellationTokenSource();
         _moodCts = cts;
         _ = MoodPollLoopAsync(Selected.StockId!.Value, cts.Token);
+    }
+
+    // §mood-history: seed the mood series from the already-loaded candles so the pane shows a back-history
+    // the instant it opens (the live poll only fills forward from now). Uses the server-stamped per-candle
+    // MarketMood where present (the composite, correct for the shown timeframe); older candles predating the
+    // composite carry null, so they fall back to a momentum reconstruction (ln price-vs-EMA → tanh) — a
+    // believable stand-in so the gauge has shape rather than a flat gap. Live polling then appends forward.
+    private void SeedMoodFromCandles()
+    {
+        var candles = _candleBuffer;
+        if (candles.Count == 0) return;
+        double ema = (double)candles[0].Close;
+        const double emaAlpha = 0.1;  // ~20-bar EMA of close = the reconstruction anchor
+        const double k = 60.0;        // momentum→swing gain for the reconstructed (faked) mood
+        foreach (var c in candles)
+        {
+            double close = (double)c.Close;
+            ema += emaAlpha * (close - ema);
+            double mood = c.MarketMood
+                ?? Math.Clamp(50.0 + 50.0 * Math.Tanh(k * Math.Log(close / Math.Max(1e-9, ema))), 0.0, 100.0);
+            _moodSamples.Add((c.OpenTime, mood));
+        }
+        if (_moodSamples.Count > MoodSamplesMax)
+            _moodSamples.RemoveRange(0, _moodSamples.Count - MoodSamplesMax);
     }
 
     private async Task MoodPollLoopAsync(int stockId, CancellationToken ct)
