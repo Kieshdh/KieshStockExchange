@@ -50,6 +50,11 @@ public sealed class CandleChartDrawable : IDrawable
     public IReadOnlyList<DrawingObject> Drawings { get; set; } = Array.Empty<DrawingObject>();
     public Guid? DraggingDrawingId { get; set; }
     public Guid? SelectedDrawingId { get; set; }
+    // In-progress Polyline being built (left-clicks drop vertices; a double-click commits). While
+    // building, ChartView feeds the dropped vertices + a live cursor point so the render pass draws
+    // the accumulated segments plus a rubber-band segment to the cursor. Both null when not building.
+    public IReadOnlyList<DrawPoint>? BuildingPolyline { get; set; }
+    public DrawPoint? BuildingPolylineCursor { get; set; }
     // Fallback drawing colour (theme-overridable via a ChartDrawing resource) for drawings whose
     // persisted Style has no colour — new drawings carry their own Style.Color from the style-bar.
     public Color DrawingColor = Color.FromArgb("#4C9AFF");
@@ -585,6 +590,7 @@ public sealed class CandleChartDrawable : IDrawable
     const float DrawHandleR = 4f;    // endpoint drag-handle radius
     const float DrawHitTol = 5f;     // extra pixel slack when hit-testing a line/handle
     const float DrawCloseHalf = 7f;  // half-size of the ✕ remove glyph
+    const float ArrowSize = 10f;     // barb length of an end-of-line arrowhead
 
     /// <summary>
     /// Draw the user's horizontal lines + trendlines. HLine spans the plot at its price with a
@@ -626,12 +632,51 @@ public sealed class CandleChartDrawable : IDrawable
                     DrawHandle(canvas, plot.Right - 1f, y, color);
                 }
             }
-            else // Trend
+            else if (d.Kind == DrawTool.HRay)
+            {
+                // Horizontal ray: from the click time rightward to the plot edge at price P1.
+                float y = Y((double)d.P1);
+                if (y < plot.Top || y > plot.Bottom) { canvas.StrokeDashPattern = null; continue; }
+                float x1 = X(d.T1);
+                canvas.DrawLine(x1, y, plot.Right, y);
+                canvas.StrokeDashPattern = null;
+                if (d.Style.Arrow) DrawArrowHead(canvas, plot.Right, y, 1f, 0f, color, ArrowSize);
+                DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
+                DrawHandle(canvas, x1, y, color);
+                DrawCloseGlyph(canvas, x1, y - 12f, color);
+            }
+            else if (d.Kind == DrawTool.Polyline)
+            {
+                var pts = d.Points;
+                if (pts is null || pts.Count == 0) { canvas.StrokeDashPattern = null; continue; }
+                float lastX = X(pts[0].T), lastY = Y((double)pts[0].P);
+                for (int k = 1; k < pts.Count; k++)
+                {
+                    float nx = X(pts[k].T), ny = Y((double)pts[k].P);
+                    canvas.DrawLine(lastX, lastY, nx, ny);
+                    lastX = nx; lastY = ny;
+                }
+                canvas.StrokeDashPattern = null;
+                // Arrowhead on the final segment, pointing along its direction.
+                if (d.Style.Arrow && pts.Count >= 2)
+                {
+                    float px = X(pts[^2].T), py = Y((double)pts[^2].P);
+                    DrawArrowHead(canvas, lastX, lastY, lastX - px, lastY - py, color, ArrowSize);
+                }
+                for (int k = 0; k < pts.Count; k++)
+                    DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
+                DrawCloseGlyph(canvas, X(pts[0].T), Y((double)pts[0].P) - 12f, color);
+            }
+            else // Trend or Ray (both a two-anchor segment; Ray extends past anchor2 to the plot edge)
             {
                 float x1 = X(d.T1), y1 = Y((double)d.P1);
                 float x2 = X(d.T2), y2 = Y((double)d.P2);
-                canvas.DrawLine(x1, y1, x2, y2);
+                float farX = x2, farY = y2;
+                if (d.Kind == DrawTool.Ray)
+                    (farX, farY) = RayExit(x1, y1, x2 - x1, y2 - y1, plot);
+                canvas.DrawLine(x1, y1, farX, farY);
                 canvas.StrokeDashPattern = null;
+                if (d.Style.Arrow) DrawArrowHead(canvas, farX, farY, farX - x1, farY - y1, color, ArrowSize);
                 DrawHandle(canvas, x1, y1, color);
                 DrawHandle(canvas, x2, y2, color);
                 DrawCloseGlyph(canvas, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f, color);
@@ -641,7 +686,33 @@ public sealed class CandleChartDrawable : IDrawable
             }
             canvas.StrokeDashPattern = null;
         }
+
+        DrawBuildingPolyline(canvas, X, Y);
         canvas.RestoreState();
+    }
+
+    // Live preview of the polyline being built: the dropped vertices connected in order, plus a
+    // rubber-band segment from the last vertex to the current cursor point. Drawn in the default
+    // style so it reads as "in progress" until the double-click commits it.
+    private void DrawBuildingPolyline(ICanvas canvas, Func<DateTime, float> X, Func<double, float> Y)
+    {
+        var pts = BuildingPolyline;
+        if (pts is null || pts.Count == 0) return;
+        var color = DrawStyle.Default.Color;
+        canvas.StrokeColor = color;
+        canvas.StrokeSize = DrawStyle.Default.Thickness;
+        canvas.StrokeDashPattern = null;
+        float lastX = X(pts[0].T), lastY = Y((double)pts[0].P);
+        for (int k = 1; k < pts.Count; k++)
+        {
+            float nx = X(pts[k].T), ny = Y((double)pts[k].P);
+            canvas.DrawLine(lastX, lastY, nx, ny);
+            lastX = nx; lastY = ny;
+        }
+        if (BuildingPolylineCursor is DrawPoint c)
+            canvas.DrawLine(lastX, lastY, X(c.T), Y((double)c.P));
+        for (int k = 0; k < pts.Count; k++)
+            DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
     }
 
     // Solid = no pattern; Dash = medium dashes; Dot = tight dots.
@@ -720,6 +791,37 @@ public sealed class CandleChartDrawable : IDrawable
         canvas.RestoreState();
     }
 
+    // Far intersection of the ray (origin + t·dir, t ≥ 0) with the plot rect — the point where the
+    // ray leaves the box. Origin is assumed inside; returns origin when the direction is degenerate.
+    private static (float x, float y) RayExit(float ox, float oy, float dx, float dy, RectF r)
+    {
+        float t = float.MaxValue;
+        if (dx > 1e-6f) t = Math.Min(t, (r.Right - ox) / dx);
+        else if (dx < -1e-6f) t = Math.Min(t, (r.Left - ox) / dx);
+        if (dy > 1e-6f) t = Math.Min(t, (r.Bottom - oy) / dy);
+        else if (dy < -1e-6f) t = Math.Min(t, (r.Top - oy) / dy);
+        if (t == float.MaxValue) t = 0f;
+        return (ox + dx * t, oy + dy * t);
+    }
+
+    // Filled triangle arrowhead with its tip at (tipX,tipY) pointing along (dirX,dirY); size = barb length.
+    private void DrawArrowHead(ICanvas canvas, float tipX, float tipY, float dirX, float dirY, Color color, float size)
+    {
+        float len = (float)Math.Sqrt(dirX * dirX + dirY * dirY);
+        if (len < 1e-4f) return;
+        float ux = dirX / len, uy = dirY / len;   // unit direction
+        float px = -uy, py = ux;                   // perpendicular
+        float baseX = tipX - ux * size, baseY = tipY - uy * size;
+        float half = size * 0.5f;
+        var path = new PathF();
+        path.MoveTo(tipX, tipY);
+        path.LineTo(baseX + px * half, baseY + py * half);
+        path.LineTo(baseX - px * half, baseY - py * half);
+        path.Close();
+        canvas.FillColor = color;
+        canvas.FillPath(path);
+    }
+
     private void DrawHandle(ICanvas canvas, float x, float y, Color color)
     {
         canvas.FillColor = color;
@@ -772,7 +874,30 @@ public sealed class CandleChartDrawable : IDrawable
                 if (p.X >= _lastPlot.Left && p.X <= _lastPlot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }
-            else
+            else if (d.Kind == DrawTool.HRay)
+            {
+                float x1 = TimeToPixelX(d.T1), y = PriceToPixelY(d.P1);
+                if (WithinBox(p, x1, y - 12f, DrawCloseHalf)) return (d, DrawingHitPart.Close);
+                if (Dist(p.X, p.Y, x1, y) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (p.X >= x1 - DrawHitTol && p.X <= _lastPlot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
+                    return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.Polyline)
+            {
+                var pts = d.Points;
+                if (pts is null || pts.Count == 0) continue;
+                if (WithinBox(p, TimeToPixelX(pts[0].T), PriceToPixelY(pts[0].P) - 12f, DrawCloseHalf))
+                    return (d, DrawingHitPart.Close);
+                float lastX = TimeToPixelX(pts[0].T), lastY = PriceToPixelY(pts[0].P);
+                for (int k = 1; k < pts.Count; k++)
+                {
+                    float nx = TimeToPixelX(pts[k].T), ny = PriceToPixelY(pts[k].P);
+                    if (PointSegDist(p.X, p.Y, lastX, lastY, nx, ny) <= DrawHitTol)
+                        return (d, DrawingHitPart.Body);
+                    lastX = nx; lastY = ny;
+                }
+            }
+            else // Trend or Ray
             {
                 float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
                 float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
@@ -780,7 +905,10 @@ public sealed class CandleChartDrawable : IDrawable
                     return (d, DrawingHitPart.Close);
                 if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
-                if (PointSegDist(p.X, p.Y, x1, y1, x2, y2) <= DrawHitTol
+                // Ray body extends past anchor2 to the plot edge — hit-test the full drawn segment.
+                float fx = x2, fy = y2;
+                if (d.Kind == DrawTool.Ray) (fx, fy) = RayExit(x1, y1, x2 - x1, y2 - y1, _lastPlot);
+                if (PointSegDist(p.X, p.Y, x1, y1, fx, fy) <= DrawHitTol
                     && p.X >= _lastPlot.Left - 2 && p.X <= _lastPlot.Right + 2
                     && p.Y >= _lastPlot.Top - 2 && p.Y <= _lastPlot.Bottom + 2)
                     return (d, DrawingHitPart.Body);

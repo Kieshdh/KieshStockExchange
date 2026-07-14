@@ -157,7 +157,7 @@
                         Style="{StaticResource ChartResolutionButton.Unselected}"
                         Command="{Binding CycleScaleModeCommand}" />
 
-                <!-- Drawing-tool toggle (cycles None -> Horizontal line -> Trendline) -->
+                <!-- Drawing-tool toggle (cycles None -> HLine -> Trend -> Ray -> HRay -> Polyline) -->
                 <Button Text="{Binding DrawToolLabel}"
                         Style="{StaticResource ChartResolutionButton.Unselected}"
                         Command="{Binding CycleDrawToolCommand}">
@@ -171,6 +171,24 @@
                         <DataTrigger TargetType="Button"
                                      Binding="{Binding DrawTool}"
                                      Value="{x:Static helpers:DrawTool.Trend}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding DrawTool}"
+                                     Value="{x:Static helpers:DrawTool.Ray}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding DrawTool}"
+                                     Value="{x:Static helpers:DrawTool.HRay}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="TextColor"       Value="{StaticResource White}" />
+                        </DataTrigger>
+                        <DataTrigger TargetType="Button"
+                                     Binding="{Binding DrawTool}"
+                                     Value="{x:Static helpers:DrawTool.Polyline}">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
@@ -433,6 +451,10 @@
                 <!-- Dash style cycle (Solid -> Dash -> Dot) -->
                 <Button Text="╌" Style="{StaticResource ChartResolutionButton.Unselected}"
                         Command="{Binding CycleDrawingDashCommand}" />
+
+                <!-- Arrowhead toggle: puts / removes an arrow on the line's END -->
+                <Button Text="→" Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding ToggleDrawingArrowCommand}" />
 
                 <!-- Delete selected drawing -->
                 <Button Text="🗑" Style="{StaticResource ChartIconButton}"

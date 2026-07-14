@@ -49,6 +49,14 @@ public partial class ChartView : ContentView
     private bool _drawDragIsNew;
     private bool _drawDragMoved;
 
+    // Polyline-building state — the Polyline tool drops a vertex per left-click and finishes on a
+    // double-click. _polyBuilding gates the append/preview path; _polyPoints accumulates the vertices
+    // in data space; _lastPolyClickMs powers manual double-click detection (WinUI's is unreliable here).
+    private bool _polyBuilding;
+    private readonly List<DrawPoint> _polyPoints = new();
+    private long _lastPolyClickMs;
+    private const long PolyDoubleClickMs = 400;
+
     // Open-order-drag state — set when _dragMode == OpenOrder.
     private int? _draggingOrderId;
     private decimal _draggingOrderStartPrice;
@@ -243,14 +251,38 @@ public partial class ChartView : ContentView
         base.OnBindingContextChanged();
 
         if (_vm != null)
+        {
             _vm.RedrawRequested -= OnRedrawRequested;
+            _vm.PropertyChanged -= OnVmPropertyChanged;
+            _vm.Drawings.CollectionChanged -= OnVmDrawingsChanged;
+        }
+
+        // A VM swap abandons any half-built polyline (its vertices belong to the old context).
+        CancelPolyline();
 
         _vm = BindingContext as ChartViewModel;
         if (_vm == null) return;
 
         _vm.RedrawRequested += OnRedrawRequested;
+        _vm.PropertyChanged += OnVmPropertyChanged;
+        _vm.Drawings.CollectionChanged += OnVmDrawingsChanged;
         UpdateDrawable();
         Chart.Invalidate();
+    }
+
+    // Switching draw tool from the toolbar abandons any in-progress polyline build.
+    private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ChartViewModel.DrawTool) && _polyBuilding)
+            CancelPolyline();
+    }
+
+    // A wholesale collection Reset means the drawing set was reloaded (stock/currency switch) — the
+    // only path that Clears it — so drop any half-built polyline whose anchors belong to the old stock.
+    private void OnVmDrawingsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset && _polyBuilding)
+            CancelPolyline();
     }
 
     private void OnRedrawRequested()
@@ -469,6 +501,23 @@ public partial class ChartView : ContentView
             return;
         }
 
+        // Priority 0.4: a polyline is mid-build — each left-click appends a vertex, a double-click
+        // finishes it. Handled ahead of the existing-drawing hit-test so clicks near a prior segment
+        // still extend the polyline rather than selecting something underneath.
+        if (_polyBuilding && _vm.DrawTool == DrawTool.Polyline && _drawable.IsInChartArea(p)
+            && _drawable.PixelToPrice(p.Y) is decimal plp && plp > 0m)
+        {
+            long nowMs = Environment.TickCount64;
+            bool dbl = nowMs - _lastPolyClickMs <= PolyDoubleClickMs;
+            _lastPolyClickMs = nowMs;
+            if (dbl && _polyPoints.Count >= 2) { CommitPolyline(); e.Handled = true; return; }
+            _polyPoints.Add(new DrawPoint(_drawable.PixelToTime(p.X), plp));
+            _drawable.BuildingPolyline = _polyPoints.ToList();
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
+
         // Priority 0.5: an existing drawing (horizontal line / trendline). Grabbable regardless of
         // the active tool so the user can always move or remove one. A ✕ hit removes it outright.
         var drawHit = _drawable.HitDrawing(p);
@@ -490,24 +539,38 @@ public partial class ChartView : ContentView
         }
 
         // Priority 0.6: with a draw tool active, a press in the chart body places a new drawing
-        // instead of free-panning. HLine commits on the single click; Trend anchors here and drags
-        // its second endpoint to the release point.
+        // instead of free-panning. HLine/HRay commit on the single click; Trend/Ray anchor here and
+        // drag their second endpoint to the release point; Polyline starts a click-per-vertex build.
         if (_vm.DrawTool != DrawTool.None && _drawable.IsInChartArea(p)
             && _drawable.PixelToPrice(p.Y) is decimal newPrice && newPrice > 0m)
         {
             var t = _drawable.PixelToTime(p.X);
             var id = Guid.NewGuid();
-            if (_vm.DrawTool == DrawTool.HLine)
+            if (_vm.DrawTool == DrawTool.HLine || _vm.DrawTool == DrawTool.HRay)
             {
-                _vm.AddDrawing(new DrawingObject(id, DrawTool.HLine, t, newPrice, t, newPrice, DrawStyle.Default));
+                _vm.AddDrawing(new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, DrawStyle.Default));
                 _vm.SelectedDrawingId = id;   // a freshly-placed line is selected for immediate styling
                 e.Handled = true;
                 return;
             }
-            var trend = new DrawingObject(id, DrawTool.Trend, t, newPrice, t, newPrice, DrawStyle.Default);
-            _vm.AddDrawing(trend);
+            if (_vm.DrawTool == DrawTool.Polyline)
+            {
+                // Start a new in-progress polyline anchored at the click; subsequent clicks append.
+                _polyBuilding = true;
+                _polyPoints.Clear();
+                _polyPoints.Add(new DrawPoint(t, newPrice));
+                _lastPolyClickMs = Environment.TickCount64;
+                _drawable.BuildingPolyline = _polyPoints.ToList();
+                _drawable.BuildingPolylineCursor = new DrawPoint(t, newPrice);
+                Chart.Invalidate();
+                e.Handled = true;
+                return;
+            }
+            // Trend or Ray: a two-anchor segment; the second anchor drags to the release point.
+            var seg = new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, DrawStyle.Default);
+            _vm.AddDrawing(seg);
             _vm.SelectedDrawingId = id;
-            BeginDrawingDrag(trend, DrawingHitPart.Anchor2, p, isNew: true);
+            BeginDrawingDrag(seg, DrawingHitPart.Anchor2, p, isNew: true);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             Chart.Invalidate();
             e.Handled = true;
@@ -625,6 +688,18 @@ public partial class ChartView : ContentView
     private void OnPlatformPointerMoved(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         if (_vm == null || sender is not Microsoft.UI.Xaml.UIElement el) return;
+
+        // Polyline build has no active drag mode — rubber-band the pending segment to the cursor.
+        if (_polyBuilding && _vm.DrawTool == DrawTool.Polyline)
+        {
+            var pc = PlatformPointerToControl(el, e);
+            if (_drawable.PixelToPrice(pc.Y) is decimal cpr && cpr > 0m)
+            {
+                _drawable.BuildingPolylineCursor = new DrawPoint(_drawable.PixelToTime(pc.X), cpr);
+                Chart.Invalidate();
+            }
+        }
+
         if (_dragMode == DragMode.None) return;
 
         var p = PlatformPointerToControl(el, e);
@@ -854,13 +929,58 @@ public partial class ChartView : ContentView
     private static DrawingObject ShiftTrend(DrawingObject d, TimeSpan dt, decimal dPrice)
         => d with { T1 = d.T1 + dt, P1 = d.P1 + dPrice, T2 = d.T2 + dt, P2 = d.P2 + dPrice };
 
+    // Finish the in-progress polyline: commit the accumulated vertices as one drawing (needs ≥ 2),
+    // select it for immediate styling, then clear the building state.
+    private void CommitPolyline()
+    {
+        if (_vm != null && _polyPoints.Count >= 2)
+        {
+            var id = Guid.NewGuid();
+            _vm.AddDrawing(new DrawingObject(
+                id, DrawTool.Polyline, default, 0m, default, 0m, DrawStyle.Default, _polyPoints.ToList()));
+            _vm.SelectedDrawingId = id;
+        }
+        CancelPolyline();
+    }
+
+    // Abort / clear the in-progress polyline build (called on commit, right-click, Escape, tool or
+    // stock switch). Resets the preview state on the drawable so the rubber-band vanishes.
+    private void CancelPolyline()
+    {
+        _polyBuilding = false;
+        _polyPoints.Clear();
+        _lastPolyClickMs = 0;
+        _drawable.BuildingPolyline = null;
+        _drawable.BuildingPolylineCursor = null;
+        Chart.Invalidate();
+    }
+
     private void OnPlatformRightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs e)
     {
         if (_vm == null || sender is not Microsoft.UI.Xaml.UIElement el) return;
         var pos = e.GetPosition(el);
         var p = new PointF((float)pos.X, (float)pos.Y);
 
-        // Right-click on a drawing removes it (before the add-line path claims the click).
+        // Priority 1: right-click is the universal "cancel the current gesture". Abort an in-progress
+        // polyline or a mid-drag draw (and DON'T drop a stray line anymore).
+        if (_polyBuilding)
+        {
+            CancelPolyline();
+            e.Handled = true;
+            return;
+        }
+        if (_dragMode == DragMode.Drawing)
+        {
+            if (_drawDragIsNew && _draggingDrawingId is Guid nid) _vm.RemoveDrawing(nid);
+            _draggingDrawingId = null;
+            _drawable.DraggingDrawingId = null;
+            _dragMode = DragMode.None;
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        // Priority 2: right-click on an existing drawing removes it.
         if (_drawable.HitDrawing(p) is { } dh)
         {
             _vm.RemoveDrawing(dh.Drawing.Id);
@@ -868,13 +988,8 @@ public partial class ChartView : ContentView
             return;
         }
 
-        // Right-click on empty chart drops a horizontal line at the cursor price (the old
-        // marker gesture, now a styled HLine drawing — muscle memory unchanged).
-        if (_drawable.PixelToPrice(p.Y) is decimal mp && mp > 0m)
-        {
-            var t = _drawable.PixelToTime(p.X);
-            _vm.AddDrawing(new DrawingObject(Guid.NewGuid(), DrawTool.HLine, t, mp, t, mp, DrawStyle.Default));
-        }
+        // Priority 3: empty chart — right-click is now a deselect gesture, not a create gesture.
+        _vm.SelectedDrawingId = null;
         e.Handled = true;
     }
 
@@ -919,6 +1034,10 @@ public partial class ChartView : ContentView
             case Windows.System.VirtualKey.End:
                 if (_vm.GoLiveCommand.CanExecute(null)) _vm.GoLiveCommand.Execute(null);
                 e.Handled = true;
+                break;
+            case Windows.System.VirtualKey.Escape:
+                // Escape abandons an in-progress polyline build (mirrors right-click cancel).
+                if (_polyBuilding) { CancelPolyline(); e.Handled = true; }
                 break;
         }
     }

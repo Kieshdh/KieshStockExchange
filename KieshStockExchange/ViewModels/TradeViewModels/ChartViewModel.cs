@@ -279,16 +279,21 @@ public partial class ChartViewModel : StockAwareViewModel
 
     public string DrawToolLabel => DrawTool switch
     {
-        DrawTool.HLine => "Draw ─",
-        DrawTool.Trend => "Draw ╱",
-        _              => "Draw",
+        DrawTool.HLine    => "Draw ─",
+        DrawTool.Trend    => "Draw ╱",
+        DrawTool.Ray      => "Draw →",
+        DrawTool.HRay     => "Draw ─→",
+        DrawTool.Polyline => "Draw ╱╲",
+        _                 => "Draw",
     };
 
     partial void OnDrawToolChanged(DrawTool value) => OnPropertyChanged(nameof(DrawToolLabel));
 
+    // Cycles None -> HLine -> Trend -> Ray -> HRay -> Polyline -> None. Switching tools mid-build
+    // clears any in-progress polyline (ChartView listens for the change).
     [RelayCommand]
     private void CycleDrawTool()
-        => DrawTool = (DrawTool)(((int)DrawTool + 1) % 3);
+        => DrawTool = (DrawTool)(((int)DrawTool + 1) % 6);
 
     // User drawings for the selected stock, anchored in (time, price) so they survive pan/zoom.
     // Persisted to Preferences per stock+currency (see PersistDrawings); reloaded on stock change.
@@ -1046,6 +1051,11 @@ public partial class ChartViewModel : StockAwareViewModel
     [RelayCommand]
     private void CycleDrawingDash()
         => MutateSelectedStyle(s => s with { Dash = (DashKind)(((int)s.Dash + 1) % 3) });
+
+    // Style-bar toggle: put / remove an arrowhead on the END of the selected line.
+    [RelayCommand]
+    private void ToggleDrawingArrow()
+        => MutateSelectedStyle(s => s with { Arrow = !s.Arrow });
 
     [RelayCommand]
     private void DeleteSelectedDrawing()

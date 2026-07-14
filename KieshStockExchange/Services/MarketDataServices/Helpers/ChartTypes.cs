@@ -36,9 +36,11 @@ public enum PriceScaleMode { Linear, Logarithmic, Percent }
 public enum MaKind { Sma, Ema }
 
 // Active chart drawing tool (toolbar cycle). None = normal pan/interact; HLine = one-click
-// horizontal line at a price; Trend = a click-drag two-anchor line segment. The tool is a
-// transient UI mode; the drawings it produces are what get persisted.
-public enum DrawTool { None, HLine, Trend }
+// horizontal line at a price; Trend = a click-drag two-anchor line segment; Ray = a click-drag
+// segment extended infinitely past its 2nd anchor; HRay = one-click horizontal ray running right
+// from the click; Polyline = multi-vertex line (left-click drops each vertex, double-click ends).
+// The tool is a transient UI mode; the drawings it produces are what get persisted.
+public enum DrawTool { None, HLine, Trend, Ray, HRay, Polyline }
 
 // Which part of a drawing a pointer hit — drives drag behaviour (move an endpoint vs the whole
 // shape) and the ✕-remove hit-zone.
@@ -48,20 +50,27 @@ public enum DrawingHitPart { Body, Anchor1, Anchor2, Close }
 // canvas.StrokeDashPattern in the render pass; Solid uses no pattern.
 public enum DashKind { Solid, Dash, Dot }
 
-// Per-drawing styling picked from the floating style-bar. Colour + thickness + dash. Persisted
-// with the drawing (Color round-trips as a hex string via ColorJsonConverter). Default is the
-// calm blue at 1.5 px solid so a freshly-placed line matches the previous single-colour look.
-public readonly record struct DrawStyle(Color Color, float Thickness, DashKind Dash)
+// Per-drawing styling picked from the floating style-bar. Colour + thickness + dash + an optional
+// arrowhead on the line's END. Persisted with the drawing (Color round-trips as a hex string via
+// ColorJsonConverter; Arrow rides the same JSON, defaulting false for legacy drawings). Default is
+// the calm blue at 1.5 px solid so a freshly-placed line matches the previous single-colour look.
+public readonly record struct DrawStyle(Color Color, float Thickness, DashKind Dash, bool Arrow = false)
 {
     public static readonly DrawStyle Default = new(Color.FromArgb("#4C9AFF"), 1.5f, DashKind.Solid);
 }
 
+// One vertex of a Polyline drawing, anchored in DATA space so it survives pan/zoom.
+public readonly record struct DrawPoint(DateTime T, decimal P);
+
 // A user drawing anchored in DATA space (time + price) so it survives pan/zoom through the same
 // X/Y transforms the candles use. HLine uses only P1 (spans the plot; T-anchors are ignored). A
-// Trend segment runs from (T1,P1) to (T2,P2). Style carries colour/thickness/dash. Id keys
-// drag/remove/select and JSON-persists per stock.
+// Trend/Ray segment runs from (T1,P1) to (T2,P2) — Ray then extends past anchor2 to the plot edge.
+// HRay runs right from (T1,P1) at that price. Polyline ignores T1..P2 and connects the Points list.
+// Style carries colour/thickness/dash/arrow. Id keys drag/remove/select and JSON-persists per stock.
+// Points is null for every non-Polyline kind (trailing/defaulted so legacy JSON still deserializes).
 public readonly record struct DrawingObject(
-    Guid Id, DrawTool Kind, DateTime T1, decimal P1, DateTime T2, decimal P2, DrawStyle Style);
+    Guid Id, DrawTool Kind, DateTime T1, decimal P1, DateTime T2, decimal P2, DrawStyle Style,
+    IReadOnlyList<DrawPoint>? Points = null);
 
 // User-facing color choice for an MA row. Key references a Color resource in
 // Resources/Styles/Colors.xaml; Name is the label shown in the settings picker.
