@@ -399,10 +399,6 @@ public partial class ChartViewModel : StockAwareViewModel
         "ChartMaColor1", "ChartMaColor2", "ChartMaColor3", "ChartMaColor4", "ChartMaColor5"
     };
 
-    // Price marker lines drawn across the chart at user-chosen prices.
-    // Visual only — they do not trigger notifications.
-    public ObservableCollection<PriceMarker> Markers { get; } = new();
-
     // Live snapshot of the user's open limit orders for the currently selected
     // stock+currency, rendered on the chart as horizontal price lines (green for
     // buy, red for sell). Synced from IOrderCacheService.OrdersChanged.
@@ -512,7 +508,6 @@ public partial class ChartViewModel : StockAwareViewModel
             cfg.PropertyChanged += OnMaConfigPropertyChanged;
         }
 
-        Markers.CollectionChanged += (_, __) => RequestRedraw();
         Drawings.CollectionChanged += (_, __) => RequestRedraw();
         OpenOrderLines.CollectionChanged += (_, __) => RequestRedraw();
         FillMarkers.CollectionChanged += (_, __) => RequestRedraw();
@@ -971,39 +966,19 @@ public partial class ChartViewModel : StockAwareViewModel
         MaSeries.Remove(cfg);
     }
 
+    /// <summary>
+    /// Adds a horizontal-line drawing at the current live price with the default style. The toolbar
+    /// "+ Line" entry point (the old "+ Marker"); the right-click gesture builds its own at the
+    /// cursor price. HLine ignores its T-anchors, so any timestamp works — use now.
+    /// </summary>
     [RelayCommand]
-    private void AddMarkerAtCurrent()
+    private void AddHLineAtCurrent()
     {
         var price = GetCurrentPrice();
         if (price is null || price.Value <= 0m) return;
-        Markers.Add(new PriceMarker(Guid.NewGuid(), price.Value));
-    }
-
-    [RelayCommand]
-    private void AddMarkerAt(decimal? price)
-    {
-        if (price is null || price.Value <= 0m) return;
-        Markers.Add(new PriceMarker(Guid.NewGuid(), price.Value));
-    }
-
-    [RelayCommand]
-    private void RemoveMarker(Guid id)
-    {
-        for (int i = Markers.Count - 1; i >= 0; i--)
-            if (Markers[i].Id == id) { Markers.RemoveAt(i); break; }
-    }
-
-    /// <summary>Replaces a marker's price in place (used during drag).</summary>
-    public void UpdateMarkerPrice(Guid id, decimal newPrice)
-    {
-        if (newPrice <= 0m) return;
-        for (int i = 0; i < Markers.Count; i++)
-        {
-            if (Markers[i].Id != id) continue;
-            Markers[i] = Markers[i] with { Price = newPrice };
-            RequestRedraw();
-            return;
-        }
+        var now = TimeHelper.NowUtc();
+        AddDrawing(new DrawingObject(
+            Guid.NewGuid(), DrawTool.HLine, now, price.Value, now, price.Value, DrawStyle.Default));
     }
 
     // --- Drawings (horizontal lines + trendlines) ------------------------------------------------
@@ -1034,16 +1009,25 @@ public partial class ChartViewModel : StockAwareViewModel
             if (Drawings[i].Id == d.Id) { Drawings[i] = d; return; }
     }
 
+    // Shared serializer options carrying the Color<->hex converter so DrawStyle round-trips
+    // (Maui Color isn't System.Text.Json-serializable on its own).
+    private static readonly JsonSerializerOptions _drawingJson = new()
+    {
+        Converters = { new ColorJsonConverter() },
+    };
+
     /// <summary>Serializes the current drawings to Preferences under the selected stock's key.</summary>
     public void PersistDrawings()
     {
         if (_drawingsKey is null) return;
-        try { Preferences.Default.Set(_drawingsKey, JsonSerializer.Serialize(Drawings.ToList())); }
+        try { Preferences.Default.Set(_drawingsKey, JsonSerializer.Serialize(Drawings.ToList(), _drawingJson)); }
         catch (Exception ex) { _logger.LogDebug(ex, "Saving chart drawings failed."); }
     }
 
     // Clear + reload the drawing set for the currently selected stock+currency. The key folds in
-    // the currency so USD/EUR price levels don't bleed across each other on the same stock.
+    // the currency so USD/EUR price levels don't bleed across each other on the same stock. Legacy
+    // drawings persisted before per-drawing styling deserialize with a null Style.Color — normalize
+    // those to the default style so they still render.
     private void LoadDrawingsForSelected()
     {
         Drawings.Clear();
@@ -1054,9 +1038,15 @@ public partial class ChartViewModel : StockAwareViewModel
         if (string.IsNullOrEmpty(json)) return;
         try
         {
-            var saved = JsonSerializer.Deserialize<List<DrawingObject>>(json);
+            var saved = JsonSerializer.Deserialize<List<DrawingObject>>(json, _drawingJson);
             if (saved is not null)
-                foreach (var d in saved) Drawings.Add(d);
+                foreach (var d in saved)
+                {
+                    var style = (d.Style.Color is null || d.Style.Thickness <= 0f)
+                        ? DrawStyle.Default
+                        : d.Style;
+                    Drawings.Add(d with { Style = style });
+                }
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Loading chart drawings failed."); }
     }

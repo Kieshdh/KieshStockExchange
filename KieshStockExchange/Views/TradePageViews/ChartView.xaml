@@ -181,10 +181,10 @@
             <!-- Spacer -->
             <BoxView Grid.Column="1" Color="Transparent" />
 
-            <!-- Add price marker at current price -->
-            <Button Grid.Column="2" Text="+ Marker"
+            <!-- Add a horizontal line at the current price -->
+            <Button Grid.Column="2" Text="+ Line"
                     Style="{StaticResource ChartLiveButton.Off}"
-                    Command="{Binding AddMarkerAtCurrentCommand}" />
+                    Command="{Binding AddHLineAtCurrentCommand}" />
             <!-- Y-axis auto-fit toggle -->
             <Button Grid.Column="3" Text="Autofit"
                     Style="{StaticResource ChartLiveButton.Off}"

@@ -20,7 +20,7 @@ public partial class ChartView : ContentView
     // Active platform-pointer drag (Windows-side). Cross-platform so the
     // (cross-platform) PanGestureRecognizer can suppress its updates while a
     // marker / Y-axis / free-pan drag is in flight.
-    private enum DragMode { None, Marker, OpenOrder, YAxis, FreePan, Measure, Drawing }
+    private enum DragMode { None, OpenOrder, YAxis, FreePan, Measure, Drawing }
     private DragMode _dragMode = DragMode.None;
 
     // Inertial-pan state. During a free-pan drag we smooth a velocity (candles/sec)
@@ -35,9 +35,6 @@ public partial class ChartView : ContentView
     private const double InertiaMinVel = 3.0;     // candles/sec floor to start / keep coasting
     private const double InertiaTickSec = 0.016;
     private const long InertiaStaleMs = 60;       // ignore velocity if the last sample is older
-
-    // Marker-drag state — set when _dragMode == Marker.
-    private Guid? _draggingMarkerId;
 
     // Drawing-drag state — set when _dragMode == Drawing. Which part is being moved (endpoint vs
     // whole shape), the drawing snapshot + data-space grab point at press (so a body move applies
@@ -292,7 +289,6 @@ public partial class ChartView : ContentView
         // Snapshot markers to a stable array — Draw runs on the UI thread but
         // ObservableCollection enumeration with concurrent edits would still be
         // brittle if a future feature mutates from a different thread.
-        _drawable.Markers = _vm.Markers.ToArray();
         _drawable.Drawings = _vm.Drawings.ToArray();
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
@@ -495,33 +491,13 @@ public partial class ChartView : ContentView
             var id = Guid.NewGuid();
             if (_vm.DrawTool == DrawTool.HLine)
             {
-                _vm.AddDrawing(new DrawingObject(id, DrawTool.HLine, t, newPrice, t, newPrice));
+                _vm.AddDrawing(new DrawingObject(id, DrawTool.HLine, t, newPrice, t, newPrice, DrawStyle.Default));
                 e.Handled = true;
                 return;
             }
-            var trend = new DrawingObject(id, DrawTool.Trend, t, newPrice, t, newPrice);
+            var trend = new DrawingObject(id, DrawTool.Trend, t, newPrice, t, newPrice, DrawStyle.Default);
             _vm.AddDrawing(trend);
             BeginDrawingDrag(trend, DrawingHitPart.Anchor2, p, isNew: true);
-            (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
-            Chart.Invalidate();
-            e.Handled = true;
-            return;
-        }
-
-        // Priority 1: marker line — drags only the marker.
-        var markerHit = _drawable.HitMarker(p);
-        if (markerHit is not null)
-        {
-            if (markerHit.Value.CloseHit)
-            {
-                _vm.RemoveMarkerCommand.Execute(markerHit.Value.Marker.Id);
-                e.Handled = true;
-                return;
-            }
-
-            _dragMode = DragMode.Marker;
-            _draggingMarkerId = markerHit.Value.Marker.Id;
-            _drawable.DraggingMarkerId = _draggingMarkerId;
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             Chart.Invalidate();
             e.Handled = true;
@@ -641,12 +617,6 @@ public partial class ChartView : ContentView
                 }
                 break;
 
-            case DragMode.Marker:
-                if (_draggingMarkerId is Guid mid &&
-                    _drawable.PixelToPrice(p.Y) is decimal newPrice)
-                    _vm.UpdateMarkerPrice(mid, newPrice);
-                break;
-
             case DragMode.Drawing:
                 DragDrawing(p);
                 break;
@@ -764,13 +734,6 @@ public partial class ChartView : ContentView
             Chart.Invalidate();
         }
 
-        if (_dragMode == DragMode.Marker)
-        {
-            _draggingMarkerId = null;
-            _drawable.DraggingMarkerId = null;
-            Chart.Invalidate();
-        }
-
         if (_dragMode == DragMode.Drawing)
         {
             // A tool-placed trendline the user clicked without dragging is a degenerate dot — drop
@@ -805,8 +768,6 @@ public partial class ChartView : ContentView
     {
         if (_dragMode == DragMode.None) return;
 
-        _draggingMarkerId = null;
-        _drawable.DraggingMarkerId = null;
         _draggingOrderId = null;
         _draggingOrderStartPrice = 0m;
         _draggingOrderStartY = 0f;
@@ -873,7 +834,7 @@ public partial class ChartView : ContentView
         var pos = e.GetPosition(el);
         var p = new PointF((float)pos.X, (float)pos.Y);
 
-        // Right-click on a drawing removes it (before the marker-add path claims the click).
+        // Right-click on a drawing removes it (before the add-line path claims the click).
         if (_drawable.HitDrawing(p) is { } dh)
         {
             _vm.RemoveDrawing(dh.Drawing.Id);
@@ -881,9 +842,13 @@ public partial class ChartView : ContentView
             return;
         }
 
-        var price = _drawable.PixelToPrice(p.Y);
-        if (price is decimal mp && _vm.AddMarkerAtCommand.CanExecute(mp))
-            _vm.AddMarkerAtCommand.Execute(mp);
+        // Right-click on empty chart drops a horizontal line at the cursor price (the old
+        // marker gesture, now a styled HLine drawing — muscle memory unchanged).
+        if (_drawable.PixelToPrice(p.Y) is decimal mp && mp > 0m)
+        {
+            var t = _drawable.PixelToTime(p.X);
+            _vm.AddDrawing(new DrawingObject(Guid.NewGuid(), DrawTool.HLine, t, mp, t, mp, DrawStyle.Default));
+        }
         e.Handled = true;
     }
 

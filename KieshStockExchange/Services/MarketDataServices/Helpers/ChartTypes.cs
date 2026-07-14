@@ -44,11 +44,24 @@ public enum DrawTool { None, HLine, Trend }
 // shape) and the ✕-remove hit-zone.
 public enum DrawingHitPart { Body, Anchor1, Anchor2, Close }
 
+// Line dash pattern for a drawing (the TradingView style-bar Solid/Dash/Dot cycle). Maps to a
+// canvas.StrokeDashPattern in the render pass; Solid uses no pattern.
+public enum DashKind { Solid, Dash, Dot }
+
+// Per-drawing styling picked from the floating style-bar. Colour + thickness + dash. Persisted
+// with the drawing (Color round-trips as a hex string via ColorJsonConverter). Default is the
+// calm blue at 1.5 px solid so a freshly-placed line matches the previous single-colour look.
+public readonly record struct DrawStyle(Color Color, float Thickness, DashKind Dash)
+{
+    public static readonly DrawStyle Default = new(Color.FromArgb("#4C9AFF"), 1.5f, DashKind.Solid);
+}
+
 // A user drawing anchored in DATA space (time + price) so it survives pan/zoom through the same
 // X/Y transforms the candles use. HLine uses only P1 (spans the plot; T-anchors are ignored). A
-// Trend segment runs from (T1,P1) to (T2,P2). Id keys drag/remove and JSON-persists per stock.
+// Trend segment runs from (T1,P1) to (T2,P2). Style carries colour/thickness/dash. Id keys
+// drag/remove/select and JSON-persists per stock.
 public readonly record struct DrawingObject(
-    Guid Id, DrawTool Kind, DateTime T1, decimal P1, DateTime T2, decimal P2);
+    Guid Id, DrawTool Kind, DateTime T1, decimal P1, DateTime T2, decimal P2, DrawStyle Style);
 
 // User-facing color choice for an MA row. Key references a Color resource in
 // Resources/Styles/Colors.xaml; Name is the label shown in the settings picker.
@@ -76,6 +89,23 @@ public readonly record struct MaColorOption(string Key, string Name)
     }
 }
 
+// Round-trips a Maui Color through JSON as an "#AARRGGBB" hex string. Needed because Color has no
+// public parameterless ctor / settable props, so System.Text.Json can't (de)serialize it directly.
+// Used only for persisting DrawStyle in DrawingObject.
+public sealed class ColorJsonConverter : System.Text.Json.Serialization.JsonConverter<Color>
+{
+    public override Color Read(ref System.Text.Json.Utf8JsonReader reader, Type type,
+        System.Text.Json.JsonSerializerOptions opts)
+    {
+        var s = reader.GetString();
+        return string.IsNullOrEmpty(s) ? DrawStyle.Default.Color : Color.FromArgb(s);
+    }
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, Color value,
+        System.Text.Json.JsonSerializerOptions opts)
+        => writer.WriteStringValue((value ?? DrawStyle.Default.Color).ToArgbHex(true));
+}
+
 public readonly record struct MaPoint(DateTime AtTime, double Value);
 
 public readonly record struct MovingAverageSeries(
@@ -83,8 +113,6 @@ public readonly record struct MovingAverageSeries(
     MaKind Kind,
     Color Color,
     IReadOnlyList<MaPoint> Points);
-
-public readonly record struct PriceMarker(Guid Id, decimal Price);
 
 // Snapshot of one of the user's open orders rendered on the chart as a horizontal
 // price line. IsBuy drives the line colour (green vs red); Quantity shows in the

@@ -44,17 +44,14 @@ public sealed class CandleChartDrawable : IDrawable
     // pre-computed list of points against the candle buffer.
     public IReadOnlyList<MovingAverageSeries> MaSeries { get; set; } = Array.Empty<MovingAverageSeries>();
 
-    // Price marker lines drawn across the chart at user-chosen prices. The
-    // currently-dragged marker (if any) is rendered with extra emphasis.
-    public IReadOnlyList<PriceMarker> Markers { get; set; } = Array.Empty<PriceMarker>();
-    public Guid? DraggingMarkerId { get; set; }
-
     // User drawings (horizontal lines + trendlines), anchored in data space so they hold their
-    // place through pan/zoom. The currently-dragged drawing (if any) paints with extra emphasis.
+    // place through pan/zoom. The currently-dragged drawing (if any) paints with extra emphasis;
+    // the selected drawing (if any) shows grab-handles and drives the floating style-bar.
     public IReadOnlyList<DrawingObject> Drawings { get; set; } = Array.Empty<DrawingObject>();
     public Guid? DraggingDrawingId { get; set; }
-    // A calm blue distinct from the green/red order lines and the goldenrod markers. Theme-
-    // overridable via a ChartDrawing resource; the default is intentionally visible everywhere.
+    public Guid? SelectedDrawingId { get; set; }
+    // Fallback drawing colour (theme-overridable via a ChartDrawing resource) for drawings whose
+    // persisted Style has no colour — new drawings carry their own Style.Color from the style-bar.
     public Color DrawingColor = Color.FromArgb("#4C9AFF");
 
     // Set by ChartView while the user drags an open-order line. The line whose
@@ -314,7 +311,6 @@ public sealed class CandleChartDrawable : IDrawable
         DrawFillMarkers(canvas, plot, X, Y);
         DrawTriggerMarkers(canvas, plot, X, Y);
         DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
-        DrawMarkers(canvas, plot, Y, currency);
         DrawDrawings(canvas, plot, X, Y, currency);
 
         // Border around the plot area.
@@ -581,64 +577,6 @@ public sealed class CandleChartDrawable : IDrawable
         return lum < 0.5 ? Color.FromRgba(1f, 1f, 1f, 0.85f) : Color.FromRgba(0f, 0f, 0f, 0.85f);
     }
 
-    private void DrawMarkers(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)
-    {
-        if (Markers.Count == 0) return;
-        canvas.SaveState();
-        for (int i = 0; i < Markers.Count; i++)
-        {
-            var m = Markers[i];
-            float y = Y((double)m.Price);
-            if (y < plot.Top || y > plot.Bottom) continue;
-
-            bool dragging = DraggingMarkerId == m.Id;
-            canvas.StrokeColor = MarkerColor;
-            canvas.StrokeSize = dragging ? 2f : 1f;
-            canvas.DrawLine(plot.Left, y, plot.Right, y);
-
-            // Tag in the right gutter — last 14 px reserved as the close hit-zone.
-            var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
-            canvas.FillColor = MarkerColor;
-            canvas.FillRectangle(tagRect);
-            canvas.FontColor = Colors.Black;
-            canvas.FontSize = PriceTagFont;
-            canvas.DrawString(CurrencyHelper.Format(m.Price, cur),
-                new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 18, tagRect.Height),
-                HorizontalAlignment.Left, VerticalAlignment.Center);
-            canvas.DrawString("✕",
-                new RectF(tagRect.Right - 14, tagRect.Y, 12, tagRect.Height),
-                HorizontalAlignment.Center, VerticalAlignment.Center);
-        }
-        canvas.RestoreState();
-    }
-
-    /// <summary>
-    /// Returns the marker hit by the pointer (within 4 px of the line), and whether
-    /// the close glyph in the right-gutter tag was clicked.
-    /// </summary>
-    public (PriceMarker Marker, bool CloseHit)? HitMarker(PointF pInControl)
-    {
-        if (Markers.Count == 0) return null;
-        if (_lastPlot.Width <= 0 || _lastYMax <= _lastYMin) return null;
-
-        for (int i = 0; i < Markers.Count; i++)
-        {
-            var m = Markers[i];
-            float y = (float)(_lastPlot.Bottom - ((double)m.Price - _lastYMin) / (_lastYMax - _lastYMin) * _lastPlot.Height);
-            if (Math.Abs(pInControl.Y - y) > 4f) continue;
-
-            // The whole tag-strip width counts as the marker; the rightmost ~14 px
-            // is the close hit-zone.
-            float closeLeft = _lastPlot.Right + 1 + (RightAxisW - 16);
-            bool closeHit = pInControl.X >= closeLeft && pInControl.X <= _lastPlot.Right + RightAxisW;
-            bool inLine = pInControl.X >= _lastPlot.Left && pInControl.X <= _lastPlot.Right + RightAxisW;
-            if (!inLine) continue;
-
-            return (m, closeHit);
-        }
-        return null;
-    }
-
     // Drawing geometry — shared by the render pass and the hit-test so the visible shape and its
     // clickable zones never drift apart.
     const float DrawHandleR = 4f;    // endpoint drag-handle radius
@@ -659,53 +597,139 @@ public sealed class CandleChartDrawable : IDrawable
         {
             var d = Drawings[i];
             bool active = DraggingDrawingId == d.Id;
-            canvas.StrokeColor = DrawingColor;
-            canvas.StrokeSize = active ? 2f : 1.5f;
+            bool selected = SelectedDrawingId == d.Id;
+            // Per-drawing style (colour/thickness/dash); fall back to the theme colour when a
+            // legacy drawing carries no colour. A selected/active line paints a touch thicker.
+            var color = d.Style.Color ?? DrawingColor;
+            float thickness = d.Style.Thickness > 0f ? d.Style.Thickness : 1.5f;
+            canvas.StrokeColor = color;
+            canvas.StrokeSize = (active || selected) ? thickness + 1f : thickness;
+            canvas.StrokeDashPattern = DashPattern(d.Style.Dash);
 
             if (d.Kind == DrawTool.HLine)
             {
                 float y = Y((double)d.P1);
-                if (y < plot.Top || y > plot.Bottom) continue;
+                if (y < plot.Top || y > plot.Bottom) { canvas.StrokeDashPattern = null; continue; }
                 canvas.DrawLine(plot.Left, y, plot.Right, y);
+                canvas.StrokeDashPattern = null;
 
-                // Right-gutter price tag, matching the marker/order-line convention.
-                var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
-                canvas.FillColor = DrawingColor;
-                canvas.FillRectangle(tagRect);
-                canvas.FontColor = Colors.White;
-                canvas.FontSize = PriceTagFont;
-                canvas.DrawString(CurrencyHelper.Format(d.P1, cur),
-                    new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
-                    HorizontalAlignment.Left, VerticalAlignment.Center);
-
-                DrawCloseGlyph(canvas, plot.Left + 10f, y);
+                // Right-gutter price tag in the line's colour, matching the order-line convention.
+                DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
+                DrawCloseGlyph(canvas, plot.Left + 10f, y, color);
+                // Selection: grab-handles at the ends so it reads as "editable" like a trendline.
+                if (selected)
+                {
+                    DrawHandle(canvas, plot.Left + 1f, y, color);
+                    DrawHandle(canvas, plot.Right - 1f, y, color);
+                }
             }
             else // Trend
             {
                 float x1 = X(d.T1), y1 = Y((double)d.P1);
                 float x2 = X(d.T2), y2 = Y((double)d.P2);
                 canvas.DrawLine(x1, y1, x2, y2);
-                DrawHandle(canvas, x1, y1);
-                DrawHandle(canvas, x2, y2);
-                DrawCloseGlyph(canvas, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f);
+                canvas.StrokeDashPattern = null;
+                DrawHandle(canvas, x1, y1, color);
+                DrawHandle(canvas, x2, y2, color);
+                DrawCloseGlyph(canvas, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f, color);
+                // Trendline labels (always-on v1): endpoint prices + a midpoint change/% / bar-count
+                // tag coloured by direction (TradingView convention).
+                DrawTrendLabels(canvas, d, x1, y1, x2, y2, color, cur);
             }
+            canvas.StrokeDashPattern = null;
         }
         canvas.RestoreState();
     }
 
-    private void DrawHandle(ICanvas canvas, float x, float y)
+    // Solid = no pattern; Dash = medium dashes; Dot = tight dots.
+    private static float[]? DashPattern(DashKind kind) => kind switch
     {
-        canvas.FillColor = DrawingColor;
+        DashKind.Dash => new[] { 5f, 4f },
+        DashKind.Dot => new[] { 1f, 3f },
+        _ => null,
+    };
+
+    // Right-gutter price pill (shared by HLine + the trend endpoint tags).
+    private void DrawGutterPriceTag(ICanvas canvas, RectF plot, float y, decimal price, Color color, CurrencyType cur)
+    {
+        var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
+        canvas.FillColor = color;
+        canvas.FillRectangle(tagRect);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = PriceTagFont;
+        canvas.DrawString(CurrencyHelper.Format(price, cur),
+            new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+    }
+
+    // A small price pill anchored beside a trendline endpoint (flips to the inside edge so it
+    // doesn't spill off the plot). Painted in the line's colour with white text.
+    private void DrawEndpointPriceTag(ICanvas canvas, RectF plot, float x, float y, decimal price, Color color, CurrencyType cur, bool toLeft)
+    {
+        string text = CurrencyHelper.Format(price, cur);
+        float w = Math.Max(40f, text.Length * 6.5f);
+        float lx = toLeft ? x - w - 6f : x + 6f;
+        lx = Math.Clamp(lx, plot.Left, Math.Max(plot.Left, plot.Right - w));
+        float ly = Math.Clamp(y - 8f, plot.Top, Math.Max(plot.Top, plot.Bottom - 16f));
+        var r = new RectF(lx, ly, w, 16f);
+        canvas.FillColor = color;
+        canvas.FillRectangle(r);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = PriceTagFont;
+        canvas.DrawString(text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+    }
+
+    // Trendline readout: a price pill at each endpoint + a midpoint pill with the price change,
+    // % change ((p2/p1-1)*100) and the #bars between anchors, tinted green up / red down.
+    private void DrawTrendLabels(ICanvas canvas, DrawingObject d, float x1, float y1, float x2, float y2,
+        Color lineColor, CurrencyType cur)
+    {
+        canvas.SaveState();
+        canvas.StrokeDashPattern = null;
+        // Endpoint prices — anchor each pill on the outer side of the segment.
+        bool leftIsP1 = x1 <= x2;
+        DrawEndpointPriceTag(canvas, _lastPlot, x1, y1, d.P1, lineColor, cur, toLeft: leftIsP1);
+        DrawEndpointPriceTag(canvas, _lastPlot, x2, y2, d.P2, lineColor, cur, toLeft: !leftIsP1);
+
+        // Midpoint change / % / bars, coloured by sign.
+        decimal change = d.P2 - d.P1;
+        double pct = d.P1 != 0m ? ((double)(d.P2 / d.P1) - 1.0) * 100.0 : 0.0;
+        int bars = Viewport.Bucket > TimeSpan.Zero
+            ? (int)Math.Round(Math.Abs((d.T2 - d.T1).TotalSeconds) / Viewport.Bucket.TotalSeconds)
+            : 0;
+        var tint = change >= 0m ? Bull : Bear;
+        string sign = change >= 0m ? "+" : "";
+        string text = $"{sign}{CurrencyHelper.Format(change, cur)}  ({sign}{pct:0.00}%)  {bars} bar{(bars == 1 ? "" : "s")}";
+
+        float w = Math.Max(120f, text.Length * 6.2f);
+        float cx = (x1 + x2) * 0.5f;
+        float cy = (y1 + y2) * 0.5f;
+        float lx = Math.Clamp(cx - w / 2f, _lastPlot.Left, Math.Max(_lastPlot.Left, _lastPlot.Right - w));
+        float ly = Math.Clamp(cy - 28f, _lastPlot.Top, Math.Max(_lastPlot.Top, _lastPlot.Bottom - 16f));
+        var panel = new RectF(lx, ly, w, 16f);
+        canvas.FillColor = tint;
+        canvas.FillRectangle(panel);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = PriceTagFont;
+        canvas.DrawString(text, new RectF(panel.X + 4, panel.Y, panel.Width - 8, panel.Height),
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+        canvas.RestoreState();
+    }
+
+    private void DrawHandle(ICanvas canvas, float x, float y, Color color)
+    {
+        canvas.FillColor = color;
         canvas.FillCircle(x, y, DrawHandleR);
         canvas.StrokeColor = OutlineForBackground();
         canvas.StrokeSize = 1f;
         canvas.DrawCircle(x, y, DrawHandleR);
     }
 
-    private void DrawCloseGlyph(ICanvas canvas, float cx, float cy)
+    private void DrawCloseGlyph(ICanvas canvas, float cx, float cy, Color color)
     {
         var r = new RectF(cx - DrawCloseHalf, cy - DrawCloseHalf, DrawCloseHalf * 2, DrawCloseHalf * 2);
-        canvas.FillColor = DrawingColor;
+        canvas.FillColor = color;
         canvas.FillRectangle(r);
         canvas.FontColor = Colors.White;
         canvas.FontSize = PriceTagFont;
