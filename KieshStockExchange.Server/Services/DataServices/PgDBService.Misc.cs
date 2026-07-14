@@ -10,7 +10,7 @@ public sealed partial class PgDBService
     private const string CandleCols = @"
         ""CandleId"",""StockId"",""Currency"",""BucketSeconds"",""OpenTime"",
         ""Open"",""High"",""Low"",""Close"",""Volume"",""TradeCount"",
-        ""MinTransactionId"",""MaxTransactionId"",""MarketMood""";
+        ""MinTransactionId"",""MaxTransactionId"",""MarketMood"",""MoodMid"",""MoodSlow""";
 
     private const string MessageCols = @"""MessageId"",""UserId"",""Kind"",""Title"",""Content"",""CreatedAt"",""ReadAt""";
 
@@ -120,10 +120,10 @@ public sealed partial class PgDBService
         row.CandleId = await c.ExecuteScalarAsync<int>(@"
             INSERT INTO ""Candles"" (""StockId"",""Currency"",""BucketSeconds"",""OpenTime"",
                                      ""Open"",""High"",""Low"",""Close"",""Volume"",""TradeCount"",
-                                     ""MinTransactionId"",""MaxTransactionId"",""MarketMood"")
+                                     ""MinTransactionId"",""MaxTransactionId"",""MarketMood"",""MoodMid"",""MoodSlow"")
             VALUES (@StockId,@Currency,@BucketSeconds,@OpenTime,
                     @Open,@High,@Low,@Close,@Volume,@TradeCount,
-                    @MinTransactionId,@MaxTransactionId,@MarketMood)
+                    @MinTransactionId,@MaxTransactionId,@MarketMood,@MoodMid,@MoodSlow)
             RETURNING ""CandleId""", row);
         candle.CandleId = row.CandleId;
     }
@@ -138,7 +138,7 @@ public sealed partial class PgDBService
               ""OpenTime"" = @OpenTime, ""Open"" = @Open, ""High"" = @High, ""Low"" = @Low, ""Close"" = @Close,
               ""Volume"" = @Volume, ""TradeCount"" = @TradeCount,
               ""MinTransactionId"" = @MinTransactionId, ""MaxTransactionId"" = @MaxTransactionId,
-              ""MarketMood"" = @MarketMood
+              ""MarketMood"" = @MarketMood, ""MoodMid"" = @MoodMid, ""MoodSlow"" = @MoodSlow
             WHERE ""CandleId"" = @CandleId", CandleMapper.ToRow(candle));
     }
 
@@ -159,17 +159,18 @@ public sealed partial class PgDBService
     private const string UpsertCandleSql = @"
         INSERT INTO ""Candles"" (""StockId"",""Currency"",""BucketSeconds"",""OpenTime"",
                                  ""Open"",""High"",""Low"",""Close"",""Volume"",""TradeCount"",
-                                 ""MinTransactionId"",""MaxTransactionId"",""MarketMood"")
+                                 ""MinTransactionId"",""MaxTransactionId"",""MarketMood"",""MoodMid"",""MoodSlow"")
         VALUES (@StockId,@Currency,@BucketSeconds,@OpenTime,
                 @Open,@High,@Low,@Close,@Volume,@TradeCount,
-                @MinTransactionId,@MaxTransactionId,@MarketMood)
+                @MinTransactionId,@MaxTransactionId,@MarketMood,@MoodMid,@MoodSlow)
         ON CONFLICT (""StockId"",""Currency"",""BucketSeconds"",""OpenTime"") DO UPDATE SET
           ""Open"" = EXCLUDED.""Open"", ""High"" = EXCLUDED.""High"",
           ""Low"" = EXCLUDED.""Low"", ""Close"" = EXCLUDED.""Close"",
           ""Volume"" = EXCLUDED.""Volume"", ""TradeCount"" = EXCLUDED.""TradeCount"",
           ""MinTransactionId"" = EXCLUDED.""MinTransactionId"",
           ""MaxTransactionId"" = EXCLUDED.""MaxTransactionId"",
-          ""MarketMood"" = EXCLUDED.""MarketMood""";
+          ""MarketMood"" = EXCLUDED.""MarketMood"",
+          ""MoodMid"" = EXCLUDED.""MoodMid"", ""MoodSlow"" = EXCLUDED.""MoodSlow""";
 
     public async Task UpsertCandlesAsync(IReadOnlyList<Candle> candles, CancellationToken ct = default)
     {

@@ -754,7 +754,15 @@ public sealed class CandleService : ICandleService, IDisposable
                 {
                     // §fear-greed: stamp the composite ONLY when the gauge is on (else leave null — the column
                     // stays honest/unpopulated until the composite is flipped on and soak-validated).
-                    if (_mood.Enabled) c.MarketMood = _mood.MoodFor(c.StockId);
+                    if (_mood.Enabled)
+                    {
+                        // §per-timeframe: stamp all three bands — MarketMood = the band this base resolution
+                        // DISPLAYS (BandForBucket); MoodMid/MoodSlow carry the slower horizons forward.
+                        int sid = c.StockId;
+                        c.MarketMood = _mood.MoodForBand(sid, MarketMoodService.BandForBucket(c.BucketSeconds));
+                        c.MoodMid    = _mood.MoodForBand(sid, MarketMoodService.BandMid);
+                        c.MoodSlow   = _mood.MoodForBand(sid, MarketMoodService.BandSlow);
+                    }
                     batch.Add(c);
                 }
                 else _logger.LogError("Dropping invalid candle in flush loop: {Summary}", c.Summary);
@@ -869,6 +877,13 @@ public sealed class CandleService : ICandleService, IDisposable
         // Validate ascending coverage and get target bucket open time
         CheckContinuous(ordered, targetBucketSeconds, baseSpan, requireFullCoverage, out var bucketOpenTime);
 
+        // §per-timeframe: the DISPLAYED band depends on the TARGET resolution — pick MarketMood/MoodMid/MoodSlow
+        // from the last child by BandForBucket; the band columns are carried forward so the client stays unchanged.
+        int band = MarketMoodService.BandForBucket(targetBucketSeconds);
+        double? displayMood = band == MarketMoodService.BandMid  ? ordered[^1].MoodMid
+                            : band == MarketMoodService.BandSlow ? ordered[^1].MoodSlow
+                            : ordered[^1].MarketMood;
+
         // Build the higher-timeframe candle
         var candle = new Candle
         {
@@ -881,8 +896,8 @@ public sealed class CandleService : ICandleService, IDisposable
             Volume = ordered.Sum(c => c.Volume),    TradeCount = ordered.Sum(c => c.TradeCount),
             MaxTransactionId = ordered.Max(c => c.MaxTransactionId),
             MinTransactionId = ordered.Min(c => c.MinTransactionId),
-            // §fear-greed: mood is a LEVEL (like Close) — carry the last child's value into the aggregate.
-            MarketMood = ordered[^1].MarketMood,
+            // §fear-greed: mood is a LEVEL (like Close) — carry the last child's values into the aggregate.
+            MarketMood = displayMood, MoodMid = ordered[^1].MoodMid, MoodSlow = ordered[^1].MoodSlow,
         };
 
         if (!candle.IsValid())

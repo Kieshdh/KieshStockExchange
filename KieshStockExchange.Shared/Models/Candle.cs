@@ -177,6 +177,14 @@ public class Candle : IValidatable
     private double? _marketMood = null;
     public double? MarketMood { get => _marketMood; set => _marketMood = value; }
 
+    // §per-timeframe F&G: the Mid/Slow horizon bands carried on every base candle (MarketMood = the DISPLAYED
+    // band, picked by resolution). Same nullable/unvalidated contract: carried by Clone, never gates IsValid.
+    private double? _moodMid = null;
+    public double? MoodMid { get => _moodMid; set => _moodMid = value; }
+
+    private double? _moodSlow = null;
+    public double? MoodSlow { get => _moodSlow; set => _moodSlow = value; }
+
     public bool IsValid() => StockId > 0 && IsValidCurrency() && Resolution != CandleResolution.None &&
         IsValidTimestamp() && IsValidPrice() && IsValidVolume();
 
@@ -332,7 +340,7 @@ public class Candle : IValidatable
             Open = this.Open, High = this.High, Low = this.Low, Close = this.Close,
             Volume = this.Volume, TradeCount = this.TradeCount,
             MinTransactionId = this.MinTransactionId, MaxTransactionId = this.MaxTransactionId,
-            MarketMood = this.MarketMood,
+            MarketMood = this.MarketMood, MoodMid = this.MoodMid, MoodSlow = this.MoodSlow,
         };
         c._vwapNotional = this._vwapNotional; // keep the running vwap alive across live-snapshot clones
         c._hlEligHigh = this._hlEligHigh;     // §filtered-tape H/L: eligible-range accumulators travel too

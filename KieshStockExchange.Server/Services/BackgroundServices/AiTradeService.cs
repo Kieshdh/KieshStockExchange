@@ -2197,13 +2197,19 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         {
             _mood.Tick(now);
             foreach (var sid in _stocks.ById.Keys) _mood.Observe(sid, SmoothedPriceForMood(sid));
-            double breadth = _mood.ComputeBreadth();
-            double pooledSigma = _mood.ComputePooledSigma();
-            foreach (var sid in _stocks.ById.Keys) _mood.Score(sid, breadth, pooledSigma, (double)_sentiment.GetSentiment(sid));
+            // §per-timeframe: score every band (Fast/Mid/Slow) — breadth + pooled-σ are per-band.
+            for (int band = 0; band < MarketMoodService.BandCount; band++)
+            {
+                double breadthB = _mood.ComputeBreadth(band);
+                double pooledSigmaB = _mood.ComputePooledSigma(band);
+                foreach (var sid in _stocks.ById.Keys)
+                    _mood.Score(sid, band, breadthB, pooledSigmaB, (double)_sentiment.GetSentiment(sid));
+            }
             _mood.UpdateLaggedGlobal();   // §reflexive-coupling: advance the lagged global mood the taker lever reads
             if (now >= _nextMoodLog)
             {
-                var (mean, mn, mx, hist) = _mood.Distribution();
+                double breadth = _mood.ComputeBreadth(MarketMoodService.BandFast);
+                var (mean, mn, mx, hist) = _mood.Distribution();   // Fast band
                 _logger.LogInformation("MOOD mean={Mean:0.0} min={Min:0.0} max={Max:0.0} breadth={Breadth:0.00} hist=[{H0},{H1},{H2},{H3},{H4}]",
                     mean, mn, mx, breadth, hist[0], hist[1], hist[2], hist[3], hist[4]);
                 _nextMoodLog = now + TimeSpan.FromSeconds(60);
