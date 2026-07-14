@@ -294,6 +294,18 @@ public partial class ChartViewModel : StockAwareViewModel
     // Persisted to Preferences per stock+currency (see PersistDrawings); reloaded on stock change.
     public ObservableCollection<DrawingObject> Drawings { get; } = new();
 
+    // The currently selected drawing (tap-to-select). Drives the floating style-bar's visibility
+    // and the drawable's grab-handle emphasis; a tap on empty chart clears it.
+    [ObservableProperty] private Guid? _selectedDrawingId;
+
+    public bool HasSelectedDrawing => SelectedDrawingId is not null;
+
+    partial void OnSelectedDrawingIdChanged(Guid? value)
+    {
+        OnPropertyChanged(nameof(HasSelectedDrawing));
+        RequestRedraw();
+    }
+
     private const string DrawingsPrefKeyBase = "chart_drawings_";
     // Preferences key for the currently loaded stock+currency, or null when nothing is selected.
     private string? _drawingsKey;
@@ -995,7 +1007,50 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         for (int i = Drawings.Count - 1; i >= 0; i--)
             if (Drawings[i].Id == id) { Drawings.RemoveAt(i); break; }
+        if (SelectedDrawingId == id) SelectedDrawingId = null;
         PersistDrawings();
+    }
+
+    // --- Style-bar: mutate the SELECTED drawing's style, persist + redraw ------------------------
+
+    // Applies a style transform to the selected drawing in place, then persists + repaints.
+    private void MutateSelectedStyle(Func<DrawStyle, DrawStyle> transform)
+    {
+        if (SelectedDrawingId is not Guid id) return;
+        for (int i = 0; i < Drawings.Count; i++)
+        {
+            if (Drawings[i].Id != id) continue;
+            Drawings[i] = Drawings[i] with { Style = transform(Drawings[i].Style) };
+            PersistDrawings();
+            RequestRedraw();
+            return;
+        }
+    }
+
+    [RelayCommand]
+    private void SetDrawingColor(Color color)
+    {
+        if (color is null) return;
+        MutateSelectedStyle(s => s with { Color = color });
+    }
+
+    // Thickness comes from the XAML preset buttons as a string ("1"/"2"/"3") — cleanest way to pass
+    // a numeric literal through CommandParameter.
+    [RelayCommand]
+    private void SetDrawingThickness(string px)
+    {
+        if (!float.TryParse(px, out var t) || t <= 0f) return;
+        MutateSelectedStyle(s => s with { Thickness = t });
+    }
+
+    [RelayCommand]
+    private void CycleDrawingDash()
+        => MutateSelectedStyle(s => s with { Dash = (DashKind)(((int)s.Dash + 1) % 3) });
+
+    [RelayCommand]
+    private void DeleteSelectedDrawing()
+    {
+        if (SelectedDrawingId is Guid id) RemoveDrawing(id);
     }
 
     /// <summary>
@@ -1031,6 +1086,7 @@ public partial class ChartViewModel : StockAwareViewModel
     private void LoadDrawingsForSelected()
     {
         Drawings.Clear();
+        SelectedDrawingId = null;   // a stale selection from the previous stock must not linger
         if (!Selected.HasSelectedStock) { _drawingsKey = null; return; }
 
         _drawingsKey = $"{DrawingsPrefKeyBase}{Selected.StockId!.Value}_{Selected.Currency}";

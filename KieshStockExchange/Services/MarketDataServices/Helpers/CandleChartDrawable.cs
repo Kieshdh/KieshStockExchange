@@ -264,15 +264,17 @@ public sealed class CandleChartDrawable : IDrawable
             }
             if (high <= low) high = low + 1m;
 
-            // Add top/bottom padding so candles don't hug the plot edges
-            var yPad = (double)(high - low) * Math.Max(0, YPaddingPercent);
-            yMin = (double)low - yPad;
-            yMax = (double)high + yPad;
+            // Tight target = visible candle extremes + an 8% top/bottom margin so candles never
+            // hug the plot edges. The hysteresis smoother turns this into the committed axis range.
+            double span = (double)(high - low);
+            double pad = span * AutoFitMargin;
+            (yMin, yMax) = SmoothAutoFit((double)low - pad, (double)high + pad);
         }
         else if (ManualYMin is decimal mn && ManualYMax is decimal mx && mx > mn)
         {
             yMin = (double)mn;
             yMax = (double)mx;
+            _autoFitInit = false;   // re-enabling autofit later re-snaps to the live candles
         }
         else
         {
@@ -280,6 +282,7 @@ public sealed class CandleChartDrawable : IDrawable
             // recent auto-fit values so the chart doesn't jump on toggle.
             yMin = _lastYMin;
             yMax = _lastYMax;
+            _autoFitInit = false;
         }
 
         if (yMax <= yMin) yMax = yMin + 1.0;
@@ -1044,6 +1047,13 @@ public sealed class CandleChartDrawable : IDrawable
     private DateTime _lastTMin;
     private DateTime _lastTMax;
 
+    // Autofit hysteresis state — the committed axis range plus a counter that gates contraction so
+    // the range only shrinks after the tight fit has stayed comfortably inside it for a short spell.
+    private bool _autoFitInit;
+    private double _autoFitLo;
+    private double _autoFitHi = 1.0;
+    private int _autoFitContractFrames;
+
     /// <summary>Rectangle reserved for the volume sub-pane in the most recent paint.</summary>
     public RectF VolumeRect => _lastVolRect;
     /// <summary>Rectangle reserved for the mood sub-pane in the most recent paint.</summary>
@@ -1565,6 +1575,63 @@ public sealed class CandleChartDrawable : IDrawable
     #endregion
 
     #region Private Helpers
+    // Autofit smoothing tunables.
+    const double AutoFitMargin = 0.08;         // 8% top/bottom breathing room around the candles
+    const double AutoFitContractRatio = 0.90;  // contract only when the tight fit < 90% of the range
+    const int AutoFitContractHold = 8;         // frames the tight fit must stay small before shrinking
+    const double AutoFitContractLerp = 0.25;   // per-frame lerp toward the tight target while shrinking
+
+    // Turns a raw tight [lo,hi] target into a stable committed axis range: expand IMMEDIATELY when
+    // candles exceed the range, but contract only after the tight fit has sat < 90% of the range for
+    // AutoFitContractHold frames (then lerp in), snapping the bounds to nice tick increments. This
+    // kills the per-frame tremble a naive re-fit produces while still tracking real moves.
+    private (double lo, double hi) SmoothAutoFit(double targetLo, double targetHi)
+    {
+        if (targetHi <= targetLo) targetHi = targetLo + 1.0;
+
+        if (!_autoFitInit)
+        {
+            (_autoFitLo, _autoFitHi) = SnapRange(targetLo, targetHi);
+            _autoFitContractFrames = 0;
+            _autoFitInit = true;
+            return (_autoFitLo, _autoFitHi);
+        }
+
+        double eps = (_autoFitHi - _autoFitLo) * 1e-4;
+        if (targetLo < _autoFitLo - eps || targetHi > _autoFitHi + eps)
+        {
+            // Candles broke out of the range — grow at once to cover them (union), snapped to ticks.
+            (_autoFitLo, _autoFitHi) = SnapRange(
+                Math.Min(_autoFitLo, targetLo), Math.Max(_autoFitHi, targetHi));
+            _autoFitContractFrames = 0;
+            return (_autoFitLo, _autoFitHi);
+        }
+
+        double curRange = _autoFitHi - _autoFitLo;
+        double tgtRange = targetHi - targetLo;
+        if (tgtRange < AutoFitContractRatio * curRange) _autoFitContractFrames++;
+        else _autoFitContractFrames = 0;
+
+        if (_autoFitContractFrames >= AutoFitContractHold)
+        {
+            double nlo = _autoFitLo + (targetLo - _autoFitLo) * AutoFitContractLerp;
+            double nhi = _autoFitHi + (targetHi - _autoFitHi) * AutoFitContractLerp;
+            (_autoFitLo, _autoFitHi) = SnapRange(nlo, nhi);
+            // Re-arm the counter once we've essentially reached the target.
+            if (Math.Abs(_autoFitHi - targetHi) < eps && Math.Abs(_autoFitLo - targetLo) < eps)
+                _autoFitContractFrames = 0;
+        }
+        return (_autoFitLo, _autoFitHi);
+    }
+
+    // Quantize a range outward to nice tick increments so the price axis lands on round levels.
+    private static (double lo, double hi) SnapRange(double lo, double hi)
+    {
+        if (hi <= lo) return (lo, lo + 1.0);
+        var (niceMin, niceMax, _) = NiceRange(lo, hi, maxTicks: 6);
+        return (niceMin, niceMax);
+    }
+
     // Returns a human-friendly axis range and tick step that neatly covers [min, max].
     private static (double niceMin, double niceMax, double step) NiceRange(double min, double max, int maxTicks)
     {

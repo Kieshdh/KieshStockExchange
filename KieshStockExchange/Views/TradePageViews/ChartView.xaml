@@ -380,6 +380,65 @@
                 </Grid>
             </VerticalStackLayout>
         </Border>
+
+        <!-- Floating drawing style-bar (TradingView convention): appears top-center only while a
+             drawing is selected. Colour swatches, thickness presets, a Solid/Dash/Dot cycle and a
+             delete button — each a VM command that mutates the selected drawing's style. -->
+        <Border Grid.Row="1"
+                IsVisible="{Binding HasSelectedDrawing}"
+                BackgroundColor="{DynamicResource ChartPanel}"
+                Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1"
+                StrokeShape="RoundRectangle 8"
+                Padding="8,5"
+                Margin="0,8,0,0"
+                VerticalOptions="Start"
+                HorizontalOptions="Center">
+            <HorizontalStackLayout Spacing="6" VerticalOptions="Center">
+
+                <!-- Colour swatches -->
+                <Button Style="{StaticResource ChartSwatchButton}" BackgroundColor="#2962FF"
+                        Command="{Binding SetDrawingColorCommand}">
+                    <Button.CommandParameter><Color>#2962FF</Color></Button.CommandParameter>
+                </Button>
+                <Button Style="{StaticResource ChartSwatchButton}" BackgroundColor="#F23645"
+                        Command="{Binding SetDrawingColorCommand}">
+                    <Button.CommandParameter><Color>#F23645</Color></Button.CommandParameter>
+                </Button>
+                <Button Style="{StaticResource ChartSwatchButton}" BackgroundColor="#089981"
+                        Command="{Binding SetDrawingColorCommand}">
+                    <Button.CommandParameter><Color>#089981</Color></Button.CommandParameter>
+                </Button>
+                <Button Style="{StaticResource ChartSwatchButton}" BackgroundColor="#FF9800"
+                        Command="{Binding SetDrawingColorCommand}">
+                    <Button.CommandParameter><Color>#FF9800</Color></Button.CommandParameter>
+                </Button>
+                <Button Style="{StaticResource ChartSwatchButton}" BackgroundColor="#B39DDB"
+                        Command="{Binding SetDrawingColorCommand}">
+                    <Button.CommandParameter><Color>#B39DDB</Color></Button.CommandParameter>
+                </Button>
+
+                <BoxView Style="{StaticResource ChartToolbarSeparator}" />
+
+                <!-- Thickness presets -->
+                <Button Text="1" Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SetDrawingThicknessCommand}" CommandParameter="1" />
+                <Button Text="2" Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SetDrawingThicknessCommand}" CommandParameter="2" />
+                <Button Text="3" Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding SetDrawingThicknessCommand}" CommandParameter="3" />
+
+                <BoxView Style="{StaticResource ChartToolbarSeparator}" />
+
+                <!-- Dash style cycle (Solid -> Dash -> Dot) -->
+                <Button Text="╌" Style="{StaticResource ChartResolutionButton.Unselected}"
+                        Command="{Binding CycleDrawingDashCommand}" />
+
+                <!-- Delete selected drawing -->
+                <Button Text="🗑" Style="{StaticResource ChartIconButton}"
+                        Command="{Binding DeleteSelectedDrawingCommand}" />
+            </HorizontalStackLayout>
+        </Border>
     </Grid>
     </Border>
 </ContentView>

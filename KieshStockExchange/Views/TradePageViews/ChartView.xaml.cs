@@ -290,6 +290,7 @@ public partial class ChartView : ContentView
         // ObservableCollection enumeration with concurrent edits would still be
         // brittle if a future feature mutates from a different thread.
         _drawable.Drawings = _vm.Drawings.ToArray();
+        _drawable.SelectedDrawingId = _vm.SelectedDrawingId;
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
         _drawable.OpenOrderSellColor = ResolveColor(_vm.SellOrderColorOption.Key);
@@ -428,6 +429,11 @@ public partial class ChartView : ContentView
         }
     }
 
+    // Manual double-click detection for the price-axis gutter — WinUI's DoubleTapped is unreliable
+    // here because the gutter press handles the pointer + captures it for the Y-scale drag.
+    private long _lastGutterClickMs;
+    private const long GutterDoubleClickMs = 400;
+
     private static PointF PlatformPointerToControl(
         Microsoft.UI.Xaml.UIElement el,
         Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
@@ -474,6 +480,8 @@ public partial class ChartView : ContentView
                 e.Handled = true;
                 return;
             }
+            // Tap-to-select: hitting a drawing selects it (reveals the style-bar) and begins a drag.
+            _vm.SelectedDrawingId = dh.Drawing.Id;
             BeginDrawingDrag(dh.Drawing, dh.Part, p, isNew: false);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             Chart.Invalidate();
@@ -492,11 +500,13 @@ public partial class ChartView : ContentView
             if (_vm.DrawTool == DrawTool.HLine)
             {
                 _vm.AddDrawing(new DrawingObject(id, DrawTool.HLine, t, newPrice, t, newPrice, DrawStyle.Default));
+                _vm.SelectedDrawingId = id;   // a freshly-placed line is selected for immediate styling
                 e.Handled = true;
                 return;
             }
             var trend = new DrawingObject(id, DrawTool.Trend, t, newPrice, t, newPrice, DrawStyle.Default);
             _vm.AddDrawing(trend);
+            _vm.SelectedDrawingId = id;
             BeginDrawingDrag(trend, DrawingHitPart.Anchor2, p, isNew: true);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             Chart.Invalidate();
@@ -542,6 +552,20 @@ public partial class ChartView : ContentView
         {
             if (_drawable.LastYMax <= _drawable.LastYMin) return;
 
+            // Double-click the gutter → reset the Y scale to auto-fit (TradingView reset-scale).
+            long nowMs = Environment.TickCount64;
+            if (nowMs - _lastGutterClickMs <= GutterDoubleClickMs)
+            {
+                _lastGutterClickMs = 0;
+                _vm.ManualYMin = null;
+                _vm.ManualYMax = null;
+                _vm.IsYAutoFit = true;
+                Chart.Invalidate();
+                e.Handled = true;
+                return;
+            }
+            _lastGutterClickMs = nowMs;
+
             // Auto-flip to manual mode so the next paint doesn't snap back.
             if (_vm.IsYAutoFit)
             {
@@ -565,9 +589,11 @@ public partial class ChartView : ContentView
         }
 
         // Priority 4: chart body (price + volume area) — free pan that locks
-        // the data point under the cursor at drag-start to the cursor.
+        // the data point under the cursor at drag-start to the cursor. A press on
+        // empty chart (nothing hit above) also clears any drawing selection.
         if (_drawable.IsInChartArea(p))
         {
+            _vm.SelectedDrawingId = null;
             int visible = Math.Max(1, _vm.VisibleCount);
             double pxPerCandle = (double)Chart.Width / visible;
             // Approximate plot height — the drawable's cached price rect height

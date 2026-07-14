@@ -68,6 +68,15 @@
         <Setter Property="BorderColor"     Value="{DynamicResource ChartGrid}" />
     </Style>
 
+    <!-- Colour swatch in the floating drawing style-bar. BackgroundColor is set per-instance. -->
+    <Style x:Key="ChartSwatchButton" TargetType="Button">
+        <Setter Property="Padding"         Value="0" />
+        <Setter Property="WidthRequest"    Value="20" />
+        <Setter Property="HeightRequest"   Value="16" />
+        <Setter Property="CornerRadius"    Value="3" />
+        <Setter Property="BorderWidth"     Value="0" />
+    </Style>
+
     <!-- ============================================================
          NEW DESIGN SYSTEM STYLES
          ============================================================ -->
