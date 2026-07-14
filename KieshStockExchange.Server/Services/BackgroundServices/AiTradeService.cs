@@ -134,6 +134,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     // Timer clocks driving CheckTimers. All scheduling lives here; the work
     // each clock triggers lives in the relevant helper.
     private DateTime _nextDailyCheck    = DateTime.MinValue;
+    private DateTime _nextMoodLog       = DateTime.MinValue; // §fear-greed periodic distribution log throttle
     private DateTime _nextAssetReload   = DateTime.MinValue;
     private DateTime _nextPruneTime     = DateTime.MinValue;
     private DateTime _nextStatsLogTime      = DateTime.MinValue;
@@ -216,6 +217,8 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
     private readonly BotPriceMemoryService _priceMemory; // medium-term EWMA + long-term daily-TWAP anchors
     private readonly BotRegimeService     _regime;    // §A2/A3/A4 shared regime (default off)
     private readonly BotActivityService   _activity;  // §Pillar B activity field (default off)
+    private readonly MarketMoodService    _mood;      // §fear-greed composite index (default off → v1 fallback)
+    private readonly double               _moodGreedScale; // v1 fallback tanh gain (Bots:Mood:GreedScale)
     private readonly FundamentalService   _funds;     // §P6 slowly-drifting fundamentals
     private readonly ExogenousShockService _news;     // §exogenous-information news-shock bus (default off)
     private readonly StockProfileService  _profiles;  // §P6 per-stock personality
@@ -592,6 +595,23 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         compGExp:         _configuration.GetValue("Bots:Activity:Composition:GExp", 0.5),
                         compFloor:        _configuration.GetValue("Bots:Activity:Composition:Floor", 0.4),
                         compCap:          _configuration.GetValue("Bots:Activity:Composition:Cap", 3.0));
+        // §fear-greed: composite Fear/Greed index (fast layer of the one-axis-three-timescales model). Read-only
+        // projection; default-off so the live gauge keeps the v1 sentiment×activity fallback until it is wired +
+        // soak-validated. Momentum-dominant weights; sentiment demoted to a small slow anchor.
+        _moodGreedScale = _configuration.GetValue("Bots:Mood:GreedScale", 1.2);
+        _mood      = new MarketMoodService(stocks.ById.Keys,
+                        enabled:           _configuration.GetValue("Bots:Mood:Enabled", false),
+                        weights:           new MoodWeights(
+                            Mom:     _configuration.GetValue("Bots:Mood:WMom", 0.6),
+                            Breadth: _configuration.GetValue("Bots:Mood:WBreadth", 0.35),
+                            Vol:     _configuration.GetValue("Bots:Mood:WVol", 0.4),
+                            Flow:    _configuration.GetValue("Bots:Mood:WFlow", 0.35),
+                            Sent:    _configuration.GetValue("Bots:Mood:WSent", 0.2)),
+                        momTauSec:         _configuration.GetValue("Bots:Mood:MomTauSec", 300.0),
+                        momSigmaTauSec:    _configuration.GetValue("Bots:Mood:MomSigmaTauSec", 900.0),
+                        volTauSec:         _configuration.GetValue("Bots:Mood:VolTauSec", 60.0),
+                        volBaselineTauSec: _configuration.GetValue("Bots:Mood:VolBaselineTauSec", 900.0),
+                        flowTauSec:        _configuration.GetValue("Bots:Mood:FlowTauSec", 300.0));
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         // §3.7 arbitrage cohort: dedicated decision path, fully outside the sentiment/anchor/veto/
@@ -1089,12 +1109,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         lock (_activitySamplesLock) return _activitySamples.ToArray();
     }
 
-    // §market-mood: the bots' ground-truth mood surfaced as a 0..100 Fear/Greed gauge. Loop-thread reads
-    // (like GetSentiment) done off the HTTP thread — the dicts only gain keys at reset then update values,
-    // so a best-effort TryGetValue is safe here without a lock. Truthful (not a chart proxy): the real
-    // combined sentiment + activity fields that drive price.
+    // §market-mood: the bots' ground-truth mood surfaced as a 0..100 Fear/Greed gauge. Loop-thread writes the
+    // composite; the HTTP thread reads the cached value here — the per-stock dicts only gain keys at reset then
+    // update values, so a best-effort read is safe without a lock. When the composite is enabled we return its
+    // cached score; otherwise the v1 sentiment×activity fallback (truthful, byte-identical to the old endpoint).
     public double MoodForStock(int stockId)
-        => MoodScore((double)_sentiment.GetSentiment(stockId), _activity.CompositionActivity(stockId));
+        => _mood.Enabled
+            ? _mood.MoodFor(stockId)
+            : MarketMoodService.LegacyMoodScore(
+                (double)_sentiment.GetSentiment(stockId), _activity.CompositionActivity(stockId), _moodGreedScale);
 
     public (double Global, IReadOnlyDictionary<int, double> Stocks) GetMarketMood()
     {
@@ -1109,14 +1132,6 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // neutral, which is the honest aggregate (it already folds in the shared common-mode sentiment).
         return (n > 0 ? sum / n : 50.0, stocks);
     }
-
-    // Map the raw fields to Fear(0)↔Greed(100): score = 50 + 50·tanh(k·sentiment·activity). Sentiment
-    // (~[-1,1]) sets the DIRECTION (greed = positive, fear = negative); activity (~1, [0.4,3]) is the
-    // INTENSITY gain, so a busy market amplifies the tilt while a quiet/neutral one sits near 50. tanh
-    // bounds it into (0,100). Pure ⇒ deterministic and unit-testable.
-    internal const double MoodGreedScale = 1.2;
-    internal static double MoodScore(double sentiment, double activity)
-        => Math.Clamp(50.0 + 50.0 * Math.Tanh(MoodGreedScale * sentiment * Math.Max(0.0, activity)), 0.0, 100.0);
 
     // 10s cadence × 8640 = 24h history (matches longest dashboard range).
     private const int MaxActivitySamples = 8640;
@@ -1965,6 +1980,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                 // §Pillar B self-excitation: fills on this name beget more (trade clustering). No-op when the
                 // activity field is disabled; accumulated and drained once per tick on the loop thread.
                 _activity.RecordFill(order.StockId, result.FillTransactions.Count);
+                // §fear-greed: the aggressing (batched) order is the taker; buffer its signed filled notional
+                // for the flow-imbalance term. No-op when the composite is disabled.
+                if (_mood.Enabled)
+                    _mood.RecordTakerFlow(order.StockId, order.IsBuyOrder, fillVol);
             }
 
             _state.ApplyResultToCache(_ctx, result);
@@ -2164,6 +2183,24 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _bank.Tick(now);    // §bank-estimate: republish estimates AFTER sentiment/news, BEFORE _funds reads them
         _funds.Tick(now);   // §P6: advance the slowly-drifting fundamentals (internally gated to its interval)
         _priceMemory.Tick(now); // EWMA + day-TWAP; short-circuits at top when anyConsumer=false
+        // §fear-greed: fold this tick's per-stock returns + (prior-tick) taker flow into the composite, then
+        // rescore. Depends on _sentiment/_activity having advanced above; gated so it's byte-identical when off.
+        // Two passes: Observe all (momentum EWMA) → breadth scan → Score all. Taker flow is buffered during the
+        // batch phase (RecordTakerFlow) and drained here on the next tick (1-tick lag, negligible).
+        if (_mood.Enabled)
+        {
+            _mood.Tick(now);
+            foreach (var sid in _stocks.ById.Keys) _mood.Observe(sid, RecentReturnForActivity(sid));
+            double breadth = _mood.ComputeBreadth();
+            foreach (var sid in _stocks.ById.Keys) _mood.Score(sid, breadth, (double)_sentiment.GetSentiment(sid));
+            if (now >= _nextMoodLog)
+            {
+                var (mean, mn, mx, hist) = _mood.Distribution();
+                _logger.LogInformation("MOOD mean={Mean:0.0} min={Min:0.0} max={Max:0.0} breadth={Breadth:0.00} hist=[{H0},{H1},{H2},{H3},{H4}]",
+                    mean, mn, mx, breadth, hist[0], hist[1], hist[2], hist[3], hist[4]);
+                _nextMoodLog = now + TimeSpan.FromSeconds(60);
+            }
+        }
         if (now >= _nextDailyCheck)
         {
             _state.CheckDailyRefresh(_ctx);
