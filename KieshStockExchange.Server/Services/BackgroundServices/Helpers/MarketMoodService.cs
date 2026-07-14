@@ -69,7 +69,6 @@ public sealed class MarketMoodService
         public double BuyPending;   // this-tick buy  taker notional, drained by Observe
         public double SellPending;  // this-tick sell taker notional, drained by Observe
         public bool   Seeded;       // first valid price seeds the anchors
-        public bool   VolSeeded;    // first real return seeds the vol EWMAs
         public long   Count;        // observations folded so far (drives the warmup guard)
         public readonly Band[] Bands = { new Band(), new Band(), new Band() };
     }
@@ -177,7 +176,7 @@ public sealed class MarketMoodService
         for (int i = 0; i < BandCount; i++)
         {
             var b = s.Bands[i];
-            if (!s.VolSeeded) { b.VolEwma = absr; b.VolBaseline = absr; }   // seed vol on the first real return
+            if (b.VolBaseline <= 0.0) { b.VolEwma = absr; b.VolBaseline = absr; }   // seed vol on the first real return
             double kAnc  = Keep(_dt, _anchorTau[i]);
             double kVol  = Keep(_dt, _volTau[i]);
             double kVolB = Keep(_dt, _volBaselineTau[i]);
@@ -186,7 +185,6 @@ public sealed class MarketMoodService
             b.VolEwma     = kVol  * b.VolEwma     + (1 - kVol)  * absr;
             b.VolBaseline = kVolB * b.VolBaseline + (1 - kVolB) * absr;
         }
-        s.VolSeeded = true;
 
         s.BuyEwma  = kFlow * s.BuyEwma  + (1 - kFlow) * s.BuyPending;
         s.SellEwma = kFlow * s.SellEwma + (1 - kFlow) * s.SellPending;
