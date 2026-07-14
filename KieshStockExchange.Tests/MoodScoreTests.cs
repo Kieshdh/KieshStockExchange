@@ -10,7 +10,7 @@ namespace KieshStockExchange.Tests;
 public class MoodScoreTests
 {
     // Default weights (kept in sync with AiTradeService / appsettings Bots:Mood:W*).
-    private static readonly MoodWeights W = new(Mom: 0.6, Breadth: 0.35, Vol: 0.4, Flow: 0.35, Sent: 0.2);
+    private static readonly MoodWeights W = new(Mom: 0.9, Breadth: 0.35, Vol: 0.2, Flow: 0.15, Sent: 0.2);
 
     private static double Score(double momZ, double breadth, double volZ, double flowZ, double sent)
         => MarketMoodService.MoodScore(W, momZ, breadth, volZ, flowZ, sent);

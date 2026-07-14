@@ -602,16 +602,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         _mood      = new MarketMoodService(stocks.ById.Keys,
                         enabled:           _configuration.GetValue("Bots:Mood:Enabled", false),
                         weights:           new MoodWeights(
-                            Mom:     _configuration.GetValue("Bots:Mood:WMom", 0.6),
+                            Mom:     _configuration.GetValue("Bots:Mood:WMom", 0.9),
                             Breadth: _configuration.GetValue("Bots:Mood:WBreadth", 0.35),
-                            Vol:     _configuration.GetValue("Bots:Mood:WVol", 0.4),
-                            Flow:    _configuration.GetValue("Bots:Mood:WFlow", 0.35),
+                            Vol:     _configuration.GetValue("Bots:Mood:WVol", 0.2),
+                            Flow:    _configuration.GetValue("Bots:Mood:WFlow", 0.15),
                             Sent:    _configuration.GetValue("Bots:Mood:WSent", 0.2)),
-                        momTauSec:         _configuration.GetValue("Bots:Mood:MomTauSec", 300.0),
-                        momSigmaTauSec:    _configuration.GetValue("Bots:Mood:MomSigmaTauSec", 900.0),
+                        anchorTauSec:      _configuration.GetValue("Bots:Mood:AnchorTauSec", 600.0),
                         volTauSec:         _configuration.GetValue("Bots:Mood:VolTauSec", 60.0),
                         volBaselineTauSec: _configuration.GetValue("Bots:Mood:VolBaselineTauSec", 900.0),
-                        flowTauSec:        _configuration.GetValue("Bots:Mood:FlowTauSec", 300.0));
+                        flowTauSec:        _configuration.GetValue("Bots:Mood:FlowTauSec", 300.0),
+                        smoothTauSec:      _configuration.GetValue("Bots:Mood:SmoothTauSec", 60.0));
         _injector  = new BotCashInjector(_ctx, portfolio, _economy,
                         new SeparatorLogger<BotCashInjector>(loggerFactory, loggerOptions));
         // §3.7 arbitrage cohort: dedicated decision path, fully outside the sentiment/anchor/veto/
@@ -2126,6 +2126,16 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         return 0.0;
     }
 
+    // §fear-greed: the current smoothed price (reference currency USD, then EUR) from the loop's price cache,
+    // fed to the mood service's trend anchor. 0 when no price is known (mood skips the stock this tick).
+    private double SmoothedPriceForMood(int stockId)
+    {
+        foreach (var ccy in CurrenciesToTrade)
+            if (_ctx.SmoothedPrices.TryGetValue((stockId, ccy), out var cur) && cur > 0m)
+                return (double)cur;
+        return 0.0;
+    }
+
     // §impact-decouple A: the sentiment price-reaction's return measured against the >1-min reference instead
     // of the ~1s prior price. Mirrors RecentReturnForActivity's first-match currency selection EXACTLY, then
     // uses the reference for THAT same currency, falling back to the legacy (cur-prev)/prev when its ref is
@@ -2190,9 +2200,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         if (_mood.Enabled)
         {
             _mood.Tick(now);
-            foreach (var sid in _stocks.ById.Keys) _mood.Observe(sid, RecentReturnForActivity(sid));
+            foreach (var sid in _stocks.ById.Keys) _mood.Observe(sid, SmoothedPriceForMood(sid));
             double breadth = _mood.ComputeBreadth();
-            foreach (var sid in _stocks.ById.Keys) _mood.Score(sid, breadth, (double)_sentiment.GetSentiment(sid));
+            double pooledSigma = _mood.ComputePooledSigma();
+            foreach (var sid in _stocks.ById.Keys) _mood.Score(sid, breadth, pooledSigma, (double)_sentiment.GetSentiment(sid));
             if (now >= _nextMoodLog)
             {
                 var (mean, mn, mx, hist) = _mood.Distribution();

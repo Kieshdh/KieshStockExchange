@@ -8,34 +8,40 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// bot market. This is the FAST layer of the one-axis-three-timescales model:
 ///   sentiment (slow OU anchor) → F&amp;G composite (this) → activity / taker (behavioural expression).
 /// Unlike v1 (a smooth <c>sentiment × activity</c> proxy, which read "too smooth") the score is dominated by
-/// FAST price-derived signals — momentum, breadth, realised-vol, taker-flow — so it feels alive; sentiment is
-/// demoted to a small slow anchor. It is a READ-ONLY downstream projection: never fed back into the bot
-/// decision accumulator as a SOURCE (the reflexive lever, when it lands, rides a separate lagged taker channel).
+/// fast, price-derived signals so it feels alive; sentiment is demoted to a small slow anchor. READ-ONLY
+/// projection: never fed back into the bot decision accumulator as a SOURCE (the reflexive lever rides a
+/// separate lagged taker channel and consumes only |mood−50|).
 ///
-/// Threading: the loop thread owns every write (<see cref="Tick"/>/<see cref="Observe"/>/<see cref="RecordTakerFlow"/>/
-/// <see cref="Score"/>); the HTTP thread only reads the cached <see cref="MoodFor"/>. Per-stock state keys are
-/// populated once at construction, so a lock-free TryGetValue is safe off-thread (mirrors BotActivityService and
-/// the existing MoodForStock read).
+/// DIRECTION signal = TREND-vs-ANCHOR (like CNN's F&amp;G momentum): <c>trend = ln(price / EMA(price))</c>,
+/// normalised by the CROSS-SECTIONAL (pooled) σ of the trend across stocks — NOT each stock's own σ. Own-σ
+/// normalisation self-mutes a big mover exactly when it should read greed; pooled σ keeps "up vs the market"
+/// legible. Taker-FLOW is de-emphasised here because in this sim it is largely reversion flow (bots sell into
+/// strength), so it points anti-trend. Vol is the fear intensity (a spike ⇒ fear).
+///
+/// Threading: the loop thread owns every write (Tick/Observe/RecordTakerFlow/Score); the HTTP thread only reads
+/// the cached <see cref="MoodFor"/>. Per-stock state keys are populated once at construction, so a lock-free
+/// TryGetValue is safe off-thread (mirrors BotActivityService and the existing MoodForStock read).
 /// </summary>
 internal sealed class MarketMoodService
 {
     // ---- config (bound from Bots:Mood:* in the AiTradeService ctor) ----
     private readonly bool _enabled;
     private readonly MoodWeights _w;
-    private readonly double _momTau, _momSigmaTau, _volTau, _volBaselineTau, _flowTau;
+    private readonly double _anchorTau, _volTau, _volBaselineTau, _flowTau, _smoothTau;
 
-    // ---- per-stock EWMA state (mutable in place on the loop thread) ----
+    // ---- per-stock state (mutable in place on the loop thread) ----
     private sealed class State
     {
-        public double MomEwma;      // EWMA of per-tick return (recent drift, ~MomTau)
-        public double MomVarEwma;   // EWMA of ret^2 (slow) → the sigma that z-scores momentum
+        public double Price;        // last smoothed price
+        public double PriceEma;     // EMA of price = the trend anchor (~AnchorTau)
+        public double Trend;        // ln(Price / PriceEma): >0 above anchor (uptrend), <0 below (downtrend)
         public double VolEwma;      // EWMA of |ret| (fast, ~VolTau)
         public double VolBaseline;  // EWMA of |ret| (slow, ~VolBaselineTau)
         public double BuyEwma;      // EWMA of buy  taker notional (~FlowTau)
         public double SellEwma;     // EWMA of sell taker notional (~FlowTau)
         public double BuyPending;   // this-tick buy  taker notional, drained by Observe
         public double SellPending;  // this-tick sell taker notional, drained by Observe
-        public bool   Seeded;       // first Observe seeds the vol baselines (no cold-start z spike)
+        public bool   Seeded;       // first valid price seeds the anchor
         public long   Count;        // observations folded so far (drives the warmup guard)
         public double Score = 50.0; // last computed 0..100 (read off-thread)
     }
@@ -46,19 +52,23 @@ internal sealed class MarketMoodService
     private DateTime _lastTick;
     private bool _haveLastTick;
 
+    // Ticks a stock must be observed before its composite is trusted — the first handful of samples leave the
+    // anchor / vol baseline unstable, so the gauge reports neutral (50) until then.
+    private const long WarmupObs = 20;
+
     public MarketMoodService(
         IEnumerable<int> stockIds,
         bool enabled,
         MoodWeights weights,
-        double momTauSec, double momSigmaTauSec, double volTauSec, double volBaselineTauSec, double flowTauSec)
+        double anchorTauSec, double volTauSec, double volBaselineTauSec, double flowTauSec, double smoothTauSec)
     {
         _enabled        = enabled;
         _w              = weights;
-        _momTau         = Math.Max(1.0, momTauSec);
-        _momSigmaTau    = Math.Max(1.0, momSigmaTauSec);
+        _anchorTau      = Math.Max(1.0, anchorTauSec);
         _volTau         = Math.Max(1.0, volTauSec);
         _volBaselineTau = Math.Max(1.0, volBaselineTauSec);
         _flowTau        = Math.Max(1.0, flowTauSec);
+        _smoothTau      = Math.Max(0.0, smoothTauSec);   // 0 = no output smoothing
 
         _state = new Dictionary<int, State>();
         foreach (var sid in stockIds) _state[sid] = new State();
@@ -91,76 +101,89 @@ internal sealed class MarketMoodService
     }
 
     /// <summary>
-    /// Loop thread: fold this tick's return + buffered taker flow into the per-stock EWMA state. Vol is derived
-    /// from |ret| internally so the caller only supplies the return the loop already computes.
+    /// Loop thread: fold this tick's smoothed price into the per-stock state — advance the trend anchor, the
+    /// return-derived vol EWMAs, and the buffered taker flow.
     /// </summary>
-    public void Observe(int stockId, double ret)
+    public void Observe(int stockId, double price)
     {
-        if (!_state.TryGetValue(stockId, out var s)) return;
-        double absr = Math.Abs(ret);
+        if (price <= 0.0 || !_state.TryGetValue(stockId, out var s)) return;
         if (!s.Seeded)
         {
-            s.MomVarEwma = ret * ret;
-            s.VolEwma = absr;
-            s.VolBaseline = absr;
-            s.Seeded = true;
+            s.Price = price; s.PriceEma = price; s.Trend = 0.0; s.Seeded = true; s.Count++;
+            return;
         }
 
-        double kMom  = Keep(_dt, _momTau);
-        double kSig  = Keep(_dt, _momSigmaTau);
+        double ret = (price - s.Price) / s.Price;
+        double absr = Math.Abs(ret);
+        if (s.VolBaseline <= 0.0) { s.VolEwma = absr; s.VolBaseline = absr; }   // seed vol on the first real return
+
+        double kAnc  = Keep(_dt, _anchorTau);
         double kVol  = Keep(_dt, _volTau);
         double kVolB = Keep(_dt, _volBaselineTau);
         double kFlow = Keep(_dt, _flowTau);
 
-        s.MomEwma     = kMom  * s.MomEwma     + (1 - kMom)  * ret;
-        s.MomVarEwma  = kSig  * s.MomVarEwma  + (1 - kSig)  * ret * ret;
+        s.PriceEma    = kAnc  * s.PriceEma    + (1 - kAnc)  * price;
+        s.Trend       = Math.Log(price / Math.Max(1e-12, s.PriceEma));   // +uptrend / −downtrend
         s.VolEwma     = kVol  * s.VolEwma     + (1 - kVol)  * absr;
         s.VolBaseline = kVolB * s.VolBaseline + (1 - kVolB) * absr;
         s.BuyEwma     = kFlow * s.BuyEwma     + (1 - kFlow) * s.BuyPending;
         s.SellEwma    = kFlow * s.SellEwma    + (1 - kFlow) * s.SellPending;
         s.BuyPending = 0.0;
         s.SellPending = 0.0;
+        s.Price = price;
         s.Count++;
     }
 
-    // Ticks a stock must be observed before its composite is trusted — the first handful of samples leave the
-    // momentum σ / vol baseline unstable, so the gauge reports neutral (50) until then.
-    private const long WarmupObs = 20;
-
-    /// <summary>Fraction of tracked stocks whose smoothed recent return is positive (breadth, 0..1). One scan.</summary>
+    /// <summary>Fraction of warmed stocks in an uptrend (trend &gt; 0) — breadth, 0..1. One scan.</summary>
     public double ComputeBreadth()
     {
         int up = 0, n = 0;
-        foreach (var s in _state.Values) { if (s.MomEwma > 0) up++; n++; }
+        foreach (var s in _state.Values) { if (s.Count < WarmupObs) continue; if (s.Trend > 0) up++; n++; }
         return n > 0 ? (double)up / n : 0.5;
     }
 
+    /// <summary>Cross-sectional (pooled) σ of the trend across warmed stocks — the scale that z-scores each
+    /// stock's trend against "how big a trend the typical name has right now". Floored to avoid a blow-up.</summary>
+    public double ComputePooledSigma()
+    {
+        double sum = 0, sumsq = 0; int n = 0;
+        foreach (var s in _state.Values) { if (s.Count < WarmupObs) continue; sum += s.Trend; sumsq += s.Trend * s.Trend; n++; }
+        if (n < 2) return 1e-6;
+        double mean = sum / n;
+        double var = Math.Max(0.0, sumsq / n - mean * mean);
+        return Math.Max(1e-6, Math.Sqrt(var));
+    }
+
     /// <summary>
-    /// Loop thread: derive the normalised signals from state and cache this stock's 0..100 composite mood.
-    /// <paramref name="breadth"/> is the market-wide up-fraction; <paramref name="sentiment"/> the stock's slow anchor.
+    /// Loop thread: derive the normalised signals and cache this stock's 0..100 composite mood. <paramref name="breadth"/>
+    /// is the market-wide up-fraction, <paramref name="pooledSigma"/> the cross-sectional trend scale, and
+    /// <paramref name="sentiment"/> the stock's slow anchor.
     /// </summary>
-    public double Score(int stockId, double breadth, double sentiment)
+    public double Score(int stockId, double breadth, double pooledSigma, double sentiment)
     {
         if (!_state.TryGetValue(stockId, out var s)) return 50.0;
         if (s.Count < WarmupObs) { s.Score = 50.0; return 50.0; }   // not enough samples ⇒ report neutral
 
-        double momSigma = Math.Sqrt(Math.Max(0.0, s.MomVarEwma));
-        // Winsorize the z-scores. During warmup (or a spike) the fast EWMA can outrun a still-settling σ/baseline;
-        // clamping keeps each term to a sane contribution so no single signal pegs the tanh on cold-start noise.
-        double momZ = momSigma > 1e-12 ? Math.Clamp(s.MomEwma / momSigma, -3.0, 3.0) : 0.0;
+        // Trend-vs-anchor direction, normalised by the pooled cross-sectional σ (not own-σ), winsorized.
+        double momZ = pooledSigma > 1e-12 ? Math.Clamp(s.Trend / pooledSigma, -3.0, 3.0) : 0.0;
+        // Vol relative to its own slow baseline (a spike ⇒ fear). Winsorized so a lagging baseline can't blow up.
         double volZ = s.VolBaseline > 1e-12 ? Math.Clamp(s.VolEwma / s.VolBaseline - 1.0, -0.9, 3.0) : 0.0;
         double denom = s.BuyEwma + s.SellEwma;
         double flowZ = denom > 1e-12 ? (s.BuyEwma - s.SellEwma) / denom : 0.0;
 
-        double score = MoodScore(_w, momZ, breadth, volZ, flowZ, sentiment);
-        s.Score = score;
-        return score;
+        double raw = MoodScore(_w, momZ, breadth, volZ, flowZ, sentiment);
+        // Output smoothing: EMA the reported score so the dial doesn't lurch when a mean-reverting stock
+        // crosses its trend anchor tick-to-tick. Preserves the direction (a slow EMA of a correct signal is
+        // still correct), just damps the jitter. 0 tau ⇒ raw (no smoothing).
+        double kS = _smoothTau > 0.0 ? Keep(_dt, _smoothTau) : 0.0;
+        s.Score = kS * s.Score + (1 - kS) * raw;
+        return s.Score;
     }
 
     /// <summary>Off-thread read: the last cached composite score for a stock, or 50 if unknown.</summary>
     public double MoodFor(int stockId) => _state.TryGetValue(stockId, out var s) ? s.Score : 50.0;
 
-    /// <summary>Loop-thread snapshot of the mood distribution for the periodic soak log (global mean + 5 buckets).</summary>
+    /// <summary>Loop-thread snapshot of the mood distribution for the periodic soak log (mean + range + 5 buckets).</summary>
     public (double mean, double min, double max, int[] hist) Distribution()
     {
         var hist = new int[5];
@@ -176,8 +199,8 @@ internal sealed class MarketMoodService
 
     // ---- the pure composite (unit-tested) ----
     // mood = 50 + 50·tanh( wMom·momZ + wBreadth·(2·breadth−1) − wVol·volZ + wFlow·flowZ + wSent·sentiment )
-    // Fast price-derived terms dominate (momentum leads); sentiment is a small slow anchor. A vol SPIKE
-    // (volZ > 0) is subtracted → fear; buy pressure (flowZ > 0) and a broad rally (breadth > 0.5) → greed.
+    // momZ = trend-vs-anchor z-score (direction, leads); vol SPIKE (volZ > 0) subtracts → fear; broad rally
+    // (breadth > 0.5) and buy taker pressure (flowZ > 0) add → greed; sentiment is a small slow anchor.
     internal static double MoodScore(in MoodWeights w, double momZ, double breadth, double volZ, double flowZ, double sentiment)
         => Math.Clamp(
                50.0 + 50.0 * Math.Tanh(
@@ -195,6 +218,7 @@ internal sealed class MarketMoodService
 }
 
 /// <summary>
-/// The five composite weights (bound from <c>Bots:Mood:W*</c>). Momentum dominant; sentiment a small slow anchor.
+/// The five composite weights (bound from <c>Bots:Mood:W*</c>). Trend-vs-anchor momentum leads; taker flow is
+/// de-emphasised (reversion flow in this sim); vol is the fear intensity; sentiment a small slow anchor.
 /// </summary>
 internal readonly record struct MoodWeights(double Mom, double Breadth, double Vol, double Flow, double Sent);
