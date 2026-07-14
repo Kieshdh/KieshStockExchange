@@ -600,7 +600,9 @@ public sealed class CandleChartDrawable : IDrawable
     /// </summary>
     private void DrawDrawings(ICanvas canvas, RectF plot, Func<DateTime, float> X, Func<double, float> Y, CurrencyType cur)
     {
-        if (Drawings.Count == 0) return;
+        // Keep painting while a polyline is mid-build even with no committed drawings, else the
+        // in-progress preview (drawn below) never shows until the first shape is committed.
+        if (Drawings.Count == 0 && BuildingPolyline is null) return;
         canvas.SaveState();
         for (int i = 0; i < Drawings.Count; i++)
         {
