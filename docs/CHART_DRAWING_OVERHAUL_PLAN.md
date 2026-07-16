@@ -133,10 +133,14 @@ persistence swap), distinct from the interactive client drawing-tools build:
 - **Client:** replace the direct `Preferences` calls (`PersistDrawings`/`LoadDrawingsForSelected`) with an
   `IDrawingStore` abstraction — server-backed, with a local cache for offline/perf and last-write-wins on
   reconnect. Loads on stock switch + auth.
-- **Batched writes (owner):** never write per-change. The client **debounces + coalesces** drawing edits and
-  **flushes them in batches**; the server persists each batch in one transaction (mirrors the engine's
-  existing group-commit / `RunInTransactionAsync` convention). Flush triggers = debounce timer + stock-switch
-  + app-background/logout; a single dirty-set per user+stock+currency (not N row writes).
+- **Batched writes (owner):** never write per-change, and there's **no haste** (drawings aren't time-critical).
+  - **Client:** debounce + coalesce edits into one dirty-set per user+stock+currency; POST the whole set
+    (not per-shape). Flush triggers = debounce timer + stock-switch + app-background/logout.
+  - **Server:** the endpoint just enqueues into an **in-memory buffer/dirty-set**; a **background flush loop
+    on a relaxed timer** (generous interval — seconds→minutes, configurable, no rush) drains the queue and
+    **batch-upserts** all pending users' changes in one transaction. Same pattern as the existing
+    `CandleService.FlushLoopAsync` (buffer → periodic drain → batch persist). Flush on shutdown too, so the
+    last batch isn't lost.
 - Current local `Preferences` blobs = legacy; optional one-time migrate-up on first login.
 The drawing-TOOLS build (rail, shapes, panels, undo) is independent of the backend and proceeds phased.
 
