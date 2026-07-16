@@ -31,6 +31,8 @@ pattern): each group is ONE rail button showing the **last-used tool** of that g
 8. **Magnifier** — (single)
 9. **Magnet** — snap mode (off / weak / strong); see behaviors
 10. **👁 Show/hide drawings** — (single, pinned bottom)
+11. **🗑 Delete all** — (pinned bottom, under the eye) clears all drawings **except locked ones**, behind an
+    **"Are you sure?" confirmation** dialog.
 
 **Flyout interaction:** hovering a multi-option group **widens it to reveal its options** (each with its
 name); the flyout stays open while you interact. **Picking a tool collapses the flyout** back to the group
