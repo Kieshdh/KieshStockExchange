@@ -670,8 +670,10 @@ public sealed class CandleChartDrawable : IDrawable
                     if (polyHeadStart) lim = Math.Min(lim, seg0 * (n == 2 && polyHeadEnd ? 0.30f : 0.6f));
                     if (polyHeadEnd) lim = Math.Min(lim, segN * (n == 2 && polyHeadStart ? 0.30f : 0.6f));
                     polyEff = Math.Min(EndSize(thickness), lim);
-                    startCut = polyHeadStart ? polyEff : 0f;
-                    endCut = polyHeadEnd ? polyEff : 0f;
+                    // Open head = hollow barb: line runs to the tip (no base-cut), matching the straight kinds.
+                    bool polyCut = d.Style.Head != ArrowHeadStyle.Open;
+                    startCut = polyHeadStart && polyCut ? polyEff : 0f;
+                    endCut = polyHeadEnd && polyCut ? polyEff : 0f;
                 }
                 for (int k = 1; k < n; k++)
                 {

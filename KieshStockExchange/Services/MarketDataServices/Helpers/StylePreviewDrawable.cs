@@ -85,10 +85,13 @@ public sealed class StylePreviewDrawable : IDrawable
         if (headStart && headEnd) eff = Math.Min(headSize, len * 0.30f);
         eff = Math.Min(eff, len);   // never longer than the segment itself
 
-        // The line stops at the BASE of any head pointing inward along the segment: an outward start
-        // head (base at +u) and a forward end head (base at −u).
-        float startCut = headStart ? eff : 0f;
-        float endCut = headEnd ? eff : 0f;
+        // Filled/Outline heads enclose an area, so the line stops at the BASE of any inward-pointing head
+        // (outward start head base at +u, forward end head base at −u) — no line through their interior.
+        // The Open head is a hollow barb: let the line run all the way to the TIP so line + barb read as
+        // one clean arrow (the ">" line reaches the point instead of stopping short).
+        bool cutForHead = head != ArrowHeadStyle.Open;
+        float startCut = headStart && cutForHead ? eff : 0f;
+        float endCut = headEnd && cutForHead ? eff : 0f;
         float lax = ax + ux * startCut, lay = ay + uy * startCut;
         float lbx = bx - ux * endCut, lby = by - uy * endCut;
 

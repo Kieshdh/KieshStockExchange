@@ -501,6 +501,19 @@ public partial class ChartView : ContentView
             return;
         }
 
+        // Priority 0.3: the Measure TOOL — drag anywhere in the chart to show the transient ruler. Owns
+        // the gesture ahead of the drawing hit-tests so measuring always wins while it's armed. It clears
+        // on release and the tool disarms itself (one-shot, like TradingView) — see the release handler.
+        if (_vm.DrawTool == DrawTool.Measure && _drawable.IsInChartArea(p))
+        {
+            _dragMode = DragMode.Measure;
+            _drawable.Measure = new MeasureState(true, p.X, p.Y, p.X, p.Y);
+            (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
+
         // Priority 0.4: a polyline is mid-build — each left-click appends a vertex, a double-click
         // finishes it. Handled ahead of the existing-drawing hit-test so clicks near a prior segment
         // still extend the polyline rather than selecting something underneath.
@@ -831,8 +844,10 @@ public partial class ChartView : ContentView
 
         if (_dragMode == DragMode.Measure)
         {
-            // Clear-on-release (v1): the ruler vanishes when the drag ends.
+            // Clear-on-release: the ruler vanishes when the drag ends. If the Measure TOOL armed it (vs a
+            // Shift-drag), disarm the tool too so it's one-shot like TradingView — pick, drag, gone.
             _drawable.Measure = default;
+            if (_vm != null && _vm.DrawTool == DrawTool.Measure) _vm.DrawTool = DrawTool.None;
             Chart.Invalidate();
         }
 
@@ -978,6 +993,16 @@ public partial class ChartView : ContentView
             _drawable.DraggingDrawingId = null;
             _dragMode = DragMode.None;
             _vm.DrawTool = DrawTool.None;
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        // Priority 1.5: a drawing is selected — right-click just DESELECTS it (clears the style-bar)
+        // instead of removing it. A follow-up right-click on empty chart then disarms any active tool.
+        if (_vm.SelectedDrawingId is not null)
+        {
+            _vm.SelectedDrawingId = null;
             Chart.Invalidate();
             e.Handled = true;
             return;

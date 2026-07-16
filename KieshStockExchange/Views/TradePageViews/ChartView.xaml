@@ -640,6 +640,10 @@
                             <DataTrigger TargetType="Border" Binding="{Binding PenHeadTiles[0].IsSelected}" Value="True">
                                 <Setter Property="Stroke" Value="{StaticResource White}" />
                             </DataTrigger>
+                            <DataTrigger TargetType="Border" Binding="{Binding CanEditHead}" Value="False">
+                                <Setter Property="Opacity" Value="0.3" />
+                                <Setter Property="InputTransparent" Value="True" />
+                            </DataTrigger>
                         </Border.Triggers>
                     </Border>
                     <Border Grid.Row="1" Grid.Column="6" Style="{StaticResource PenSpecimenTile}">
@@ -652,6 +656,10 @@
                             <DataTrigger TargetType="Border" Binding="{Binding PenHeadTiles[1].IsSelected}" Value="True">
                                 <Setter Property="Stroke" Value="{StaticResource White}" />
                             </DataTrigger>
+                            <DataTrigger TargetType="Border" Binding="{Binding CanEditHead}" Value="False">
+                                <Setter Property="Opacity" Value="0.3" />
+                                <Setter Property="InputTransparent" Value="True" />
+                            </DataTrigger>
                         </Border.Triggers>
                     </Border>
                     <Border Grid.Row="1" Grid.Column="7" Style="{StaticResource PenSpecimenTile}">
@@ -663,6 +671,10 @@
                         <Border.Triggers>
                             <DataTrigger TargetType="Border" Binding="{Binding PenHeadTiles[2].IsSelected}" Value="True">
                                 <Setter Property="Stroke" Value="{StaticResource White}" />
+                            </DataTrigger>
+                            <DataTrigger TargetType="Border" Binding="{Binding CanEditHead}" Value="False">
+                                <Setter Property="Opacity" Value="0.3" />
+                                <Setter Property="InputTransparent" Value="True" />
                             </DataTrigger>
                         </Border.Triggers>
                     </Border>

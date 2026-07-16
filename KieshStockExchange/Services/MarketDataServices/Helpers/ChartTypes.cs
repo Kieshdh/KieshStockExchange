@@ -39,8 +39,10 @@ public enum MaKind { Sma, Ema }
 // horizontal line at a price; Trend = a click-drag two-anchor line segment; Ray = a click-drag
 // segment extended infinitely past its 2nd anchor; HRay = one-click horizontal ray running right
 // from the click; Polyline = multi-vertex line (left-click drops each vertex, double-click ends).
-// The tool is a transient UI mode; the drawings it produces are what get persisted.
-public enum DrawTool { None, HLine, Trend, Ray, HRay, Polyline }
+// Measure = a transient drag-ruler (drag to read Δ%/Δtime/#bars); it draws nothing persistent and the
+// tool disarms itself on release (one-shot, TradingView-style). The tool is a transient UI mode; the
+// drawings the line tools produce are what get persisted.
+public enum DrawTool { None, HLine, Trend, Ray, HRay, Polyline, Measure }
 
 // Which part of a drawing a pointer hit — drives drag behaviour (move an endpoint vs the whole
 // shape) and the ✕-remove hit-zone.

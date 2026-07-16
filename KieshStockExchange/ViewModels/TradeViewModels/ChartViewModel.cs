@@ -310,7 +310,8 @@ public partial class ChartViewModel : StockAwareViewModel
         DrawTool.Trend    => "Line ╱",
         DrawTool.Ray      => "Line ↗",
         DrawTool.HRay     => "Line ↦",
-        DrawTool.Polyline => "Line /\\/▸",
+        DrawTool.Polyline => "Line /\\↗",
+        DrawTool.Measure  => "Measure",
         _                 => "Line",
     };
 
@@ -1196,9 +1197,16 @@ public partial class ChartViewModel : StockAwareViewModel
     private void SetDefaultEnding(LineEnding ending)
         => ApplyPenStyle(s => s with { Ending = ending });
 
+    // The head-shape tiles only matter when the line carries an ending to hang a head on. The panel greys
+    // + disables them (and this command no-ops) whenever the effective ending is None.
+    public bool CanEditHead => EffectivePenStyle().Ending != LineEnding.None;
+
     [RelayCommand]
     private void SetDefaultHead(ArrowHeadStyle head)
-        => ApplyPenStyle(s => s with { Head = head });
+    {
+        if (!CanEditHead) return;   // no ending ⇒ no head to shape
+        ApplyPenStyle(s => s with { Head = head });
+    }
 
     // "Set as default ✓": copy the selected line's style to the default pen.
     [RelayCommand]
@@ -1240,6 +1248,7 @@ public partial class ChartViewModel : StockAwareViewModel
     // colour/width/dash so every tile previews itself in context.
     private void RefreshPenTiles()
     {
+        OnPropertyChanged(nameof(CanEditHead));   // ending may have changed ⇒ head-row enablement
         var s = EffectivePenStyle();
         var col = s.Color ?? DrawStyle.Default.Color;
         float th = s.Thickness > 0f ? s.Thickness : DrawStyle.Default.Thickness;
