@@ -12,13 +12,24 @@ compilation still surfaces C# errors, so compile-check with the app closed for a
 - Head-shape tiles greyed + disabled unless the line has a **LineEnding** (`CanEditHead`).
 - Polyline label glyph → `/\↗`.
 
-## The tool set (LEFT RAIL)
-A slim vertical icon rail pinned to the chart's left edge. **Hover expands the rail to show each tool's
-name**; click arms it. Below the rail: an **eye toggle** to show/hide all drawings.
-Tools, in order:
-cursor · HLine · VLine · Trend · Ray · HRay · Polyline · Freehand · Rectangle · Ellipse · Text ·
-Measure · Magnifier · Position (long/short) · Alert · Arrow.
-(Snapshot is NOT on the rail — it's a top-right toolbar button; see Top toolbar.)
+## The tool set (LEFT RAIL) — grouped, TradingView-style
+A slim vertical icon rail on the chart's left edge. Tools are **grouped into categories** (TradingView
+pattern): each group is ONE rail button showing the **last-used tool** of that group, with a small **caret**
+that opens a **flyout** listing the group's tools (each with its name). Clicking the group icon arms its
+current tool; the flyout lets you pick a different one (which then becomes the group's icon). The **active
+tool is highlighted**. Groups, top → bottom (order within each = owner's list):
+
+1. **Cursor** — (single)
+2. **Lines** ▸ Trend · Ray · **Extended line** (infinite both ways) · Horizontal line · Horizontal ray ·
+   Vertical line · Polyline · Freehand
+3. **Shapes** ▸ Rectangle · Ellipse
+4. **Annotate** ▸ Text · Arrow
+5. **Position** — long/short (single, or grouped if more trade tools are added)
+6. **Tools** ▸ Measure · Magnifier
+7. **👁 Show/hide drawings** — (pinned bottom)
+
+**Alert is NOT on the rail** — it's a top-row button next to the moving-average button (see Top toolbar).
+Delete-last stays available via the `Delete` key (+ optional small button); Snapshot is top-right.
 
 ## Tool behaviors
 - **Magnifier** — drag a box → zoom the viewport to it (X = offset+count, Y = manual range). **Disables
@@ -27,7 +38,15 @@ Measure · Magnifier · Position (long/short) · Alert · Arrow.
 - **Text** — anchor + string; needs a text-entry affordance in the pen panel.
 - **VLine** — vertical line at a time; shows its **time on the x-axis**.
 - **Freehand** — drag → smoothed free path (persisted like a polyline).
-- **Position (long/short)** — entry → target → stop; shows risk/reward, R-multiple, %/$ to each leg.
+- **Position (long/short)** — TradingView-style box with THREE horizontal lines + two shaded zones and
+  draggable handles (drag each leg to reprice; drag the whole box to move):
+  - **Entry** line (middle) — label: **PnL** (live/closed) + **Qty** + **Risk/reward ratio**.
+  - **Target** line (top) — a **green** profit zone from entry→target; label: **target price · (% move) · Amount** (profit).
+  - **Stop** line (bottom) — a **red** loss zone from entry→stop; label: **stop price · (% move) · Amount** (loss/risk).
+  - Long = green above / red below entry; Short = mirrored. Amounts/% derive from entry, qty and the leg prices.
+  - **When selected**, its settings panel shows/edits EVERY detail: **quantity (shares)**, **entry / target /
+    stop prices**, **risk %**, computed **amounts** ($ profit/loss per leg), and the **R:R** — all editable,
+    kept in sync with the draggable handles.
 - **Alert line** — horizontal line that fires a notification when price crosses (ties into notifications).
 - **Arrow marker** — points at a candle, optional short label.
 
@@ -47,7 +66,14 @@ Measure · Magnifier · Position (long/short) · Alert · Arrow.
   price in the gutter; VLine shows its **time on the x-axis**.
 - **`Escape`** exits the line settings (closes the pen panel + deselects + disarms the tool).
 - **Eye toggle** hides/shows all drawings.
-- Pen panel gains **fill color + opacity** (shapes) and a **text field** (text tool).
+- **Active-tool highlight** — the currently armed rail tool (and any active top-row toggle) shows a clear
+  selected-state highlight (background/border/accent) so it's obvious what's active.
+- Pen panel gains, for **Rectangle + Ellipse**, a **fill colour** picker + an **opacity slider (bar)** to
+  set fill transparency; and a **text field** for the Text tool.
+
+## Axis polish
+- **X-axis time labels are too sparse** — display time labels more frequently along the bottom axis
+  (tighter tick spacing / more gridline labels).
 
 ## Settings reorg
 - **Moving-average panel** — tidy it to MA-only. Remove the **candle-colour** controls that currently sit
