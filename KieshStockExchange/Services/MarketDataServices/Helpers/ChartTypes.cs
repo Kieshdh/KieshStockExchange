@@ -46,10 +46,13 @@ public enum MaKind { Sma, Ema }
 // long/short risk-reward box; Alert = a price line that fires a notification; Arrow = a marker pointing
 // at a candle. The tool is a transient UI mode; the drawings the shape tools produce are what get
 // persisted. (See docs/CHART_DRAWING_OVERHAUL_PLAN.md.)
+// NOTE: append-only — DrawingObject.Kind persists by value, so never reorder/insert existing members.
+// The rail's display order is set in XAML, independent of these ordinals.
 public enum DrawTool
 {
     None, HLine, Trend, Ray, HRay, Polyline, Measure,
     VLine, Freehand, Rectangle, Ellipse, Text, Magnifier, Position, Alert, Arrow,
+    ExtendedLine,   // a trend line extended to infinity in BOTH directions
 }
 
 // Which part of a drawing a pointer hit — drives drag behaviour (move an endpoint vs the whole
