@@ -31,8 +31,8 @@ pattern): each group is ONE rail button showing the **last-used tool** of that g
 8. **Magnifier** — (single)
 9. **Magnet** — snap mode (off / weak / strong); see behaviors
 10. **👁 Show/hide drawings** — (single, pinned bottom)
-11. **🗑 Delete all** — (pinned bottom, under the eye) clears all drawings **except locked ones**, behind an
-    **"Are you sure?" confirmation** dialog.
+11. **🗑 Delete all** — (pinned bottom, under the eye) clears all drawings **except locked ones**, behind a
+    confirmation dialog whose action button reads **"Confirm delete"** (+ Cancel).
 
 **Flyout interaction:** hovering a multi-option group **widens it to reveal its options** (each with its
 name); the flyout stays open while you interact. **Picking a tool collapses the flyout** back to the group
@@ -114,6 +114,14 @@ section.
 ## Axis polish
 - **X-axis time labels are too sparse** — display time labels more frequently along the bottom axis
   (tighter tick spacing / more gridline labels).
+- **Auto-scale padding too big** — Y-autofit uses a fixed `YPaddingPercent = 0.06` (6%), which reads as too
+  much empty space. Add a **`+` / `−`** control **next to the auto-scale (Y-Auto) button** to tighten/loosen
+  the Y-padding (adjust `YPaddingPercent`, persisted; sensible clamp e.g. 0–15%). Lower the default too.
+
+## Storage (current state — reference)
+Drawings are persisted **locally in MAUI `Preferences`** (JSON, per stock+currency key `chart_drawings_*`),
+NOT the SQL database — per-device, no cross-device sync, lost on reinstall. Server-synced drawings (a
+`UserDrawings` table + endpoints) is a future add, not in this overhaul unless requested.
 
 ## Settings reorg
 - **Moving-average panel** — tidy it to MA-only. Remove the **candle-colour** controls that currently sit
