@@ -52,7 +52,11 @@ section.
 - **Rectangle / Ellipse** — 2-corner shape; **border** color/thickness/dash + **fill** color + opacity.
 - **Text** — anchor + string; needs a text-entry affordance in the pen panel.
 - **VLine** — vertical line at a time; shows its **time on the x-axis**.
-- **Freehand** — drag → smoothed free path (persisted like a polyline).
+- **Brush / Highlighter** (Drawing group) — drag → a free path, but rendered as a **smoothed spline**
+  (Catmull-Rom / Bézier through the captured points), NOT the exact jittery pointer trace, for natural
+  curves. Highlighter = brush at high transparency. A **Smoothing** slider (spline tension = how hard it
+  curves, e.g. 0 = follow points exactly → high = very rounded) is a per-tool setting in the panel.
+  Points are decimated + persisted like a polyline; the spline is re-evaluated at draw time.
 - **Position (long/short)** — TradingView-style box with THREE horizontal lines + two shaded zones and
   draggable handles (drag each leg to reprice; drag the whole box to move):
   - **Entry** line (middle) — label: **PnL** (live/closed) + **Qty** + **Risk/reward ratio**.

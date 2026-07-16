@@ -93,6 +93,19 @@ captured by Set-as-default). Add `MutateSelectedDrawing(Func<DrawingObject,Drawi
 - **StylePreviewDrawable**: one new `Swatch` mode (filled square at FillOpacity) for fill tiles; size tiles
   reuse Dot mode.
 
+## Addendum — expanded tool set (post-council owner additions)
+The kind-gated architecture absorbs these with no structural change (each = a `Show*` bool + the relevant
+existing section):
+- **Shapes** (Circle / Rotated rectangle / Triangle / Arc) → same as Rectangle/Ellipse: `ShowStrokeRows` +
+  `ShowFillSection`. Rotated rectangle stores an extra angle on the drawing (append-only field).
+- **Brush / Highlighter** (Drawing group) → `ShowStrokeRows` (colour + width) + the **opacity slider**
+  (Highlighter defaults high-transparency) + a NEW **Smoothing slider** (spline tension) — reuses the same
+  `Slider` primitive as opacity, commit on `DragCompleted`; new trailing `DrawStyle` field `Smoothing`.
+- **Text variants** (Plain text / Comment / Price label) → `ShowTextSection` + `ShowSizeTiles`; Price label
+  also shows its price in the gutter.
+- **Position** Long / Short / Manual → the Position section; Manual just opens with the numeric entries
+  focused instead of starting a drag.
+
 **Deferred (cut list):** per-drawing position zone colours (→ fixed bull/bear); per-tool default styles
 (→ single shared default + a seeded amber+dash for alerts); Measure/Magnifier settings (none); Arrow/Alert
 font family/bold/background; account lot-size calculator; fib/channel sections (design-on-paper, one gated
