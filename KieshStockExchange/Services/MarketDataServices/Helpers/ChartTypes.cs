@@ -40,9 +40,17 @@ public enum MaKind { Sma, Ema }
 // segment extended infinitely past its 2nd anchor; HRay = one-click horizontal ray running right
 // from the click; Polyline = multi-vertex line (left-click drops each vertex, double-click ends).
 // Measure = a transient drag-ruler (drag to read Δ%/Δtime/#bars); it draws nothing persistent and the
-// tool disarms itself on release (one-shot, TradingView-style). The tool is a transient UI mode; the
-// drawings the line tools produce are what get persisted.
-public enum DrawTool { None, HLine, Trend, Ray, HRay, Polyline, Measure }
+// tool disarms itself on release (one-shot, TradingView-style). Magnifier = drag a box to zoom the
+// viewport to it (also a transient action, no persistent drawing). VLine = vertical time line; Freehand
+// = free-drawn path; Rectangle/Ellipse = 2-corner shapes with fill; Text = anchored label; Position =
+// long/short risk-reward box; Alert = a price line that fires a notification; Arrow = a marker pointing
+// at a candle. The tool is a transient UI mode; the drawings the shape tools produce are what get
+// persisted. (See docs/CHART_DRAWING_OVERHAUL_PLAN.md.)
+public enum DrawTool
+{
+    None, HLine, Trend, Ray, HRay, Polyline, Measure,
+    VLine, Freehand, Rectangle, Ellipse, Text, Magnifier, Position, Alert, Arrow,
+}
 
 // Which part of a drawing a pointer hit — drives drag behaviour (move an endpoint vs the whole
 // shape) and the ✕-remove hit-zone.
