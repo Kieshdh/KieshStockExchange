@@ -3,6 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:models="clr-namespace:KieshStockExchange.Models;assembly=KieshStockExchange.Shared"
              xmlns:helpers="clr-namespace:KieshStockExchange.Services.MarketDataServices.Helpers"
+             xmlns:tools="clr-namespace:KieshStockExchange.Models.ChartDrawing.Tools"
+             xmlns:style="clr-namespace:KieshStockExchange.Models.ChartDrawing.Style"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartView"
              x:Name="ChartRoot"
@@ -323,7 +325,7 @@
                                         SelectedItem="{Binding SelectedColorOption}"
                                         FontSize="12">
                                     <Picker.ItemDisplayBinding>
-                                        <Binding Path="Name" x:DataType="helpers:MaColorOption" />
+                                        <Binding Path="Name" x:DataType="style:MaColorOption" />
                                     </Picker.ItemDisplayBinding>
                                 </Picker>
                                 <Button Grid.Column="5" Text="✕"
@@ -351,7 +353,7 @@
                             SelectedItem="{Binding BuyOrderColorOption}"
                             FontSize="12">
                         <Picker.ItemDisplayBinding>
-                            <Binding Path="Name" x:DataType="helpers:MaColorOption" />
+                            <Binding Path="Name" x:DataType="style:MaColorOption" />
                         </Picker.ItemDisplayBinding>
                     </Picker>
                 </Grid>
@@ -364,7 +366,7 @@
                             SelectedItem="{Binding SellOrderColorOption}"
                             FontSize="12">
                         <Picker.ItemDisplayBinding>
-                            <Binding Path="Name" x:DataType="helpers:MaColorOption" />
+                            <Binding Path="Name" x:DataType="style:MaColorOption" />
                         </Picker.ItemDisplayBinding>
                     </Picker>
                 </Grid>
@@ -407,10 +409,10 @@
                     <HorizontalStackLayout Spacing="4">
                         <Button Text="⊘" Style="{StaticResource PenToolTile}"
                                 Command="{Binding SelectDrawToolCommand}"
-                                CommandParameter="{x:Static helpers:DrawTool.None}">
+                                CommandParameter="{x:Static tools:DrawTool.None}">
                             <Button.Triggers>
                                 <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                             Value="{x:Static helpers:DrawTool.None}">
+                                             Value="{x:Static tools:DrawTool.None}">
                                     <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                                     <Setter Property="BorderColor"     Value="{StaticResource White}" />
                                     <Setter Property="TextColor"       Value="{StaticResource White}" />
@@ -419,10 +421,10 @@
                         </Button>
                         <Button Text="─" Style="{StaticResource PenToolTile}"
                                 Command="{Binding SelectDrawToolCommand}"
-                                CommandParameter="{x:Static helpers:DrawTool.HLine}">
+                                CommandParameter="{x:Static tools:DrawTool.HLine}">
                             <Button.Triggers>
                                 <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                             Value="{x:Static helpers:DrawTool.HLine}">
+                                             Value="{x:Static tools:DrawTool.HLine}">
                                     <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                                     <Setter Property="BorderColor"     Value="{StaticResource White}" />
                                     <Setter Property="TextColor"       Value="{StaticResource White}" />
@@ -431,10 +433,10 @@
                         </Button>
                         <Button Text="╱" Style="{StaticResource PenToolTile}"
                                 Command="{Binding SelectDrawToolCommand}"
-                                CommandParameter="{x:Static helpers:DrawTool.Trend}">
+                                CommandParameter="{x:Static tools:DrawTool.Trend}">
                             <Button.Triggers>
                                 <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                             Value="{x:Static helpers:DrawTool.Trend}">
+                                             Value="{x:Static tools:DrawTool.Trend}">
                                     <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                                     <Setter Property="BorderColor"     Value="{StaticResource White}" />
                                     <Setter Property="TextColor"       Value="{StaticResource White}" />
@@ -443,10 +445,10 @@
                         </Button>
                         <Button Text="↗" Style="{StaticResource PenToolTile}"
                                 Command="{Binding SelectDrawToolCommand}"
-                                CommandParameter="{x:Static helpers:DrawTool.Ray}">
+                                CommandParameter="{x:Static tools:DrawTool.Ray}">
                             <Button.Triggers>
                                 <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                             Value="{x:Static helpers:DrawTool.Ray}">
+                                             Value="{x:Static tools:DrawTool.Ray}">
                                     <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                                     <Setter Property="BorderColor"     Value="{StaticResource White}" />
                                     <Setter Property="TextColor"       Value="{StaticResource White}" />
@@ -455,10 +457,10 @@
                         </Button>
                         <Button Text="↦" Style="{StaticResource PenToolTile}"
                                 Command="{Binding SelectDrawToolCommand}"
-                                CommandParameter="{x:Static helpers:DrawTool.HRay}">
+                                CommandParameter="{x:Static tools:DrawTool.HRay}">
                             <Button.Triggers>
                                 <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                             Value="{x:Static helpers:DrawTool.HRay}">
+                                             Value="{x:Static tools:DrawTool.HRay}">
                                     <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                                     <Setter Property="BorderColor"     Value="{StaticResource White}" />
                                     <Setter Property="TextColor"       Value="{StaticResource White}" />
@@ -467,10 +469,10 @@
                         </Button>
                         <Button Text="/\/▸" Style="{StaticResource PenToolTile}"
                                 Command="{Binding SelectDrawToolCommand}"
-                                CommandParameter="{x:Static helpers:DrawTool.Polyline}">
+                                CommandParameter="{x:Static tools:DrawTool.Polyline}">
                             <Button.Triggers>
                                 <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                             Value="{x:Static helpers:DrawTool.Polyline}">
+                                             Value="{x:Static tools:DrawTool.Polyline}">
                                     <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                                     <Setter Property="BorderColor"     Value="{StaticResource White}" />
                                     <Setter Property="TextColor"       Value="{StaticResource White}" />

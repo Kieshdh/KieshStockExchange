@@ -1,13 +1,21 @@
 using System.Globalization;
 using KieshStockExchange.Models;
+using KieshStockExchange.Models.ChartDrawing.Objects;
+using KieshStockExchange.Models.ChartDrawing.Style;
+using KieshStockExchange.Models.ChartDrawing.Tools;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
+using KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
 namespace KieshStockExchange.Services.MarketDataServices;
 
 public sealed class CandleChartDrawable : IDrawable
 {
+    // UP-CORE: the price<->pixel seam the NEW drawing renderers route through (existing renderers keep
+    // their local Y closure). Stateless — all plot context is passed per call — so one shared instance.
+    private readonly IScaleTransform _scale = new RegularScaleTransform();
+
     #region Properties
     public IReadOnlyList<Candle> Candles { get; set; } = Array.Empty<Candle>();
     // Series style (the TradingView-style chart-type toggle). Orders/markers/MAs/crosshair
@@ -589,7 +597,6 @@ public sealed class CandleChartDrawable : IDrawable
     // clickable zones never drift apart.
     const float DrawHandleR = 4f;    // endpoint drag-handle radius
     const float DrawHitTol = 5f;     // extra pixel slack when hit-testing a line/handle
-    const float DrawCloseHalf = 7f;  // half-size of the ✕ remove glyph
 
     /// <summary>
     /// Draw the user's horizontal lines + trendlines. HLine spans the plot at its price with a
@@ -630,7 +637,6 @@ public sealed class CandleChartDrawable : IDrawable
 
                 // Right-gutter price tag in the line's colour, matching the order-line convention.
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
-                DrawCloseGlyph(canvas, plot.Left + 10f, y, color);
                 // Selection: grab-handles at the ends so it reads as "editable" like a trendline.
                 if (selected)
                 {
@@ -649,7 +655,6 @@ public sealed class CandleChartDrawable : IDrawable
                     d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
                 DrawHandle(canvas, x1, y, color);
-                DrawCloseGlyph(canvas, x1, y - 12f, color);
             }
             else if (d.Kind == DrawTool.Polyline)
             {
@@ -704,7 +709,40 @@ public sealed class CandleChartDrawable : IDrawable
                 }
                 for (int k = 0; k < pts.Count; k++)
                     DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
-                DrawCloseGlyph(canvas, X(pts[0].T), Y((double)pts[0].P) - 12f, color);
+            }
+            else if (d.Kind == DrawTool.ExtendedLine)
+            {
+                // Infinite line through both anchors, extended to BOTH plot edges. Vertical mapping
+                // routes through the scale seam (identical to the local Y under RegularScaleTransform).
+                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _lastYMin, _lastYMax, ScaleMode);
+                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _lastYMin, _lastYMax, ScaleMode);
+                var (ax, ay) = RayExit(x1, y1, x2 - x1, y2 - y1, plot);   // forward edge
+                var (bx, by) = RayExit(x1, y1, x1 - x2, y1 - y2, plot);   // backward edge
+                StylePreviewDrawable.DrawStraightSegment(canvas, bx, by, ax, ay,
+                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
+                DrawHandle(canvas, x1, y1, color);
+                DrawHandle(canvas, x2, y2, color);
+            }
+            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse)
+            {
+                // Two-corner shape: optional translucent fill (Fill + FillOpacity) then a border stroke.
+                // Corners' vertical mapping routes through the scale seam.
+                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _lastYMin, _lastYMax, ScaleMode);
+                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _lastYMin, _lastYMax, ScaleMode);
+                var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
+
+                if (d.Style.Fill is Color fill)
+                {
+                    canvas.FillColor = fill.WithAlpha(Math.Clamp(d.Style.FillOpacity, 0f, 1f));
+                    if (d.Kind == DrawTool.Rectangle) canvas.FillRectangle(rect); else canvas.FillEllipse(rect);
+                }
+                canvas.StrokeColor = color;
+                canvas.StrokeSize = stroke;
+                canvas.StrokeDashPattern = dashPattern;
+                if (d.Kind == DrawTool.Rectangle) canvas.DrawRectangle(rect); else canvas.DrawEllipse(rect);
+
+                DrawHandle(canvas, x1, y1, color);
+                DrawHandle(canvas, x2, y2, color);
             }
             else // Trend or Ray (both a two-anchor segment; Ray extends past anchor2 to the plot edge)
             {
@@ -718,7 +756,6 @@ public sealed class CandleChartDrawable : IDrawable
                     d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
                 DrawHandle(canvas, x1, y1, color);
                 DrawHandle(canvas, x2, y2, color);
-                DrawCloseGlyph(canvas, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f, color);
                 // Trendline labels (always-on v1): endpoint prices + a midpoint change/% / bar-count
                 // tag coloured by direction (TradingView convention).
                 DrawTrendLabels(canvas, d, x1, y1, x2, y2, color, cur);
@@ -856,16 +893,6 @@ public sealed class CandleChartDrawable : IDrawable
         canvas.DrawCircle(x, y, DrawHandleR);
     }
 
-    private void DrawCloseGlyph(ICanvas canvas, float cx, float cy, Color color)
-    {
-        var r = new RectF(cx - DrawCloseHalf, cy - DrawCloseHalf, DrawCloseHalf * 2, DrawCloseHalf * 2);
-        canvas.FillColor = color;
-        canvas.FillRectangle(r);
-        canvas.FontColor = Colors.White;
-        canvas.FontSize = PriceTagFont;
-        canvas.DrawString("✕", r, HorizontalAlignment.Center, VerticalAlignment.Center);
-    }
-
     // Forward data->pixel transforms rebuilt from the last paint's cached geometry, so hit-testing
     // maps a drawing's data anchors back to the exact pixels the render pass used. Y routes through
     // PriceToFrac so the log scale is honoured just like the axes.
@@ -895,14 +922,12 @@ public sealed class CandleChartDrawable : IDrawable
             {
                 float y = PriceToPixelY(d.P1);
                 if (y < _lastPlot.Top || y > _lastPlot.Bottom) continue;
-                if (WithinBox(p, _lastPlot.Left + 10f, y, DrawCloseHalf)) return (d, DrawingHitPart.Close);
                 if (p.X >= _lastPlot.Left && p.X <= _lastPlot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.HRay)
             {
                 float x1 = TimeToPixelX(d.T1), y = PriceToPixelY(d.P1);
-                if (WithinBox(p, x1, y - 12f, DrawCloseHalf)) return (d, DrawingHitPart.Close);
                 if (Dist(p.X, p.Y, x1, y) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (p.X >= x1 - DrawHitTol && p.X <= _lastPlot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
@@ -911,8 +936,6 @@ public sealed class CandleChartDrawable : IDrawable
             {
                 var pts = d.Points;
                 if (pts is null || pts.Count == 0) continue;
-                if (WithinBox(p, TimeToPixelX(pts[0].T), PriceToPixelY(pts[0].P) - 12f, DrawCloseHalf))
-                    return (d, DrawingHitPart.Close);
                 float lastX = TimeToPixelX(pts[0].T), lastY = PriceToPixelY(pts[0].P);
                 for (int k = 1; k < pts.Count; k++)
                 {
@@ -922,12 +945,39 @@ public sealed class CandleChartDrawable : IDrawable
                     lastX = nx; lastY = ny;
                 }
             }
+            else if (d.Kind == DrawTool.ExtendedLine)
+            {
+                float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
+                float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
+                if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                var (ax, ay) = RayExit(x1, y1, x2 - x1, y2 - y1, _lastPlot);
+                var (bx, by) = RayExit(x1, y1, x1 - x2, y1 - y2, _lastPlot);
+                if (PointSegDist(p.X, p.Y, bx, by, ax, ay) <= DrawHitTol
+                    && p.X >= _lastPlot.Left - 2 && p.X <= _lastPlot.Right + 2
+                    && p.Y >= _lastPlot.Top - 2 && p.Y <= _lastPlot.Bottom + 2)
+                    return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse)
+            {
+                float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
+                float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
+                if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
+                // Body = on the border (within tolerance) or anywhere inside a filled shape.
+                bool onBorder =
+                    p.X >= rect.Left - DrawHitTol && p.X <= rect.Right + DrawHitTol &&
+                    p.Y >= rect.Top - DrawHitTol && p.Y <= rect.Bottom + DrawHitTol &&
+                    (Math.Abs(p.X - rect.Left) <= DrawHitTol || Math.Abs(p.X - rect.Right) <= DrawHitTol ||
+                     Math.Abs(p.Y - rect.Top) <= DrawHitTol || Math.Abs(p.Y - rect.Bottom) <= DrawHitTol);
+                bool inside = d.Style.Fill is not null && rect.Contains(p);
+                if (onBorder || inside) return (d, DrawingHitPart.Body);
+            }
             else // Trend or Ray
             {
                 float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
                 float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
-                if (WithinBox(p, (x1 + x2) * 0.5f, (y1 + y2) * 0.5f - 12f, DrawCloseHalf))
-                    return (d, DrawingHitPart.Close);
                 if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
                 // Ray body extends past anchor2 to the plot edge — hit-test the full drawn segment.
@@ -941,9 +991,6 @@ public sealed class CandleChartDrawable : IDrawable
         }
         return null;
     }
-
-    private static bool WithinBox(PointF p, float cx, float cy, float half)
-        => Math.Abs(p.X - cx) <= half && Math.Abs(p.Y - cy) <= half;
 
     private static float Dist(float ax, float ay, float bx, float by)
         => (float)Math.Sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));

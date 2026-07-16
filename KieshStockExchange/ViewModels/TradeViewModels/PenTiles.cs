@@ -1,5 +1,6 @@
 using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
+using KieshStockExchange.Models.ChartDrawing.Style;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;

@@ -1,3 +1,5 @@
+using KieshStockExchange.Models.ChartDrawing.Style;
+
 namespace KieshStockExchange.Services.MarketDataServices.Helpers;
 
 // How a StylePreviewDrawable paints its tile. Line = a horizontal line honouring dash + endings/head

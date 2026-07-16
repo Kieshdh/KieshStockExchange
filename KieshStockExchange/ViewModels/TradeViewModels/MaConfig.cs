@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using KieshStockExchange.Models.ChartDrawing.Style;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 using System.Windows.Input;
 

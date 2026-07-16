@@ -1,3 +1,6 @@
+using KieshStockExchange.Models.ChartDrawing.Objects;
+using KieshStockExchange.Models.ChartDrawing.Style;
+using KieshStockExchange.Models.ChartDrawing.Tools;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;

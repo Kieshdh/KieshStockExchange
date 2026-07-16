@@ -5,6 +5,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
+using KieshStockExchange.Models.ChartDrawing.Objects;
+using KieshStockExchange.Models.ChartDrawing.Style;
+using KieshStockExchange.Models.ChartDrawing.Tools;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
@@ -315,7 +318,13 @@ public partial class ChartViewModel : StockAwareViewModel
         _                 => "Line",
     };
 
-    partial void OnDrawToolChanged(DrawTool value) => OnPropertyChanged(nameof(PenToolLabel));
+    partial void OnDrawToolChanged(DrawTool value)
+    {
+        OnPropertyChanged(nameof(PenToolLabel));
+        // With no selection, EditingKind == the armed tool, so arming a tool flips every Show* gate.
+        // RefreshPenTiles raises EditingKind + the Show* notifications (nothing else calls it on this path).
+        RefreshPenTiles();
+    }
 
     private const string DrawToolLastPrefKey = "chart_draw_tool_last";
 
@@ -341,6 +350,29 @@ public partial class ChartViewModel : StockAwareViewModel
     // drawing. These drive the panel's mode (TOOL row + "+ Line" vs "Set as default" + "Delete") and header.
     public bool IsDefaultPenMode => !HasSelectedDrawing;
     public string PenPanelHeader => HasSelectedDrawing ? "Selected line" : "Pen";
+
+    // UP-CORE: the tool whose style panel is showing — the selected drawing's kind, else the armed
+    // pen tool. FirstOrDefault (not First) so a momentarily empty selection set returns default
+    // (Kind = None) instead of throwing. Computed get-only (like CanEditHead): a pure function of
+    // SelectedDrawingId + DrawTool, so there is no second source of truth to keep in sync — the
+    // Show* notifications are raised in RefreshPenTiles, which every changing path already routes through.
+    public DrawTool EditingKind =>
+        SelectedDrawingId is Guid id ? Drawings.FirstOrDefault(d => d.Id == id).Kind : DrawTool;
+
+    private DrawToolPreset EditingPreset => DrawToolPresets.For(EditingKind);
+
+    // Panel-section gates driven by the preset table. Split ShowFillColor/ShowOpacity so a shape can
+    // show both while a line shows neither. These are logic-only in UP-CORE (no XAML binds them yet).
+    public bool ShowStroke    => EditingPreset.ShowStroke;
+    public bool ShowFillColor => EditingPreset.ShowFillColor;
+    public bool ShowOpacity   => EditingPreset.ShowOpacity;
+    public bool ShowDash      => EditingPreset.ShowDash;
+    public bool ShowEnding    => EditingPreset.ShowEnding;
+    public bool ShowHead      => EditingPreset.ShowHead;
+    public bool ShowText      => EditingPreset.ShowText;
+    public bool ShowPosition  => EditingPreset.ShowPosition;
+    public bool ShowSize      => EditingPreset.ShowSize;
+    public bool ShowSmoothing => EditingPreset.ShowSmoothing;
 
     // Remembered so a deselect restores the panel to whatever it was before the selection opened it.
     private bool _penPanelWasOpenBeforeSelect;
@@ -1166,6 +1198,42 @@ public partial class ChartViewModel : StockAwareViewModel
         }
     }
 
+    // UP-CORE: the single seam LP2/LP3/LP5 route every non-style edit of the selected drawing through
+    // (text, fill, size, position legs, smoothing, direction). Mirrors MutateSelectedStyle but takes a
+    // whole-object transform and respects Locked (a no-op on a locked target). Persists immediately —
+    // these are discrete panel commits, unlike UpdateDrawing which defers persist for continuous drags.
+    // UI-thread only (invoked from bound commands / pointer callbacks), matching the rest of the pen tray.
+    public void MutateSelectedDrawing(Func<DrawingObject, DrawingObject> mutate)
+    {
+        if (SelectedDrawingId is not Guid id) return;
+        for (int i = 0; i < Drawings.Count; i++)
+        {
+            if (Drawings[i].Id != id) continue;
+            if (Drawings[i].Locked) return;   // locked drawings are protected from edits
+            Drawings[i] = mutate(Drawings[i]);
+            PersistDrawings();
+            RefreshPenTiles();
+            RequestRedraw();
+            return;
+        }
+    }
+
+    // UP-CORE: setters for the new per-drawing editable fields, each routing through MutateSelectedDrawing
+    // (discrete panel commits → persist now). Logic-only in UP-CORE — no XAML binds these yet. Continuous
+    // anchor drags (P1/P2/P3 during a gesture) stay on the UpdateDrawing path so they don't persist per-frame.
+    public void SetSelectedFill(Color? fill) => MutateSelectedDrawing(d => d with { Style = d.Style with { Fill = fill } });
+    public void SetSelectedFillOpacity(float opacity)
+        => MutateSelectedDrawing(d => d with { Style = d.Style with { FillOpacity = Math.Clamp(opacity, 0f, 1f) } });
+    public void SetSelectedSize(SizeKind size) => MutateSelectedDrawing(d => d with { Style = d.Style with { Size = size } });
+    public void SetSelectedText(string? text) => MutateSelectedDrawing(d => d with { Text = text });
+    public void SetSelectedQty(decimal qty) => MutateSelectedDrawing(d => d with { Qty = qty });
+    public void SetSelectedDirection(int direction) => MutateSelectedDrawing(d => d with { Direction = direction });
+    public void SetSelectedSmoothing(float smoothing)
+        => MutateSelectedDrawing(d => d with { Smoothing = Math.Clamp(smoothing, 0f, 1f) });
+    public void SetSelectedEntryPrice(decimal price) => MutateSelectedDrawing(d => d with { P1 = price });
+    public void SetSelectedTargetPrice(decimal price) => MutateSelectedDrawing(d => d with { P2 = price });
+    public void SetSelectedStopPrice(decimal price) => MutateSelectedDrawing(d => d with { P3 = price });
+
     // Each setter edits the SELECTED drawing when there is one, else the saved default pen. The
     // default write routes through the DefaultDrawStyle setter (persist + tile refresh); the selected
     // write through MutateSelectedStyle.
@@ -1249,6 +1317,19 @@ public partial class ChartViewModel : StockAwareViewModel
     private void RefreshPenTiles()
     {
         OnPropertyChanged(nameof(CanEditHead));   // ending may have changed ⇒ head-row enablement
+        // UP-CORE: EditingKind + the panel-section gates are pure functions of the current
+        // selection/armed-tool, so re-raise them here — the one place every changing path routes through.
+        OnPropertyChanged(nameof(EditingKind));
+        OnPropertyChanged(nameof(ShowStroke));
+        OnPropertyChanged(nameof(ShowFillColor));
+        OnPropertyChanged(nameof(ShowOpacity));
+        OnPropertyChanged(nameof(ShowDash));
+        OnPropertyChanged(nameof(ShowEnding));
+        OnPropertyChanged(nameof(ShowHead));
+        OnPropertyChanged(nameof(ShowText));
+        OnPropertyChanged(nameof(ShowPosition));
+        OnPropertyChanged(nameof(ShowSize));
+        OnPropertyChanged(nameof(ShowSmoothing));
         var s = EffectivePenStyle();
         var col = s.Color ?? DrawStyle.Default.Color;
         float th = s.Thickness > 0f ? s.Thickness : DrawStyle.Default.Thickness;
@@ -1298,11 +1379,21 @@ public partial class ChartViewModel : StockAwareViewModel
         Converters = { new ColorJsonConverter() },
     };
 
+    // The current persisted-payload schema version. UP-CORE writes the { "v":1, "drawings":[...] }
+    // envelope; this "v":1 shape is UP-STORE's client<->server wire contract.
+    private const int DrawingsSchemaVersion = 1;
+
     /// <summary>Serializes the current drawings to Preferences under the selected stock's key.</summary>
     public void PersistDrawings()
     {
         if (_drawingsKey is null) return;
-        try { Preferences.Default.Set(_drawingsKey, JsonSerializer.Serialize(Drawings.ToList(), _drawingJson)); }
+        try
+        {
+            // Always write the v1 envelope (one-way migration on next save). A legacy bare-array blob
+            // is read back by LoadDrawingsForSelected via root-token sniffing.
+            var envelope = new DrawingEnvelope(DrawingsSchemaVersion, Drawings.ToList());
+            Preferences.Default.Set(_drawingsKey, JsonSerializer.Serialize(envelope, _drawingJson));
+        }
         catch (Exception ex) { _logger.LogDebug(ex, "Saving chart drawings failed."); }
     }
 
@@ -1321,10 +1412,23 @@ public partial class ChartViewModel : StockAwareViewModel
         if (string.IsNullOrEmpty(json)) return;
         try
         {
-            var saved = JsonSerializer.Deserialize<List<DrawingObject>>(json, _drawingJson);
+            // Sniff the root token: a bare array is the legacy (pre-v1) blob; an object is the v1
+            // envelope. Pass _drawingJson on BOTH branches so the ColorJsonConverter parses "#RRGGBBAA".
+            using var doc = JsonDocument.Parse(json);
+            bool legacy = doc.RootElement.ValueKind == JsonValueKind.Array;
+            List<DrawingObject>? saved =
+                legacy
+                    ? doc.RootElement.Deserialize<List<DrawingObject>>(_drawingJson)
+                : doc.RootElement.TryGetProperty("drawings", out var arr)
+                    ? arr.Deserialize<List<DrawingObject>>(_drawingJson)
+                    : null;
+
             if (saved is not null)
-                foreach (var d in saved)
+                foreach (var raw in saved)
                 {
+                    // A legacy bare-array blob predates the trailing fields, so STJ read them as
+                    // default(T); re-apply the non-zero defaults (a v1 envelope carries them explicitly).
+                    var d = legacy ? DrawingBackCompat.ApplyLegacyTrailingDefaults(raw) : raw;
                     var style = (d.Style.Color is null || d.Style.Thickness <= 0f)
                         ? DrawStyle.Default
                         : d.Style;

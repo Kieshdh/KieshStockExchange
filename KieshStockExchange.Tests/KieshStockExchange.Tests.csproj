@@ -18,10 +18,34 @@
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Standalone, workload-free MAUI Graphics value types (Color/PointF/RectF/PathF/Colors) so the
+         link-compiled chart-drawing files below build headlessly. Use an EXPLICIT version — $(MauiVersion)
+         is undefined outside a UseMaui project. If an offline restore misses this exact version, align it
+         with the client's resolved Microsoft.Maui.Controls version. Never add Microsoft.Maui.Controls here
+         (it needs the MAUI workload), and never ProjectReference the MAUI client (drags in the workload). -->
+    <PackageReference Include="Microsoft.Maui.Graphics" Version="9.0.90" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- The link-compiled client files rely on MAUI's implicit global using in the client project;
+         supply it here so Color/PathF/RectF/Colors resolve uniformly across every linked file. -->
+    <Using Include="Microsoft.Maui.Graphics" />
+  </ItemGroup>
+
+  <!-- UP-CORE: link-compile the pure chart-drawing value types + the three headless helpers into the
+       test assembly (a separate assembly from the client, so no duplicate-symbol clash). Enumerate the
+       helpers — do NOT glob Drawing\** (that would sweep in ChartSnapshotRenderer, which needs Skia, and
+       IScaleTransform/RegularScaleTransform, which need PriceScaleMode from the un-linked ChartTypes.cs). -->
+  <ItemGroup>
+    <Compile Include="..\KieshStockExchange\Models\ChartDrawing\**\*.cs"
+             Link="ChartDrawing\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\Drawing\MagnetSnapper.cs"
+             Link="Drawing\MagnetSnapper.cs" />
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\Drawing\SplineSmoother.cs"
+             Link="Drawing\SplineSmoother.cs" />
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\Drawing\UndoStack.cs"
+             Link="Drawing\UndoStack.cs" />
   </ItemGroup>
 
   <ItemGroup>

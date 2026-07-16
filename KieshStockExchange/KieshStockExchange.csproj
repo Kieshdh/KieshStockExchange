@@ -76,6 +76,9 @@
 		<PackageReference Include="Microsoft.Extensions.Http" Version="9.0.8" />
 		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.8" />
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+		<!-- Offscreen Skia canvas for ChartSnapshotRenderer (chart-to-PNG). Part of the MAUI
+		     Graphics family, so it versions with $(MauiVersion). -->
+		<PackageReference Include="Microsoft.Maui.Graphics.Skia" Version="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.8" />
 	</ItemGroup>
 

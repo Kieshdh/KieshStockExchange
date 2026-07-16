@@ -3,6 +3,11 @@ namespace KieshStockExchange.Services.MarketDataServices.Helpers;
 // Shared value types passed from ChartViewModel into CandleChartDrawable. Records
 // keep them immutable so a paint that runs while the VM mutates state still sees a
 // consistent snapshot.
+//
+// NOTE: the drawing model types (DrawTool, DrawStyle, DrawingObject, DrawPoint, the style enums,
+// ColorJsonConverter, MaColorOption) moved to KieshStockExchange.Models.ChartDrawing.{Tools,Style,
+// Objects} (UP-CORE). The transient render-state types below (CrosshairState, MeasureState) and the
+// hit-part enum stay here next to the drawable since they are never persisted.
 
 public readonly record struct ChartViewport(DateTime ViewStart, DateTime ViewEnd, TimeSpan Bucket)
 {
@@ -35,112 +40,10 @@ public enum PriceScaleMode { Linear, Logarithmic, Percent }
 
 public enum MaKind { Sma, Ema }
 
-// Active chart drawing tool (toolbar cycle). None = normal pan/interact; HLine = one-click
-// horizontal line at a price; Trend = a click-drag two-anchor line segment; Ray = a click-drag
-// segment extended infinitely past its 2nd anchor; HRay = one-click horizontal ray running right
-// from the click; Polyline = multi-vertex line (left-click drops each vertex, double-click ends).
-// Measure = a transient drag-ruler (drag to read Δ%/Δtime/#bars); it draws nothing persistent and the
-// tool disarms itself on release (one-shot, TradingView-style). Magnifier = drag a box to zoom the
-// viewport to it (also a transient action, no persistent drawing). VLine = vertical time line; Freehand
-// = free-drawn path; Rectangle/Ellipse = 2-corner shapes with fill; Text = anchored label; Position =
-// long/short risk-reward box; Alert = a price line that fires a notification; Arrow = a marker pointing
-// at a candle. The tool is a transient UI mode; the drawings the shape tools produce are what get
-// persisted. (See docs/CHART_DRAWING_OVERHAUL_PLAN.md.)
-// NOTE: append-only — DrawingObject.Kind persists by value, so never reorder/insert existing members.
-// The rail's display order is set in XAML, independent of these ordinals.
-public enum DrawTool
-{
-    None, HLine, Trend, Ray, HRay, Polyline, Measure,
-    VLine, Freehand, Rectangle, Ellipse, Text, Magnifier, Position, Alert, Arrow,
-    ExtendedLine,   // a trend line extended to infinity in BOTH directions
-}
-
 // Which part of a drawing a pointer hit — drives drag behaviour (move an endpoint vs the whole
-// shape) and the ✕-remove hit-zone.
+// shape). Close is retained (unreachable) for back-compat with the pointer handler in ChartView;
+// UP-CORE stops producing it (the on-chart ✕ glyph is gone — deletion moves to the panel + Delete key).
 public enum DrawingHitPart { Body, Anchor1, Anchor2, Close }
-
-// Line dash pattern for a drawing (the TradingView style-bar Solid/Dash/Dot cycle). Maps to a
-// canvas.StrokeDashPattern in the render pass; Solid uses no pattern.
-public enum DashKind { Solid, Dash, Dot }
-
-// TradingView-style line endings (the pen tray's ENDING row). None = plain; End = head at the far/
-// terminal end pointing outward; BothOut = outward heads at both ends. Start / BothForward remain for
-// legacy-JSON back-compat but are no longer offered in the picker. Supersedes the old bool Arrow (== End).
-public enum LineEnding { None, End, Start, BothOut, BothForward }
-
-// Head shape drawn wherever a LineEnding places a head. FilledTriangle = the classic solid ▶ (order 0
-// so legacy drawings with no persisted head default to it); Open = two barb strokes forming a hollow
-// "V"; Outline = the same triangle stroked as an outline with no fill.
-public enum ArrowHeadStyle { FilledTriangle, Open, Outline }
-
-// Per-drawing styling picked from the pen tray. Colour + thickness + dash + a line-ending + a head
-// shape. Persisted with the drawing (Color round-trips as a hex string via ColorJsonConverter). Arrow
-// is the LEGACY bool kept only so pre-Ending JSON still deserializes; the load path migrates a set
-// Arrow to Ending=End (see LoadDrawingsForSelected) and nothing writes Arrow anymore. Head defaults to
-// FilledTriangle so pre-Head JSON keeps the classic look. Default is the calm blue at 1.5 px solid
-// with no ending, so a freshly-placed line matches the previous single-colour look.
-public readonly record struct DrawStyle(
-    Color Color, float Thickness, DashKind Dash, bool Arrow = false, LineEnding Ending = LineEnding.None,
-    ArrowHeadStyle Head = ArrowHeadStyle.FilledTriangle)
-{
-    public static readonly DrawStyle Default = new(Color.FromArgb("#4C9AFF"), 1.5f, DashKind.Solid);
-}
-
-// One vertex of a Polyline drawing, anchored in DATA space so it survives pan/zoom.
-public readonly record struct DrawPoint(DateTime T, decimal P);
-
-// A user drawing anchored in DATA space (time + price) so it survives pan/zoom through the same
-// X/Y transforms the candles use. HLine uses only P1 (spans the plot; T-anchors are ignored). A
-// Trend/Ray segment runs from (T1,P1) to (T2,P2) — Ray then extends past anchor2 to the plot edge.
-// HRay runs right from (T1,P1) at that price. Polyline ignores T1..P2 and connects the Points list.
-// Style carries colour/thickness/dash/arrow. Id keys drag/remove/select and JSON-persists per stock.
-// Points is null for every non-Polyline kind (trailing/defaulted so legacy JSON still deserializes).
-public readonly record struct DrawingObject(
-    Guid Id, DrawTool Kind, DateTime T1, decimal P1, DateTime T2, decimal P2, DrawStyle Style,
-    IReadOnlyList<DrawPoint>? Points = null);
-
-// User-facing color choice for an MA row. Key references a Color resource in
-// Resources/Styles/Colors.xaml; Name is the label shown in the settings picker.
-public readonly record struct MaColorOption(string Key, string Name)
-{
-    public static readonly IReadOnlyList<MaColorOption> All = new[]
-    {
-        new MaColorOption("ChartMaColor1", "Blue"),
-        new MaColorOption("ChartMaColor2", "Amber"),
-        new MaColorOption("ChartMaColor3", "Purple"),
-        new MaColorOption("ChartMaColor4", "Cyan"),
-        new MaColorOption("ChartMaColor5", "Yellow"),
-        // Bull/Bear theme colours so the open-order line picker can default to
-        // the green/red Binance + TradingView convention while still letting
-        // the user pick from the same palette as their MAs.
-        new MaColorOption("ChartBull",     "Green"),
-        new MaColorOption("ChartBear",     "Red"),
-    };
-
-    public static MaColorOption FromKey(string key)
-    {
-        for (int i = 0; i < All.Count; i++)
-            if (All[i].Key == key) return All[i];
-        return All[0];
-    }
-}
-
-// Round-trips a Maui Color through JSON as an "#AARRGGBB" hex string. Needed because Color has no
-// public parameterless ctor / settable props, so System.Text.Json can't (de)serialize it directly.
-// Used only for persisting DrawStyle in DrawingObject.
-public sealed class ColorJsonConverter : System.Text.Json.Serialization.JsonConverter<Color>
-{
-    public override Color Read(ref System.Text.Json.Utf8JsonReader reader, Type type,
-        System.Text.Json.JsonSerializerOptions opts)
-    {
-        var s = reader.GetString();
-        return string.IsNullOrEmpty(s) ? DrawStyle.Default.Color : Color.FromArgb(s);
-    }
-
-    public override void Write(System.Text.Json.Utf8JsonWriter writer, Color value,
-        System.Text.Json.JsonSerializerOptions opts)
-        => writer.WriteStringValue((value ?? DrawStyle.Default.Color).ToArgbHex(true));
-}
 
 public readonly record struct MaPoint(DateTime AtTime, double Value);
 
