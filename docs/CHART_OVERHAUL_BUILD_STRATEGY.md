@@ -38,6 +38,12 @@ The split axis is the **verification oracle**, not the phase plan: work a machin
 ### UP-CORE — `ultraplan-chart-drawing-core.md` (author + fire FIRST; MUST land on branch before any local phase)
 **Hard rule: touches models, converters, pure helpers, logic-only VM members. Never touches XAML, pointer/gesture handlers, timers, cursor, or layout. Must compile app-closed, pass Shared unit tests, and render identically to today.** That identical-render guarantee is the handoff contract.
 
+**★ OPEN DECISION (resolve before finalizing UP-CORE) — Shared vs Maui.Graphics:** repo-facts found `KieshStockExchange.Shared` does NOT reference `Microsoft.Maui.Graphics`, and `DrawStyle`/`DrawingObject`/`ColorJsonConverter` all use MAUI `Color`. So:
+- **(A) RECOMMENDED — keep the model CLIENT-side** (just reorganize into folders under the client), and the **server stores the drawing JSON as an OPAQUE string blob** (never introspects it). No new dependency; no MAUI-graphics smell on the headless server; the drawing model is inherently a client rendering concern. The `"v":1` schema is the contract; server = dumb per-(user,stock,currency) sync store.
+- **(B) move the model to Shared** + add a `Microsoft.Maui.Graphics` PackageReference to Shared (the server then transitively references it). Matches the owner's "in Shared" guess but puts a graphics dep on the headless server.
+- **(C) only the pure-data enums** (DrawTool/DashKind/LineEnding/ArrowHeadStyle/DrawingHitPart/DrawPoint) move to Shared (zero new dep); DrawStyle/DrawingObject stay client. Half-measure.
+Owner leaned "in Shared" (B); recommend (A) unless he wants the typed model shared. **DECIDE THIS FIRST** — it sets whether UP-CORE item 0 moves types to Shared or just reorganizes client folders.
+
 0. **Code organization (owner):** the drawing types live in ONE flat client file today (`KieshStockExchange/Services/MarketDataServices/Helpers/ChartTypes.cs`). Split them into grouped folders, and **move the PERSISTED model into `KieshStockExchange.Shared`** (it becomes the client↔server wire/persistence contract for UP-STORE):
    - **`KieshStockExchange.Shared/Models/ChartDrawing/Tools/`** — `DrawTool` enum + the Kind→preset table.
    - **`KieshStockExchange.Shared/Models/ChartDrawing/Style/`** — `DrawStyle`, `DashKind`, `LineEnding`, `ArrowHeadStyle`, `SizeKind`, `ColorJsonConverter`.
