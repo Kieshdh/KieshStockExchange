@@ -51,11 +51,26 @@ services:
       Bots__Mood__ConvictionFearBid: "true"
       Bots__Mood__PerStrategy: "true"
       Bots__Mood__MMWiden: "true"
-      # GlobalCoFire cross-stock correlation lever @0.10 (council-approved, live 2026-07-16).
+      # Random-walk main driver: softer medium-term reversion so moves stick (2026-07-16).
+      Bots__RecentAnchor__Strength: "0.05"
+      # NEWS system — 3-tier jump-diffusion + variable-permanence coupling (2026-07-16).
+      # Individual (per-stock, dominant) + global tier; MeanIntervalMinutes=60 is a MODERATE
+      # review frequency (per-stock ~hourly) so events are catchable — a 1-line dial, tune to taste.
       Bots__ExogShock__Enabled: "true"
-      Bots__ExogShock__GlobalFraction: "0.4"
-      Bots__ExogShock__MeanIntervalMinutes: "0.5"
+      Bots__ExogShock__MeanIntervalMinutes: "60"
+      Bots__ExogShock__DecayHalfLifeSec: "600"
+      Bots__ExogShock__MinMagnitude: "0.01"
+      Bots__ExogShock__MaxMagnitude: "0.12"
+      Bots__ExogShock__MagnitudeExponent: "2.5"
+      Bots__ExogShock__Cap: "0.25"
+      Bots__ExogShock__AnchorTracksShock: "true"
+      Bots__ExogShock__ChaserFraction: "0.10"
+      Bots__ExogShock__ChaserNotionalFrac: "0.06"
+      Bots__ExogShock__ChaserMaxNotionalFrac: "0.10"
+      Bots__ExogShock__ChaserMinIntervalSec: "120"
+      Bots__ExogShock__GlobalFraction: "0.25"
       Bots__ExogShock__GlobalCoFire: "true"
       Bots__ExogShock__GlobalCoFireFraction: "0.15"
       Bots__ExogShock__GlobalCoFireNotionalFrac: "0.1"
-      Bots__ExogShock__AnchorTracksShock: "false"
+      # Variable-permanence coupling (docs/NEWS_PERMANENCE_COUPLING.md); rest = appsettings defaults.
+      Bots__ExogShock__Permanence__Enabled: "true"
