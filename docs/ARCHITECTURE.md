@@ -2,9 +2,9 @@
 
 **What this is:** the top-level orientation for the whole codebase — the four projects, how a single order travels end-to-end, why the client and server share the same Models + interfaces, a reading order for the rest of the doc set, and a shared glossary. It is deliberately the **thin index**: it points *into* the detailed docs (`BOT_MECHANICS`, `ENGINE_MECHANICS`, `CLIENT_STRUCTURE`, …) rather than duplicating them. Read this first, then follow the reading order in §4.
 
-**The product in one sentence.** A .NET stock-exchange **simulator**: a fleet of ~20k server-side trading bots continuously makes the market across 50 stocks (70 cross-listed USD/EUR **listings**), and a human logs into a Windows MAUI desktop app to browse quotes, read charts, and place **real** orders that match against the same book the bots trade. Price is not scripted — it EMERGES from a real matching engine as those orders cross.
+**The product in one sentence.** A .NET stock-exchange **simulator**: a fleet of ~20k server-side trading bots continuously makes the market across 50 stocks (70 USD/EUR **listings**), and a human logs into a Windows MAUI desktop app to browse quotes, read charts, and place **real** orders that match against the same book the bots trade. Price is not scripted — it EMERGES from a real matching engine as those orders cross.
 
-**Line numbers rot; symbols don't.** File/symbol references are concrete but line numbers drift with every edit above them. The **symbol name is the durable handle — grep it** if a cited path looks off. Anything below marked *(inferred)* was reasoned from structure, not verified line-by-line.
+**Line numbers rot; symbols don't.** File/symbol references are concrete but line numbers drift with every edit above them. The **symbol name is the durable handle — grep it** if a cited path looks off. All named symbols below have been verified against source (2026-07-16).
 
 ---
 
@@ -30,9 +30,9 @@ The solution (`KieshStockExchange.sln`) is four projects. The dependency arrows 
 | **KieshStockExchange.Migration** | `net9.0` (console) | A **one-shot CLI tool**, not a runtime dependency: `smoke <pg-conn>` (round-trip sanity) and `migrate-data --sqlite <path> --pg <conn>` (the historical SQLite→Postgres data lift, `Program.cs`). Separate from EF **schema** migrations (below). | — |
 | **KieshStockExchange.Tests** | `net9.0` | xUnit suite (engine/order invariants). | — |
 
-**Two things named "migration" — keep them apart.** (1) **Schema** migrations are **EF Core**, under `KieshStockExchange.Server/data/Migrations/` against `KseDbContext` — a **migrations-only** `DbContext` that is *never injected at runtime* (`data/KseDbContext.cs`: "runtime queries go through Dapper. Schema source-of-truth lives here."). (2) The **KieshStockExchange.Migration** project is the SQLite→PG **data** copy tool. The schema lives in EF; the runtime *reads/writes* the schema through hand-written Dapper on `PgDBService` — see §3 and `DATA_LAYER.md` (planned).
+**Two things named "migration" — keep them apart.** (1) **Schema** migrations are **EF Core**, under `KieshStockExchange.Server/Data/Migrations/` against `KseDbContext` — a **migrations-only** `DbContext` that is *never injected at runtime* (`Data/KseDbContext.cs`: "runtime queries go through Dapper. Schema source-of-truth lives here."). (2) The **KieshStockExchange.Migration** project is the SQLite→PG **data** copy tool. The schema lives in EF; the runtime *reads/writes* the schema through hand-written Dapper on `PgDBService` — see §3 and `DATA_LAYER.md`.
 
-**Where the bot/engine code physically lives** (the two big subsystems people look for): the bot loop + decision + signal services are under `Server/Services/BackgroundServices/` (+ `…/Helpers/`); the engine is under `Server/Services/MarketEngineServices/` (matcher/book/settlement in its `Helpers/` subfolder). Seeding (`SeedServices/ExcelSeedService.cs`) loads the bot population + per-bot geometry generated offline by the Python **`Tools/`** seeder (document-only; never modified from app work).
+**Where the bot/engine code physically lives** (the two big subsystems people look for): the bot tick host is `Server/Services/HostedServices/BotLoopHostedService.cs`; the loop body + per-bot decision + signal services are `Server/Services/BackgroundServices/AiTradeService.cs` + `…/Helpers/` (`AiBotDecisionService`, `BotSentimentService`, `ExogenousShockService`, …); the engine is under `Server/Services/MarketEngineServices/` (matcher/book/settlement in its `Helpers/` subfolder). Seeding (`SeedServices/ExcelSeedService.cs`) loads the bot population + per-bot geometry generated offline by the Python **`Tools/`** seeder (document-only; never modified from app work).
 
 ---
 
@@ -54,7 +54,8 @@ The single most important path in the system. A user fills the ticket and hits B
           MatchingEngine      ── cross the in-memory (stockId,currency) book     (§4 ENGINE)   pure, no DB
           SettlementEngine    ── move Fund/Position, persist rows, PROVE CK=0    (§5 ENGINE)   the only writer
             └─ Postgres via PgDBService (Dapper), inside one transaction
-[PUSH]    engine events ─▶ MarketHubBroadcaster / IOrderCacheService            HostedServices/
+[PUSH]    quote/candle/portfolio events ─▶ MarketHubBroadcaster                 HostedServices/
+          order mutations ─▶ SignalROrderCacheService ("OrderUpdated")          MarketEngineServices/
             └─ SignalR MarketHub groups: quotes:{stock}:{ccy} · orders:{uid} · portfolio:{uid}
 [CLIENT]  MarketHubClient event ─▶ SignalR*/Api* proxy ─▶ VM re-render          (chart, book, open-orders, P&L)
 ```
@@ -74,7 +75,7 @@ Every ~1 s a `BotLoopHostedService` tick (`Server/Services/HostedServices/BotLoo
 `KieshStockExchange.Shared` is referenced by **both** the client and the server. Two distinct reasons, both structural:
 
 1. **Models are the wire DTOs.** `Order`, `Fund`, `Position`, `Stock`, `LiveQuote`, `Candle`, `PortfolioSnapshot` (`Shared/Models/`) are serialized on the server and deserialized on the client *as the same CLR types* — no hand-maintained DTO mirror, no drift. The model also carries its **invariants** (immutable `OrderId`/`UserId`/`StockId`; negative-price rejection; `IsValid()`), so a malformed order can't even be *constructed* on either side — the model is the last line of defence under the validator (`ENGINE_MECHANICS.md §2.1`).
-2. **Interfaces are a polymorphism seam across the network boundary.** The service **contracts** (`IOrderEntryService`, `IDataBaseService`, `IStockService`, …) live in `Shared/Services/*/Interfaces`. The server registers the **real** implementation (`OrderEntryService`, `PgDBService`); the client registers a **network-proxy** implementation of the *same interface* (an `Api*` shim, e.g. `ApiDataBaseService`, `ApiOrderEntryService` *(inferred name)*). A ViewModel therefore programs against `IOrderEntryService` exactly as server code does — the HTTP hop is invisible at the call site. This is why the old in-process client engine could be deleted at the Phase-3 split without touching a single VM: only the DI registration changed, not the contract (`CLIENT_STRUCTURE.md §1`).
+2. **Interfaces are a polymorphism seam across the network boundary.** The service **contracts** (`IOrderEntryService`, `IDataBaseService`, `IStockService`, …) live in `Shared/Services/*/Interfaces`. The server registers the **real** implementation (`OrderEntryService`, `PgDBService`); the client registers a **network-proxy** implementation of the *same interface* (an `Api*` shim, e.g. `ApiDataBaseService`, `ApiOrderEntryClient` — see `MauiProgram.cs` registrations). A ViewModel therefore programs against `IOrderEntryService` exactly as server code does — the HTTP hop is invisible at the call site. This is why the old in-process client engine could be deleted at the Phase-3 split without touching a single VM: only the DI registration changed, not the contract (`CLIENT_STRUCTURE.md §1`).
 
 **Consequence for readers:** if you see an interface used in the client, its client impl is a **shim** — reads/writes go out over HTTP or arrive over SignalR. The real behavior behind that interface is in the Server project. `IDataBaseService.RunInTransactionAsync` ("multi-table writes use a transaction", per `CLAUDE.md`) is a **server** concern — the client's `ApiDataBaseService` never opens a transaction.
 
@@ -82,16 +83,16 @@ Every ~1 s a `BotLoopHostedService` tick (`Server/Services/HostedServices/BotLoo
 
 ## 4. Doc index + recommended reading order
 
-Read top-to-bottom for a full onboarding; jump by topic once oriented. **Existing** docs are live; **planned** docs are named here so the map is stable even before they land (they are the deliverables of the current documentation arc).
+Read top-to-bottom for a full onboarding; jump by topic once oriented. All seven core docs are live.
 
 | # | Doc | Status | Covers | Read it when |
 |---|---|---|---|---|
 | 1 | **ARCHITECTURE.md** (this) | ✅ | The system map: projects, one lifecycle, the shared seam, this index, the glossary. | First. Always. |
 | 2 | **BOT_MECHANICS.md** | ✅ | *Who* places orders and *why*: the ~20k-bot loop, per-bot decision, sentiment/mood/F&G signals, the market-realism scorecard. | To understand where order flow comes from + how price is shaped. |
 | 3 | **ENGINE_MECHANICS.md** | ✅ | *What happens to an order*: Entry→Execution→Matching→Settlement, reservations, and the CK=0 conservation proof. | To understand matching, settlement, and money/share safety. |
-| 4 | **DATA_LAYER.md** | ⏳ planned | The persistence seam: EF schema (`KseDbContext` + `Migrations/`) vs. runtime Dapper (`PgDBService`, `*Row` records), the in-memory caches (`AccountsCache`, order books), retention. | To understand how state is stored + kept conserved on disk. |
-| 5 | **API_REFERENCE.md** | ⏳ planned | The REST surface (`Controllers/*`) + the SignalR `MarketHub` group/event contract — the client↔server wire protocol. | To call the server or add an endpoint. |
-| 6 | **SERVER_HOST_AND_OPS.md** | ⏳ planned | `Program.cs` composition + host pipeline, the hosted background services, Docker/prod deploy, config (`appsettings*.json`, `docker-compose*.yml`). | To run, deploy, or operate the box. |
+| 4 | **DATA_LAYER.md** | ✅ | The persistence seam: EF schema (`KseDbContext` + `Migrations/`) vs. runtime Dapper (`PgDBService`, `*Row` records), the in-memory caches (`AccountsCache`, order books), retention. | To understand how state is stored + kept conserved on disk. |
+| 5 | **API_REFERENCE.md** | ✅ | The REST surface (`Controllers/*`) + the SignalR `MarketHub` group/event contract — the client↔server wire protocol. | To call the server or add an endpoint. |
+| 6 | **SERVER_HOST_AND_OPS.md** | ✅ | `Program.cs` composition + host pipeline, the hosted background services, Docker/prod deploy, config (`appsettings*.json`, `docker-compose*.yml`). | To run, deploy, or operate the box. |
 | 7 | **CLIENT_STRUCTURE.md** | ✅ | The MAUI head: DI, Shell nav, MVVM, the hub client, auth/theming, and the actual screens. | To work on the desktop UI. |
 
 Supporting material (not part of the core set): `docs/*_PLAN.md` / `docs/ultraplan-prompt-*.md` are the design + decision logs behind individual features; `docs/PERF_SCALING_PLAN.md` and `docs/REALISM_OVERHAUL_PLAN.md` are the two most-referenced.
@@ -108,7 +109,7 @@ Terms used unglossed across the doc set. Each detailed doc keeps its own local g
 - **cohort** — a strategy-defined slice of the bot population (MarketMaker / TrendFollower / MeanReversion / Scalper / Random, plus small separate Arbitrage + house cohorts). Sets the market's loop gain (`BOT §5`).
 - **F&G / mood** — the "Fear & Greed" market-mood signal: a 0–100 gauge derived from the fleet's activity/sentiment that also feeds *back* into bot decisions (mood-reflexive coupling), surfaced in the chart's Market-Mood pane (`BOT §2.10`).
 - **co-fire** — a shared directional **taker** burst across a fraction of stocks in one tick (`ExogenousShockService` `GlobalCoFire`), the bot-level lever that manufactures cross-stock **correlation** (deployed at notional 0.10 on prod) (`BOT §2.7`).
-- **listing vs stock** — a **stock** is one company (50 total); a **listing** is a `(stockId, currency)` order book. Each stock is cross-listed in USD and EUR as two listings → 70 live books (35 USD + 35 EUR). Orders, books, quotes, and candles are all *per listing*.
+- **listing vs stock** — a **stock** is one company (50 total); a **listing** is a `(stockId, currency)` order book. As currently seeded: 20 stocks dual-listed USD+EUR, 15 USD-only, 15 EUR-only → 70 live books (35 USD + 35 EUR). The split is seed-derived (`Tools/Config.py`), not an engine constant (`ENGINE §4`). Orders, books, quotes, and candles are all *per listing*.
 - **seed price** — a stock's fundamental anchor value, set at seed time (`Tools/` → `ExcelSeedService`). Bots' value-anchor levers tilt toward it; it is the reference the ×3/÷3 price band is measured from (`BOT §2.5`). Reseeds preserve candle continuity by re-anchoring seed price to the last candle close.
 - **soak** — a timed local test run (15 m smoke / 45 m A/B workhorse / 2 h bake) graded against the realism scorecard; the acceptance harness for every bot/engine change (`BOT §1`).
 

@@ -120,7 +120,7 @@ LoginRequest    (string Username, string Password)
 RegisterRequest (string Username, string Password, string Email, string FullName, DateTime BirthDate)
 LoginResponse   (string Token, DateTime ExpiresUtc, int UserId, string Username, bool IsAdmin)
 ```
-`register` also 400s on a weak password / invalid user (5–20 alphanumeric username, valid email, 18+), 409 on a taken username.
+`login` 401s with the same opaque `invalid_credentials` for unknown-user and wrong-password alike (no username enumeration). `register` 400s on a weak password (`SecurityHelper.IsValidPassword`, min 8 chars) / invalid user (5–20 alphanumeric username, valid email, 18+), 409 on a taken username.
 
 ### 3.2 Order placement (`OrderRequests.cs`)
 
@@ -225,7 +225,7 @@ Admin JSON payloads (`AdminBotController.cs`, inline records): `BotStatusRespons
 |---|---|---|---|---|
 | `QuoteUpdated` | `quotes:{id}:{ccy}` | `MarketHubBroadcaster` ← `IMarketDataService.QuoteUpdated` | `GET api/market-lookup/latest-price`, `GET api/stock-prices/latest` (bootstrap) | live quote |
 | `CandleClosed` | `quotes:{id}:{ccy}` | `MarketHubBroadcaster` ← `ICandleService.CandleClosed` | `GET api/candles/by-stock-range` (history) | closed `Candle` |
-| `OrderBookSnapshot` | `quotes:{id}:{ccy}` | `OrderBookBroadcaster` (own hosted service; throttled ~1/100 ms) | `GET api/order-book/{id}/{ccy}` (cache-miss fallback) | `OrderBookSnapshot` (§3.5) |
+| `OrderBookSnapshot` | `quotes:{id}:{ccy}` | `OrderBookBroadcaster` (own hosted service; ≤1 push/100 ms per key) | `GET api/order-book/{id}/{ccy}` (cache-miss fallback) | `OrderBookSnapshot` (§3.5) |
 | `OrderUpdated` | `orders:{userId}` | `SignalROrderCacheService.NotifyOrdersMutated` (engine settle/cancel/modify) | `GET api/orders/by-user/{userId}` (re-fetch on receipt) | `{ UserId }` envelope — a bare "go refresh" trigger, no order payload |
 | `NotificationReceived` | `orders:{userId}` | `ServerNotificationService` (fed by the engine + `OrderController`) | `GET api/messages/by-user/{userId}` | persisted `Message` |
 | `PortfolioChanged` | `portfolio:{userId}` | `MarketHubBroadcaster` ← `IUserPortfolioService.SnapshotChanged` | `GET api/funds/by-user`, `GET api/positions/by-user` | snapshot — **treated as a bare refresh trigger** by the client (see `CLIENT_STRUCTURE.md` §6: the push currently targets a placeholder `portfolio:0` group) |
@@ -247,4 +247,4 @@ Ranked by blast radius. All of these are reachable by **any authenticated (non-a
 6. **Reference-data write CRUD is write-open** — `POST`/`PUT`/`DELETE` on `StockController`, `StockPriceController`, `StockListingController`, `CandleController`, `AIUserController` are JWT-only. A non-admin can mutate the catalog, price history, and candles. (Reads on these are legitimately open market data.)
 7. **`SessionController` stale comment** — the class comment says "No security claim — anyone can hit these endpoints," but that predates the fallback policy; the endpoints now require a JWT. Low impact (they only write log lines), but the comment misleads.
 
-*Inferred, not verified:* items 1–6 read as deliberate deferrals ("Phase-7 admin policy" appears in several comments) rather than exploited holes — this is a simulation with a trusted client — but as written the server does not enforce admin/ownership on them. Whether that matters depends on who can obtain a token (any successful `POST api/auth/register`, which is anonymous and self-service). Flagging per the brief; confirm intent before treating as a bug.
+*Verified vs inferred:* the missing gates themselves are **verified against the controller attributes** — items 1–6 carry no `[Authorize(Roles=…)]` and no `CanAccessUser` call; only the fallback `RequireAuthenticatedUser` applies. What's *inferred* is intent: they read as deliberate deferrals ("Role-gating lands with the Phase-7 admin policy", `MessageController.cs`) rather than exploited holes — this is a simulation with a trusted client. Whether it matters depends on who can obtain a token (any successful `POST api/auth/register`, which is anonymous and self-service). Flagged per the brief; confirm intent before treating as a bug.

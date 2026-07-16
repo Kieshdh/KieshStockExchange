@@ -32,7 +32,7 @@
 
 **How migrations get applied.** Normally `dotnet ef database update`. But `Program.cs` (grep `Db:AutoMigrate`) also calls `ctx.Database.Migrate()` at startup via a design-time `KseDbContextFactory`, so a host without the EF CLI still converges. Guarded by `Db:AutoMigrate` (default **true**); a migration failure is logged `Critical` and **does not** take the host down (it must surface via health checks, not a boot loop). Assumes single-instance deploy — `Migrate()` races across replicas (documented as out of scope). Runs **before** the seed block so a fresh DB has its schema before any `INSERT`.
 
-**The vestigial-attribute trap.** Every `*Row` class is annotated with **`SQLite`** attributes — `[Table]`, `[PrimaryKey, AutoIncrement]`, `[Indexed]`, `[Column]` — left over from a pre-Postgres SQLite era. **Neither stack reads them.** EF maps via `OnModelCreating`; Dapper maps by **property-name ↔ column-name** match (the SQL string names the columns explicitly). The attributes are dead metadata. Do not trust them for the real schema — **`KseDbContext.OnModelCreating` is the only structural truth** (types, indexes, CHECK constraints). *(inferred: the attributes compile only because the `SQLite` package is still referenced; they have no behavioural effect.)*
+**The vestigial-attribute trap.** Every `*Row` class is annotated with **`SQLite`** attributes — `[Table]`, `[PrimaryKey, AutoIncrement]`, `[Indexed]`, `[Column]` — left over from a pre-Postgres SQLite era. **Neither stack reads them.** EF maps via `OnModelCreating`; Dapper maps by **property-name ↔ column-name** match (the SQL string names the columns explicitly). The attributes are dead metadata. Do not trust them for the real schema — **`KseDbContext.OnModelCreating` is the only structural truth** (types, indexes, CHECK constraints; everything not configured there maps by EF property-name convention). The attributes compile only because `sqlite-net-pcl` is still referenced (`using SQLite;` in every Row file; the server csproj's own comment says it "stays until the DBService rewrite") — EF ignores SQLite's attribute namespace entirely.
 
 ---
 
@@ -41,7 +41,7 @@
 One `sealed partial class PgDBService : IDataBaseService`, split across seven files by table region so each rewrite touches one file. Constructor deps: `IDbConnectionFactory` (the pool) + `ILogger`.
 
 ### 2.1 Connection scope — `OpenAsync` / `DbScope`
-Every query opens through `private OpenAsync(ct)` (`PgDBService.cs`), which returns a **`DbScope`** struct — a thin Dapper wrapper (`QueryAsync`/`ExecuteAsync`/`ExecuteScalarAsync`). The key behaviour:
+Every query opens through `private OpenAsync(ct)` (`PgDBService.cs`), which returns a **`DbScope`** struct — a thin Dapper wrapper (`QueryAsync`/`QuerySingleOrDefaultAsync`/`ExecuteAsync`/`ExecuteScalarAsync`). The key behaviour:
 - **If an ambient transaction is in flight** (`_ambient.Value` set, §3), `OpenAsync` reuses that connection + transaction and `ownsConnection: false` → dispose is a no-op. This is what makes a bot trade group's many writes land on **one** physical connection inside **one** transaction.
 - **Otherwise** it pulls a fresh pooled connection (`_factory.OpenConnectionAsync`) with `ownsConnection: true` → disposed when the `await using` scope exits.
 
@@ -68,10 +68,10 @@ Runtime never binds Dapper straight to a domain model — it goes through a **`*
 
 Each region defines a **column-list constant** (e.g. `OrderCols`, `FundCols`, `PositionCols`) reused across all its `SELECT`s so the projection stays consistent.
 
-> ⚠️ **Flagged discrepancy (verify):** `StockCols` in `PgDBService.Stocks.cs` is `StockId,Symbol,CompanyName,Sector,CreatedAt` — it **omits `SharesOutstanding`**, even though the column exists, `StockRow`/`StockMapper` map it, and it was added by migration `AddSharesOutstanding`. So `GetStocksAsync`/`GetStockById` appear to return `SharesOutstanding = 0` (Dapper leaves unselected props at default). A grep found no other runtime `SELECT` of the column. If marketcap (`price × SharesOutstanding`) reads a live value somewhere, that path isn't `PgDBService`'s catalog read — confirm before relying on it.
+> ⚠️ **Flagged discrepancy (verified 2026-07):** `StockCols` in `PgDBService.Stocks.cs` is `StockId,Symbol,CompanyName,Sector,CreatedAt` — it **omits `SharesOutstanding`**, even though the column exists, `StockRow`/`StockMapper` map it, and it was added by migration `AddSharesOutstanding`. Both catalog reads (`GetStocksAsync`, `GetStockById`) select `{StockCols}` only, so they return `SharesOutstanding = 0` (Dapper leaves unselected props at default). No other runtime `SELECT` of the column exists in `PgDBService`. If marketcap (`price × SharesOutstanding`) reads a live value somewhere, that path isn't `PgDBService`'s catalog read — confirm before relying on it.
 
 ### 2.4 Batching hot writes
-`InsertAllAsync<T>`/`UpdateAllAsync<T>` (`PgDBService.cs`) are the bulk entry points. For **N > 1** of the hot types (`Order`, `Transaction`, `Position`, `Fund`, `FundTransaction`) they dispatch to a dedicated batch method that unrolls into **one multi-row `VALUES` statement** — collapsing a bot trade group's ~20 round-trips to ~5. For **N == 1** and all cold types they fall through to a per-row `switch` (batch SQL has measurable overhead at N=1, and 14 settlement sites pass single-element arrays). Batches are chunked at `BatchChunkSize = 2000` rows so `cols × rows` stays under Postgres's 65535 bind-param cap (`ChunkedBatchAsync`). Update batches use the `UPDATE … FROM (VALUES …) AS data(…) WHERE pk = data.pk` idiom with per-column `::type` casts on the first tuple.
+`InsertAllAsync<T>`/`UpdateAllAsync<T>` (`PgDBService.cs`) are the bulk entry points. For **N > 1** of the hot types they dispatch to a dedicated batch method that unrolls into **one multi-row `VALUES` statement** — collapsing a bot trade group's ~20 round-trips to ~5. The two lists are asymmetric, matching what settlement actually does in bulk: **insert-batched** = `Order`, `Transaction`, `Position`, `FundTransaction` (append-only ledger rows); **update-batched** = `Order`, `Fund`, `Position` (`Fund` rows are created via upsert, never bulk-inserted; `FundTransaction` rows are never updated). For **N == 1** and all cold types they fall through to a per-row `switch` (batch SQL has measurable overhead at N=1, and 14 settlement sites pass single-element arrays). Batches are chunked at `BatchChunkSize = 2000` rows so `cols × rows` stays under Postgres's 65535 bind-param cap (`ChunkedBatchAsync`). Update batches use the `UPDATE … FROM (VALUES …) AS data(…) WHERE pk = data.pk` idiom with per-column `::type` casts on the first tuple.
 
 ### 2.5 Paging + upserts
 - **Paging guard:** `ClampPage(skip, take)` clamps skip ≥ 0 and take into `[0, MaxPageSize=1000]` so hostile paging degrades to an empty/capped page instead of a Postgres `OFFSET/LIMIT must not be negative` 500. All `*PageAsync` methods return `(Items, Total)`. Sort keys are whitelisted via `switch` (never interpolated raw) — SQL-injection-safe.
@@ -105,7 +105,7 @@ Three singletons cache DB state in process so the hot path avoids round-trips. T
 
 ## 5. SCHEMA
 
-14 tables. Structural truth = `KseDbContext.OnModelCreating`; the ~23 migrations only *evolve* toward it (initial schema + incremental adds: shorts, stop/trailing/bracket orders, decomposed order type, bot per-strategy params, transaction mid-price, shares outstanding, stock sector, candle mood bands, armed-stop partial indexes). Money columns are **`numeric(20,10)`**; timestamps are **`timestamp with time zone`**. PKs are identity `int` (`ValueGeneratedOnAdd`) except `UserPreferences` (PK = caller-supplied `UserId`).
+14 tables. Structural truth = `KseDbContext.OnModelCreating`; the 22 migrations (as of 2026-07) only *evolve* toward it (initial schema + incremental adds: shorts, stop/trailing/bracket orders, decomposed order type, bot per-strategy params, transaction mid-price, shares outstanding, stock sector, candle mood bands, armed-stop partial indexes). Money columns are **`numeric(20,10)`**; timestamps are **`timestamp with time zone`**. PKs are identity `int` (`ValueGeneratedOnAdd`) except `UserPreferences` (PK = caller-supplied `UserId`).
 
 ### 5.1 Table-relationship list (compact ERD)
 
@@ -184,7 +184,7 @@ Transactions (TransactionId PK) ── BuyerId/SellerId → Users, StockId → S
 - `Db:MaxPoolSize` (default 50; applied only if the connection string didn't set `Pool Size`).
 - `Db:SynchronousCommit` (`on|off|local|remote_write|remote_apply`) — passed as a libpq `-c` startup option (zero per-tx cost); unset ⇒ Postgres default ⇒ byte-identical. The perf lever from `PERF_SCALING_PLAN`.
 - `Db:AutoMigrate` (default true) — apply pending EF migrations at startup.
-- `Seed:AutoOnEmptyDb` — seed from the embedded workbook when the DB is empty (runs after migrate, before warm-up).
+- `Seed:AutoOnEmptyDb` (default **false**) — seed from the embedded workbook when the DB is empty (runs after migrate, before warm-up).
 
 **Gotchas:**
 - **SQLite attributes on `*Row` are dead** — trust `KseDbContext` only (§1).

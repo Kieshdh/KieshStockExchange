@@ -39,7 +39,7 @@ The engine's shared state is registered **singleton** because it *is* the market
 | `MarketMoodService` | Fear/Greed writer | one instance injected into both `AiTradeService` (writer) + `CandleService` (flush-time stamper) — see the `§fear-greed` comment |
 | `IAiTradeService` | `AiTradeService` | the bot fleet; the hosted loop just starts/stops it |
 
-Note two deliberate DI tricks:
+Note three deliberate DI tricks:
 - **`Lazy<IStopWatcher>`** — breaks the cycle `StopTriggerWatcher → OrderExecutionService → BracketCoordinator → IStopWatcher`. Grep `Lazy<IStopWatcher>`.
 - **`StopTriggerWatcher` registered three times** — once as the concrete type, once as `IStopWatcher` (the arm/disarm surface `OrderEntryService` calls), once as `IHostedService` (the quote loop). All three resolve the **same singleton instance** (`sp.GetRequiredService<StopTriggerWatcher>`). Same pattern would apply to any actor that is both a callable service and a background loop.
 - **`IBotMaintenanceQueries`** is the *same* `PgDBService` singleton re-exposed under a server-only query interface (no second instance) so the bot-maintenance path never leaks onto the shared `IDataBaseService` / client surface.
@@ -66,7 +66,7 @@ Then the middleware pipeline is wired (§3) and `app.Run()` blocks. **`ShutdownT
 Standard ASP.NET Core `IConfiguration`, layered lowest-to-highest precedence:
 
 1. **`appsettings.json`** — the base; every default lives here. This is the big file: the whole `Bots:*` realism config, `Retention:*`, `Db:*`, `Serilog`, `Seed`, `Users:SeedBalanceUsd`.
-2. **`appsettings.{ASPNETCORE_ENVIRONMENT}.json`** — `appsettings.Production.json` (or `.Development.json`) **deep-merges** over the base: only the leaf keys present override, the rest of the tree stays. Prod's file flips `Seed:AutoOnEmptyDb`, sets JSON-file Serilog output, and carries a block of `Bots:*` tuning overrides (`TradeIntervalMs`, `Staggering:Slots`, `DipBuyStrength`, the stop-pool `LeanReload`/`PruneLimitOnly` flags, `Rotator`/`BankEstimate` on).
+2. **`appsettings.{ASPNETCORE_ENVIRONMENT}.json`** — `appsettings.Production.json` (or `.Development.json`) **deep-merges** over the base: only the leaf keys present override, the rest of the tree stays. Prod's file re-asserts `Seed:AutoOnEmptyDb` (already true in base), switches the Serilog file sink to the JSON formatter, and carries a block of `Bots:*` tuning overrides (`TradeIntervalMs`, `Staggering:Slots`, `DipBuyStrength`, `OrderMaxAgeSec`, the stop-pool `StopReplaceOld`/`PruneLimitOnly`/`LeanReload` flags, `Rotator`/`BankEstimate` on) plus a `Retention` window block.
 3. **Environment variables** `Section__Key` — highest precedence. **Double-underscore `__` is the config-path separator** (`:` isn't legal in an env var name on Linux). So `Bots__Mood__Enabled=true` sets `Bots:Mood:Enabled`, and `Auth__SigningKey` sets `Auth:SigningKey`. **This is the tier the live prod experiment flags use** (§6.2) — reversible, no rebuild of appsettings, no schema.
 
 Array elements index numerically: `Cors__AllowedOrigins__0` = `Cors:AllowedOrigins[0]` (see the base compose file). Bindings read via `GetValue("Section:Key", default)` (e.g. `Db:AutoMigrate`, `Bots:AutoStart`, `Retention:Enabled`) — the default in code is what runs if the key is absent from all three tiers.
@@ -81,7 +81,7 @@ Registered in phase A, wired in phase C after the warm-up. Middleware **order ma
 
 - **JWT** (`Auth:*` → `JwtSettings`) — `AddJwtBearer` with issuer/audience/lifetime/signing-key validation, 30s clock skew. `Auth:SigningKey` is **mandatory**; boot throws if it's blank, and **throws in Production if it still equals the checked-in dev key** (`DevSigningKey` const) — prod must supply `Auth__SigningKey` (openssl rand -hex 32). SignalR can't carry an `Authorization` header on the WS upgrade, so a `JwtBearerEvents.OnMessageReceived` hook lifts the token from `?access_token=…` for `/hubs` paths.
 - **Authorization** — a **fallback policy** requires an authenticated user on *every* endpoint unless `[AllowAnonymous]`. Only auth/login and `/healthz/*` are anonymous.
-- **CORS** — origins from `Cors:AllowedOrigins` (empty in dev; prod sets `Cors__AllowedOrigins__0`). `AllowCredentials` + any header/method. Native MAUI `HttpClient` sends no `Origin`, so CORS only bites a hypothetical browser client *(per the env template comment)*.
+- **CORS** — origins from `Cors:AllowedOrigins` (empty in dev; prod sets `Cors__AllowedOrigins__0`). `AllowCredentials` + any header/method. Native MAUI `HttpClient` sends no `Origin` header (CORS is a browser mechanism), so the policy only bites a hypothetical browser client — `.env.production.example` states this explicitly.
 - **Forwarded headers** — `UseForwardedHeaders()` runs **first** in the pipeline so downstream (rate-limit partitioning, scheme/IP) sees the real client behind Caddy. `KnownProxies`/`KnownNetworks` are **cleared** because Caddy is the only hop and sits on a non-loopback compose address.
 - **Rate limiting** — fixed-window: `"orders"` policy caps order/portfolio mutations at **60/min** partitioned by authenticated user id (falling back to client IP); `"auth"` caps login at **10/min** per IP. Over-limit = immediate `429`, no queue. Reads are unlimited. `UseRateLimiter()` runs *after* auth so the partition key can read the `sub` claim.
 - **Health checks** — `/healthz/live` is bare liveness (predicate `_ => false` ⇒ runs no checks, always 200 if the process is up); `/healthz/ready` additionally runs `DatabaseHealthCheck` (a trivial `GetStocksAsync` read). Both `AllowAnonymous`. The Docker `HEALTHCHECK` hits **`/healthz/live`** deliberately — a slow/contended DB must not mark the container unhealthy and trigger a restart loop.
@@ -171,7 +171,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.
 
 ## 7. CADDY + ENV + SECRETS
 
-- **`Caddyfile`** — one site block: `{$DOMAIN} { reverse_proxy server:8080; encode gzip; log … }`. Caddy **terminates TLS** (automatic Let's Encrypt, HTTP-01 challenge) and reverse-proxies to the server container over the compose network. `{$DOMAIN}` is read from the `DOMAIN` env var. A cert is fetched on the first HTTPS request to `$DOMAIN`; the `caddydata` volume persists it.
+- **`Caddyfile`** — one site block: `{$DOMAIN} { reverse_proxy server:8080; encode gzip; log … }`. Caddy **terminates TLS** (automatic Let's Encrypt) and reverse-proxies to the server container over the compose network. `{$DOMAIN}` is read from the `DOMAIN` env var. Caddy provisions the cert itself at startup and auto-renews; the `caddydata` volume persists it (so recreating the container doesn't re-hit Let's Encrypt rate limits).
 - **`.env.production.example`** — the template (`.env.production` itself is gitignored). Copy it, fill real values: `POSTGRES_*` creds, `KSE_DB_CONNECTION_STRING` (password **must match** `POSTGRES_PASSWORD`, `Host=postgres`), `KSE_AUTH_SIGNING_KEY` (`openssl rand -hex 32` — this becomes `Auth__SigningKey`; boot refuses the dev key in prod), `KSE_ALLOWED_ORIGIN`, `DOMAIN`. Compose reads it via `--env-file .env.production`.
 
 ---
@@ -200,9 +200,9 @@ git pull && docker compose -f docker-compose.yml -f docker-compose.prod.yml --en
 | Key | Default (base) | Effect |
 |---|---|---|
 | `Bots:AutoStart` | true | Bot loop runs (vs dormant) |
-| `Retention:Enabled` | true (base) / gated in prod | History prune loop |
-| `Db:AutoMigrate` | true | Apply pending EF migrations at boot |
-| `Seed:AutoOnEmptyDb` | true (base), true (prod for reseed) | Seed an empty DB from the embedded workbook |
+| `Retention:Enabled` | true (base + prod) | History prune loop |
+| `Db:AutoMigrate` | true (code default; no appsettings key) | Apply pending EF migrations at boot |
+| `Seed:AutoOnEmptyDb` | true (base + prod; code default false) | Seed an empty DB from the embedded workbook |
 | `Auth:SigningKey` | dev key (base) | **Must** be overridden in prod or boot throws |
 | `Db:GroupCommit:Enabled` / `Db:PerCurrencyGroupGates` | false | Settlement write-behind / per-currency gate split (see appsettings comments + ENGINE_MECHANICS §6) |
 
@@ -212,7 +212,7 @@ git pull && docker compose -f docker-compose.yml -f docker-compose.prod.yml --en
 |---|---|
 | `Auth__SigningKey` | `Auth:SigningKey` |
 | `Cors__AllowedOrigins__0` | `Cors:AllowedOrigins[0]` |
-| `KSE_DB_CONNECTION_STRING` | consumed directly by `PostgresConnectionFactory` *(not a `Section__Key`; a bespoke env name)* |
+| `KSE_DB_CONNECTION_STRING` | read directly via `Environment.GetEnvironmentVariable` by `PostgresConnectionFactory` (resolution order: `ConnectionStrings:DefaultConnection` → this env var → local-dev default) *and* by `KseDbContextFactory` (migrations). Not a `Section__Key`. |
 | `ASPNETCORE_ENVIRONMENT` | selects `appsettings.{Environment}.json` |
 | `Bots__Mood__Enabled` | `Bots:Mood:Enabled` |
 | `Bots__ExogShock__GlobalCoFireNotionalFrac` | `Bots:ExogShock:GlobalCoFireNotionalFrac` |
