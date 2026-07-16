@@ -14,22 +14,37 @@ compilation still surfaces C# errors, so compile-check with the app closed for a
 
 ## The tool set (LEFT RAIL) — grouped, TradingView-style
 A slim vertical icon rail on the chart's left edge. Tools are **grouped into categories** (TradingView
-pattern): each group is ONE rail button showing the **last-used tool** of that group, with a small **caret**
-that opens a **flyout** listing the group's tools (each with its name). Clicking the group icon arms its
-current tool; the flyout lets you pick a different one (which then becomes the group's icon). The **active
-tool is highlighted**. Groups, top → bottom (order within each = owner's list):
+pattern): each group is ONE rail button showing the **last-used tool** of that group. **Final groups
+(top → bottom):**
 
 1. **Cursor** — (single)
-2. **Lines** ▸ Trend · Ray · **Extended line** (infinite both ways) · Horizontal line · Horizontal ray ·
-   Vertical line · Polyline · Freehand
-3. **Shapes** ▸ Rectangle · Ellipse
-4. **Annotate** ▸ Text · Arrow
-5. **Position** — long/short (single, or grouped if more trade tools are added)
-6. **Tools** ▸ Measure · Magnifier
-7. **👁 Show/hide drawings** — (pinned bottom)
+2. **Lines** ▸ Trend line · Ray · **Extended line** (infinite both ways) · Horizontal line · Horizontal ray ·
+   Vertical line · Polyline
+3. **Shapes** ▸ Circle (perfect) · Ellipse · Rectangle · **Rotated rectangle** (2 points, then adjust width) ·
+   **Triangle** · **Arc**
+4. **Drawing** ▸ **Brush** · **Highlighter** (highlighter = brush at high transparency) · **Arrow**
+5. **Position** ▸ Long · Short · **Manual** *(all DRAWABLE R:R tools; Long/Short = drag entry/target/stop on
+   the chart; **Manual** = type the entry/target/stop/qty directly to place the box — same panel/data, no
+   dragging. "Manual" name TBC.)*
+6. **Text** ▸ Plain text · **Comment** · **Price label**
+7. **Measure** — (single)
+8. **Magnifier** — (single)
+9. **👁 Show/hide drawings** — (single, pinned bottom)
 
-**Alert is NOT on the rail** — it's a top-row button next to the moving-average button (see Top toolbar).
-Delete-last stays available via the `Delete` key (+ optional small button); Snapshot is top-right.
+**Flyout interaction:** hovering a multi-option group **widens it to reveal its options** (each with its
+name); the flyout stays open while you interact. **Picking a tool collapses the flyout** back to the group
+icon **and shows that tool's settings panel** (per `CHART_TOOL_PANELS_DESIGN.md`). The **active tool is
+highlighted**.
+
+**Alert is NOT on the rail** — top-row button next to the moving-average button. Delete-last = `Delete` key
+(+ optional button); Snapshot is top-right.
+
+**Panel mapping (council architecture scales to the new tools):** shapes (circle/ellipse/rect/rotated-rect/
+triangle/arc) → border stroke + fill + opacity; Brush → stroke; Highlighter → stroke at high opacity/
+transparency; text variants (plain/comment/price-label) → text + size + colour; Long/Short → the Position
+section.
+
+*(All rail tools resolved. Long/Short/Manual = drawable R:R tools, no order-engine hookup.)*
 
 ## Tool behaviors
 - **Magnifier** — drag a box → zoom the viewport to it (X = offset+count, Y = manual range). **Disables
@@ -68,6 +83,9 @@ Delete-last stays available via the `Delete` key (+ optional small button); Snap
 - **Eye toggle** hides/shows all drawings.
 - **Active-tool highlight** — the currently armed rail tool (and any active top-row toggle) shows a clear
   selected-state highlight (background/border/accent) so it's obvious what's active.
+- **Crosshair cursor** — in **Cursor mode** the OS mouse pointer becomes a **crosshair (cross)** while over
+  the chart (WinUI `ProtectedCursor` = `InputSystemCursorShape.Cross`); reverts to the arrow off-chart. (A
+  drawing tool can show a crosshair/pen cursor too — confirm on eyeball.)
 - Pen panel gains, for **Rectangle + Ellipse**, a **fill colour** picker + an **opacity slider (bar)** to
   set fill transparency; and a **text field** for the Text tool.
 
