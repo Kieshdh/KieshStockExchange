@@ -97,6 +97,11 @@ section.
   moved, its style/values can't be edited, and it can't be deleted (`Delete` key / ✕ glyph / right-click
   remove / delete-last all skip it) — nor undone away by `Ctrl+Z`. A small lock icon marks it; unlock to
   modify. (`DrawingObject += bool Locked`, trailing default false, back-compat.)
+- **Deletion paths (locked-down):** ONLY via (a) the tool's **settings-panel Delete button** and (b) the
+  **`Delete` key** on the selected drawing — plus the **delete-last** button and **delete-all**. **REMOVE the
+  on-chart ✕ close glyph** on drawings (drop the `DrawCloseGlyph` render + the `DrawingHitPart.Close` hit
+  path). **Right-click no longer deletes** either — it deselects a selected drawing / disarms the tool on
+  empty chart. (Supersedes the earlier right-click-removes-unselected behavior.)
 - **Delete-last-touched** button (+ `Delete` key) — removes the most recently placed/selected/moved drawing.
 - **Label/gutter gating** — trend/ray price + %-change labels show **only on hover or when selected**
   (clean otherwise); on select, endpoint prices show in the **right gutter**; HLine **always** shows its
@@ -118,10 +123,14 @@ section.
   much empty space. Add a **`+` / `−`** control **next to the auto-scale (Y-Auto) button** to tighten/loosen
   the Y-padding (adjust `YPaddingPercent`, persisted; sensible clamp e.g. 0–15%). Lower the default too.
 
-## Storage (current state — reference)
-Drawings are persisted **locally in MAUI `Preferences`** (JSON, per stock+currency key `chart_drawings_*`),
-NOT the SQL database — per-device, no cross-device sync, lost on reinstall. Server-synced drawings (a
-`UserDrawings` table + endpoints) is a future add, not in this overhaul unless requested.
+## Storage — DECIDED: local, user-scoped
+Drawings stay **local on the client PC** (MAUI `Preferences`, JSON) — no server, no cross-device sync (owner
+preference). **FIX the current gap:** the key is device-global (`chart_drawings_<stock+currency>`), so a
+second account on the same PC would see the first's drawings. **Scope the key by user** →
+`chart_drawings_<userId>_<stock+currency>` (also the default-pen key). Behavior:
+- Persist **through logout** — the same user logging back in on that PC gets their drawings back.
+- **No cross-user leak** — a different account on the same PC sees only its own.
+- Not synced across devices / lost on reinstall (accepted). Server-sync (`UserDrawings` table) = future-only.
 
 ## Settings reorg
 - **Moving-average panel** — tidy it to MA-only. Remove the **candle-colour** controls that currently sit
