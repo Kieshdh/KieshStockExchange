@@ -29,7 +29,8 @@ pattern): each group is ONE rail button showing the **last-used tool** of that g
 6. **Text** ▸ Plain text · **Comment** · **Price label**
 7. **Measure** — (single)
 8. **Magnifier** — (single)
-9. **👁 Show/hide drawings** — (single, pinned bottom)
+9. **Magnet** — snap mode (off / weak / strong); see behaviors
+10. **👁 Show/hide drawings** — (single, pinned bottom)
 
 **Flyout interaction:** hovering a multi-option group **widens it to reveal its options** (each with its
 name); the flyout stays open while you interact. **Picking a tool collapses the flyout** back to the group
@@ -49,6 +50,16 @@ section.
 ## Tool behaviors
 - **Magnifier** — drag a box → zoom the viewport to it (X = offset+count, Y = manual range). **Disables
   auto-fit** on use.
+- **Magnet** (harder) — a persistent SNAP **mode** (not a one-shot tool; a 3-state toggle **off / weak /
+  strong**, its own rail button). While ON, placing/dragging a drawing anchor **snaps to the nearest
+  significant price of the nearest candle** — wick **high**, wick **low**, **open**, or **close** (snapping
+  the anchor's time to that candle too):
+  - **Weak** — snaps only when the cursor is **within a small threshold** of an OHLC point; otherwise the
+    anchor follows the cursor freely.
+  - **Strong** — **always** snaps to the nearest OHLC point of the candle under/near the cursor.
+  - **Not near any candle** → anchor is placed at the **cursor** (no snap) in both modes.
+  Applies to every anchor-placing tool (lines, shapes, position legs, etc.). Implemented as a
+  pixel→(candle, nearest-OHLC) snap the placement/drag path routes through when Magnet is active.
 - **Rectangle / Ellipse** — 2-corner shape; **border** color/thickness/dash + **fill** color + opacity.
 - **Text** — anchor + string; needs a text-entry affordance in the pen panel.
 - **VLine** — vertical line at a time; shows its **time on the x-axis**.
@@ -78,7 +89,12 @@ section.
   Invert scale + Move scale to left. Retire the standalone scale/auto-fit buttons into this menu.
 
 ## Cross-cutting behaviors
-- **Undo `Ctrl+Z` / Redo `Ctrl+Y`** — bounded stack over the drawings (add / move / delete).
+- **Undo `Ctrl+Z` / Redo `Ctrl+Y`** — bounded stack over the drawings (add / move / delete). **Skips locked
+  items** — undo will not remove or alter a locked drawing.
+- **Lock** — each drawing's settings panel has a **Lock** toggle. A locked drawing is protected: it can't be
+  moved, its style/values can't be edited, and it can't be deleted (`Delete` key / ✕ glyph / right-click
+  remove / delete-last all skip it) — nor undone away by `Ctrl+Z`. A small lock icon marks it; unlock to
+  modify. (`DrawingObject += bool Locked`, trailing default false, back-compat.)
 - **Delete-last-touched** button (+ `Delete` key) — removes the most recently placed/selected/moved drawing.
 - **Label/gutter gating** — trend/ray price + %-change labels show **only on hover or when selected**
   (clean otherwise); on select, endpoint prices show in the **right gutter**; HLine **always** shows its
