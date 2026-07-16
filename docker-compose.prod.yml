@@ -53,6 +53,11 @@ services:
       Bots__Mood__MMWiden: "true"
       # Random-walk main driver: softer medium-term reversion so moves stick (2026-07-16).
       Bots__RecentAnchor__Strength: "0.05"
+      # More random-walk character (2026-07-16): halve the per-stock persistent trend (RegimeDrift
+      # 1.0→0.5 = choppier, less smooth trend) + 10% less taker flow (MarketProbMult 1.5→1.35 =
+      # calmer, deeper book, smaller moves). Both reversible env; delete a line to roll back.
+      Bots__Sentiment__RegimeDrift__Strength: "0.5"
+      Bots__MarketProbMult: "1.35"
       # NEWS system — 3-tier jump-diffusion + variable-permanence coupling (2026-07-16).
       # Individual (per-stock, dominant) + global tier; MeanIntervalMinutes=60 is a MODERATE
       # review frequency (per-stock ~hourly) so events are catchable — a 1-line dial, tune to taste.
