@@ -41,15 +41,20 @@ internal sealed class ExogenousShockService
 
     private readonly bool   _enabled;
     private readonly double _decayHalfLifeSec;
+    private readonly double _residualHalfLifeSec; // §news-permanence: slow bleed of the permanent floor (~3h ⇒ session-permanent, not eternal)
     private readonly double _cap;          // max |shock| as a fraction of seed
     private readonly double _floor;        // drop a decaying shock once it shrinks below this
     private readonly double _softWallK;    // cubic soft-wall strength near ±cap
     private readonly double _difficultyMult; // reserved product dial (1.0 = inert): scales impulse magnitude
 
-    // Per-stock signed shock (fraction of seed); only entries with |v| ≥ floor are kept. shockId persists
-    // across decay so a fresh impulse from rest increments it (reshuffling the chaser cohort).
-    private readonly Dictionary<int, double> _shock   = new();
-    private readonly Dictionary<int, int>    _shockId = new();
+    // §news-permanence: per-stock shock decomposed into a TRANSIENT overshoot (decays at the per-event Tau) and a
+    // PERMANENT residual floor (decays slowly at ResidualHalfLifeSec). Legacy impulses (α=0/τ=0 sentinel) put the whole
+    // step into Transient at the global half-life ⇒ Residual stays 0 ⇒ byte-identical to the pre-permanence engine.
+    private struct ShockState { public double Transient; public double Residual; public double TauSec; }
+    // Per-stock signed shock state; only entries with |transient| ≥ floor OR |residual| ≥ floor are kept. shockId
+    // persists across decay so a fresh impulse from rest increments it (reshuffling the chaser cohort).
+    private readonly Dictionary<int, ShockState> _shock   = new();
+    private readonly Dictionary<int, int>        _shockId = new();
     private int  _activeCount;
     private int  _arrivalsSinceLog;
     private long _simTick;
@@ -72,7 +77,8 @@ internal sealed class ExogenousShockService
     internal ExogenousShockService(IStockService stocks, StockProfileService profiles,
         ILogger<ExogenousShockService> logger, IShockSource source,
         bool enabled = false, double decayHalfLifeSec = 300.0, double cap = 0.06,
-        double floor = 0.001, double softWallK = 0.1, double difficultyMult = 1.0)
+        double floor = 0.001, double softWallK = 0.1, double difficultyMult = 1.0,
+        double residualHalfLifeSec = 10800.0)
     {
         _stocks   = stocks   ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -80,6 +86,7 @@ internal sealed class ExogenousShockService
         _source   = source   ?? throw new ArgumentNullException(nameof(source));
         _enabled  = enabled;
         _decayHalfLifeSec = Math.Max(MinDtSec, decayHalfLifeSec);
+        _residualHalfLifeSec = Math.Max(MinDtSec, residualHalfLifeSec);
         _cap       = Math.Max(0.0, cap);
         _floor     = Math.Clamp(floor, 0.0, _cap);
         _softWallK = Math.Max(0.0, softWallK);
@@ -98,27 +105,49 @@ internal sealed class ExogenousShockService
         _lastTickUtc = now;
         _simTick++;
 
-        // 1) Exponential decay by half-life; drop dust below the floor.
+        // 1) Decay each entry: the TRANSIENT overshoot bleeds at its per-event half-life toward the raised floor,
+        //    the PERMANENT residual bleeds slowly toward 0 (spec §1.3). Legacy sentinel entries hold Residual=0 and
+        //    TauSec=global half-life ⇒ this is bit-for-bit the old single-accumulator decay. Drop only when BOTH
+        //    components fall below the floor. residual *= keep with residual==0 stays 0 ⇒ no round-trip drift off.
         if (_shock.Count > 0)
         {
-            double keep = Math.Pow(0.5, dt / _decayHalfLifeSec);
+            double keepR = Math.Pow(0.5, dt / _residualHalfLifeSec);
             foreach (var sid in _shock.Keys.ToList())
             {
-                double v = _shock[sid] * keep;
-                if (Math.Abs(v) < _floor) _shock.Remove(sid);
-                else _shock[sid] = v;
+                var e = _shock[sid];
+                double tau = e.TauSec > 0.0 ? e.TauSec : _decayHalfLifeSec;
+                e.Transient *= Math.Pow(0.5, dt / tau);
+                e.Residual  *= keepR;
+                if (Math.Abs(e.Transient) < _floor && Math.Abs(e.Residual) < _floor) _shock.Remove(sid);
+                else _shock[sid] = e;
             }
         }
 
         // 2) Apply arrivals from the source. shockId bumps ONLY on a genuine new-impulse-from-rest (hysteresis),
-        //    so a shock hovering at the floor can't reshuffle the chaser cohort every tick.
+        //    so a shock hovering at the floor can't reshuffle the chaser cohort every tick. The soft-wall clamps the
+        //    TOTAL (transient+residual) to ±Cap; the applied step is then split α→residual / (1−α)→transient.
         foreach (var imp in _source.Poll(_simTick, dt))
         {
             int sid = imp.StockId;
-            bool wasAtRest = !_shock.TryGetValue(sid, out var prev);
-            double next = BotMath.SoftWallStep(prev, imp.SignedMagnitude * Mult(sid), _cap, _softWallK);
+            bool wasAtRest = !_shock.TryGetValue(sid, out var e);
+            double prevTotal = e.Transient + e.Residual; // 0 when at rest (default struct)
+            double next = BotMath.SoftWallStep(prevTotal, imp.SignedMagnitude * Mult(sid), _cap, _softWallK);
             if (Math.Abs(next) < _floor) continue; // negligible after the wall — ignore
-            _shock[sid] = next;
+            if (imp.DecayHalfLifeSec <= 0.0)
+            {
+                // Legacy sentinel: the WHOLE clamped step is transient at the global half-life — EXACT pre-permanence
+                // assignment (next, not prevTotal+applied) so there is no floating-point round-trip ⇒ byte-identical.
+                e.Transient = next;
+                e.TauSec    = _decayHalfLifeSec;
+            }
+            else
+            {
+                double applied = next - prevTotal; // the effective step after the joint soft-wall
+                e.Residual  += imp.PermanentFraction * applied;        // α·M → permanent floor
+                e.Transient += (1.0 - imp.PermanentFraction) * applied; // (1−α)·M → transient overshoot
+                e.TauSec     = imp.DecayHalfLifeSec;                    // newer event wins (refractory: no parallel floor)
+            }
+            _shock[sid] = e;
             if (wasAtRest) _shockId[sid] = _shockId.GetValueOrDefault(sid) + 1;
             _arrivalsSinceLog++;
             if (_logger.IsEnabled(LogLevel.Information))
@@ -159,9 +188,16 @@ internal sealed class ExogenousShockService
     #endregion
 
     #region Reads (hot path — loop-thread only)
-    /// <summary>Signed current shock (fraction of seed) for a stock; 0 when disabled, unseen, or at rest.</summary>
+    /// <summary>Signed TOTAL shock (transient + permanent residual, fraction of seed) for a stock; 0 when disabled,
+    /// unseen, or at rest. Feeds the FundamentalService anchor tilt (so the raised residual re-rates the level).</summary>
     internal double GetShock(int stockId)
-        => _enabled && _shock.TryGetValue(stockId, out var v) ? v : 0.0;
+        => _enabled && _shock.TryGetValue(stockId, out var e) ? e.Transient + e.Residual : 0.0;
+
+    /// <summary>§news-permanence: the TRANSIENT overshoot only (excludes the permanent residual). Feeds the chaser
+    /// cohort so it chases the fresh burst that fades at τ½, NOT the durable floor (which needs no perpetual taker
+    /// flow — the anchor holds it). Equals <see cref="GetShock"/> when permanence is off (residual is always 0).</summary>
+    internal double GetTransient(int stockId)
+        => _enabled && _shock.TryGetValue(stockId, out var e) ? e.Transient : 0.0;
 
     /// <summary>Monotonic impulse-generation id for a stock (0 when none) — keys the per-shock chaser reshuffle.</summary>
     internal int GetShockId(int stockId)
@@ -184,7 +220,7 @@ internal sealed class ExogenousShockService
     {
         if (!_logger.IsEnabled(LogLevel.Information)) return;
         double maxAbs = 0.0, sumAbs = 0.0;
-        foreach (var v in _shock.Values) { var a = Math.Abs(v); sumAbs += a; if (a > maxAbs) maxAbs = a; }
+        foreach (var e in _shock.Values) { var a = Math.Abs(e.Transient + e.Residual); sumAbs += a; if (a > maxAbs) maxAbs = a; }
         int total = _stocks.ById.Count;
         double duty = total > 0 ? (double)_activeCount / total : 0.0;
         _logger.LogInformation(
@@ -202,8 +238,10 @@ internal sealed class ExogenousShockService
         {
             foreach (var sid in _stocks.ById.Keys)
             {
-                _shock.TryGetValue(sid, out var v);
-                var sample = new ShockSample(now, sid, (decimal)v, GetShockId(sid), Math.Abs(v) >= _floor);
+                _shock.TryGetValue(sid, out var e);
+                double total = e.Transient + e.Residual;
+                bool active = Math.Abs(e.Transient) >= _floor || Math.Abs(e.Residual) >= _floor;
+                var sample = new ShockSample(now, sid, (decimal)total, (decimal)e.Residual, GetShockId(sid), active);
                 _samples.Enqueue(sample);
                 _store.Append(sample);
             }
@@ -220,8 +258,8 @@ internal sealed class ExogenousShockService
         ShockSample[] snapshot;
         lock (_samples) snapshot = _samples.ToArray();
 
-        var sb = new StringBuilder(256 + snapshot.Length * 48);
-        sb.AppendLine("TimestampUtc,StockId,Shock,ShockId,Active");
+        var sb = new StringBuilder(256 + snapshot.Length * 56);
+        sb.AppendLine("TimestampUtc,StockId,Shock,Residual,ShockId,Active");
         var inv = CultureInfo.InvariantCulture;
         for (int i = 0; i < snapshot.Length; i++)
         {
@@ -230,6 +268,7 @@ internal sealed class ExogenousShockService
             sb.Append(r.TimestampUtc.ToString("O", inv)).Append(',')
               .Append(r.StockId).Append(',')
               .Append(r.Shock.ToString(inv)).Append(',')
+              .Append(r.Residual.ToString(inv)).Append(',')
               .Append(r.ShockId).Append(',')
               .Append(r.Active ? '1' : '0')
               .Append('\n');
@@ -251,6 +290,7 @@ internal sealed class ExogenousShockService
 internal readonly record struct ShockSample(
     DateTime TimestampUtc,
     int      StockId,
-    decimal  Shock,
+    decimal  Shock,      // total = transient + residual
+    decimal  Residual,   // §news-permanence: the permanent floor component only
     int      ShockId,
     bool     Active);

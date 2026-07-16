@@ -71,4 +71,33 @@ internal static class BotMath
         double span = max - min;
         return min + span * Math.Pow(rng.NextDouble(), exp);
     }
+
+    /// <summary>Standard-normal draw via Box–Muller. Consumes exactly two RNG draws (deterministic given the rng).</summary>
+    internal static double NextGaussian(Random rng)
+    {
+        double u1 = 1.0 - rng.NextDouble(); // (0,1] so Log is finite
+        double u2 = 1.0 - rng.NextDouble();
+        return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
+    }
+
+    /// <summary>Standard-normal CDF Φ(x) = ½·(1+erf(x/√2)), erf via Abramowitz–Stegun 7.1.26 (|err| ≤ 1.5e-7). RNG-free.</summary>
+    internal static double NormalCdf(double x)
+    {
+        double sign = x < 0.0 ? -1.0 : 1.0;
+        double ax = Math.Abs(x) / 1.4142135623730951; // |x|/√2
+        double t = 1.0 / (1.0 + 0.3275911 * ax);
+        double y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592)
+                         * t * Math.Exp(-ax * ax);
+        return 0.5 * (1.0 + sign * y);
+    }
+
+    /// <summary>Poisson(λ) sample via Knuth's multiplicative method. <c>λ ≤ 0 ⇒ 0</c>. Consumes ≥1 RNG draw when λ &gt; 0.</summary>
+    internal static int SamplePoisson(Random rng, double lambda)
+    {
+        if (lambda <= 0.0) return 0;
+        double l = Math.Exp(-lambda), p = 1.0;
+        int k = 0;
+        do { k++; p *= rng.NextDouble(); } while (p > l);
+        return k - 1;
+    }
 }

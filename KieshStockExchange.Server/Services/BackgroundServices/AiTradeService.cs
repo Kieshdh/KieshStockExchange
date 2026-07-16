@@ -410,6 +410,41 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // SectorCount 1 OR SectorFraction 0 ⇒ every pulse market-wide ⇒ byte-identical.
         var exogSectorCount    = _configuration.GetValue("Bots:ExogShock:SectorCount", 1);
         var exogSectorFraction = _configuration.GetValue("Bots:ExogShock:SectorFraction", 0.0);
+        // §news-permanence: variable permanence + α↔τ coupling + aftershocks (spec docs/NEWS_PERMANENCE_COUPLING.md).
+        // Master gate default false ⇒ the permanence RNG is never constructed, impulses carry the α=0/τ=0 sentinel, and
+        // the shock state machine is byte-identical to today's decay-to-zero. Only read when the block is present.
+        var permEnabled = _configuration.GetValue("Bots:ExogShock:Permanence:Enabled", false);
+        var perm = new NewsPermanenceOptions
+        {
+            Enabled             = permEnabled,
+            AlphaMin            = _configuration.GetValue("Bots:ExogShock:Permanence:AlphaMin", 0.30),
+            AlphaMax            = _configuration.GetValue("Bots:ExogShock:Permanence:AlphaMax", 0.90),
+            AlphaSpread         = _configuration.GetValue("Bots:ExogShock:Permanence:AlphaSpread", 0.40),
+            TauMedianSec        = _configuration.GetValue("Bots:ExogShock:Permanence:TauMedianSec", 1500.0),
+            TauSpread           = _configuration.GetValue("Bots:ExogShock:Permanence:TauSpread", 0.40),
+            TauMinSec           = _configuration.GetValue("Bots:ExogShock:Permanence:TauMinSec", 300.0),
+            TauMaxSec           = _configuration.GetValue("Bots:ExogShock:Permanence:TauMaxSec", 2400.0),
+            Coupling            = _configuration.GetValue("Bots:ExogShock:Permanence:Coupling", 0.6),
+            ResidualHalfLifeSec = _configuration.GetValue("Bots:ExogShock:Permanence:ResidualHalfLifeSec", 10800.0),
+            PermRngSeed         = _configuration.GetValue("Bots:ExogShock:Permanence:PermRngSeed", 0),
+            AfterLambda         = _configuration.GetValue("Bots:ExogShock:Permanence:Aftershock:Lambda", 0.6),
+            AfterDelayMedianSec = _configuration.GetValue("Bots:ExogShock:Permanence:Aftershock:DelayMedianSec", 300.0),
+            AfterDelaySpread    = _configuration.GetValue("Bots:ExogShock:Permanence:Aftershock:DelaySpread", 0.6),
+            AfterMagFracMin     = _configuration.GetValue("Bots:ExogShock:Permanence:Aftershock:MagFracMin", 0.3),
+            AfterMagFracMax     = _configuration.GetValue("Bots:ExogShock:Permanence:Aftershock:MagFracMax", 0.7),
+            AfterSameSignProb   = _configuration.GetValue("Bots:ExogShock:Permanence:Aftershock:SameSignProb", 0.7),
+            AfterDecay          = _configuration.GetValue("Bots:ExogShock:Permanence:Aftershock:Decay", 0.5),
+            AfterMaxDepth       = _configuration.GetValue("Bots:ExogShock:Permanence:Aftershock:MaxDepth", 1),
+            Individual = (_configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Individual:AlphaShift", 0.00),
+                          _configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Individual:TauMult", 1.0),
+                          _configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Individual:LambdaAfter", 0.6)),
+            Sector     = (_configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Sector:AlphaShift", -0.10),
+                          _configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Sector:TauMult", 1.6),
+                          _configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Sector:LambdaAfter", 0.4)),
+            Global     = (_configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Global:AlphaShift", -0.22),
+                          _configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Global:TauMult", 2.4),
+                          _configuration.GetValue("Bots:ExogShock:Permanence:Tiers:Global:LambdaAfter", 0.3)),
+        };
         var exogSource = new RandomShockSource(stocks,
                         meanIntervalMinutes: _configuration.GetValue("Bots:ExogShock:MeanIntervalMinutes", 3.0),
                         minMagnitude:        _configuration.GetValue("Bots:ExogShock:MinMagnitude", 0.01),
@@ -418,14 +453,18 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         // §global-exog: fraction of shock arrivals that fire MARKET-WIDE (shared → cross-stock corr); 0 ⇒ per-stock-only.
                         globalFraction:      _configuration.GetValue("Bots:ExogShock:GlobalFraction", 0.0),
                         sectorCount:         exogSectorCount,
-                        sectorFraction:      exogEnabled ? exogSectorFraction : 0.0);
+                        sectorFraction:      exogEnabled ? exogSectorFraction : 0.0,
+                        // §news-permanence: gated on BOTH the exog master flag AND the permanence flag ⇒ off unless both on.
+                        permanence:          (exogEnabled && permEnabled) ? perm : null);
         _news      = new ExogenousShockService(stocks, _profiles,
                         new SeparatorLogger<ExogenousShockService>(loggerFactory, loggerOptions), exogSource,
                         enabled:          exogEnabled,
                         decayHalfLifeSec: _configuration.GetValue("Bots:ExogShock:DecayHalfLifeSec", 300.0),
                         cap:              exogCap,
                         softWallK:        _configuration.GetValue("Bots:ExogShock:SoftWallK", 0.1),
-                        difficultyMult:   _configuration.GetValue("Bots:ExogShock:DifficultyMult", 1.0));
+                        difficultyMult:   _configuration.GetValue("Bots:ExogShock:DifficultyMult", 1.0),
+                        // §news-permanence: slow bleed of the permanent floor (~3h). Inert when no residual accrues (off).
+                        residualHalfLifeSec: perm.ResidualHalfLifeSec);
 
         // Anti-runaway validation for AnchorTracksShock: the moving target must stay provably INTERIOR to the
         // hard overheat veto. Require Enabled, CapFromSeed=true (veto pinned to SEED while the soft target
@@ -955,7 +994,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         chaserBuyRoomRelaxFrac:    exogEnabled ? exogChaserBuyRoomRelaxFrac : 0.0,
                         chaserIntervalTicks:       exogEnabled ? exogChaserIntervalTicks : 0,
                         exogCap:                   exogCap,
-                        shockOf:                   _news.GetShock,
+                        // §news-permanence: the chaser reads the TRANSIENT burst (GetTransient) so it chases the fresh
+                        // pop that fades at τ½, NOT the durable residual floor (the anchor holds that without needing
+                        // perpetual taker flow). Equals GetShock when permanence is off ⇒ byte-identical.
+                        shockOf:                   _news.GetTransient,
                         shockIdOf:                 _news.GetShockId,
                         anyShockActive:            () => _news.AnyActive,
                         // §global co-fire: same-tick, same-sign taker burst across all stocks on a market-wide pulse.
