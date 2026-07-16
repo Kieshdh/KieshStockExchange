@@ -1,0 +1,66 @@
+# Chart Drawing Overhaul — Final Inspection Report
+
+## 1) VERDICT
+
+**Sound and buildable — the panel architecture is a keeper, but do not build against the spec as written.** Confidence: **high.** The core (one shell, kind-gated sections, two mutate seams) is unanimously endorsed and grounded in the real `ChartTypes.cs` model. The failure mode is at the *edges*: a phase plan that predates the addendum, an undo/lock contract that corrupts as written, and a Position tool carrying three unstored fields. All are afternoon-scale doc fixes, not a redesign. Resolve the MUST-FIX list, then build.
+
+---
+
+## 2) MUST-FIX BEFORE BUILD
+
+**M1. Rewrite the 5-phase plan — ~40% of the spec has no phase.** (Unanimous; highest blast radius.) §5 predates the §11 addendum and never mentions Magnet, Lock, Delete-all button, Brush/Highlighter + Smoothing, Circle/Triangle/Arc/RotatedRect, Comment/PriceLabel, Manual, ExtendedLine, crosshair, axis density, MA-panel reorg. A phase-by-phase builder will "finish" without them. **Fix:** re-slot every addendum item onto the final rail (see §4). Critically, **Magnet moves into P2** — every later anchor tool must route through its snap helper; building it late forces retrofits.
+
+**M2. Make "tool = Kind + preset" the load-bearing rule.** (First-Principles A1, Contrarian B2, Executor A11, Outsider A8.) Kills ambiguities #1/#2/#8 and most enum churn at once. Concretely: `Freehand` **is** Brush (existing member — say so, don't add one); Highlighter, Circle, Long, Short, Manual, Comment, PriceLabel = **presets in a static table** (seed style + placement constraint), *not* Kinds. Only genuinely new enum members: `RotatedRect`, `Triangle`, `Arc` (append-only per the enum's own NOTE). The §6 `Show*` bools then need only those three added, and the §7 table stops being stale by construction.
+
+**M3. Fix the undo/lock contract — it corrupts as written.** (Unanimous.) Ship the one-sentence rule: **locking a drawing purges every undo/redo entry referencing it; lock/unlock are themselves not undoable.** Then bound the rest: push one entry **per gesture** (pointer-down for drags, commit for polyline, `DragCompleted` for sliders — never per move-frame); cap ~50; **stacks cleared on stock switch** (entries hold Guids from the prior stock's list — selection is already nulled at `ChartViewModel.cs:1316`, the stacks need the same); **Set-as-default is not undoable** (writes Preferences, not a drawing); state explicitly whether style/leg edits enter the stack (recommend: add/move/delete only, else every `MutateSelectedStyle` becomes a frame).
+
+**M4. Position tool has three unstored fields — patch the data model.** (Contrarian A6, First-Principles A3, Executor A11, Expansionist A4/A8.) §8 edits qty + shows PnL amounts, but §9 adds only `P3`. Fixes: (a) add trailing `decimal Qty = 0m` to `DrawingObject` — don't let it get stuffed in `Text`; (b) **direction (long/short) needs storage or a derive-rule that survives mid-edit** — inferring `target>entry` flips the box visually while the user is typing a leg; (c) **cut Risk% from v1** — it has no account-equity hookup and the global-Preferences-scalar-edited-per-box design (spec's own flag #12) silently retunes every box; keep Qty, amounts, R:R; (d) "PnL (live/**closed**)" — there is no order, so "closed" is undefined; **live-only** vs current price; (e) document P1=Entry, P2=Target, P3=Stop.
+
+**M5. Split the opacity concept and fix the Fill serialization bug.** (Flags #3/#4; Contrarian A5 grounded.) Split `ShowFillSection` → `ShowFillColor` + `ShowOpacity` (Position gets opacity only — one bool can't express "slider but no colour grid"). For strokes, the cheapest correct path is **stroke transparency rides the colour's alpha channel** — `ColorJsonConverter` already round-trips `#AARRGGBB`, so Highlighter = Brush + low-alpha seed with **zero new field**. **Grounded bug to fix regardless:** `ColorJsonConverter.Write` coalesces null → default blue (`ChartTypes.cs:142`), so a `Color? Fill = null` "∅ none" persists and reloads as a *blue fill*. Use `Colors.Transparent` as the no-fill sentinel or teach the converter to write null.
+
+**M6. Snapshot as spec'd is not implementable — respec it.** (Executor A2 grounded.) MAUI has no per-element capture; `Screenshot.CaptureAsync()` is window-level and would contaminate the image with the flyout/pen panel/crosshair. **Fix:** offscreen re-render — `SkiaBitmapExportContext` → `drawable.Draw(canvas, rect)` → PNG (~30 lines, deterministic, drawings included, respects the eye toggle). This makes it a **P1** feature, not P5 — the spec currently places the button in P1 and the capture in P5 (dead button for 3 phases). Destination: clipboard + auto-named file + toast.
+
+**M7. Quantify Magnet and forbid body-snap.** (Flag #11; all voices.) Weak = snap within **8 px** of an OHLC point; Strong = nearest OHLC of the candle whose x-slot contains the cursor, else cursor-free (index arithmetic, O(1) per frame). **Magnet applies to single-anchor placement/drag only — body-moves never snap** (snapping a trend line's two anchors independently changes its slope mid-drag). **Axis-mask:** HLine/HRay snap price only, VLine time only. **Exempt** Brush/Highlighter (per-point OHLC snap = garbage), Measure, Magnifier.
+
+**M8. Escape is a ladder, and accelerators must gate on focus.** (First-Principles A2, Contrarian A7/A8, Executor A4.) Escape: **(1) cancel in-progress placement** (half-drawn polyline / mid-drag shape — the `_drawDragIsNew → RemoveDrawing` path at `ChartView.xaml.cs:991` is the precedent) → **(2) deselect + close panel** → **(3) disarm**; current §4 "does all three at once" loses the cancel state. And the new panel Entries steal focus: **all chart accelerators (Delete, Ctrl+Z/Y) must be gated on no-Entry-focused** and registered at page level, or typing a label correction nukes a drawing.
+
+**M9. Pin down Alert's runtime or defer it.** (Flag #9; all voices, split verdict.) It is the only tool with *behavior after placement* and the only "top-row-not-rail" tool. Minimum spec: fires **only while its stock's chart is loaded** (client has no other feed), **one-shot** (fired line renders dimmed "triggered @ time", re-arm by dragging), persisted with drawings; the top-row button simply sets `DrawTool = Alert` (member exists) — nothing requires rail origin. **Contrarian's alternative: defer Alert to its own task** — the gated ALERT section slots in later exactly as the architecture promises. Owner's call, but pick one; do not ship a decorative line.
+
+**M10. Smaller grounded correctness items to fold in:** `EditingKind`'s `Drawings.First(...)` → **`FirstOrDefault`** (SelectedDrawingId goes stale after delete-all/undo and `First` throws); **crosshair** `ProtectedCursor` is a *protected* member — set via one-time cached reflection (what CommunityToolkit does) and reset on PointerExited/CaptureLost/disarm; **slider** must preview on `ValueChanged` + commit on `DragCompleted` **plus a debounce** (track-click/keyboard fire ValueChanged with no DragCompleted → lost commits); **Delete key** = selected-first, else last-touched; **eye-off + arm tool** auto-re-enables the eye (drawing invisibly is a trap); **move drawings JSON out of `Preferences` into a per-stock file** with a `"v":1` version field (Brush strokes make the blob fat; Preferences rewrites its whole store per Set).
+
+---
+
+## 3) CREATIVE IMPROVEMENTS (ranked by value/effort)
+
+| # | Improvement | Call | Value/effort |
+|---|---|---|---|
+| C1 | **Shift-constrain** — trend→0/45/90°, Ellipse→circle, Rect→square | **KEEP-NOW (fold into P2)** | Unanimous pick. Shift-state already read (`:492`). Huge feel win, and makes the "Circle (perfect)" preset nearly free. |
+| C2 | **Alert → real notification sink** — on cross, MAUI toast + bell/badge in existing `TopNavBarViewModel` | **KEEP-NOW (P5, as a requirement not an option)** | Trading-app standout. Spec hand-waves "ties into notifications"; without this the Alert tool is decorative. All client-side. |
+| C3 | **Ctrl = momentary magnet + snap ring** — hold Ctrl inverts magnet state; flash a ring on the snapped OHLC point | **KEEP-NOW (fold into P2 magnet)** | TradingView parity; one modifier check in the snap path you're building anyway. Ring stops weak-magnet feeling "haunted." |
+| C4 | **Status hint strip** — one bound label: "Click 2nd point · Esc cancels" and live `Δ +2.34 (+1.8%) · 14 bars` during drag | **KEEP-NOW (P1)** | Outsider's "single biggest feels-pro item," ~1 bound string driven by the placement state machine. |
+| C5 | **Magnet candidate-set = OHLC + active order lines + MA points** — `OpenOrderLines` (`ChartViewModel.cs:544`) and `BuildEnabledMas` (`:1681`) already exist as point lists | **KEEP-NOW (build the shape into P2 magnet)** | Trading-app standout (snap-to-order-line/MA). ~20 lines *if* magnet is a candidate-set from day one; retrofitting later is costly. |
+| C6 | **Position box → "Prefill order"** — button opens/prefills `PlaceOrderViewModel` (`:340`) with qty/limit=entry/TP=target/SL=stop | **KEEP-NOW-lite (P5)** | Trading-app standout (position→real order). Prefill-not-submit = one click from the user's existing confirm flow, no server change, no order-safety surface. Turns the Position tool from a picture into the app's best order-entry UX. |
+| C7 | **Double-click drawing → select + open panel** (right field focused) | **KEEP-NOW (P3)** | TradingView muscle memory; one hit-test reuse. |
+| C8 | **Sticky arming** — double-click a rail tool stays armed for repeat placement (single click = one-shot); Esc exits | **KEEP-NOW (P1, part of the lifecycle spec)** | ~10 lines, big QoL for multi-line/channel users; must be decided anyway since M-lifecycle defines one-shot. |
+| C9 | **Convert HLine/PriceLabel → Alert** (panel/right-click, seeds amber+dash) | **KEEP-NOW (P5, with Alert)** | One mutate; users always draw the level first, then want the alert. |
+| C10 | **Per-tool shortcuts** (Alt+T trend, Alt+R rect, …) printed in flyout labels | KEEP-NOW-if-cheap (P1) | One switch extension at `:1042`; doubles as discoverability. Skip if flyout labels get crowded. |
+| C11 | **Ctrl+drag / Ctrl+D duplicate** selected drawing | **DEFER** | Substitutes for a parallel-channel tool (traders clone trendlines constantly), but adds new interaction state. Bank it. |
+| C12 | **Measure → copy stats to clipboard** (Δprice·Δ%·Δbars·Δtime) | DEFER (cheap add later) | ~10 lines inside the one-shot measure. |
+| C13 | **Server-synced drawings** — one JSON blob per (user, stock, currency) via a k-v endpoint | **DEFER** | Trading-app standout but violates this task's "client-only, no server impact." The `"v":1` field in M10 is its down-payment. |
+| C14 | **Fib retracement** — reserve the enum member + a rail group slot now | **DEFER (reserve slot)** | Outsider: the #1 TradingView-parity hole, out-ranks Arc/Triangle/RotatedRect combined for a chartist. Reserve so the rail doesn't reshuffle later; build as the first post-ship follow-up. |
+
+**Also on the cut list (agree, keep deferred):** Triangle/Arc/RotatedRect (near-zero value in a trading sim, hardest 3-point placement UX — Contrarian argues cut entirely; at minimum let them slip to a "P2b" without blocking P2 sign-off), "Manual" position (hollow — selecting any placed Position already opens the numeric panel; rename to "Position (by price)" or fold away, resolving ambiguity #8 for free), Comment variant (no behavior specified anywhere), risk%/lot-size calculator, right-click context menu (collides with the §0a right-click-deselect gesture).
+
+---
+
+## 4) PHASING TWEAKS
+
+Order is right (rail-first, undo-before-toolbar); **contents are stale.** Re-slot as:
+
+- **P1 — Rail foundation.** Add: crosshair cursor (M10), active-tool highlight, axis-label density, **Snapshot (full feature, moved from P5 — M6)**, status hint strip (C4), tool-lifecycle spec incl. sticky arming (M8/C8). Build the flyout as an overlay Grid above the GraphicsView with a hover-close timer (no native control does this).
+- **P2 — Shapes, text & drawing + Magnet.** Rectangle/Ellipse/Text/VLine/Brush(=Freehand)/Highlighter + fill/opacity. **Pull Magnet forward into here** (M1/M7) so every anchor tool routes through its snap helper from the start — build it as a candidate-set (C5) with the snap ring + Ctrl-invert (C3) and Shift-constrain (C1). Eye toggle + Delete-all live here. Triangle/Arc/RotatedRect optional "P2b."
+- **P3 — Undo/redo/delete + Lock.** Build **Lock inside this phase, not after it** — the undo/lock contract (M3) must be co-designed. Add double-click-to-open (C7).
+- **P4 — Top toolbar + settings reorg.** Dropdowns, price-scale menu (Indexed-100/log/invert/move-left), MA-panel tidy + candle-colour relocation. Note: every drawing's price→pixel must route through the active scale transform, or log/percent scale bends straight lines and mis-maps the Magnifier's Y box.
+- **P5 — Trading tools.** Long/Short position (with M4 model fixes), Arrow marker, **Alert as a real notification sink (C2, requirement not option) or formally deferred (M9)**, Position→Prefill-order (C6), Convert-to-alert (C9).
+
+**One swap only vs. the given order: Snapshot P5 → P1.** Everything else is same-order, corrected-contents.
