@@ -39,3 +39,23 @@ services:
         PATH="$$PATH:/root/.dotnet/tools" dotnet ef database update \
           --project KieshStockExchange.Server \
           --startup-project KieshStockExchange.Server
+
+  server:
+    # Prod-only Bots config, applied as env overrides (reversible, no schema).
+    # These reflect the LIVE prod deployment; rolling one back = delete its line
+    # (or restore a docker-compose.prod.yml.pre-* backup) + `up -d server`.
+    environment:
+      # Fear/Greed per-strategy reaction system (Stage A+B, live since 2026-07-14).
+      Bots__Mood__Enabled: "true"
+      Bots__Mood__TakerCoupling: "true"
+      Bots__Mood__ConvictionFearBid: "true"
+      Bots__Mood__PerStrategy: "true"
+      Bots__Mood__MMWiden: "true"
+      # GlobalCoFire cross-stock correlation lever @0.10 (council-approved, live 2026-07-16).
+      Bots__ExogShock__Enabled: "true"
+      Bots__ExogShock__GlobalFraction: "0.4"
+      Bots__ExogShock__MeanIntervalMinutes: "0.5"
+      Bots__ExogShock__GlobalCoFire: "true"
+      Bots__ExogShock__GlobalCoFireFraction: "0.15"
+      Bots__ExogShock__GlobalCoFireNotionalFrac: "0.1"
+      Bots__ExogShock__AnchorTracksShock: "false"
