@@ -123,14 +123,22 @@ section.
   much empty space. Add a **`+` / `−`** control **next to the auto-scale (Y-Auto) button** to tighten/loosen
   the Y-padding (adjust `YPaddingPercent`, persisted; sensible clamp e.g. 0–15%). Lower the default too.
 
-## Storage — DECIDED: local, user-scoped
-Drawings stay **local on the client PC** (MAUI `Preferences`, JSON) — no server, no cross-device sync (owner
-preference). **FIX the current gap:** the key is device-global (`chart_drawings_<stock+currency>`), so a
-second account on the same PC would see the first's drawings. **Scope the key by user** →
-`chart_drawings_<userId>_<stock+currency>` (also the default-pen key). Behavior:
-- Persist **through logout** — the same user logging back in on that PC gets their drawings back.
-- **No cross-user leak** — a different account on the same PC sees only its own.
-- Not synced across devices / lost on reinstall (accepted). Server-sync (`UserDrawings` table) = future-only.
+## Storage — DECIDED: server-side, per user (own ULTRAPLAN)
+Drawings move to the **server**, scoped to the user's account (cross-device, survives reinstall, no
+cross-user leak). This is a separate, well-bounded feature = its **own ultraplan** (server DB + client
+persistence swap), distinct from the interactive client drawing-tools build:
+- **Server:** a `UserDrawings` table (userId, stockId, currency, JSON payload of the drawings list, updatedAt)
+  + EF migration + CRUD endpoints (get/save/delete per user+stock+currency), following the existing DB/API
+  patterns. The `DrawingObject`/`DrawStyle` JSON is the wire contract.
+- **Client:** replace the direct `Preferences` calls (`PersistDrawings`/`LoadDrawingsForSelected`) with an
+  `IDrawingStore` abstraction — server-backed, with a local cache for offline/perf and last-write-wins on
+  reconnect. Loads on stock switch + auth.
+- **Batched writes (owner):** never write per-change. The client **debounces + coalesces** drawing edits and
+  **flushes them in batches**; the server persists each batch in one transaction (mirrors the engine's
+  existing group-commit / `RunInTransactionAsync` convention). Flush triggers = debounce timer + stock-switch
+  + app-background/logout; a single dirty-set per user+stock+currency (not N row writes).
+- Current local `Preferences` blobs = legacy; optional one-time migrate-up on first login.
+The drawing-TOOLS build (rail, shapes, panels, undo) is independent of the backend and proceeds phased.
 
 ## Settings reorg
 - **Moving-average panel** — tidy it to MA-only. Remove the **candle-colour** controls that currently sit
