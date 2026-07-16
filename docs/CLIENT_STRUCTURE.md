@@ -38,6 +38,17 @@ Three assemblies:
 
 Layering mirrors the folder tree — **by convention only** (no analyzer or architecture test enforces it): `Views/` (XAML + code-behind) → `ViewModels/` → `Services/` (grouped `DataServices`, `MarketDataServices`, `MarketEngineServices`, `PortfolioServices`, `UserServices`, `BackgroundServices`, `OtherServices`, `SignalR`) → HTTP/hub → server. Code-behind is view-only (layout math, `BindingContext` fan-out); all logic lives in a VM or a service.
 
+### 1.1 Build, TFMs & running
+
+**Two TFMs, one solution.** The client head (`KieshStockExchange.csproj`) is a MAUI app targeting **`net9.0-windows10.0.19041.0`** (Windows is the primary target). `KieshStockExchange.Shared` targets plain **`net9.0`** and is pulled into the client via `ProjectReference` at its native TFM — the Windows moniker applies only to the MAUI head, not the shared library. That is why the wire DTOs (`Order`, `Fund`, `Position`, `LiveQuote`, `Candle`, …) are literally the same compiled types on client and server (§1): both reference the one `net9.0` Shared assembly.
+
+**Build the csproj, not the .sln.** Point the SDK at the client project and pass the Windows TFM explicitly — building the solution drags in TFM combinations that don't apply here:
+```bash
+dotnet build KieshStockExchange/KieshStockExchange.csproj -f net9.0-windows10.0.19041.0
+dotnet run   --project KieshStockExchange/KieshStockExchange.csproj -f net9.0-windows10.0.19041.0
+```
+**It needs a server to talk to.** The client is a thin shell (§1) — with no reachable `Server:BaseUrl` (read once from `Resources/Raw/appsettings.json`, fallback `http://localhost:5000`, §2) every screen shows empty cards. Run/point at a `KieshStockExchange.Server` instance first. That same `Resources/Raw/appsettings.json` is where the client mirrors server-coupled constants like `Candles:HLMinFillSize` (§2) — keep it in sync with the server when those change. *(Commands from the repo `CLAUDE.md`; TFMs from the two csproj files — grep `<TargetFramework` if either moniker looks stale.)*
+
 ---
 
 ## 2. Composition root — `MauiProgram.CreateMauiApp` (`MauiProgram.cs`)
