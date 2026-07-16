@@ -104,7 +104,7 @@ Only after the loop validates: consider making F&G the primary emotional layer w
 anchor. Not a starting assumption (would lose the independent bounding floor).
 
 ## Docs
-Update `docs/BOT_MECHANICS.md` (§2 mechanism reference) with the full F&G system: the one-axis-three-timescales
+Update `docs/explainers/BOT_MECHANICS.md` (§2 mechanism reference) with the full F&G system: the one-axis-three-timescales
 model, the composite formula + signals, the candle persistence, and the reflexive coupling — Kiesh: "I want this
 system explained well."
 

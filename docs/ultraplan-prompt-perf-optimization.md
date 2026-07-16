@@ -104,7 +104,7 @@ miss), (c) **CPU-bound vs round-trip-bound attribution** per op. Deliverable: th
 **Phase 2 — reduce the WORK, not just its speed (First Principles' big-but-contained win): sparse activation.** Most real participants are idle
 most of the time, yet the loop runs every active bot's full decision pipeline (multi-timescale rings + slope model + anchors + homeostasis) every
 tick. Give each bot a personal wake-schedule / cooldown so only a fraction decide per tick → cut decision load 80-90%. **MUST be validated against
-the realism scorecard** (`docs/BOT_MECHANICS.md` §1 + the soak gate-set) via an A/B (dense vs sparse): correlation, damping, ret_acf, CK must hold —
+the realism scorecard** (`docs/explainers/BOT_MECHANICS.md` §1 + the soak gate-set) via an A/B (dense vs sparse): correlation, damping, ret_acf, CK must hold —
 sparse activation changes fleet dynamics, so it is NOT free behaviorally.
 
 **Phase 3 — the structural unlock (highest reward + risk; gate on Phase 0-2 data): decouple simulation state from persistence cadence.** A
