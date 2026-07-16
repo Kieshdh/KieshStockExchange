@@ -1,7 +1,5 @@
-const T = require("./kse_theme.js");
-const { C } = T;
-const N = 1;
-const p = T.newDeck("01 — Architecture: the system map");
+module.exports = function(T, p) {
+  const C = T.C; const N = 1;
 
 // 1 · TITLE
 T.titleSlide(p, {
@@ -139,5 +137,4 @@ T.closingSlide(p, {
   notes: "Hand off to deck 2. The natural verbal bridge: we've seen the pipeline; now let's meet the 20,000 traders that keep it full.",
 });
 
-const out = "C:/Users/kjden/source/repos/Kieshdh/KieshStockExchange/docs/explainers/slides/01_ARCHITECTURE.pptx";
-p.writeFile({ fileName: out }).then(() => console.log("wrote", out));
+};
