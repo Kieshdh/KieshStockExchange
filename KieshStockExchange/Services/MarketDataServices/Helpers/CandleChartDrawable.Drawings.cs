@@ -41,7 +41,7 @@ public sealed partial class CandleChartDrawable
             // A selected/active line paints a touch thicker. DrawStraightSegment sets its own stroke, so
             // this pre-set only serves the polyline branch (which draws its own multi-segment line).
             float stroke = (active || selected) ? thickness + 1f : thickness;
-            var dashPattern = DashPattern(d.Style.Dash);
+            var dashPattern = ChartGeometry.DashPattern(d.Style.Dash);
             canvas.StrokeColor = color;
             canvas.StrokeSize = stroke;
             canvas.StrokeDashPattern = dashPattern;
@@ -53,7 +53,7 @@ public sealed partial class CandleChartDrawable
                 // Horizontal lines never carry a head (they don't "stop") — force None even if a shared
                 // default pen carries an ending. Matches the pen panel hiding End/Head for these tools.
                 StylePreviewDrawable.DrawStraightSegment(canvas, plot.Left, y, plot.Right, y,
-                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
+                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, ChartGeometry.EndSize(thickness));
 
                 // Right-gutter price tag in the line's colour, matching the order-line convention.
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
@@ -72,7 +72,7 @@ public sealed partial class CandleChartDrawable
                 float x1 = X(d.T1);
                 // Origin = click; terminal = plot right edge. No head (horizontal ray doesn't "stop").
                 StylePreviewDrawable.DrawStraightSegment(canvas, x1, y, plot.Right, y,
-                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
+                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, ChartGeometry.EndSize(thickness));
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
                 if (selected) DrawHandle(canvas, x1, y, color);
             }
@@ -104,15 +104,15 @@ public sealed partial class CandleChartDrawable
                 // polyline (one segment shared by both heads) keeps a visible middle gap.
                 bool polyHeadStart = d.Style.Ending is LineEnding.Start or LineEnding.BothOut;
                 bool polyHeadEnd = d.Style.Ending is LineEnding.End or LineEnding.BothOut or LineEnding.BothForward;
-                float polyEff = EndSize(thickness), startCut = 0f, endCut = 0f;
+                float polyEff = ChartGeometry.EndSize(thickness), startCut = 0f, endCut = 0f;
                 if (n >= 2)
                 {
-                    float seg0 = Dist(X(pts[0].T), Y((double)pts[0].P), X(pts[1].T), Y((double)pts[1].P));
-                    float segN = Dist(X(pts[n - 2].T), Y((double)pts[n - 2].P), X(pts[n - 1].T), Y((double)pts[n - 1].P));
+                    float seg0 = ChartGeometry.Dist(X(pts[0].T), Y((double)pts[0].P), X(pts[1].T), Y((double)pts[1].P));
+                    float segN = ChartGeometry.Dist(X(pts[n - 2].T), Y((double)pts[n - 2].P), X(pts[n - 1].T), Y((double)pts[n - 1].P));
                     float lim = float.MaxValue;
                     if (polyHeadStart) lim = Math.Min(lim, seg0 * (n == 2 && polyHeadEnd ? 0.30f : 0.6f));
                     if (polyHeadEnd) lim = Math.Min(lim, segN * (n == 2 && polyHeadStart ? 0.30f : 0.6f));
-                    polyEff = Math.Min(EndSize(thickness), lim);
+                    polyEff = Math.Min(ChartGeometry.EndSize(thickness), lim);
                     // Open head = hollow barb: line runs to the tip (no base-cut), matching the straight kinds.
                     bool polyCut = d.Style.Head != ArrowHeadStyle.Open;
                     startCut = polyHeadStart && polyCut ? polyEff : 0f;
@@ -155,10 +155,10 @@ public sealed partial class CandleChartDrawable
                 // routes through the scale seam (identical to the local Y under RegularScaleTransform).
                 float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _frame.YMin, _frame.YMax, ScaleMode);
                 float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _frame.YMin, _frame.YMax, ScaleMode);
-                var (ax, ay) = RayExit(x1, y1, x2 - x1, y2 - y1, plot);   // forward edge
-                var (bx, by) = RayExit(x1, y1, x1 - x2, y1 - y2, plot);   // backward edge
+                var (ax, ay) = ChartGeometry.RayExit(x1, y1, x2 - x1, y2 - y1, plot);   // forward edge
+                var (bx, by) = ChartGeometry.RayExit(x1, y1, x1 - x2, y1 - y2, plot);   // backward edge
                 StylePreviewDrawable.DrawStraightSegment(canvas, bx, by, ax, ay,
-                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
+                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, ChartGeometry.EndSize(thickness));
                 if (selected)
                 {
                     DrawHandle(canvas, x1, y1, color);
@@ -204,7 +204,7 @@ public sealed partial class CandleChartDrawable
                 bool fHeadStart = fEnding is LineEnding.Start or LineEnding.BothOut;
                 bool fHeadEnd = fEnding is LineEnding.End or LineEnding.BothOut or LineEnding.BothForward;
                 bool fCut = d.Style.Head != ArrowHeadStyle.Open;   // Open barb runs the line to the tip
-                float fEff = EndSize(thickness);
+                float fEff = ChartGeometry.EndSize(thickness);
 
                 var fbody = fscr;
                 if (fEnding != LineEnding.None && fCut && (fHeadStart || fHeadEnd))
@@ -213,8 +213,8 @@ public sealed partial class CandleChartDrawable
                     // tucks fully under the head (no line poking through the tip).
                     float fTrim = fEff + stroke * 0.5f + 1.5f;
                     fbody = (PointF[])fscr.Clone();
-                    if (fHeadEnd) fbody[^1] = PullBack(fscr[^1], fscr[^2], fTrim);
-                    if (fHeadStart) fbody[0] = PullBack(fscr[0], fscr[1], fTrim);
+                    if (fHeadEnd) fbody[^1] = ChartGeometry.PullBack(fscr[^1], fscr[^2], fTrim);
+                    if (fHeadStart) fbody[0] = ChartGeometry.PullBack(fscr[0], fscr[1], fTrim);
                 }
 
                 canvas.StrokeColor = color;
@@ -236,7 +236,7 @@ public sealed partial class CandleChartDrawable
                 // the same fill/opacity + stroke treatment as Rectangle/Ellipse.
                 float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _frame.YMin, _frame.YMax, ScaleMode);
                 float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _frame.YMin, _frame.YMax, ScaleMode);
-                var arrow = BlockArrowPath(x1, y1, x2, y2);
+                var arrow = ChartGeometry.BlockArrowPath(x1, y1, x2, y2);
                 if (arrow is not null)
                 {
                     if (d.Style.Fill is Color afill)
@@ -261,10 +261,10 @@ public sealed partial class CandleChartDrawable
                 float x2 = X(d.T2), y2 = Y((double)d.P2);
                 float farX = x2, farY = y2;
                 if (d.Kind == DrawTool.Ray)
-                    (farX, farY) = RayExit(x1, y1, x2 - x1, y2 - y1, plot);
+                    (farX, farY) = ChartGeometry.RayExit(x1, y1, x2 - x1, y2 - y1, plot);
                 // Origin = anchor1; terminal = anchor2 (Trend) / ray-exit (Ray). Forward = origin→terminal.
                 StylePreviewDrawable.DrawStraightSegment(canvas, x1, y1, farX, farY,
-                    d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
+                    d.Style.Ending, color, stroke, dashPattern, d.Style.Head, ChartGeometry.EndSize(thickness));
                 if (selected)
                 {
                     DrawHandle(canvas, x1, y1, color);
@@ -299,7 +299,7 @@ public sealed partial class CandleChartDrawable
 
         canvas.StrokeColor = color;
         canvas.StrokeSize = thickness;
-        canvas.StrokeDashPattern = DashPattern(style.Dash);
+        canvas.StrokeDashPattern = ChartGeometry.DashPattern(style.Dash);
         if (BuildingIsFreehand)
         {
             // Preview the SAME B-spline the committed freehand uses (smoothing=1), so the live stroke
@@ -322,7 +322,7 @@ public sealed partial class CandleChartDrawable
             var (sx, sy) = scr[0]; var (s2x, s2y) = scr[1];
             var (lx, ly) = scr[^1]; var (l2x, l2y) = scr[^2];
             StylePreviewDrawable.DrawEndings(canvas, sx, sy, s2x - sx, s2y - sy,
-                lx, ly, lx - l2x, ly - l2y, style.Ending, color, EndSize(thickness), style.Head, thickness);
+                lx, ly, lx - l2x, ly - l2y, style.Ending, color, ChartGeometry.EndSize(thickness), style.Head, thickness);
         }
 
         // Vertex dots — polyline placement feedback only; a freehand previews as a bare smooth stroke.
@@ -330,14 +330,6 @@ public sealed partial class CandleChartDrawable
             for (int k = 0; k < pts.Count; k++)
                 DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
     }
-
-    // Solid = no pattern; Dash = medium dashes; Dot = tight dots.
-    private static float[]? DashPattern(DashKind kind) => kind switch
-    {
-        DashKind.Dash => new[] { 5f, 4f },
-        DashKind.Dot => new[] { 1f, 3f },
-        _ => null,
-    };
 
     // Right-gutter price pill (shared by HLine + the trend endpoint tags).
     private void DrawGutterPriceTag(ICanvas canvas, RectF plot, float y, decimal price, Color color, CurrencyType cur)
@@ -431,23 +423,6 @@ public sealed partial class CandleChartDrawable
         canvas.RestoreState();
     }
 
-    // Far intersection of the ray (origin + t·dir, t ≥ 0) with the plot rect — the point where the
-    // ray leaves the box. Origin is assumed inside; returns origin when the direction is degenerate.
-    private static (float x, float y) RayExit(float ox, float oy, float dx, float dy, RectF r)
-    {
-        float t = float.MaxValue;
-        if (dx > 1e-6f) t = Math.Min(t, (r.Right - ox) / dx);
-        else if (dx < -1e-6f) t = Math.Min(t, (r.Left - ox) / dx);
-        if (dy > 1e-6f) t = Math.Min(t, (r.Bottom - oy) / dy);
-        else if (dy < -1e-6f) t = Math.Min(t, (r.Top - oy) / dy);
-        if (t == float.MaxValue) t = 0f;
-        return (ox + dx * t, oy + dy * t);
-    }
-
-    // Bigger, thickness-scaled line-ending head (3 px → ~21 px); arrowhead geometry itself lives on
-    // StylePreviewDrawable so the chart and the pen-tray specimens draw identical heads.
-    private static float EndSize(float thickness) => 12f + 3f * thickness;
-
     private void DrawHandle(ICanvas canvas, float x, float y, Color color)
     {
         canvas.FillColor = color;
@@ -455,29 +430,6 @@ public sealed partial class CandleChartDrawable
         canvas.StrokeColor = OutlineForBackground();
         canvas.StrokeSize = 1f;
         canvas.DrawCircle(x, y, DrawHandleR);
-    }
-
-    // A 7-vertex filled block arrow from tail(tx,ty) → head(hx,hy). Proportions are FIXED fractions of the
-    // length L, so the pointer enlarges (never distorts) as the anchors move apart. Null for a degenerate one.
-    private static PathF? BlockArrowPath(float tx, float ty, float hx, float hy)
-    {
-        float dx = hx - tx, dy = hy - ty;
-        float len = (float)Math.Sqrt(dx * dx + dy * dy);
-        if (len < 4f) return null;
-        float ux = dx / len, uy = dy / len;      // unit tail→head
-        float nx = -uy, ny = ux;                  // unit perpendicular
-        float headLen = 0.40f * len, headHW = 0.25f * len, shaftHW = 0.12f * len;
-        float bx = hx - ux * headLen, by = hy - uy * headLen;   // head base (shaft ↔ barb junction)
-        var path = new PathF();
-        path.MoveTo(tx + nx * shaftHW, ty + ny * shaftHW);      // shaft back, +side
-        path.LineTo(bx + nx * shaftHW, by + ny * shaftHW);      // shaft front, +side
-        path.LineTo(bx + nx * headHW,  by + ny * headHW);       // barb, +side
-        path.LineTo(hx, hy);                                    // tip
-        path.LineTo(bx - nx * headHW,  by - ny * headHW);       // barb, −side
-        path.LineTo(bx - nx * shaftHW, by - ny * shaftHW);      // shaft front, −side
-        path.LineTo(tx - nx * shaftHW, ty - ny * shaftHW);      // shaft back, −side
-        path.Close();
-        return path;
     }
 
     // Uniform cubic B-SPLINE (approximating) over PIXEL control points: the points are CONTROL points and
@@ -522,14 +474,5 @@ public sealed partial class CandleChartDrawable
         canvas.DrawPath(path);
         canvas.StrokeLineCap = LineCap.Butt;
         canvas.StrokeLineJoin = LineJoin.Miter;
-    }
-
-    // Pull `tip` back toward `prev` by `dist` px (ends a freehand stroke at its head's base).
-    private static PointF PullBack(PointF tip, PointF prev, float dist)
-    {
-        float dx = tip.X - prev.X, dy = tip.Y - prev.Y;
-        float len = (float)Math.Sqrt(dx * dx + dy * dy);
-        if (len < 1e-4f) return tip;
-        return new PointF(tip.X - dx / len * dist, tip.Y - dy / len * dist);
     }
 }

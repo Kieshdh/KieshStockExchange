@@ -13,12 +13,12 @@ namespace KieshStockExchange.Services.MarketDataServices;
 public sealed partial class CandleChartDrawable
 {
     #region Axes and Grid
-    // Price <-> normalized-fraction helpers now live on RenderFrame (mode-parameterized statics)
+    // Price <-> normalized-fraction helpers now live on ChartGeometry (mode-parameterized statics)
     // so the per-paint frame and the axes share one definition; hit-testing inverts the same math.
 
     private void DrawYGridAndLabels(ICanvas canvas, RectF plot, double yMin, double yMax, CurrencyType cur)
     {
-        var (niceMin, niceMax, step) = NiceRange(yMin, yMax, maxTicks: 6);
+        var (niceMin, niceMax, step) = ChartGeometry.NiceRange(yMin, yMax, maxTicks: 6);
         canvas.FontColor = Axis;
         canvas.FontSize = AxisFont;
 
@@ -28,7 +28,7 @@ public sealed partial class CandleChartDrawable
 
         for (double v = niceMin; v <= niceMax + 1e-9; v += step)
         {
-            float y = plot.Bottom - (float)(RenderFrame.PriceToFrac(v, yMin, yMax, ScaleMode) * plot.Height);
+            float y = plot.Bottom - (float)(ChartGeometry.PriceToFrac(v, yMin, yMax, ScaleMode) * plot.Height);
             if (y < plot.Top - 1 || y > plot.Bottom + 1) continue;
 
             // Horizontal grid line
@@ -52,8 +52,8 @@ public sealed partial class CandleChartDrawable
 
     private void DrawXGridAndLabels(ICanvas canvas, RectF plot, DateTime tMin, DateTime tMax)
     {
-        TimeSpan step = ChooseTimeStep(tMin, tMax, targetTicks: 7);
-        var first = AlignToStep(tMin, step, forward: true);
+        TimeSpan step = ChartGeometry.ChooseTimeStep(tMin, tMax, targetTicks: 7);
+        var first = ChartGeometry.AlignToStep(tMin, step, forward: true);
 
         canvas.FontColor = Axis;
         canvas.FontSize = AxisFont;
@@ -80,75 +80,4 @@ public sealed partial class CandleChartDrawable
         }
     }
     #endregion
-
-    // Picks the time-step from a fixed candidate list that produces the closest number of ticks to targetTicks.
-    private static TimeSpan ChooseTimeStep(DateTime from, DateTime to, int targetTicks)
-    {
-        var total = to - from;
-        var candidates = new[]
-        {
-            TimeSpan.FromSeconds(1),  TimeSpan.FromSeconds(5),
-            TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(1),
-            TimeSpan.FromMinutes(2),  TimeSpan.FromMinutes(5),
-            TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(15),
-            TimeSpan.FromMinutes(30), TimeSpan.FromHours(1),
-            TimeSpan.FromHours(2),    TimeSpan.FromHours(4),
-            TimeSpan.FromHours(6),    TimeSpan.FromHours(12),
-            TimeSpan.FromDays(1),     TimeSpan.FromDays(7)
-        };
-
-        TimeSpan best = candidates[0];
-        double bestDiff = double.MaxValue;
-        foreach (var c in candidates)
-        {
-            var ticks = Math.Max(1, (int)Math.Round(total.TotalSeconds / c.TotalSeconds));
-            var diff = Math.Abs(ticks - targetTicks);
-            if (diff < bestDiff) { bestDiff = diff; best = c; }
-        }
-        return best;
-    }
-
-    // Snaps t to the nearest multiple of step, rounding forward or backward.
-    private static DateTime AlignToStep(DateTime t, TimeSpan step, bool forward)
-    {
-        var ticks = step.Ticks;
-        long k = t.Ticks / ticks;
-        long aligned = forward
-            ? ((t.Ticks % ticks) == 0 ? t.Ticks : (k + 1) * ticks)
-            : k * ticks;
-        return new DateTime(aligned, DateTimeKind.Utc);
-    }
-
-    // Returns a human-friendly axis range and tick step that neatly covers [min, max].
-    private static (double niceMin, double niceMax, double step) NiceRange(double min, double max, int maxTicks)
-    {
-        var range = NiceNum(max - min, round: false);
-        var step = NiceNum(range / (maxTicks - 1), round: true);
-        var niceMin = Math.Floor(min / step) * step;
-        var niceMax = Math.Ceiling(max / step) * step;
-        return (niceMin, niceMax, step);
-
-        // Rounds x to a "nice" number (1, 2, 5, 10 …) — classic Wilkinson algorithm.
-        static double NiceNum(double x, bool round)
-        {
-            var exp = Math.Floor(Math.Log10(x));
-            var f = x / Math.Pow(10, exp);
-            double nf;
-            if (round)
-            {
-                if (f < 1.5) nf = 1;
-                else if (f < 3) nf = 2;
-                else if (f < 7) nf = 5;
-                else nf = 10;
-            }
-            else
-            {
-                if (f <= 1) nf = 1;
-                else if (f <= 2) nf = 2;
-                else if (f <= 5) nf = 5;
-                else nf = 10;
-            }
-            return nf * Math.Pow(10, exp);
-        }
-    }
 }

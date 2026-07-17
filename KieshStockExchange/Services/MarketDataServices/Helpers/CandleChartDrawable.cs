@@ -464,7 +464,7 @@ public sealed partial class CandleChartDrawable : IDrawable
     private static (double lo, double hi) SnapRange(double lo, double hi)
     {
         if (hi <= lo) return (lo, lo + 1.0);
-        var (niceMin, niceMax, _) = NiceRange(lo, hi, maxTicks: 6);
+        var (niceMin, niceMax, _) = ChartGeometry.NiceRange(lo, hi, maxTicks: 6);
         return (niceMin, niceMax);
     }
     #endregion

@@ -40,6 +40,7 @@
              Link="Chart\StylePreviewDrawable.cs" />
     <Compile Include="..\KieshStockExchange\Models\ChartDrawing\**\*.cs"
              Link="ChartDrawing\%(RecursiveDir)%(Filename)%(Extension)" />
-    <!-- Step 2 adds: ..\KieshStockExchange\Helpers\ChartGeometry.cs -->
+    <Compile Include="..\KieshStockExchange\Helpers\ChartGeometry.cs"
+             Link="Helpers\ChartGeometry.cs" />
   </ItemGroup>
 </Project>

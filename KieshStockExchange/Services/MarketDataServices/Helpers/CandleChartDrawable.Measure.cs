@@ -55,7 +55,7 @@ public sealed partial class CandleChartDrawable
         var cur = Candles.Count > 0 ? Candles[0].CurrencyType : CurrencyType.USD;
 
         string line1 = $"{(dPrice >= 0 ? "+" : "")}{CurrencyHelper.Format(dPrice, cur)}  ({(dPct >= 0 ? "+" : "")}{dPct:0.00}%)";
-        string line2 = $"{HumanizeSpan(dt)}  ·  {bars} bar{(bars == 1 ? "" : "s")}";
+        string line2 = $"{ChartGeometry.HumanizeSpan(dt)}  ·  {bars} bar{(bars == 1 ? "" : "s")}";
 
         // Label panel anchored at the cursor end, flipped to stay inside the plot.
         float panelW = Math.Max(120f, Math.Max(line1.Length, line2.Length) * 6.5f);
@@ -76,15 +76,6 @@ public sealed partial class CandleChartDrawable
         canvas.DrawString(line2, new RectF(panel.X + 5, panel.Y + 15, panel.Width - 10, 13),
             HorizontalAlignment.Left, VerticalAlignment.Center);
         canvas.RestoreState();
-    }
-
-    // Human-friendly span for the measure label: coarsest two units that carry signal.
-    private static string HumanizeSpan(TimeSpan t)
-    {
-        if (t.TotalDays >= 1) return $"{(int)t.TotalDays}d {t.Hours}h";
-        if (t.TotalHours >= 1) return $"{(int)t.TotalHours}h {t.Minutes}m";
-        if (t.TotalMinutes >= 1) return $"{(int)t.TotalMinutes}m {t.Seconds}s";
-        return $"{(int)t.TotalSeconds}s";
     }
 
     // Magnifier box-zoom overlay: a dashed selection rectangle with a faint fill between the anchor and

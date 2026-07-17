@@ -39,7 +39,7 @@ public sealed partial class CandleChartDrawable
             else if (d.Kind == DrawTool.HRay)
             {
                 float x1 = _frame.TimeToPixelX(d.T1), y = _frame.HitPriceToPixelY(d.P1);
-                if (Dist(p.X, p.Y, x1, y) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (p.X >= x1 - DrawHitTol && p.X <= _frame.Plot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }
@@ -58,7 +58,7 @@ public sealed partial class CandleChartDrawable
                 for (int k = 1; k < pts.Count; k++)
                 {
                     float nx = _frame.TimeToPixelX(pts[k].T), ny = _frame.HitPriceToPixelY(pts[k].P);
-                    if (PointSegDist(p.X, p.Y, lastX, lastY, nx, ny) <= DrawHitTol)
+                    if (ChartGeometry.PointSegDist(p.X, p.Y, lastX, lastY, nx, ny) <= DrawHitTol)
                         return (d, DrawingHitPart.Body);
                     lastX = nx; lastY = ny;
                 }
@@ -67,11 +67,11 @@ public sealed partial class CandleChartDrawable
             {
                 float x1 = _frame.TimeToPixelX(d.T1), y1 = _frame.HitPriceToPixelY(d.P1);
                 float x2 = _frame.TimeToPixelX(d.T2), y2 = _frame.HitPriceToPixelY(d.P2);
-                if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
-                if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
-                var (ax, ay) = RayExit(x1, y1, x2 - x1, y2 - y1, _frame.Plot);
-                var (bx, by) = RayExit(x1, y1, x1 - x2, y1 - y2, _frame.Plot);
-                if (PointSegDist(p.X, p.Y, bx, by, ax, ay) <= DrawHitTol
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                var (ax, ay) = ChartGeometry.RayExit(x1, y1, x2 - x1, y2 - y1, _frame.Plot);
+                var (bx, by) = ChartGeometry.RayExit(x1, y1, x1 - x2, y1 - y2, _frame.Plot);
+                if (ChartGeometry.PointSegDist(p.X, p.Y, bx, by, ax, ay) <= DrawHitTol
                     && p.X >= _frame.Plot.Left - 2 && p.X <= _frame.Plot.Right + 2
                     && p.Y >= _frame.Plot.Top - 2 && p.Y <= _frame.Plot.Bottom + 2)
                     return (d, DrawingHitPart.Body);
@@ -80,8 +80,8 @@ public sealed partial class CandleChartDrawable
             {
                 float x1 = _frame.TimeToPixelX(d.T1), y1 = _frame.HitPriceToPixelY(d.P1);
                 float x2 = _frame.TimeToPixelX(d.T2), y2 = _frame.HitPriceToPixelY(d.P2);
-                if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
-                if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
                 var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
                 // Body = on the border (within tolerance) or anywhere inside a filled shape.
                 bool onBorder =
@@ -96,12 +96,12 @@ public sealed partial class CandleChartDrawable
             {
                 float x1 = _frame.TimeToPixelX(d.T1), y1 = _frame.HitPriceToPixelY(d.P1);
                 float x2 = _frame.TimeToPixelX(d.T2), y2 = _frame.HitPriceToPixelY(d.P2);
-                if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
-                if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
                 // Body = the block-arrow's oriented bounding box (anchors' bbox padded by the head half-width).
                 float amin = Math.Min(x1, x2), amax = Math.Max(x1, x2);
                 float bmin = Math.Min(y1, y2), bmax = Math.Max(y1, y2);
-                float apad = 0.25f * Dist(x1, y1, x2, y2);
+                float apad = 0.25f * ChartGeometry.Dist(x1, y1, x2, y2);
                 if (p.X >= amin - apad && p.X <= amax + apad && p.Y >= bmin - apad && p.Y <= bmax + apad)
                     return (d, DrawingHitPart.Body);
             }
@@ -109,31 +109,18 @@ public sealed partial class CandleChartDrawable
             {
                 float x1 = _frame.TimeToPixelX(d.T1), y1 = _frame.HitPriceToPixelY(d.P1);
                 float x2 = _frame.TimeToPixelX(d.T2), y2 = _frame.HitPriceToPixelY(d.P2);
-                if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
-                if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
                 // Ray body extends past anchor2 to the plot edge — hit-test the full drawn segment.
                 float fx = x2, fy = y2;
-                if (d.Kind == DrawTool.Ray) (fx, fy) = RayExit(x1, y1, x2 - x1, y2 - y1, _frame.Plot);
-                if (PointSegDist(p.X, p.Y, x1, y1, fx, fy) <= DrawHitTol
+                if (d.Kind == DrawTool.Ray) (fx, fy) = ChartGeometry.RayExit(x1, y1, x2 - x1, y2 - y1, _frame.Plot);
+                if (ChartGeometry.PointSegDist(p.X, p.Y, x1, y1, fx, fy) <= DrawHitTol
                     && p.X >= _frame.Plot.Left - 2 && p.X <= _frame.Plot.Right + 2
                     && p.Y >= _frame.Plot.Top - 2 && p.Y <= _frame.Plot.Bottom + 2)
                     return (d, DrawingHitPart.Body);
             }
         }
         return null;
-    }
-
-    private static float Dist(float ax, float ay, float bx, float by)
-        => (float)Math.Sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
-
-    // Shortest distance from point (px,py) to the segment (ax,ay)-(bx,by).
-    private static float PointSegDist(float px, float py, float ax, float ay, float bx, float by)
-    {
-        float dx = bx - ax, dy = by - ay;
-        float len2 = dx * dx + dy * dy;
-        if (len2 <= 1e-6f) return Dist(px, py, ax, ay);
-        float t = Math.Clamp(((px - ax) * dx + (py - ay) * dy) / len2, 0f, 1f);
-        return Dist(px, py, ax + t * dx, ay + t * dy);
     }
 
     /// <summary>

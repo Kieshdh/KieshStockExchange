@@ -46,7 +46,7 @@ internal sealed class RenderFrame
         => Plot.Left + (float)(((utc - TMin).TotalSeconds / SpanSec) * Plot.Width);
 
     public float MapY(double price)
-        => Plot.Bottom - (float)(PriceToFrac(price, YMin, YMax, Mode) * Plot.Height);
+        => Plot.Bottom - (float)(ChartGeometry.PriceToFrac(price, YMin, YMax, Mode) * Plot.Height);
 
     // The price<->pixel seam the drawing renderers route through (ExtendedLine/Rect/Ellipse/Arrow).
     public float ScaleY(decimal price)
@@ -55,7 +55,7 @@ internal sealed class RenderFrame
     // ---- forward transforms (HIT form — subtract in double, cast LAST; deliberately different in
     //      the low bits from MapY, preserved verbatim from the old hit-test helpers) ----
     public float HitPriceToPixelY(decimal price)
-        => (float)(Plot.Bottom - PriceToFrac((double)price, YMin, YMax, Mode) * Plot.Height);
+        => (float)(Plot.Bottom - ChartGeometry.PriceToFrac((double)price, YMin, YMax, Mode) * Plot.Height);
 
     public float TimeToPixelX(DateTime t)
     {
@@ -70,7 +70,7 @@ internal sealed class RenderFrame
         if (Plot.Height <= 0 || YMax <= YMin) return null;
         if (yInControl < Plot.Top || yInControl > Plot.Bottom) return null;
         double frac = (Plot.Bottom - yInControl) / (double)Plot.Height;
-        double price = FracToPrice(frac, YMin, YMax, Mode);
+        double price = ChartGeometry.FracToPrice(frac, YMin, YMax, Mode);
         return (decimal)price;
     }
 
@@ -81,28 +81,5 @@ internal sealed class RenderFrame
         frac = Math.Clamp(frac, 0.0, 1.0);
         var span = TMax - TMin;
         return TMin.AddTicks((long)(span.Ticks * frac));
-    }
-
-    // Price <-> normalized vertical fraction (0 = plot bottom, 1 = plot top), keyed on the scale
-    // mode. Log maps equal RATIOS to equal pixels; Linear/Percent are plain linear. Bodies are the
-    // drawable's old instance helpers verbatim, with the live ScaleMode read replaced by a parameter.
-    internal static double PriceToFrac(double price, double lo, double hi, PriceScaleMode mode)
-    {
-        if (mode == PriceScaleMode.Logarithmic)
-        {
-            double a = Math.Log(Math.Max(lo, 1e-9)), b = Math.Log(Math.Max(hi, 1e-9));
-            return b <= a ? 0.0 : (Math.Log(Math.Max(price, 1e-9)) - a) / (b - a);
-        }
-        return hi <= lo ? 0.0 : (price - lo) / (hi - lo);
-    }
-
-    internal static double FracToPrice(double frac, double lo, double hi, PriceScaleMode mode)
-    {
-        if (mode == PriceScaleMode.Logarithmic)
-        {
-            double a = Math.Log(Math.Max(lo, 1e-9)), b = Math.Log(Math.Max(hi, 1e-9));
-            return Math.Exp(a + frac * (b - a));
-        }
-        return lo + frac * (hi - lo);
     }
 }
