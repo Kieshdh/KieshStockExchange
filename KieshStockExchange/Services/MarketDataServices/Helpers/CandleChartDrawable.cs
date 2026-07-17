@@ -634,9 +634,10 @@ public sealed class CandleChartDrawable : IDrawable
             {
                 float y = Y((double)d.P1);
                 if (y < plot.Top || y > plot.Bottom) { canvas.StrokeDashPattern = null; continue; }
-                // Endings ride the plot edges (forward = right), so they pan with the viewport.
+                // Horizontal lines never carry a head (they don't "stop") — force None even if a shared
+                // default pen carries an ending. Matches the pen panel hiding End/Head for these tools.
                 StylePreviewDrawable.DrawStraightSegment(canvas, plot.Left, y, plot.Right, y,
-                    d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
+                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
 
                 // Right-gutter price tag in the line's colour, matching the order-line convention.
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
@@ -653,9 +654,9 @@ public sealed class CandleChartDrawable : IDrawable
                 float y = Y((double)d.P1);
                 if (y < plot.Top || y > plot.Bottom) { canvas.StrokeDashPattern = null; continue; }
                 float x1 = X(d.T1);
-                // Origin = click; terminal = plot right edge (forward = right).
+                // Origin = click; terminal = plot right edge. No head (horizontal ray doesn't "stop").
                 StylePreviewDrawable.DrawStraightSegment(canvas, x1, y, plot.Right, y,
-                    d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
+                    LineEnding.None, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
                 if (selected) DrawHandle(canvas, x1, y, color);
             }
