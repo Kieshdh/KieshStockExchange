@@ -61,7 +61,7 @@
                         Command="{Binding ToggleToolGroupCommand}" CommandParameter="shapes" />
             </Grid>
 
-            <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" HorizontalOptions="Start" WidthRequest="32" />
+            <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" HorizontalOptions="Start" WidthRequest="42" />
 
             <!-- Measure (single) -->
             <Button ImageSource="tool_measure.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
