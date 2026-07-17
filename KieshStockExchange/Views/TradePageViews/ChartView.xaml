@@ -230,8 +230,12 @@
                     Clicked="OnSnapshotClicked" />
         </Grid>
 
+        <!-- Row 1: left tool rail (col 0) + the chart & its overlays (col 1) so the chart sits BESIDE
+             the rail, not under it. The toolbar (Row 0) spans the full width above both. -->
+        <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
+
         <!-- Chart -->
-        <GraphicsView x:Name="Chart" Grid.Row="1"
+        <GraphicsView x:Name="Chart" Grid.Column="1"
                       Style="{StaticResource ChartSurface}">
             <GraphicsView.GestureRecognizers>
                 <PanGestureRecognizer x:Name="ChartPan" />
@@ -242,13 +246,13 @@
         <!-- LP1: left drawing-tool rail (TradingView-style, on the chart's left edge). Arms the same
              DrawTools as the pen-tray TOOL row; the active tool is highlighted. Grouped hover-flyouts,
              shapes, magnet + the eye toggle land in later LP increments; this is the tool-arming rail. -->
-        <Border Grid.Row="1"
-                VerticalOptions="Center" HorizontalOptions="Start"
-                Margin="6,0,0,0" Padding="3"
+        <Border Grid.Column="0"
+                VerticalOptions="Fill" HorizontalOptions="Start"
+                Margin="0" Padding="3"
                 BackgroundColor="{DynamicResource ChartPanel}"
                 Stroke="{DynamicResource ChartGrid}" StrokeThickness="1"
-                StrokeShape="RoundRectangle 8">
-            <VerticalStackLayout Spacing="3">
+                StrokeShape="Rectangle">
+            <VerticalStackLayout Spacing="3" VerticalOptions="Start">
                 <Button Text="⊘" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.None}">
@@ -339,7 +343,7 @@
 
         <!-- OHLCV overlay: top-left of the chart canvas. InputTransparent so
              pan / wheel gestures still reach the GraphicsView underneath. -->
-        <HorizontalStackLayout Grid.Row="1"
+        <HorizontalStackLayout Grid.Column="1"
                                VerticalOptions="Start"
                                HorizontalOptions="Start"
                                Margin="14,10,0,0"
@@ -393,7 +397,7 @@
         </HorizontalStackLayout>
 
         <!-- MA settings overlay: anchored top-right of the chart canvas. -->
-        <Border Grid.Row="1"
+        <Border Grid.Column="1"
                 IsVisible="{Binding IsMaSettingsOpen}"
                 BackgroundColor="{DynamicResource ChartPanel}"
                 Stroke="{DynamicResource ChartGrid}"
@@ -479,7 +483,7 @@
              selection it edits the saved DEFAULT pen (TOOL row + "+ Line" footer); with a drawing
              selected it edits that drawing (Set-as-default + Delete footer). Every option is a live
              specimen of itself rather than a text label. -->
-        <Border Grid.Row="1"
+        <Border Grid.Column="1"
                 IsVisible="{Binding IsPenPanelOpen}"
                 BackgroundColor="{DynamicResource ChartPanel}"
                 Stroke="{DynamicResource ChartGrid}"
@@ -799,6 +803,7 @@
                 </HorizontalStackLayout>
             </VerticalStackLayout>
         </Border>
+        </Grid>
     </Grid>
     </Border>
 </ContentView>

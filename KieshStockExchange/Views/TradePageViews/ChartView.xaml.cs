@@ -1,5 +1,6 @@
 using System.IO;
 using CommunityToolkit.Maui.Alerts;
+using CommunityToolkit.Maui.Storage;
 using KieshStockExchange.Models.ChartDrawing.Objects;
 using KieshStockExchange.Models.ChartDrawing.Style;
 using KieshStockExchange.Models.ChartDrawing.Tools;
@@ -440,20 +441,15 @@ public partial class ChartView : ContentView
             if (w <= 1 || h <= 1) return;   // not laid out yet
 
             UpdateDrawable();               // reflect the exact current view
-            var png = ChartSnapshotRenderer.Render(_drawable, w, h);
+            var bg = TryGetColor("ChartBg", out var c) ? c : Colors.Black;
+            var png = ChartSnapshotRenderer.Render(_drawable, w, h, bg, scale: 2f);
 
+            // Open a native Save-As dialog so the user picks the location/name (CommunityToolkit FileSaver).
             var name = $"KSE-chart-{DateTime.Now:yyyyMMdd-HHmmss}.png";
-            string dir;
-            try
-            {
-                dir = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) dir = FileSystem.Current.CacheDirectory;
-            }
-            catch { dir = FileSystem.Current.CacheDirectory; }
-
-            var path = Path.Combine(dir, name);
-            await File.WriteAllBytesAsync(path, png);
-            await Toast.Make($"Snapshot saved: {name}").Show();
+            using var stream = new MemoryStream(png);
+            var result = await FileSaver.Default.SaveAsync(name, stream, CancellationToken.None);
+            if (result.IsSuccessful)
+                await Toast.Make($"Snapshot saved: {Path.GetFileName(result.FilePath)}").Show();
         }
         catch (Exception ex)
         {
