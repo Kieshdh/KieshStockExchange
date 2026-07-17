@@ -323,6 +323,10 @@ public partial class ChartViewModel : StockAwareViewModel
     partial void OnDrawToolChanged(DrawTool value)
     {
         OnPropertyChanged(nameof(PenToolLabel));
+        // Group active-highlight tracks the armed tool; arming anything closes an open group flyout.
+        OnPropertyChanged(nameof(IsLinesGroupActive));
+        OnPropertyChanged(nameof(IsShapesGroupActive));
+        OpenToolGroup = null;
         // With no selection, EditingKind == the armed tool, so arming a tool flips every Show* gate.
         // RefreshPenTiles raises EditingKind + the Show* notifications (nothing else calls it on this path).
         RefreshPenTiles();
@@ -337,6 +341,57 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         DrawTool = tool;
         Preferences.Default.Set(DrawToolLastPrefKey, tool.ToString());
+    }
+
+    // --- Left-rail tool GROUPS (TradingView-style) ----------------------------------------------------
+    // Each group shows its LAST-PICKED tool as the rail icon; the ">" opens a named flyout of the group's
+    // tools. Picking one arms it + becomes the group's icon. The group icon itself arms its current tool.
+    [ObservableProperty] private DrawTool _linesGroupTool = DrawTool.Trend;
+    [ObservableProperty] private DrawTool _shapesGroupTool = DrawTool.Rectangle;
+    [ObservableProperty] private string? _openToolGroup;   // "lines" | "shapes" | null (only one open)
+
+    partial void OnLinesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(LinesGroupIcon));
+    partial void OnShapesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(ShapesGroupIcon));
+    partial void OnOpenToolGroupChanged(string? value)
+    {
+        OnPropertyChanged(nameof(IsLinesGroupOpen));
+        OnPropertyChanged(nameof(IsShapesGroupOpen));
+    }
+
+    public string LinesGroupIcon => ToolIcon(LinesGroupTool);
+    public string ShapesGroupIcon => ToolIcon(ShapesGroupTool);
+    public bool IsLinesGroupActive => LinesGroupContains(DrawTool);
+    public bool IsShapesGroupActive => DrawTool is DrawTool.Rectangle or DrawTool.Ellipse;
+    public bool IsLinesGroupOpen => OpenToolGroup == "lines";
+    public bool IsShapesGroupOpen => OpenToolGroup == "shapes";
+
+    private static bool LinesGroupContains(DrawTool t) => t is DrawTool.Trend or DrawTool.Ray
+        or DrawTool.ExtendedLine or DrawTool.HLine or DrawTool.HRay or DrawTool.VLine or DrawTool.Polyline;
+
+    private static string ToolIcon(DrawTool t) => t switch
+    {
+        DrawTool.Trend => "tool_trend.png",
+        DrawTool.Ray => "tool_ray.png",
+        DrawTool.ExtendedLine => "tool_extendedline.png",
+        DrawTool.HLine => "tool_hline.png",
+        DrawTool.HRay => "tool_hray.png",
+        DrawTool.VLine => "tool_vline.png",
+        DrawTool.Polyline => "tool_polyline.png",
+        DrawTool.Rectangle => "tool_rectangle.png",
+        DrawTool.Ellipse => "tool_ellipse.png",
+        _ => "tool_cursor.png",
+    };
+
+    [RelayCommand] private void ToggleToolGroup(string key) => OpenToolGroup = OpenToolGroup == key ? null : key;
+
+    // Pick a tool from a group flyout: it becomes that group's current tool, is armed, and the flyout closes.
+    [RelayCommand]
+    private void PickGroupTool(DrawTool tool)
+    {
+        if (LinesGroupContains(tool)) LinesGroupTool = tool;
+        else if (tool is DrawTool.Rectangle or DrawTool.Ellipse) ShapesGroupTool = tool;
+        SelectDrawTool(tool);
+        OpenToolGroup = null;
     }
 
     // User drawings for the selected stock, anchored in (time, price) so they survive pan/zoom.
