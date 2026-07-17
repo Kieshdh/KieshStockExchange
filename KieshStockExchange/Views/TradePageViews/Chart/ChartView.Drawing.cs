@@ -13,9 +13,9 @@ public partial class ChartView
     private void FinishPlacement(Guid id)
     {
         if (_vm == null) return;
-        _vm.DrawTool = DrawTool.None;
-        _vm.SelectSingle(id);
-        _vm.IsPenPanelOpen = true;
+        _vm.Drawing.DrawTool = DrawTool.None;
+        _vm.Drawing.SelectSingle(id);
+        _vm.Drawing.IsPenPanelOpen = true;
     }
 
     // Seed the drawing-drag state from the grabbed drawing and the press point. The data-space grab
@@ -57,7 +57,7 @@ public partial class ChartView
             _ => ShiftTrend(d, time - _drawDragStartTime, price - _drawDragStartPrice),
         };
         upd = upd with { Id = id };
-        _vm.UpdateDrawing(upd);
+        _vm.Drawing.UpdateDrawing(upd);
     }
 
     private static DrawingObject ShiftTrend(DrawingObject d, TimeSpan dt, decimal dPrice)
@@ -70,8 +70,8 @@ public partial class ChartView
         if (_vm != null && _polyPoints.Count >= 2)
         {
             var id = Guid.NewGuid();
-            _vm.AddDrawing(new DrawingObject(
-                id, DrawTool.Polyline, default, 0m, default, 0m, _vm.DefaultDrawStyle, _polyPoints.ToList()));
+            _vm.Drawing.AddDrawing(new DrawingObject(
+                id, DrawTool.Polyline, default, 0m, default, 0m, _vm.Drawing.DefaultDrawStyle, _polyPoints.ToList()));
             CancelPolyline();       // clear the in-progress preview first
             FinishPlacement(id);    // revert to cursor + select the new polyline (settings pop up)
             return;

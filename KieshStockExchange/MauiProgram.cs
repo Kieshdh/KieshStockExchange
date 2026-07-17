@@ -204,6 +204,7 @@ public static class MauiProgram
         builder.Services.AddTransient<TransactionHistoryViewModel>();
         builder.Services.AddTransient<OpenOrdersViewModel>();
         builder.Services.AddTransient<UserPositionsViewModel>();
+        builder.Services.AddTransient<ChartDrawingViewModel>();
         builder.Services.AddTransient<ChartViewModel>();
         builder.Services.AddTransient<OrderBookViewModel>();
         builder.Services.AddTransient<OrderHistoryViewModel>();

@@ -85,7 +85,7 @@ public partial class ChartView
         // Priority 0.3: the Measure TOOL — drag anywhere in the chart to show the transient ruler. Owns
         // the gesture ahead of the drawing hit-tests so measuring always wins while it's armed. It clears
         // on release and the tool disarms itself (one-shot, like TradingView) — see the release handler.
-        if (_vm.DrawTool == DrawTool.Measure && _drawable.IsInChartArea(p))
+        if (_vm.Drawing.DrawTool == DrawTool.Measure && _drawable.IsInChartArea(p))
         {
             _dragMode = DragMode.Measure;
             _drawable.Measure = new MeasureState(true, p.X, p.Y, p.X, p.Y);
@@ -98,7 +98,7 @@ public partial class ChartView
         // Priority 0.4: a polyline is mid-build — each left-click appends a vertex, a double-click
         // finishes it. Handled ahead of the existing-drawing hit-test so clicks near a prior segment
         // still extend the polyline rather than selecting something underneath.
-        if (_polyBuilding && _vm.DrawTool == DrawTool.Polyline && _drawable.IsInChartArea(p)
+        if (_polyBuilding && _vm.Drawing.DrawTool == DrawTool.Polyline && _drawable.IsInChartArea(p)
             && _drawable.PixelToPrice(p.Y) is decimal plp && plp > 0m)
         {
             long nowMs = Environment.TickCount64;
@@ -119,23 +119,23 @@ public partial class ChartView
         {
             if (dh.Part == DrawingHitPart.Close)
             {
-                _vm.RemoveDrawing(dh.Drawing.Id);
+                _vm.Drawing.RemoveDrawing(dh.Drawing.Id);
                 e.Handled = true;
                 return;
             }
             // Shift-click TOGGLES the drawing in the multi-selection (for a bulk Delete) — no drag.
             if (shiftDown)
             {
-                _vm.AddToSelection(dh.Drawing.Id);
-                _vm.IsPenPanelOpen = true;
+                _vm.Drawing.AddToSelection(dh.Drawing.Id);
+                _vm.Drawing.IsPenPanelOpen = true;
                 Chart.Invalidate();
                 e.Handled = true;
                 return;
             }
             // Plain tap-to-select: select ONLY this drawing, show its settings, begin a drag. Force the
             // panel open too — re-tapping an already-selected drawing leaves the id unchanged (no OnChanged).
-            _vm.SelectSingle(dh.Drawing.Id);
-            _vm.IsPenPanelOpen = true;
+            _vm.Drawing.SelectSingle(dh.Drawing.Id);
+            _vm.Drawing.IsPenPanelOpen = true;
             BeginDrawingDrag(dh.Drawing, dh.Part, p, isNew: false);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             Chart.Invalidate();
@@ -146,21 +146,21 @@ public partial class ChartView
         // Priority 0.6: with a draw tool active, a press in the chart body places a new drawing
         // instead of free-panning. HLine/HRay commit on the single click; Trend/Ray anchor here and
         // drag their second endpoint to the release point; Polyline starts a click-per-vertex build.
-        if (_vm.DrawTool != DrawTool.None && _drawable.IsInChartArea(p)
+        if (_vm.Drawing.DrawTool != DrawTool.None && _drawable.IsInChartArea(p)
             && _drawable.PixelToPrice(p.Y) is decimal newPrice && newPrice > 0m)
         {
             var t = _drawable.PixelToTime(p.X);
             var id = Guid.NewGuid();
-            if (_vm.DrawTool == DrawTool.HLine || _vm.DrawTool == DrawTool.HRay || _vm.DrawTool == DrawTool.VLine)
+            if (_vm.Drawing.DrawTool == DrawTool.HLine || _vm.Drawing.DrawTool == DrawTool.HRay || _vm.Drawing.DrawTool == DrawTool.VLine)
             {
                 // One-click lines (HLine/HRay at a price, VLine at a time). After placing: revert to the
                 // cursor tool + auto-select the new line so its settings pop up (TradingView one-shot flow).
-                _vm.AddDrawing(new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, _vm.DefaultDrawStyle));
+                _vm.Drawing.AddDrawing(new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
                 FinishPlacement(id);
                 e.Handled = true;
                 return;
             }
-            if (_vm.DrawTool == DrawTool.Polyline)
+            if (_vm.Drawing.DrawTool == DrawTool.Polyline)
             {
                 // Start a new in-progress polyline anchored at the click; subsequent clicks append.
                 _polyBuilding = true;
@@ -174,8 +174,8 @@ public partial class ChartView
                 return;
             }
             // Trend or Ray: a two-anchor segment; the second anchor drags to the release point.
-            var seg = new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, _vm.DefaultDrawStyle);
-            _vm.AddDrawing(seg);
+            var seg = new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle);
+            _vm.Drawing.AddDrawing(seg);
             // No auto-select — the drag below positions anchor2; the tool row stays visible for the next line.
             BeginDrawingDrag(seg, DrawingHitPart.Anchor2, p, isNew: true);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
@@ -263,7 +263,7 @@ public partial class ChartView
         // empty chart (nothing hit above) also clears any drawing selection.
         if (_drawable.IsInChartArea(p))
         {
-            _vm.ClearDrawingSelection();
+            _vm.Drawing.ClearDrawingSelection();
             int visible = Math.Max(1, _vm.VisibleCount);
             double pxPerCandle = (double)Chart.Width / visible;
             // Approximate plot height — the drawable's cached price rect height
@@ -297,7 +297,7 @@ public partial class ChartView
         if (_vm == null || sender is not Microsoft.UI.Xaml.UIElement el) return;
 
         // Polyline build has no active drag mode — rubber-band the pending segment to the cursor.
-        if (_polyBuilding && _vm.DrawTool == DrawTool.Polyline)
+        if (_polyBuilding && _vm.Drawing.DrawTool == DrawTool.Polyline)
         {
             var pc = PlatformPointerToControl(el, e);
             if (_drawable.PixelToPrice(pc.Y) is decimal cpr && cpr > 0m)
@@ -440,7 +440,7 @@ public partial class ChartView
             // Clear-on-release: the ruler vanishes when the drag ends. If the Measure TOOL armed it (vs a
             // Shift-drag), disarm the tool too so it's one-shot like TradingView — pick, drag, gone.
             _drawable.Measure = default;
-            if (_vm != null && _vm.DrawTool == DrawTool.Measure) _vm.DrawTool = DrawTool.None;
+            if (_vm != null && _vm.Drawing.DrawTool == DrawTool.Measure) _vm.Drawing.DrawTool = DrawTool.None;
             Chart.Invalidate();
         }
 
@@ -449,15 +449,15 @@ public partial class ChartView
             // A tool-placed trendline the user clicked without dragging is a degenerate dot — drop
             // it rather than leave an invisible zero-length line on the chart.
             if (_drawDragIsNew && !_drawDragMoved && _draggingDrawingId is Guid nid)
-                _vm?.RemoveDrawing(nid);
+                _vm?.Drawing.RemoveDrawing(nid);
             // A NEW drawing that was dragged out & kept → revert to cursor + select it (settings pop up).
             else if (_drawDragIsNew && _drawDragMoved && _draggingDrawingId is Guid kid)
                 FinishPlacement(kid);
             // Record a Move on the undo stack for an EXISTING drawing that actually moved (a brand-new
             // drawing is already covered by its Add entry, so undo removes the whole creation).
             else if (!_drawDragIsNew && _drawDragMoved)
-                _vm?.RecordDrawingMoved(_drawDragOrig);
-            _vm?.PersistDrawings();
+                _vm?.Drawing.RecordDrawingMoved(_drawDragOrig);
+            _vm?.Drawing.PersistDrawings();
             _draggingDrawingId = null;
             _drawable.DraggingDrawingId = null;
             Chart.Invalidate();
@@ -493,7 +493,7 @@ public partial class ChartView
         _drawable.Measure = default;
         // An aborted new-drawing drag would otherwise leave a degenerate line behind.
         if (_dragMode == DragMode.Drawing && _drawDragIsNew && _draggingDrawingId is Guid nid)
-            _vm?.RemoveDrawing(nid);
+            _vm?.Drawing.RemoveDrawing(nid);
         _draggingDrawingId = null;
         _drawable.DraggingDrawingId = null;
         _dragMode = DragMode.None;
@@ -512,17 +512,17 @@ public partial class ChartView
         if (_polyBuilding)
         {
             CancelPolyline();
-            _vm.DrawTool = DrawTool.None;
+            _vm.Drawing.DrawTool = DrawTool.None;
             e.Handled = true;
             return;
         }
         if (_dragMode == DragMode.Drawing)
         {
-            if (_drawDragIsNew && _draggingDrawingId is Guid nid) _vm.RemoveDrawing(nid);
+            if (_drawDragIsNew && _draggingDrawingId is Guid nid) _vm.Drawing.RemoveDrawing(nid);
             _draggingDrawingId = null;
             _drawable.DraggingDrawingId = null;
             _dragMode = DragMode.None;
-            _vm.DrawTool = DrawTool.None;
+            _vm.Drawing.DrawTool = DrawTool.None;
             Chart.Invalidate();
             e.Handled = true;
             return;
@@ -530,9 +530,9 @@ public partial class ChartView
 
         // Priority 1.5: a drawing is selected — right-click just DESELECTS (clears the style-bar +
         // any multi-selection) instead of removing it. A follow-up right-click then disarms the tool.
-        if (_vm.SelectedDrawingId is not null || _vm.SelectedDrawingIds.Count > 0)
+        if (_vm.Drawing.SelectedDrawingId is not null || _vm.Drawing.SelectedDrawingIds.Count > 0)
         {
-            _vm.ClearDrawingSelection();
+            _vm.Drawing.ClearDrawingSelection();
             Chart.Invalidate();
             e.Handled = true;
             return;
@@ -541,15 +541,15 @@ public partial class ChartView
         // Priority 2: right-click on an existing drawing removes it.
         if (_drawable.HitDrawing(p) is { } dh)
         {
-            _vm.RemoveDrawing(dh.Drawing.Id);
+            _vm.Drawing.RemoveDrawing(dh.Drawing.Id);
             e.Handled = true;
             return;
         }
 
         // Priority 3: empty chart — right-click disarms the active tool (back to pan mode) and clears
         // any selection.
-        _vm.DrawTool = DrawTool.None;
-        _vm.ClearDrawingSelection();
+        _vm.Drawing.DrawTool = DrawTool.None;
+        _vm.Drawing.ClearDrawingSelection();
         e.Handled = true;
     }
 
@@ -573,14 +573,14 @@ public partial class ChartView
                        & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
         if (ctrl && e.Key == Windows.System.VirtualKey.Z)
         {
-            var cmd = shift ? _vm.RedoCommand : _vm.UndoCommand;
+            var cmd = shift ? _vm.Drawing.RedoCommand : _vm.Drawing.UndoCommand;
             if (cmd.CanExecute(null)) cmd.Execute(null);
             e.Handled = true;
             return;
         }
         if (ctrl && e.Key == Windows.System.VirtualKey.Y)
         {
-            if (_vm.RedoCommand.CanExecute(null)) _vm.RedoCommand.Execute(null);
+            if (_vm.Drawing.RedoCommand.CanExecute(null)) _vm.Drawing.RedoCommand.Execute(null);
             e.Handled = true;
             return;
         }
@@ -620,9 +620,9 @@ public partial class ChartView
             case Windows.System.VirtualKey.Delete:
             case Windows.System.VirtualKey.Back:
                 // Delete / Backspace removes ALL selected drawings (single or shift-multi); each undoable.
-                if (_vm.SelectedDrawingId is not null || _vm.SelectedDrawingIds.Count > 0)
+                if (_vm.Drawing.SelectedDrawingId is not null || _vm.Drawing.SelectedDrawingIds.Count > 0)
                 {
-                    _vm.RemoveSelectedDrawings();
+                    _vm.Drawing.RemoveSelectedDrawings();
                     e.Handled = true;
                 }
                 break;

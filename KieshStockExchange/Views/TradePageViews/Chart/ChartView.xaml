@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:style="clr-namespace:KieshStockExchange.Models.ChartDrawing.Style"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
+             xmlns:local="clr-namespace:KieshStockExchange.Views.TradePageViews"
+             x:Class="KieshStockExchange.Views.TradePageViews.ChartView"
+             x:Name="ChartRoot"
+             x:DataType="vm:ChartViewModel">
+
+    <!-- The chart shell: it owns the candle GraphicsView + gesture handling and the canvas-only overlays
+         (OHLCV, MA settings), and hosts the three extracted sub-views — ChartToolbarView (Row 0, inherits
+         ChartViewModel) plus ChartToolRailView + ChartPenPanelView (Row 1, bound to the child Drawing VM).
+         Child DECLARATION ORDER inside Row 1 is the Z-order: chart under the rail under the overlays under
+         the pen panel. -->
+    <Border BackgroundColor="{DynamicResource ChartBg}"
+            Stroke="{DynamicResource Divider}"
+            StrokeThickness="1"
+            StrokeShape="RoundRectangle 10"
+            Padding="0">
+    <Grid RowDefinitions="Auto,*"
+          BackgroundColor="Transparent"
+          MinimumHeightRequest="300">
+
+        <!-- Toolbar (spans the full width). Autofit + Snapshot bubble back to this view's code-behind. -->
+        <local:ChartToolbarView Grid.Row="0"
+                                YAutoFitRequested="OnYAutoFitClicked"
+                                SnapshotRequested="OnSnapshotClicked" />
+
+        <!-- Row 1: left tool rail (col 0) + the chart & its overlays (col 1) so the chart sits BESIDE
+             the rail, not under it. The toolbar (Row 0) spans the full width above both. -->
+        <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
+
+        <!-- Chart (Z-order bottom) -->
+        <GraphicsView x:Name="Chart" Grid.Column="1"
+                      Style="{StaticResource ChartSurface}">
+            <GraphicsView.GestureRecognizers>
+                <PanGestureRecognizer x:Name="ChartPan" />
+                <PointerGestureRecognizer x:Name="ChartPointer" />
+            </GraphicsView.GestureRecognizers>
+        </GraphicsView>
+
+        <!-- Left tool rail + its group flyouts (spans both columns; root is InputTransparent). -->
+        <local:ChartToolRailView Grid.Column="0" Grid.ColumnSpan="2"
+                                 BindingContext="{Binding Drawing}" />
+
+        <!-- OHLCV overlay: top-left of the chart canvas. InputTransparent so
+             pan / wheel gestures still reach the GraphicsView underneath. -->
+        <HorizontalStackLayout Grid.Column="1"
+                               VerticalOptions="Start"
+                               HorizontalOptions="Start"
+                               Margin="14,10,0,0"
+                               Spacing="14"
+                               InputTransparent="True">
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="O" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding DisplayedCandle.OpenDisplay, FallbackValue=''}"
+                       Style="{StaticResource ChartOhlcValue}" />
+            </HorizontalStackLayout>
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="H" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding DisplayedCandle.HighDisplay, FallbackValue=''}"
+                       Style="{StaticResource ChartOhlcValue}" />
+            </HorizontalStackLayout>
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="L" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding DisplayedCandle.LowDisplay, FallbackValue=''}"
+                       Style="{StaticResource ChartOhlcValue}" />
+            </HorizontalStackLayout>
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="C" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding DisplayedCandle.CloseDisplay, FallbackValue=''}"
+                       Style="{StaticResource ChartOhlcCloseValue}" />
+            </HorizontalStackLayout>
+
+            <HorizontalStackLayout Spacing="4">
+                <Label Text="VOL" Style="{StaticResource ChartOhlcKey}" />
+                <Label Text="{Binding DisplayedCandle.Volume, FallbackValue='', StringFormat='{0:N0}'}"
+                       Style="{StaticResource ChartOhlcValue}" />
+            </HorizontalStackLayout>
+
+        </HorizontalStackLayout>
+
+        <!-- MA settings overlay: anchored top-right of the chart canvas. -->
+        <Border Grid.Column="1"
+                IsVisible="{Binding IsMaSettingsOpen}"
+                BackgroundColor="{DynamicResource ChartPanel}"
+                Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1"
+                StrokeShape="RoundRectangle 8"
+                Padding="10"
+                Margin="0,10,72,0"
+                VerticalOptions="Start"
+                HorizontalOptions="End"
+                MinimumWidthRequest="380">
+            <VerticalStackLayout Spacing="8">
+                <Label Text="Moving averages" Style="{StaticResource ChartOhlcValue}" />
+                <CollectionView ItemsSource="{Binding MaSeries}" SelectionMode="None">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="vm:MaConfig">
+                            <Grid ColumnDefinitions="Auto,60,60,80,80,28"
+                                  ColumnSpacing="8" Padding="0,4"
+                                  HorizontalOptions="Fill">
+                                <Switch Grid.Column="0" IsToggled="{Binding Enabled}" />
+                                <Label Grid.Column="1" Text="{Binding Label}"
+                                       Style="{StaticResource ChartOhlcValue}"
+                                       VerticalOptions="Center" />
+                                <Entry Grid.Column="2" Text="{Binding Period}" Keyboard="Numeric"
+                                       FontSize="12" />
+                                <Picker Grid.Column="3"
+                                        ItemsSource="{Binding MaKinds}"
+                                        SelectedItem="{Binding Kind}"
+                                        FontSize="12" />
+                                <Picker Grid.Column="4"
+                                        ItemsSource="{Binding MaColorOptions}"
+                                        SelectedItem="{Binding SelectedColorOption}"
+                                        FontSize="12">
+                                    <Picker.ItemDisplayBinding>
+                                        <Binding Path="Name" x:DataType="style:MaColorOption" />
+                                    </Picker.ItemDisplayBinding>
+                                </Picker>
+                                <Button Grid.Column="5" Text="✕"
+                                        Style="{StaticResource ChartIconButton}"
+                                        Command="{Binding RemoveCommand}"
+                                        CommandParameter="{Binding .}" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+                <Button Text="+ Add MA"
+                        Style="{StaticResource ChartLiveButton.Off}"
+                        Command="{Binding AddMaCommand}" />
+
+                <!-- Open-order line colours. Two pickers: one each for the buy
+                     and sell limit lines drawn on the chart. Defaults to the
+                     Bull/Bear theme colours (Binance/TradingView convention). -->
+                <Label Text="Open orders" Style="{StaticResource ChartOhlcValue}" Margin="0,8,0,0" />
+                <Grid ColumnDefinitions="80,*" ColumnSpacing="8" Padding="0,2">
+                    <Label Grid.Column="0" Text="Buy"
+                           Style="{StaticResource ChartOhlcValue}"
+                           VerticalOptions="Center" />
+                    <Picker Grid.Column="1"
+                            ItemsSource="{Binding MaColorOptions}"
+                            SelectedItem="{Binding BuyOrderColorOption}"
+                            FontSize="12">
+                        <Picker.ItemDisplayBinding>
+                            <Binding Path="Name" x:DataType="style:MaColorOption" />
+                        </Picker.ItemDisplayBinding>
+                    </Picker>
+                </Grid>
+                <Grid ColumnDefinitions="80,*" ColumnSpacing="8" Padding="0,2">
+                    <Label Grid.Column="0" Text="Sell"
+                           Style="{StaticResource ChartOhlcValue}"
+                           VerticalOptions="Center" />
+                    <Picker Grid.Column="1"
+                            ItemsSource="{Binding MaColorOptions}"
+                            SelectedItem="{Binding SellOrderColorOption}"
+                            FontSize="12">
+                        <Picker.ItemDisplayBinding>
+                            <Binding Path="Name" x:DataType="style:MaColorOption" />
+                        </Picker.ItemDisplayBinding>
+                    </Picker>
+                </Grid>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- Pen tray + colour pickers (Z-order top). Bound to the child Drawing VM. -->
+        <local:ChartPenPanelView Grid.Column="1" BindingContext="{Binding Drawing}" />
+
+        </Grid>
+    </Grid>
+    </Border>
+</ContentView>

@@ -260,8 +260,8 @@ public partial class ChartView : ContentView
         if (_vm != null)
         {
             _vm.RedrawRequested -= OnRedrawRequested;
-            _vm.PropertyChanged -= OnVmPropertyChanged;
-            _vm.Drawings.CollectionChanged -= OnVmDrawingsChanged;
+            _vm.Drawing.PropertyChanged -= OnVmPropertyChanged;
+            _vm.Drawing.Drawings.CollectionChanged -= OnVmDrawingsChanged;
         }
 
         // A VM swap abandons any half-built polyline (its vertices belong to the old context).
@@ -271,8 +271,8 @@ public partial class ChartView : ContentView
         if (_vm == null) return;
 
         _vm.RedrawRequested += OnRedrawRequested;
-        _vm.PropertyChanged += OnVmPropertyChanged;
-        _vm.Drawings.CollectionChanged += OnVmDrawingsChanged;
+        _vm.Drawing.PropertyChanged += OnVmPropertyChanged;
+        _vm.Drawing.Drawings.CollectionChanged += OnVmDrawingsChanged;
         UpdateDrawable();
         Chart.Invalidate();
     }
@@ -280,7 +280,7 @@ public partial class ChartView : ContentView
     // Switching draw tool from the toolbar abandons any in-progress polyline build.
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ChartViewModel.DrawTool) && _polyBuilding)
+        if (e.PropertyName == nameof(ChartDrawingViewModel.DrawTool) && _polyBuilding)
             CancelPolyline();
     }
 
@@ -328,10 +328,10 @@ public partial class ChartView : ContentView
         // Snapshot markers to a stable array — Draw runs on the UI thread but
         // ObservableCollection enumeration with concurrent edits would still be
         // brittle if a future feature mutates from a different thread.
-        _drawable.Drawings = _vm.DrawingsHidden ? System.Array.Empty<DrawingObject>() : _vm.Drawings.ToArray();
-        _drawable.SelectedDrawingId = _vm.SelectedDrawingId;
-        _drawable.SelectedDrawingIds = _vm.SelectedDrawingIds.ToArray();   // multi-select highlight
-        _drawable.BuildingStyle = _vm.DefaultDrawStyle;   // faithful in-progress polyline preview (incl. arrowhead)
+        _drawable.Drawings = _vm.Drawing.DrawingsHidden ? System.Array.Empty<DrawingObject>() : _vm.Drawing.Drawings.ToArray();
+        _drawable.SelectedDrawingId = _vm.Drawing.SelectedDrawingId;
+        _drawable.SelectedDrawingIds = _vm.Drawing.SelectedDrawingIds.ToArray();   // multi-select highlight
+        _drawable.BuildingStyle = _vm.Drawing.DefaultDrawStyle;   // faithful in-progress polyline preview (incl. arrowhead)
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
         _drawable.OpenOrderSellColor = ResolveColor(_vm.SellOrderColorOption.Key);
@@ -487,23 +487,5 @@ public partial class ChartView : ContentView
         if (_vm != null) _vm.HoveredCandle = null;
         _drawable.Crosshair = default;
         Chart.Invalidate();
-    }
-
-    // Drag the pen/settings panel around the chart by its header row. Translation is layered on top of
-    // the panel's anchored layout, so it stays wherever the user drops it until the panel is re-opened.
-    private double _penPanStartTX, _penPanStartTY;
-    private void OnPenPanelPan(object? sender, PanUpdatedEventArgs e)
-    {
-        switch (e.StatusType)
-        {
-            case GestureStatus.Started:
-                _penPanStartTX = PenPanel.TranslationX;
-                _penPanStartTY = PenPanel.TranslationY;
-                break;
-            case GestureStatus.Running:
-                PenPanel.TranslationX = _penPanStartTX + e.TotalX;
-                PenPanel.TranslationY = _penPanStartTY + e.TotalY;
-                break;
-        }
     }
 }

@@ -125,5 +125,17 @@
         <Setter Property="TextColor"  Value="{DynamicResource White}" />
     </Style>
 
+    <!-- The OHLCV strip's CLOSE value: tints bull/bear from the displayed candle's direction. -->
+    <Style x:Key="ChartOhlcCloseValue" TargetType="Label" BasedOn="{StaticResource ChartOhlcValue}">
+        <Style.Triggers>
+            <DataTrigger TargetType="Label" Binding="{Binding DisplayedCandle.IsBullish}" Value="True">
+                <Setter Property="TextColor" Value="{DynamicResource ChartBull}" />
+            </DataTrigger>
+            <DataTrigger TargetType="Label" Binding="{Binding DisplayedCandle.IsBearish}" Value="True">
+                <Setter Property="TextColor" Value="{DynamicResource ChartBear}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
 
 </ResourceDictionary>

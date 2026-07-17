@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:models="clr-namespace:KieshStockExchange.Models;assembly=KieshStockExchange.Shared"
+             xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
+             x:Class="KieshStockExchange.Views.TradePageViews.ChartToolbarView"
+             x:DataType="vm:ChartViewModel">
+
+    <!-- The chart's top toolbar. Binds the (inherited) ChartViewModel; the pen button reaches through to
+         the child Drawing VM. Autofit + Snapshot need chart internals the toolbar can't see, so they bubble
+         YAutoFitRequested / SnapshotRequested events that ChartView services against its drawable. -->
+    <Grid Style="{StaticResource ChartToolbar}"
+          ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+
+        <!-- Resolution segments -->
+        <HorizontalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
+            <Button Text="15s"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding SelectResolutionCommand}"
+                    CommandParameter="{x:Static models:CandleResolution.FifteenSeconds}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding SelectedResolution}"
+                                 Value="{x:Static models:CandleResolution.FifteenSeconds}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <Button Text="1m"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding SelectResolutionCommand}"
+                    CommandParameter="{x:Static models:CandleResolution.OneMinute}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding SelectedResolution}"
+                                 Value="{x:Static models:CandleResolution.OneMinute}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <Button Text="5m"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding SelectResolutionCommand}"
+                    CommandParameter="{x:Static models:CandleResolution.FiveMinutes}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding SelectedResolution}"
+                                 Value="{x:Static models:CandleResolution.FiveMinutes}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <Button Text="15m"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding SelectResolutionCommand}"
+                    CommandParameter="{x:Static models:CandleResolution.FifteenMinutes}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding SelectedResolution}"
+                                 Value="{x:Static models:CandleResolution.FifteenMinutes}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <Button Text="1h"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding SelectResolutionCommand}"
+                    CommandParameter="{x:Static models:CandleResolution.OneHour}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding SelectedResolution}"
+                                 Value="{x:Static models:CandleResolution.OneHour}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <Button Text="4h"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding SelectResolutionCommand}"
+                    CommandParameter="{x:Static models:CandleResolution.FourHours}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding SelectedResolution}"
+                                 Value="{x:Static models:CandleResolution.FourHours}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <Button Text="1D"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding SelectResolutionCommand}"
+                    CommandParameter="{x:Static models:CandleResolution.OneDay}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding SelectedResolution}"
+                                 Value="{x:Static models:CandleResolution.OneDay}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+
+            <!-- Chart-type toggle (cycles Candles -> Hollow -> Bars -> Line -> Area -> Heikin-Ashi) -->
+            <BoxView WidthRequest="1" Color="{StaticResource ChartGrid}" Margin="4,4" VerticalOptions="Fill" />
+            <Button Text="{Binding ChartStyleLabel}"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding CycleChartStyleCommand}" />
+
+            <!-- Volume display toggle (cycles Overlay -> Pane -> Off) -->
+            <Button Text="{Binding VolumeModeLabel}"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding CycleVolumeModeCommand}" />
+
+            <!-- Market Mood (Fear/Greed) sub-pane toggle -->
+            <Button Text="{Binding MoodPaneLabel}"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding ToggleMoodPaneCommand}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding ShowMoodPane}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+
+            <!-- Order-book depth heatmap toggle -->
+            <Button Text="{Binding DepthLabel}"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding ToggleDepthCommand}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding ShowDepth}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+
+            <!-- Price-scale toggle (cycles Linear -> Log -> Percent) -->
+            <Button Text="{Binding ScaleModeLabel}"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding CycleScaleModeCommand}" />
+
+            <!-- Pen tray: a plain text label ("Line" + the current tool glyph) + ▾; tapping toggles
+                 the pen panel. Reaches through to the child Drawing VM. -->
+            <Button Text="{Binding Drawing.PenToolLabel, StringFormat='{0} ▾'}"
+                    Style="{StaticResource ChartResolutionButton.Unselected}"
+                    Command="{Binding Drawing.TogglePenPanelCommand}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding Drawing.IsPenPanelOpen}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+        </HorizontalStackLayout>
+
+        <!-- Spacer -->
+        <BoxView Grid.Column="1" Color="Transparent" />
+
+        <!-- Y-axis auto-fit toggle (bubbles to ChartView — needs the drawable's cached Y range) -->
+        <Button Grid.Column="2" Text="Autofit"
+                Style="{StaticResource ChartLiveButton.Off}"
+                Clicked="OnYAutoFitTapped">
+            <Button.Triggers>
+                <DataTrigger TargetType="Button"
+                             Binding="{Binding IsYAutoFit}" Value="True">
+                    <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                    <Setter Property="TextColor"       Value="{StaticResource White}" />
+                </DataTrigger>
+            </Button.Triggers>
+        </Button>
+        <!-- MA settings toggle -->
+        <Button Grid.Column="3" Text="MA"
+                Style="{StaticResource ChartLiveButton.Off}"
+                Command="{Binding ToggleMaSettingsCommand}">
+            <Button.Triggers>
+                <DataTrigger TargetType="Button"
+                             Binding="{Binding IsMaSettingsOpen}" Value="True">
+                    <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                    <Setter Property="TextColor"       Value="{StaticResource White}" />
+                </DataTrigger>
+            </Button.Triggers>
+        </Button>
+        <!-- Zoom out -->
+        <Button Grid.Column="4" Text="−"
+                Style="{StaticResource ChartIconButton}"
+                Command="{Binding ZoomOutCommand}" />
+        <!-- Zoom in -->
+        <Button Grid.Column="5" Text="+"
+                Style="{StaticResource ChartIconButton}"
+                Command="{Binding ZoomInCommand}" />
+        <!-- Separator -->
+        <BoxView Grid.Column="6" Style="{StaticResource ChartToolbarSeparator}" />
+        <!-- Live -->
+        <Button Grid.Column="7" Text="LIVE"
+                Style="{StaticResource ChartLiveButton.Off}"
+                Command="{Binding GoLiveCommand}">
+            <Button.Triggers>
+                <DataTrigger TargetType="Button"
+                             Binding="{Binding IsLive}" Value="True">
+                    <Setter Property="BackgroundColor" Value="{StaticResource ChartBull}" />
+                    <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    <Setter Property="BorderColor"     Value="{StaticResource ChartBull}" />
+                </DataTrigger>
+            </Button.Triggers>
+        </Button>
+        <!-- Snapshot (top-right): bubbles to ChartView — needs the drawable + GraphicsView size -->
+        <Button Grid.Column="8" Text="📷"
+                Style="{StaticResource ChartIconButton}"
+                Clicked="OnSnapshotTapped" />
+    </Grid>
+</ContentView>

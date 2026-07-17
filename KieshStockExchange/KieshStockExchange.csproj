@@ -209,7 +209,16 @@
 	  <MauiXaml Update="Views\PortfolioPageViews\PortfolioPage.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>
-	  <MauiXaml Update="Views\TradePageViews\ChartView.xaml">
+	  <MauiXaml Update="Views\TradePageViews\Chart\ChartView.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Views\TradePageViews\Chart\ChartToolbarView.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Views\TradePageViews\Chart\ChartToolRailView.xaml">
+	    <Generator>MSBuild:Compile</Generator>
+	  </MauiXaml>
+	  <MauiXaml Update="Views\TradePageViews\Chart\ChartPenPanelView.xaml">
 	    <Generator>MSBuild:Compile</Generator>
 	  </MauiXaml>
 	  <MauiXaml Update="Views\TradePageViews\OrderHistoryView.xaml">
