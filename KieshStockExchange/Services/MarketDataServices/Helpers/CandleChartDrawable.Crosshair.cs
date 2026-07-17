@@ -22,9 +22,9 @@ public sealed partial class CandleChartDrawable
         // line spans both; the horizontal line is drawn within whichever pane the
         // pointer is in, and the price tag only appears for the price pane.
         bool inPrice = Crosshair.Y >= plot.Top && Crosshair.Y <= plot.Bottom;
-        bool inVol = _lastVolRect.Height > 0
-                     && Crosshair.Y >= _lastVolRect.Top
-                     && Crosshair.Y <= _lastVolRect.Bottom;
+        bool inVol = _frame.VolRect.Height > 0
+                     && Crosshair.Y >= _frame.VolRect.Top
+                     && Crosshair.Y <= _frame.VolRect.Bottom;
         if (!inPrice && !inVol) return;
 
         // Snap vertical line to the centre of the hovered candle when there is one.
@@ -37,7 +37,7 @@ public sealed partial class CandleChartDrawable
 
         // Vertical line spans the full chart, including the volume sub-pane.
         float vyTop = plot.Top;
-        float vyBottom = _lastVolRect.Height > 0 ? _lastVolRect.Bottom : plot.Bottom;
+        float vyBottom = _frame.VolRect.Height > 0 ? _frame.VolRect.Bottom : plot.Bottom;
 
         canvas.SaveState();
         canvas.StrokeColor = CrosshairColor;

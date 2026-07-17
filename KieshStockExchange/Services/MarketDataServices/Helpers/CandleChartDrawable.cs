@@ -228,10 +228,6 @@ public sealed partial class CandleChartDrawable : IDrawable
                                     baseArea.Width, volH);
             }
         }
-        _lastPlot = plot;
-        _lastVolRect = volRect;
-        _lastMoodRect = moodRect;
-
         // Visible time-range. Prefer the explicit viewport when set so that
         // empty pre-history / post-future space scales correctly. Fall back
         // to the candle slice extremes for legacy callers.
@@ -251,13 +247,16 @@ public sealed partial class CandleChartDrawable : IDrawable
         }
         else
         {
+            // Bailout still commits the NEW pane rects (old ranges kept) — mirrors the old cache,
+            // which wrote the rect fields before this early return.
+            _frame = _frame.WithRects(plot, volRect, moodRect);
             DrawNoData(canvas, dirtyRect);
             canvas.RestoreState();
             return;
         }
 
         double spanSec = (tMax - tMin).TotalSeconds;
-        if (spanSec <= 0) { canvas.RestoreState(); return; }
+        if (spanSec <= 0) { _frame = _frame.WithRects(plot, volRect, moodRect); canvas.RestoreState(); return; }
 
         double yMin, yMax;
         if (YAutoFit)
@@ -311,23 +310,25 @@ public sealed partial class CandleChartDrawable : IDrawable
         {
             // Manual mode without an explicit range yet — freeze at the most
             // recent auto-fit values so the chart doesn't jump on toggle.
-            yMin = _lastYMin;
-            yMax = _lastYMax;
+            yMin = _frame.YMin;
+            yMax = _frame.YMax;
             _autoFitInit = false;
         }
 
         if (yMax <= yMin) yMax = yMin + 1.0;
-        _lastYMin = yMin;
-        _lastYMax = yMax;
-        _lastTMin = tMin;
-        _lastTMax = tMax;
+
+        var currency = Candles.Count > 0 ? Candles[0].CurrencyType : CurrencyType.USD;
+
+        // One frame per paint: pane rects, ranges and every data<->pixel transform committed in a
+        // single assignment BEFORE any renderer runs — the old seven-field cache, reified.
+        var frame = new RenderFrame(plot, volRect, moodRect, yMin, yMax, tMin, tMax, spanSec,
+            ScaleMode, Viewport.Bucket, currency, _scale);
+        _frame = frame;
 
         // Coordinate transforms from data-space to plot-space. Y routes through PriceToFrac so
         // the log scale (and its inverse in PixelToPrice) share one definition.
-        float X(DateTime utc) => plot.Left + (float)(((utc - tMin).TotalSeconds / spanSec) * plot.Width);
-        float Y(double price) => plot.Bottom - (float)(PriceToFrac(price, yMin, yMax) * plot.Height);
-
-        var currency = Candles.Count > 0 ? Candles[0].CurrencyType : CurrencyType.USD;
+        Func<DateTime, float> X = frame.MapX;
+        Func<double, float> Y = frame.MapY;
 
         DrawYGridAndLabels(canvas, plot, yMin, yMax, currency);
         DrawXGridAndLabels(canvas, plot, tMin, tMax);
@@ -384,15 +385,10 @@ public sealed partial class CandleChartDrawable : IDrawable
             Math.Max(1f, dirtyRect.Width - RightAxisW - LeftPad),
             Math.Max(1f, dirtyRect.Height - BottomAxisH - TopPad));
 
-    // Geometry cached at the end of Draw() so the inverse transforms below stay
-    // consistent with the most recent paint, even between frames.
-    private RectF _lastPlot;
-    private RectF _lastVolRect;
-    private RectF _lastMoodRect;
-    private double _lastYMin;
-    private double _lastYMax = 1.0;
-    private DateTime _lastTMin;
-    private DateTime _lastTMax;
+    // The most recent paint's committed geometry + transforms (RenderFrame reifies the old
+    // seven-field cache), so hit-testing and the public forwards below stay consistent with the
+    // last paint, even between frames.
+    private RenderFrame _frame = RenderFrame.Empty;
 
     // Autofit hysteresis state — the committed axis range plus a counter that gates contraction so
     // the range only shrinks after the tight fit has stayed comfortably inside it for a short spell.
@@ -402,14 +398,14 @@ public sealed partial class CandleChartDrawable : IDrawable
     private int _autoFitContractFrames;
 
     /// <summary>Rectangle reserved for the volume sub-pane in the most recent paint.</summary>
-    public RectF VolumeRect => _lastVolRect;
+    public RectF VolumeRect => _frame.VolRect;
     /// <summary>Rectangle reserved for the mood sub-pane in the most recent paint.</summary>
-    public RectF MoodRect => _lastMoodRect;
+    public RectF MoodRect => _frame.MoodRect;
     /// <summary>Price-plot rectangle from the most recent paint — lets view-side code
     /// (cursor-anchored zoom) map a pointer X to a plot-width fraction without redoing the gutter math.</summary>
-    public RectF PlotRect => _lastPlot;
-    public double LastYMin => _lastYMin;
-    public double LastYMax => _lastYMax;
+    public RectF PlotRect => _frame.Plot;
+    public double LastYMin => _frame.YMin;
+    public double LastYMax => _frame.YMax;
 
     private void DrawNoData(ICanvas canvas, RectF r)
     {

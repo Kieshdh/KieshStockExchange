@@ -13,28 +13,8 @@ namespace KieshStockExchange.Services.MarketDataServices;
 public sealed partial class CandleChartDrawable
 {
     #region Axes and Grid
-    // Price <-> normalized vertical fraction (0 = plot bottom, 1 = plot top), keyed on ScaleMode.
-    // Log mode maps equal RATIOS to equal pixels; Linear/Percent are plain linear. PixelToPrice
-    // inverts this so hit-testing stays exact under every scale.
-    private double PriceToFrac(double price, double lo, double hi)
-    {
-        if (ScaleMode == PriceScaleMode.Logarithmic)
-        {
-            double a = Math.Log(Math.Max(lo, 1e-9)), b = Math.Log(Math.Max(hi, 1e-9));
-            return b <= a ? 0.0 : (Math.Log(Math.Max(price, 1e-9)) - a) / (b - a);
-        }
-        return hi <= lo ? 0.0 : (price - lo) / (hi - lo);
-    }
-
-    private double FracToPrice(double frac, double lo, double hi)
-    {
-        if (ScaleMode == PriceScaleMode.Logarithmic)
-        {
-            double a = Math.Log(Math.Max(lo, 1e-9)), b = Math.Log(Math.Max(hi, 1e-9));
-            return Math.Exp(a + frac * (b - a));
-        }
-        return lo + frac * (hi - lo);
-    }
+    // Price <-> normalized-fraction helpers now live on RenderFrame (mode-parameterized statics)
+    // so the per-paint frame and the axes share one definition; hit-testing inverts the same math.
 
     private void DrawYGridAndLabels(ICanvas canvas, RectF plot, double yMin, double yMax, CurrencyType cur)
     {
@@ -48,7 +28,7 @@ public sealed partial class CandleChartDrawable
 
         for (double v = niceMin; v <= niceMax + 1e-9; v += step)
         {
-            float y = plot.Bottom - (float)(PriceToFrac(v, yMin, yMax) * plot.Height);
+            float y = plot.Bottom - (float)(RenderFrame.PriceToFrac(v, yMin, yMax, ScaleMode) * plot.Height);
             if (y < plot.Top - 1 || y > plot.Bottom + 1) continue;
 
             // Horizontal grid line

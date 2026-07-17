@@ -153,8 +153,8 @@ public sealed partial class CandleChartDrawable
             {
                 // Infinite line through both anchors, extended to BOTH plot edges. Vertical mapping
                 // routes through the scale seam (identical to the local Y under RegularScaleTransform).
-                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _lastYMin, _lastYMax, ScaleMode);
-                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _lastYMin, _lastYMax, ScaleMode);
+                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _frame.YMin, _frame.YMax, ScaleMode);
+                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _frame.YMin, _frame.YMax, ScaleMode);
                 var (ax, ay) = RayExit(x1, y1, x2 - x1, y2 - y1, plot);   // forward edge
                 var (bx, by) = RayExit(x1, y1, x1 - x2, y1 - y2, plot);   // backward edge
                 StylePreviewDrawable.DrawStraightSegment(canvas, bx, by, ax, ay,
@@ -169,8 +169,8 @@ public sealed partial class CandleChartDrawable
             {
                 // Two-corner shape: optional translucent fill (Fill + FillOpacity) then a border stroke.
                 // Corners' vertical mapping routes through the scale seam.
-                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _lastYMin, _lastYMax, ScaleMode);
-                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _lastYMin, _lastYMax, ScaleMode);
+                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _frame.YMin, _frame.YMax, ScaleMode);
+                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _frame.YMin, _frame.YMax, ScaleMode);
                 var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
 
                 if (d.Style.Fill is Color fill)
@@ -234,8 +234,8 @@ public sealed partial class CandleChartDrawable
                 // Filled BLOCK ARROW: anchor1 = tail, anchor2 = head. Fixed aspect (proportional to the
                 // length), so moving the anchors apart just ENLARGES the same pointer. Fill then outline —
                 // the same fill/opacity + stroke treatment as Rectangle/Ellipse.
-                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _lastYMin, _lastYMax, ScaleMode);
-                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _lastYMin, _lastYMax, ScaleMode);
+                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _frame.YMin, _frame.YMax, ScaleMode);
+                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _frame.YMin, _frame.YMax, ScaleMode);
                 var arrow = BlockArrowPath(x1, y1, x2, y2);
                 if (arrow is not null)
                 {
@@ -403,8 +403,8 @@ public sealed partial class CandleChartDrawable
         canvas.StrokeDashPattern = null;
         // Endpoint prices — anchor each pill on the outer side of the segment.
         bool leftIsP1 = x1 <= x2;
-        DrawEndpointPriceTag(canvas, _lastPlot, x1, y1, d.P1, lineColor, cur, toLeft: leftIsP1);
-        DrawEndpointPriceTag(canvas, _lastPlot, x2, y2, d.P2, lineColor, cur, toLeft: !leftIsP1);
+        DrawEndpointPriceTag(canvas, _frame.Plot, x1, y1, d.P1, lineColor, cur, toLeft: leftIsP1);
+        DrawEndpointPriceTag(canvas, _frame.Plot, x2, y2, d.P2, lineColor, cur, toLeft: !leftIsP1);
 
         // Midpoint change / % / bars, coloured by sign.
         decimal change = d.P2 - d.P1;
@@ -419,8 +419,8 @@ public sealed partial class CandleChartDrawable
         float w = Math.Max(120f, text.Length * 6.2f);
         float cx = (x1 + x2) * 0.5f;
         float cy = (y1 + y2) * 0.5f;
-        float lx = Math.Clamp(cx - w / 2f, _lastPlot.Left, Math.Max(_lastPlot.Left, _lastPlot.Right - w));
-        float ly = Math.Clamp(cy - 28f, _lastPlot.Top, Math.Max(_lastPlot.Top, _lastPlot.Bottom - 16f));
+        float lx = Math.Clamp(cx - w / 2f, _frame.Plot.Left, Math.Max(_frame.Plot.Left, _frame.Plot.Right - w));
+        float ly = Math.Clamp(cy - 28f, _frame.Plot.Top, Math.Max(_frame.Plot.Top, _frame.Plot.Bottom - 16f));
         var panel = new RectF(lx, ly, w, 16f);
         canvas.FillColor = tint;
         canvas.FillRectangle(panel);

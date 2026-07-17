@@ -12,18 +12,10 @@ namespace KieshStockExchange.Services.MarketDataServices;
 
 public sealed partial class CandleChartDrawable
 {
-    // Forward data->pixel transforms rebuilt from the last paint's cached geometry, so hit-testing
-    // maps a drawing's data anchors back to the exact pixels the render pass used. Y routes through
-    // PriceToFrac so the log scale is honoured just like the axes.
-    private float PriceToPixelY(decimal price)
-        => (float)(_lastPlot.Bottom - PriceToFrac((double)price, _lastYMin, _lastYMax) * _lastPlot.Height);
-
-    private float TimeToPixelX(DateTime t)
-    {
-        if (_lastTMax <= _lastTMin) return _lastPlot.Left;
-        double frac = (t - _lastTMin).TotalSeconds / (_lastTMax - _lastTMin).TotalSeconds;
-        return (float)(_lastPlot.Left + frac * _lastPlot.Width);
-    }
+    // Forward data->pixel transforms now live on the last paint's RenderFrame (HIT form —
+    // subtract-in-double, cast last), so hit-testing maps a drawing's data anchors back to the
+    // exact pixels the render pass used. Y routes through PriceToFrac so the log scale is honoured
+    // just like the axes.
 
     /// <summary>
     /// Returns the drawing hit by the pointer and which part (an endpoint, the body, or the ✕
@@ -32,40 +24,40 @@ public sealed partial class CandleChartDrawable
     public (DrawingObject Drawing, DrawingHitPart Part)? HitDrawing(PointF p)
     {
         if (Drawings.Count == 0) return null;
-        if (_lastPlot.Width <= 0 || _lastYMax <= _lastYMin) return null;
+        if (_frame.Plot.Width <= 0 || _frame.YMax <= _frame.YMin) return null;
 
         for (int i = Drawings.Count - 1; i >= 0; i--)
         {
             var d = Drawings[i];
             if (d.Kind == DrawTool.HLine)
             {
-                float y = PriceToPixelY(d.P1);
-                if (y < _lastPlot.Top || y > _lastPlot.Bottom) continue;
-                if (p.X >= _lastPlot.Left && p.X <= _lastPlot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
+                float y = _frame.HitPriceToPixelY(d.P1);
+                if (y < _frame.Plot.Top || y > _frame.Plot.Bottom) continue;
+                if (p.X >= _frame.Plot.Left && p.X <= _frame.Plot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.HRay)
             {
-                float x1 = TimeToPixelX(d.T1), y = PriceToPixelY(d.P1);
+                float x1 = _frame.TimeToPixelX(d.T1), y = _frame.HitPriceToPixelY(d.P1);
                 if (Dist(p.X, p.Y, x1, y) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
-                if (p.X >= x1 - DrawHitTol && p.X <= _lastPlot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
+                if (p.X >= x1 - DrawHitTol && p.X <= _frame.Plot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.VLine)
             {
-                float x = TimeToPixelX(d.T1);
-                if (x < _lastPlot.Left || x > _lastPlot.Right) continue;
-                if (Math.Abs(p.X - x) <= DrawHitTol && p.Y >= _lastPlot.Top && p.Y <= _lastPlot.Bottom)
+                float x = _frame.TimeToPixelX(d.T1);
+                if (x < _frame.Plot.Left || x > _frame.Plot.Right) continue;
+                if (Math.Abs(p.X - x) <= DrawHitTol && p.Y >= _frame.Plot.Top && p.Y <= _frame.Plot.Bottom)
                     return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.Polyline || d.Kind == DrawTool.Freehand)
             {
                 var pts = d.Points;
                 if (pts is null || pts.Count == 0) continue;
-                float lastX = TimeToPixelX(pts[0].T), lastY = PriceToPixelY(pts[0].P);
+                float lastX = _frame.TimeToPixelX(pts[0].T), lastY = _frame.HitPriceToPixelY(pts[0].P);
                 for (int k = 1; k < pts.Count; k++)
                 {
-                    float nx = TimeToPixelX(pts[k].T), ny = PriceToPixelY(pts[k].P);
+                    float nx = _frame.TimeToPixelX(pts[k].T), ny = _frame.HitPriceToPixelY(pts[k].P);
                     if (PointSegDist(p.X, p.Y, lastX, lastY, nx, ny) <= DrawHitTol)
                         return (d, DrawingHitPart.Body);
                     lastX = nx; lastY = ny;
@@ -73,21 +65,21 @@ public sealed partial class CandleChartDrawable
             }
             else if (d.Kind == DrawTool.ExtendedLine)
             {
-                float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
-                float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
+                float x1 = _frame.TimeToPixelX(d.T1), y1 = _frame.HitPriceToPixelY(d.P1);
+                float x2 = _frame.TimeToPixelX(d.T2), y2 = _frame.HitPriceToPixelY(d.P2);
                 if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
-                var (ax, ay) = RayExit(x1, y1, x2 - x1, y2 - y1, _lastPlot);
-                var (bx, by) = RayExit(x1, y1, x1 - x2, y1 - y2, _lastPlot);
+                var (ax, ay) = RayExit(x1, y1, x2 - x1, y2 - y1, _frame.Plot);
+                var (bx, by) = RayExit(x1, y1, x1 - x2, y1 - y2, _frame.Plot);
                 if (PointSegDist(p.X, p.Y, bx, by, ax, ay) <= DrawHitTol
-                    && p.X >= _lastPlot.Left - 2 && p.X <= _lastPlot.Right + 2
-                    && p.Y >= _lastPlot.Top - 2 && p.Y <= _lastPlot.Bottom + 2)
+                    && p.X >= _frame.Plot.Left - 2 && p.X <= _frame.Plot.Right + 2
+                    && p.Y >= _frame.Plot.Top - 2 && p.Y <= _frame.Plot.Bottom + 2)
                     return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse)
             {
-                float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
-                float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
+                float x1 = _frame.TimeToPixelX(d.T1), y1 = _frame.HitPriceToPixelY(d.P1);
+                float x2 = _frame.TimeToPixelX(d.T2), y2 = _frame.HitPriceToPixelY(d.P2);
                 if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
                 var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
@@ -102,8 +94,8 @@ public sealed partial class CandleChartDrawable
             }
             else if (d.Kind == DrawTool.Arrow)
             {
-                float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
-                float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
+                float x1 = _frame.TimeToPixelX(d.T1), y1 = _frame.HitPriceToPixelY(d.P1);
+                float x2 = _frame.TimeToPixelX(d.T2), y2 = _frame.HitPriceToPixelY(d.P2);
                 if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
                 // Body = the block-arrow's oriented bounding box (anchors' bbox padded by the head half-width).
@@ -115,16 +107,16 @@ public sealed partial class CandleChartDrawable
             }
             else // Trend or Ray
             {
-                float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
-                float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
+                float x1 = _frame.TimeToPixelX(d.T1), y1 = _frame.HitPriceToPixelY(d.P1);
+                float x2 = _frame.TimeToPixelX(d.T2), y2 = _frame.HitPriceToPixelY(d.P2);
                 if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
                 // Ray body extends past anchor2 to the plot edge — hit-test the full drawn segment.
                 float fx = x2, fy = y2;
-                if (d.Kind == DrawTool.Ray) (fx, fy) = RayExit(x1, y1, x2 - x1, y2 - y1, _lastPlot);
+                if (d.Kind == DrawTool.Ray) (fx, fy) = RayExit(x1, y1, x2 - x1, y2 - y1, _frame.Plot);
                 if (PointSegDist(p.X, p.Y, x1, y1, fx, fy) <= DrawHitTol
-                    && p.X >= _lastPlot.Left - 2 && p.X <= _lastPlot.Right + 2
-                    && p.Y >= _lastPlot.Top - 2 && p.Y <= _lastPlot.Bottom + 2)
+                    && p.X >= _frame.Plot.Left - 2 && p.X <= _frame.Plot.Right + 2
+                    && p.Y >= _frame.Plot.Top - 2 && p.Y <= _frame.Plot.Bottom + 2)
                     return (d, DrawingHitPart.Body);
             }
         }
@@ -151,7 +143,7 @@ public sealed partial class CandleChartDrawable
     public OpenOrderLine? HitOpenOrderLine(PointF pInControl)
     {
         if (OpenOrderLines.Count == 0) return null;
-        if (_lastPlot.Width <= 0 || _lastYMax <= _lastYMin) return null;
+        if (_frame.Plot.Width <= 0 || _frame.YMax <= _frame.YMin) return null;
 
         for (int i = 0; i < OpenOrderLines.Count; i++)
         {
@@ -163,15 +155,15 @@ public sealed partial class CandleChartDrawable
             // visual position but the test fires against the DB position.
             bool dragging = DraggingOrderId == line.OrderId;
             decimal price = dragging && DraggingOrderPrice is decimal dp ? dp : line.Price;
-            float y = (float)(_lastPlot.Bottom
-                              - ((double)price - _lastYMin) / (_lastYMax - _lastYMin)
-                                * _lastPlot.Height);
+            float y = (float)(_frame.Plot.Bottom
+                              - ((double)price - _frame.YMin) / (_frame.YMax - _frame.YMin)
+                                * _frame.Plot.Height);
             // Skip lines whose price is currently outside the visible Y range —
             // they aren't drawn, so they shouldn't be hit-testable either.
-            if (y < _lastPlot.Top || y > _lastPlot.Bottom) continue;
+            if (y < _frame.Plot.Top || y > _frame.Plot.Bottom) continue;
             if (Math.Abs(pInControl.Y - y) > 4f) continue;
-            if (pInControl.X < _lastPlot.Left
-                || pInControl.X > _lastPlot.Right + RightAxisW) continue;
+            if (pInControl.X < _frame.Plot.Left
+                || pInControl.X > _frame.Plot.Right + RightAxisW) continue;
             return line;
         }
         return null;
@@ -183,27 +175,13 @@ public sealed partial class CandleChartDrawable
     /// from the most recent paint. Returns null if no successful paint has been
     /// performed yet.
     /// </summary>
-    public decimal? PixelToPrice(float yInControl)
-    {
-        if (_lastPlot.Height <= 0 || _lastYMax <= _lastYMin) return null;
-        if (yInControl < _lastPlot.Top || yInControl > _lastPlot.Bottom) return null;
-        double frac = (_lastPlot.Bottom - yInControl) / (double)_lastPlot.Height;
-        double price = FracToPrice(frac, _lastYMin, _lastYMax);
-        return (decimal)price;
-    }
+    public decimal? PixelToPrice(float yInControl) => _frame.PixelToPrice(yInControl);
 
     /// <summary>
     /// Maps an X pixel inside the plot back to a UTC time using the cached time
     /// range from the most recent paint.
     /// </summary>
-    public DateTime PixelToTime(float xInControl)
-    {
-        if (_lastPlot.Width <= 0 || _lastTMax <= _lastTMin) return _lastTMin;
-        double frac = (xInControl - _lastPlot.Left) / (double)_lastPlot.Width;
-        frac = Math.Clamp(frac, 0.0, 1.0);
-        var span = _lastTMax - _lastTMin;
-        return _lastTMin.AddTicks((long)(span.Ticks * frac));
-    }
+    public DateTime PixelToTime(float xInControl) => _frame.PixelToTime(xInControl);
 
     /// <summary>
     /// Returns the index into <see cref="Candles"/> whose bucket contains the X
@@ -214,11 +192,11 @@ public sealed partial class CandleChartDrawable
     public int? HitCandleIndex(PointF pInControl)
     {
         if (Candles.Count == 0) return null;
-        if (pInControl.X < _lastPlot.Left || pInControl.X > _lastPlot.Right) return null;
-        bool inPrice = pInControl.Y >= _lastPlot.Top && pInControl.Y <= _lastPlot.Bottom;
-        bool inVol = _lastVolRect.Height > 0
-                     && pInControl.Y >= _lastVolRect.Top
-                     && pInControl.Y <= _lastVolRect.Bottom;
+        if (pInControl.X < _frame.Plot.Left || pInControl.X > _frame.Plot.Right) return null;
+        bool inPrice = pInControl.Y >= _frame.Plot.Top && pInControl.Y <= _frame.Plot.Bottom;
+        bool inVol = _frame.VolRect.Height > 0
+                     && pInControl.Y >= _frame.VolRect.Top
+                     && pInControl.Y <= _frame.VolRect.Bottom;
         if (!inPrice && !inVol) return null;
 
         var t = PixelToTime(pInControl.X);
@@ -242,8 +220,8 @@ public sealed partial class CandleChartDrawable
     /// </summary>
     public bool IsInChartArea(PointF pInControl)
     {
-        if (_lastPlot.Contains(pInControl)) return true;
-        return _lastVolRect.Height > 0 && _lastVolRect.Contains(pInControl);
+        if (_frame.Plot.Contains(pInControl)) return true;
+        return _frame.VolRect.Height > 0 && _frame.VolRect.Contains(pInControl);
     }
 
     /// <summary>
@@ -253,10 +231,10 @@ public sealed partial class CandleChartDrawable
     /// </summary>
     public bool IsInYAxisGutter(PointF pInControl)
     {
-        return pInControl.X > _lastPlot.Right
-            && pInControl.X <= _lastPlot.Right + RightAxisW
-            && pInControl.Y >= _lastPlot.Top
-            && pInControl.Y <= _lastPlot.Bottom;
+        return pInControl.X > _frame.Plot.Right
+            && pInControl.X <= _frame.Plot.Right + RightAxisW
+            && pInControl.Y >= _frame.Plot.Top
+            && pInControl.Y <= _frame.Plot.Bottom;
     }
     #endregion
 }
