@@ -372,3 +372,7 @@ KieshStockExchange.Server/Data/telemetry/
 
 # Soak experiment data — candle CSVs kept locally for cross-soak comparison (not committed)
 /data/soaks/
+
+# CandleChartDrawable Arc-2 golden-image render-comparison harness — goldens are same-machine
+# artifacts (fonts/timezone), never committed (docs/CANDLECHARTDRAWABLE_ARC2_COMPOSITION_PLAN.md §2.5)
+/data/chart-goldens/

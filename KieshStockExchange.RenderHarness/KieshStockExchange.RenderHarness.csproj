@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Arc-2 gate tool (docs/CANDLECHARTDRAWABLE_ARC2_COMPOSITION_PLAN.md §2): renders
+       CandleChartDrawable headlessly via Skia and compares against golden PNGs so the
+       composition arc has a real behavioural regression gate. Not xunit — two verbs
+       (capture/verify), exit-code gated, no test-discovery overhead. -->
+  <ItemGroup>
+    <!-- Align with the test project's pinned Graphics version; Skia must match it exactly. -->
+    <PackageReference Include="Microsoft.Maui.Graphics" Version="9.0.90" />
+    <PackageReference Include="Microsoft.Maui.Graphics.Skia" Version="9.0.90" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.Maui.Graphics" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KieshStockExchange.Shared\KieshStockExchange.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- Link-compile the drawable + its headless closure out of the client project.
+       Globs are deliberate: new CandleChartDrawable partials shrink/disappear and new
+       collaborator classes appear under Helpers/Drawing/ as the arc proceeds — both are
+       swept automatically, so the harness needs no csproj edit per step. -->
+  <ItemGroup>
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\CandleChartDrawable*.cs"
+             Link="Chart\%(Filename)%(Extension)" />
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\Drawing\*.cs"
+             Link="Chart\Drawing\%(Filename)%(Extension)" />
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\ChartTypes.cs"
+             Link="Chart\ChartTypes.cs" />
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\StylePreviewDrawable.cs"
+             Link="Chart\StylePreviewDrawable.cs" />
+    <Compile Include="..\KieshStockExchange\Models\ChartDrawing\**\*.cs"
+             Link="ChartDrawing\%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- Step 2 adds: ..\KieshStockExchange\Helpers\ChartGeometry.cs -->
+  </ItemGroup>
+</Project>

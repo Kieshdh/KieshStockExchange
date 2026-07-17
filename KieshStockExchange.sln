@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KieshStockExchange.Migratio
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KieshStockExchange.Tests", "KieshStockExchange.Tests\KieshStockExchange.Tests.csproj", "{8A857C62-59BA-44C2-9948-10866AB9D8E9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KieshStockExchange.RenderHarness", "KieshStockExchange.RenderHarness\KieshStockExchange.RenderHarness.csproj", "{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -83,6 +85,18 @@ Global
 		{8A857C62-59BA-44C2-9948-10866AB9D8E9}.Release|x64.Build.0 = Release|Any CPU
 		{8A857C62-59BA-44C2-9948-10866AB9D8E9}.Release|x86.ActiveCfg = Release|Any CPU
 		{8A857C62-59BA-44C2-9948-10866AB9D8E9}.Release|x86.Build.0 = Release|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Debug|x64.Build.0 = Debug|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Debug|x86.Build.0 = Debug|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Release|x64.ActiveCfg = Release|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Release|x64.Build.0 = Release|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Release|x86.ActiveCfg = Release|Any CPU
+		{1B2C3D4E-5F60-4A7B-8C9D-0E1F2A3B4C5D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
