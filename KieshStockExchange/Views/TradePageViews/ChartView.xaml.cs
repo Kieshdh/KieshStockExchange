@@ -330,6 +330,7 @@ public partial class ChartView : ContentView
         // brittle if a future feature mutates from a different thread.
         _drawable.Drawings = _vm.DrawingsHidden ? System.Array.Empty<DrawingObject>() : _vm.Drawings.ToArray();
         _drawable.SelectedDrawingId = _vm.SelectedDrawingId;
+        _drawable.SelectedDrawingIds = _vm.SelectedDrawingIds.ToArray();   // multi-select highlight
         _drawable.BuildingStyle = _vm.DefaultDrawStyle;   // faithful in-progress polyline preview (incl. arrowhead)
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
@@ -568,7 +569,9 @@ public partial class ChartView : ContentView
         bool shiftDown = (Microsoft.UI.Input.InputKeyboardSource
                            .GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift)
                            & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
-        if (shiftDown && _drawable.IsInChartArea(p))
+        // Shift-drag on EMPTY chart = measure ruler; shift-click ON a drawing falls through to
+        // multi-select (handled in Priority 0.5), so don't start measuring on top of one.
+        if (shiftDown && _drawable.IsInChartArea(p) && _drawable.HitDrawing(p) is null)
         {
             _dragMode = DragMode.Measure;
             _drawable.Measure = new MeasureState(true, p.X, p.Y, p.X, p.Y);
@@ -619,10 +622,18 @@ public partial class ChartView : ContentView
                 e.Handled = true;
                 return;
             }
-            // Tap-to-select: hitting a drawing selects it (reveals the style-bar) and begins a drag.
-            // Force the panel open too — re-tapping an already-selected drawing leaves SelectedDrawingId
-            // unchanged (no OnChanged), so this guarantees the settings show every time.
-            _vm.SelectedDrawingId = dh.Drawing.Id;
+            // Shift-click TOGGLES the drawing in the multi-selection (for a bulk Delete) — no drag.
+            if (shiftDown)
+            {
+                _vm.AddToSelection(dh.Drawing.Id);
+                _vm.IsPenPanelOpen = true;
+                Chart.Invalidate();
+                e.Handled = true;
+                return;
+            }
+            // Plain tap-to-select: select ONLY this drawing, show its settings, begin a drag. Force the
+            // panel open too — re-tapping an already-selected drawing leaves the id unchanged (no OnChanged).
+            _vm.SelectSingle(dh.Drawing.Id);
             _vm.IsPenPanelOpen = true;
             BeginDrawingDrag(dh.Drawing, dh.Part, p, isNew: false);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
@@ -641,9 +652,10 @@ public partial class ChartView : ContentView
             var id = Guid.NewGuid();
             if (_vm.DrawTool == DrawTool.HLine || _vm.DrawTool == DrawTool.HRay || _vm.DrawTool == DrawTool.VLine)
             {
-                // One-click lines (HLine/HRay at a price, VLine at a time). Stay in pen mode after placing
-                // (no auto-select) so the user can keep placing lines / switching tool type. Click to edit.
+                // One-click lines (HLine/HRay at a price, VLine at a time). After placing: revert to the
+                // cursor tool + auto-select the new line so its settings pop up (TradingView one-shot flow).
                 _vm.AddDrawing(new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, _vm.DefaultDrawStyle));
+                FinishPlacement(id);
                 e.Handled = true;
                 return;
             }
@@ -750,7 +762,7 @@ public partial class ChartView : ContentView
         // empty chart (nothing hit above) also clears any drawing selection.
         if (_drawable.IsInChartArea(p))
         {
-            _vm.SelectedDrawingId = null;
+            _vm.ClearDrawingSelection();
             int visible = Math.Max(1, _vm.VisibleCount);
             double pxPerCandle = (double)Chart.Width / visible;
             // Approximate plot height — the drawable's cached price rect height
@@ -937,6 +949,9 @@ public partial class ChartView : ContentView
             // it rather than leave an invisible zero-length line on the chart.
             if (_drawDragIsNew && !_drawDragMoved && _draggingDrawingId is Guid nid)
                 _vm?.RemoveDrawing(nid);
+            // A NEW drawing that was dragged out & kept → revert to cursor + select it (settings pop up).
+            else if (_drawDragIsNew && _drawDragMoved && _draggingDrawingId is Guid kid)
+                FinishPlacement(kid);
             // Record a Move on the undo stack for an EXISTING drawing that actually moved (a brand-new
             // drawing is already covered by its Add entry, so undo removes the whole creation).
             else if (!_drawDragIsNew && _drawDragMoved)
@@ -983,6 +998,16 @@ public partial class ChartView : ContentView
         _dragMode = DragMode.None;
 
         Chart.Invalidate();
+    }
+
+    // After a tool places a drawing: revert to the cursor tool and auto-select the new drawing so its
+    // settings pop up immediately (owner: one-shot tools + edit-the-thing-you-just-drew).
+    private void FinishPlacement(Guid id)
+    {
+        if (_vm == null) return;
+        _vm.DrawTool = DrawTool.None;
+        _vm.SelectSingle(id);
+        _vm.IsPenPanelOpen = true;
     }
 
     // Seed the drawing-drag state from the grabbed drawing and the press point. The data-space grab
@@ -1039,7 +1064,9 @@ public partial class ChartView : ContentView
             var id = Guid.NewGuid();
             _vm.AddDrawing(new DrawingObject(
                 id, DrawTool.Polyline, default, 0m, default, 0m, _vm.DefaultDrawStyle, _polyPoints.ToList()));
-            // No auto-select — stay in pen mode so the tool row stays visible.
+            CancelPolyline();       // clear the in-progress preview first
+            FinishPlacement(id);    // revert to cursor + select the new polyline (settings pop up)
+            return;
         }
         CancelPolyline();
     }
@@ -1083,11 +1110,11 @@ public partial class ChartView : ContentView
             return;
         }
 
-        // Priority 1.5: a drawing is selected — right-click just DESELECTS it (clears the style-bar)
-        // instead of removing it. A follow-up right-click on empty chart then disarms any active tool.
-        if (_vm.SelectedDrawingId is not null)
+        // Priority 1.5: a drawing is selected — right-click just DESELECTS (clears the style-bar +
+        // any multi-selection) instead of removing it. A follow-up right-click then disarms the tool.
+        if (_vm.SelectedDrawingId is not null || _vm.SelectedDrawingIds.Count > 0)
         {
-            _vm.SelectedDrawingId = null;
+            _vm.ClearDrawingSelection();
             Chart.Invalidate();
             e.Handled = true;
             return;
@@ -1104,7 +1131,7 @@ public partial class ChartView : ContentView
         // Priority 3: empty chart — right-click disarms the active tool (back to pan mode) and clears
         // any selection.
         _vm.DrawTool = DrawTool.None;
-        _vm.SelectedDrawingId = null;
+        _vm.ClearDrawingSelection();
         e.Handled = true;
     }
 
@@ -1174,8 +1201,12 @@ public partial class ChartView : ContentView
                 break;
             case Windows.System.VirtualKey.Delete:
             case Windows.System.VirtualKey.Back:
-                // Delete / Backspace removes the selected drawing (RemoveDrawing pushes an undoable Delete).
-                if (_vm.SelectedDrawingId is Guid delId) { _vm.RemoveDrawing(delId); e.Handled = true; }
+                // Delete / Backspace removes ALL selected drawings (single or shift-multi); each undoable.
+                if (_vm.SelectedDrawingId is not null || _vm.SelectedDrawingIds.Count > 0)
+                {
+                    _vm.RemoveSelectedDrawings();
+                    e.Handled = true;
+                }
                 break;
         }
     }

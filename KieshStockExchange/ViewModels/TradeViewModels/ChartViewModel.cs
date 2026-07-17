@@ -347,6 +347,10 @@ public partial class ChartViewModel : StockAwareViewModel
     // and the drawable's grab-handle emphasis; a tap on empty chart clears it.
     [ObservableProperty] private Guid? _selectedDrawingId;
 
+    // Full multi-selection set (shift-click adds/toggles; plain click replaces). SelectedDrawingId is the
+    // PRIMARY (drives the style panel); Delete removes ALL of these. The drawable highlights every member.
+    public ObservableCollection<Guid> SelectedDrawingIds { get; } = new();
+
     public bool HasSelectedDrawing => SelectedDrawingId is not null;
     // The pen panel is unified: no selection edits the saved default pen; a selection edits that
     // drawing. These drive the panel's mode (TOOL row + "+ Line" vs "Set as default" + "Delete") and header.
@@ -617,15 +621,39 @@ public partial class ChartViewModel : StockAwareViewModel
     [RelayCommand] private void ApplyCustomStrokeColor() { RememberRecent(CustomColorPreview); SetDefaultColor(CustomColorPreview); StrokeColorPickerOpen = false; }
     [RelayCommand] private void ApplyCustomFillColor()   { RememberRecent(CustomColorPreview); SetPenFill(CustomColorPreview);      FillColorPickerOpen = false; }
 
-    // Picking a preset swatch AUTO-APPLIES it (no Apply press) and closes that popup.
-    [RelayCommand] private void PickStrokeColor(Color color) { if (color is null) return; SetDefaultColor(color); StrokeColorPickerOpen = false; }
-    [RelayCommand] private void PickFillColor(Color color)   { if (color is null) return; SetPenFill(color);      FillColorPickerOpen = false; }
+    // Picking a swatch (preset OR recent) AUTO-APPLIES it (no Apply press), records it as recent, closes.
+    [RelayCommand] private void PickStrokeColor(Color color) { if (color is null) return; RememberRecent(color); SetDefaultColor(color); StrokeColorPickerOpen = false; }
+    [RelayCommand] private void PickFillColor(Color color)   { if (color is null) return; RememberRecent(color); SetPenFill(color);      FillColorPickerOpen = false; }
 
-    // The last custom (RGB-dialled) colour, offered as an extra swatch so it can be re-picked.
-    [ObservableProperty] private Color? _recentCustomColor;
-    public bool HasRecentCustomColor => RecentCustomColor is not null;
-    partial void OnRecentCustomColorChanged(Color? value) => OnPropertyChanged(nameof(HasRecentCustomColor));
-    private void RememberRecent(Color c) => RecentCustomColor = c;
+    // The last 4 applied colours, kept across tools AND sessions (persisted), offered as re-pickable
+    // swatches laid out exactly like the palette above. Most-recent first; picking dedupes + re-fronts.
+    private const string RecentColorsPrefKey = "chart_recent_colors";
+    private const int RecentColorsMax = 4;
+    public ObservableCollection<Color> RecentColors { get; } = LoadRecentColors();
+    public bool HasRecentColors => RecentColors.Count > 0;
+
+    private void RememberRecent(Color c)
+    {
+        if (c is null) return;
+        string hex = c.ToArgbHex(true);
+        for (int i = RecentColors.Count - 1; i >= 0; i--)
+            if (RecentColors[i].ToArgbHex(true) == hex) RecentColors.RemoveAt(i);
+        RecentColors.Insert(0, c);
+        while (RecentColors.Count > RecentColorsMax) RecentColors.RemoveAt(RecentColors.Count - 1);
+        OnPropertyChanged(nameof(HasRecentColors));
+        try { Preferences.Default.Set(RecentColorsPrefKey, string.Join(",", RecentColors.Select(x => x.ToArgbHex(true)))); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Saving recent colours failed."); }
+    }
+
+    private static ObservableCollection<Color> LoadRecentColors()
+    {
+        var col = new ObservableCollection<Color>();
+        var raw = Preferences.Default.Get(RecentColorsPrefKey, string.Empty);
+        if (!string.IsNullOrEmpty(raw))
+            foreach (var h in raw.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                try { col.Add(Color.FromArgb(h)); } catch { /* skip a bad persisted swatch */ }
+        return col;
+    }
 
     // Fill-colour commands (route through ApplyPenStyle so they hit the selected drawing or the default pen).
     [RelayCommand]
@@ -1268,6 +1296,51 @@ public partial class ChartViewModel : StockAwareViewModel
         NotifyUndoState();
     }
 
+    // --- Selection (single + shift-multi) -----------------------------------------------------------
+
+    /// <summary>Plain click: select exactly this drawing (drops any multi-selection).</summary>
+    public void SelectSingle(Guid id)
+    {
+        SelectedDrawingIds.Clear();
+        SelectedDrawingIds.Add(id);
+        SelectedDrawingId = id;   // OnChanged opens the panel + closes pickers + refreshes tiles
+        RequestRedraw();
+    }
+
+    /// <summary>Shift click: toggle this drawing in/out of the multi-selection; primary follows the last touch.</summary>
+    public void AddToSelection(Guid id)
+    {
+        if (SelectedDrawingIds.Contains(id))
+        {
+            SelectedDrawingIds.Remove(id);
+            SelectedDrawingId = SelectedDrawingIds.Count > 0 ? SelectedDrawingIds[^1] : (Guid?)null;
+        }
+        else
+        {
+            SelectedDrawingIds.Add(id);
+            SelectedDrawingId = id;
+        }
+        RequestRedraw();
+    }
+
+    /// <summary>Clear all selection (tap empty chart / right-click deselect).</summary>
+    public void ClearDrawingSelection()
+    {
+        SelectedDrawingIds.Clear();
+        SelectedDrawingId = null;
+        RequestRedraw();
+    }
+
+    /// <summary>Delete-key: remove EVERY selected drawing (each undoable), then clear the selection.</summary>
+    public void RemoveSelectedDrawings()
+    {
+        var ids = new List<Guid>(SelectedDrawingIds);
+        if (SelectedDrawingId is Guid p && !ids.Contains(p)) ids.Add(p);
+        SelectedDrawingIds.Clear();
+        foreach (var id in ids) RemoveDrawing(id);   // pushes a Delete + persists per drawing
+        SelectedDrawingId = null;
+    }
+
     /// <summary>Removes a drawing by id (✕ glyph or right-click) and persists.</summary>
     public void RemoveDrawing(Guid id)
     {
@@ -1275,6 +1348,7 @@ public partial class ChartViewModel : StockAwareViewModel
         bool found = false;
         for (int i = Drawings.Count - 1; i >= 0; i--)
             if (Drawings[i].Id == id) { removed = Drawings[i]; Drawings.RemoveAt(i); found = true; break; }
+        SelectedDrawingIds.Remove(id);
         if (SelectedDrawingId == id) SelectedDrawingId = null;
         PersistDrawings();
         if (found) { _undoStack.Push(DrawingMutation.Delete(removed)); NotifyUndoState(); }
@@ -1608,6 +1682,7 @@ public partial class ChartViewModel : StockAwareViewModel
     private void LoadDrawingsForSelected()
     {
         Drawings.Clear();
+        SelectedDrawingIds.Clear();
         _undoStack.Clear();         // undo history belongs to the previous stock — start fresh
         NotifyUndoState();
         SelectedDrawingId = null;   // a stale selection from the previous stock must not linger

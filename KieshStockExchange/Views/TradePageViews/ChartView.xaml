@@ -5,6 +5,7 @@
              xmlns:helpers="clr-namespace:KieshStockExchange.Services.MarketDataServices.Helpers"
              xmlns:tools="clr-namespace:KieshStockExchange.Models.ChartDrawing.Tools"
              xmlns:style="clr-namespace:KieshStockExchange.Models.ChartDrawing.Style"
+             xmlns:g="clr-namespace:Microsoft.Maui.Graphics;assembly=Microsoft.Maui.Graphics"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartView"
              x:Name="ChartRoot"
@@ -585,144 +586,8 @@
                             Command="{Binding ClosePenPanelCommand}" />
                 </Grid>
 
-                <!-- STROKE colour popover: palette (auto-applies on tap) + recent + RGB custom. -->
-                <Border IsVisible="{Binding StrokeColorPickerOpen}"
-                        BackgroundColor="{DynamicResource ChartBg}"
-                        Stroke="{DynamicResource ChartGrid}" StrokeThickness="1"
-                        StrokeShape="RoundRectangle 6" Padding="6">
-                    <VerticalStackLayout Spacing="6">
-                        <FlexLayout Wrap="Wrap" Direction="Row" JustifyContent="SpaceBetween"
-                                    BindableLayout.ItemsSource="{Binding PenColorTiles}">
-                            <BindableLayout.ItemTemplate>
-                                <DataTemplate x:DataType="vm:PenColorTile">
-                                    <Border FlexLayout.Basis="18%" HeightRequest="22" Margin="0,2"
-                                            BackgroundColor="{Binding Color}"
-                                            Stroke="Transparent" StrokeThickness="2"
-                                            StrokeShape="RoundRectangle 3">
-                                        <Border.GestureRecognizers>
-                                            <TapGestureRecognizer Command="{Binding Command}"
-                                                                  CommandParameter="{Binding Color}" />
-                                        </Border.GestureRecognizers>
-                                        <Border.Triggers>
-                                            <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                                <Setter Property="Stroke" Value="{StaticResource White}" />
-                                            </DataTrigger>
-                                        </Border.Triggers>
-                                    </Border>
-                                </DataTemplate>
-                            </BindableLayout.ItemTemplate>
-                        </FlexLayout>
-                        <Grid ColumnDefinitions="Auto,44" ColumnSpacing="6"
-                              IsVisible="{Binding HasRecentCustomColor}">
-                            <Label Grid.Column="0" Text="Recent" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
-                            <Border Grid.Column="1" HeightRequest="20"
-                                    BackgroundColor="{Binding RecentCustomColor}"
-                                    Stroke="{DynamicResource ChartGrid}" StrokeThickness="1" StrokeShape="RoundRectangle 3">
-                                <Border.GestureRecognizers>
-                                    <TapGestureRecognizer Command="{Binding PickStrokeColorCommand}"
-                                                          CommandParameter="{Binding RecentCustomColor}" />
-                                </Border.GestureRecognizers>
-                            </Border>
-                        </Grid>
-                        <Label Text="Custom (RGB)" Style="{StaticResource ChartOhlcKey}" />
-                        <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
-                            <Label Grid.Column="0" Text="R" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                            <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomR}" />
-                            <Label Grid.Column="2" Text="{Binding CustomR, StringFormat='{0:0}'}"
-                                   Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                        </Grid>
-                        <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
-                            <Label Grid.Column="0" Text="G" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                            <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomG}" />
-                            <Label Grid.Column="2" Text="{Binding CustomG, StringFormat='{0:0}'}"
-                                   Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                        </Grid>
-                        <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
-                            <Label Grid.Column="0" Text="B" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                            <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomB}" />
-                            <Label Grid.Column="2" Text="{Binding CustomB, StringFormat='{0:0}'}"
-                                   Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                        </Grid>
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                            <Border Grid.Column="0" BackgroundColor="{Binding CustomColorPreview}" HeightRequest="22"
-                                    Stroke="{DynamicResource ChartGrid}" StrokeThickness="1" StrokeShape="RoundRectangle 3" />
-                            <Button Grid.Column="1" Text="Apply"
-                                    Style="{StaticResource ChartLiveButton.Off}"
-                                    Command="{Binding ApplyCustomStrokeColorCommand}" />
-                        </Grid>
-                    </VerticalStackLayout>
-                </Border>
-
-                <!-- FILL colour popover (shapes only): palette + recent + RGB + No-fill. -->
-                <Border IsVisible="{Binding FillColorPickerOpen}"
-                        BackgroundColor="{DynamicResource ChartBg}"
-                        Stroke="{DynamicResource ChartGrid}" StrokeThickness="1"
-                        StrokeShape="RoundRectangle 6" Padding="6">
-                    <VerticalStackLayout Spacing="6">
-                        <FlexLayout Wrap="Wrap" Direction="Row" JustifyContent="SpaceBetween"
-                                    BindableLayout.ItemsSource="{Binding PenFillTiles}">
-                            <BindableLayout.ItemTemplate>
-                                <DataTemplate x:DataType="vm:PenColorTile">
-                                    <Border FlexLayout.Basis="18%" HeightRequest="22" Margin="0,2"
-                                            BackgroundColor="{Binding Color}"
-                                            Stroke="Transparent" StrokeThickness="2"
-                                            StrokeShape="RoundRectangle 3">
-                                        <Border.GestureRecognizers>
-                                            <TapGestureRecognizer Command="{Binding Command}"
-                                                                  CommandParameter="{Binding Color}" />
-                                        </Border.GestureRecognizers>
-                                        <Border.Triggers>
-                                            <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
-                                                <Setter Property="Stroke" Value="{StaticResource White}" />
-                                            </DataTrigger>
-                                        </Border.Triggers>
-                                    </Border>
-                                </DataTemplate>
-                            </BindableLayout.ItemTemplate>
-                        </FlexLayout>
-                        <Grid ColumnDefinitions="Auto,44" ColumnSpacing="6"
-                              IsVisible="{Binding HasRecentCustomColor}">
-                            <Label Grid.Column="0" Text="Recent" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
-                            <Border Grid.Column="1" HeightRequest="20"
-                                    BackgroundColor="{Binding RecentCustomColor}"
-                                    Stroke="{DynamicResource ChartGrid}" StrokeThickness="1" StrokeShape="RoundRectangle 3">
-                                <Border.GestureRecognizers>
-                                    <TapGestureRecognizer Command="{Binding PickFillColorCommand}"
-                                                          CommandParameter="{Binding RecentCustomColor}" />
-                                </Border.GestureRecognizers>
-                            </Border>
-                        </Grid>
-                        <Label Text="Custom (RGB)" Style="{StaticResource ChartOhlcKey}" />
-                        <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
-                            <Label Grid.Column="0" Text="R" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                            <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomR}" />
-                            <Label Grid.Column="2" Text="{Binding CustomR, StringFormat='{0:0}'}"
-                                   Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                        </Grid>
-                        <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
-                            <Label Grid.Column="0" Text="G" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                            <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomG}" />
-                            <Label Grid.Column="2" Text="{Binding CustomG, StringFormat='{0:0}'}"
-                                   Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                        </Grid>
-                        <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
-                            <Label Grid.Column="0" Text="B" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                            <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomB}" />
-                            <Label Grid.Column="2" Text="{Binding CustomB, StringFormat='{0:0}'}"
-                                   Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
-                        </Grid>
-                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
-                            <Border Grid.Column="0" BackgroundColor="{Binding CustomColorPreview}" HeightRequest="22"
-                                    Stroke="{DynamicResource ChartGrid}" StrokeThickness="1" StrokeShape="RoundRectangle 3" />
-                            <Button Grid.Column="1" Text="None"
-                                    Style="{StaticResource ChartLiveButton.Off}"
-                                    Command="{Binding ClearPenFillCommand}" />
-                            <Button Grid.Column="2" Text="Apply"
-                                    Style="{StaticResource ChartLiveButton.Off}"
-                                    Command="{Binding ApplyCustomFillColorCommand}" />
-                        </Grid>
-                    </VerticalStackLayout>
-                </Border>
+                <!-- Colour + Fill pickers are now FLOATING OVERLAYS over the chart (see below, outside the
+                     panel) so opening one does not widen/lengthen this panel. -->
 
                 <!-- OPACITY (fill translucency; shapes only). -->
                 <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" IsVisible="{Binding ShowOpacity}">
@@ -920,6 +785,164 @@
                             Style="{StaticResource ChartLiveButton.Off}"
                             Command="{Binding DeleteSelectedDrawingCommand}" />
                 </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- ═══════ Floating COLOUR pickers: overlay the chart (do NOT widen the pen panel) ═══════ -->
+        <!-- STROKE picker: dimming scrim (tap to close) + a centred popover. -->
+        <Border Grid.Column="1" IsVisible="{Binding StrokeColorPickerOpen}" BackgroundColor="#66000000">
+            <Border.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding ToggleStrokeColorPickerCommand}" />
+            </Border.GestureRecognizers>
+        </Border>
+        <Border Grid.Column="1" IsVisible="{Binding StrokeColorPickerOpen}"
+                WidthRequest="262" VerticalOptions="Center" HorizontalOptions="Center"
+                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1" StrokeShape="RoundRectangle 8" Padding="10">
+            <VerticalStackLayout Spacing="6">
+                <Grid ColumnDefinitions="*,28">
+                    <Label Grid.Column="0" Text="Stroke colour" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    <Button Grid.Column="1" Text="✕" Style="{StaticResource ChartIconButton}"
+                            Command="{Binding ToggleStrokeColorPickerCommand}" />
+                </Grid>
+                <FlexLayout Wrap="Wrap" Direction="Row" JustifyContent="SpaceBetween"
+                            BindableLayout.ItemsSource="{Binding PenColorTiles}">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PenColorTile">
+                            <Border FlexLayout.Basis="18%" HeightRequest="22" Margin="0,2"
+                                    BackgroundColor="{Binding Color}" Stroke="Transparent" StrokeThickness="2"
+                                    StrokeShape="RoundRectangle 3">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding Command}" CommandParameter="{Binding Color}" />
+                                </Border.GestureRecognizers>
+                                <Border.Triggers>
+                                    <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                        <Setter Property="Stroke" Value="{StaticResource White}" />
+                                    </DataTrigger>
+                                </Border.Triggers>
+                            </Border>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </FlexLayout>
+                <!-- Recent (last 4, kept across tools + sessions) — same lining/spacing as the palette. -->
+                <Label Text="Recent" Style="{StaticResource ChartOhlcKey}" IsVisible="{Binding HasRecentColors}" />
+                <FlexLayout Wrap="Wrap" Direction="Row" JustifyContent="SpaceBetween"
+                            IsVisible="{Binding HasRecentColors}"
+                            BindableLayout.ItemsSource="{Binding RecentColors}">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate x:DataType="g:Color">
+                            <Border FlexLayout.Basis="18%" HeightRequest="22" Margin="0,2"
+                                    BackgroundColor="{Binding .}"
+                                    Stroke="{DynamicResource ChartGrid}" StrokeThickness="1" StrokeShape="RoundRectangle 3">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer CommandParameter="{Binding .}"
+                                        Command="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.PickStrokeColorCommand}" />
+                                </Border.GestureRecognizers>
+                            </Border>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </FlexLayout>
+                <Label Text="Custom (RGB)" Style="{StaticResource ChartOhlcKey}" />
+                <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
+                    <Label Grid.Column="0" Text="R" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomR}" />
+                    <Label Grid.Column="2" Text="{Binding CustomR, StringFormat='{0:0}'}" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
+                    <Label Grid.Column="0" Text="G" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomG}" />
+                    <Label Grid.Column="2" Text="{Binding CustomG, StringFormat='{0:0}'}" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
+                    <Label Grid.Column="0" Text="B" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomB}" />
+                    <Label Grid.Column="2" Text="{Binding CustomB, StringFormat='{0:0}'}" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                    <Border Grid.Column="0" BackgroundColor="{Binding CustomColorPreview}" HeightRequest="22"
+                            Stroke="{DynamicResource ChartGrid}" StrokeThickness="1" StrokeShape="RoundRectangle 3" />
+                    <Button Grid.Column="1" Text="Apply" Style="{StaticResource ChartLiveButton.Off}"
+                            Command="{Binding ApplyCustomStrokeColorCommand}" />
+                </Grid>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- FILL picker: scrim + centred popover. -->
+        <Border Grid.Column="1" IsVisible="{Binding FillColorPickerOpen}" BackgroundColor="#66000000">
+            <Border.GestureRecognizers>
+                <TapGestureRecognizer Command="{Binding ToggleFillColorPickerCommand}" />
+            </Border.GestureRecognizers>
+        </Border>
+        <Border Grid.Column="1" IsVisible="{Binding FillColorPickerOpen}"
+                WidthRequest="262" VerticalOptions="Center" HorizontalOptions="Center"
+                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1" StrokeShape="RoundRectangle 8" Padding="10">
+            <VerticalStackLayout Spacing="6">
+                <Grid ColumnDefinitions="*,28">
+                    <Label Grid.Column="0" Text="Fill colour" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    <Button Grid.Column="1" Text="✕" Style="{StaticResource ChartIconButton}"
+                            Command="{Binding ToggleFillColorPickerCommand}" />
+                </Grid>
+                <FlexLayout Wrap="Wrap" Direction="Row" JustifyContent="SpaceBetween"
+                            BindableLayout.ItemsSource="{Binding PenFillTiles}">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PenColorTile">
+                            <Border FlexLayout.Basis="18%" HeightRequest="22" Margin="0,2"
+                                    BackgroundColor="{Binding Color}" Stroke="Transparent" StrokeThickness="2"
+                                    StrokeShape="RoundRectangle 3">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding Command}" CommandParameter="{Binding Color}" />
+                                </Border.GestureRecognizers>
+                                <Border.Triggers>
+                                    <DataTrigger TargetType="Border" Binding="{Binding IsSelected}" Value="True">
+                                        <Setter Property="Stroke" Value="{StaticResource White}" />
+                                    </DataTrigger>
+                                </Border.Triggers>
+                            </Border>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </FlexLayout>
+                <Label Text="Recent" Style="{StaticResource ChartOhlcKey}" IsVisible="{Binding HasRecentColors}" />
+                <FlexLayout Wrap="Wrap" Direction="Row" JustifyContent="SpaceBetween"
+                            IsVisible="{Binding HasRecentColors}"
+                            BindableLayout.ItemsSource="{Binding RecentColors}">
+                    <BindableLayout.ItemTemplate>
+                        <DataTemplate x:DataType="g:Color">
+                            <Border FlexLayout.Basis="18%" HeightRequest="22" Margin="0,2"
+                                    BackgroundColor="{Binding .}"
+                                    Stroke="{DynamicResource ChartGrid}" StrokeThickness="1" StrokeShape="RoundRectangle 3">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer CommandParameter="{Binding .}"
+                                        Command="{Binding Source={x:Reference ChartRoot}, Path=BindingContext.PickFillColorCommand}" />
+                                </Border.GestureRecognizers>
+                            </Border>
+                        </DataTemplate>
+                    </BindableLayout.ItemTemplate>
+                </FlexLayout>
+                <Label Text="Custom (RGB)" Style="{StaticResource ChartOhlcKey}" />
+                <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
+                    <Label Grid.Column="0" Text="R" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomR}" />
+                    <Label Grid.Column="2" Text="{Binding CustomR, StringFormat='{0:0}'}" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
+                    <Label Grid.Column="0" Text="G" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomG}" />
+                    <Label Grid.Column="2" Text="{Binding CustomG, StringFormat='{0:0}'}" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="14,*,30" ColumnSpacing="6">
+                    <Label Grid.Column="0" Text="B" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    <Slider Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding CustomB}" />
+                    <Label Grid.Column="2" Text="{Binding CustomB, StringFormat='{0:0}'}" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                    <Border Grid.Column="0" BackgroundColor="{Binding CustomColorPreview}" HeightRequest="22"
+                            Stroke="{DynamicResource ChartGrid}" StrokeThickness="1" StrokeShape="RoundRectangle 3" />
+                    <Button Grid.Column="1" Text="None" Style="{StaticResource ChartLiveButton.Off}"
+                            Command="{Binding ClearPenFillCommand}" />
+                    <Button Grid.Column="2" Text="Apply" Style="{StaticResource ChartLiveButton.Off}"
+                            Command="{Binding ApplyCustomFillColorCommand}" />
+                </Grid>
             </VerticalStackLayout>
         </Border>
         </Grid>

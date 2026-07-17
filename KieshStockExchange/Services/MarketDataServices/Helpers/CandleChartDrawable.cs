@@ -70,6 +70,15 @@ public sealed class CandleChartDrawable : IDrawable
     // persisted Style has no colour — new drawings carry their own Style.Color from the style-bar.
     public Color DrawingColor = Color.FromArgb("#4C9AFF");
 
+    // Fixed, always-readable pill background for the axis TAGS (price gutter + VLine time). Using the
+    // drawing's own colour made light/yellow labels unreadable; a standard dark slate + white text reads
+    // on any theme. The line's colour is kept as a thin border so the tag still identifies its drawing.
+    private static readonly Color LabelPillBg = Color.FromArgb("#2A2E39");
+
+    // The full drawing selection set (multi-select via shift-click). A drawing is "selected" (shows
+    // handles + thicker stroke) when it is in this set OR is the single SelectedDrawingId primary.
+    public IReadOnlyCollection<Guid>? SelectedDrawingIds { get; set; }
+
     // Set by ChartView while the user drags an open-order line. The line whose
     // OrderId matches DraggingOrderId is drawn at DraggingOrderPrice instead of
     // its stored price so the user sees the level follow the cursor live.
@@ -617,7 +626,7 @@ public sealed class CandleChartDrawable : IDrawable
         {
             var d = Drawings[i];
             bool active = DraggingDrawingId == d.Id;
-            bool selected = SelectedDrawingId == d.Id;
+            bool selected = SelectedDrawingId == d.Id || (SelectedDrawingIds?.Contains(d.Id) ?? false);
             // Per-drawing style (colour/thickness/dash); fall back to the theme colour when a
             // legacy drawing carries no colour. A selected/active line paints a touch thicker.
             var color = d.Style.Color ?? DrawingColor;
@@ -849,12 +858,15 @@ public sealed class CandleChartDrawable : IDrawable
     private void DrawGutterPriceTag(ICanvas canvas, RectF plot, float y, decimal price, Color color, CurrencyType cur)
     {
         var tagRect = new RectF(plot.Right + 1, y - 8, RightAxisW - 2, 16);
-        canvas.FillColor = color;
+        // Readable standard pill (dark slate + white text); the line's colour is a thin left border only.
+        canvas.FillColor = LabelPillBg;
         canvas.FillRectangle(tagRect);
+        canvas.StrokeColor = color; canvas.StrokeSize = 2f;
+        canvas.DrawLine(tagRect.Left, tagRect.Top, tagRect.Left, tagRect.Bottom);
         canvas.FontColor = Colors.White;
         canvas.FontSize = PriceTagFont;
         canvas.DrawString(CurrencyHelper.Format(price, cur),
-            new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
+            new RectF(tagRect.X + 4, tagRect.Y, tagRect.Width - 7, tagRect.Height),
             HorizontalAlignment.Left, VerticalAlignment.Center);
     }
 
@@ -865,8 +877,11 @@ public sealed class CandleChartDrawable : IDrawable
         float w = Math.Max(74f, text.Length * 6.3f);
         float lx = Math.Clamp(x - w / 2f, plot.Left, Math.Max(plot.Left, plot.Right - w));
         var r = new RectF(lx, plot.Bottom + 2, w, BottomAxisH - 2);
-        canvas.FillColor = color;
+        // Readable standard pill (dark slate + white text) + a thin top border in the line's colour.
+        canvas.FillColor = LabelPillBg;
         canvas.FillRectangle(r);
+        canvas.StrokeColor = color; canvas.StrokeSize = 2f;
+        canvas.DrawLine(r.Left, r.Top, r.Right, r.Top);
         canvas.FontColor = Colors.White;
         canvas.FontSize = PriceTagFont;
         canvas.DrawString(text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
@@ -883,8 +898,11 @@ public sealed class CandleChartDrawable : IDrawable
         lx = Math.Clamp(lx, plot.Left, Math.Max(plot.Left, plot.Right - w));
         float ly = Math.Clamp(y - 8f, plot.Top, Math.Max(plot.Top, plot.Bottom - 16f));
         var r = new RectF(lx, ly, w, 16f);
-        canvas.FillColor = color;
+        // Readable standard pill + thin line-colour border (was line-colour fill = unreadable on light pens).
+        canvas.FillColor = LabelPillBg;
         canvas.FillRectangle(r);
+        canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
+        canvas.DrawRectangle(r);
         canvas.FontColor = Colors.White;
         canvas.FontSize = PriceTagFont;
         canvas.DrawString(text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
