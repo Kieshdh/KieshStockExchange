@@ -135,6 +135,9 @@ public static class MauiProgram
         builder.Services.AddSingleton<IStockService, StockService>();
         builder.Services.AddSingleton<ITransactionService, TransactionService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
+        // Alert tool (non-chart half): evaluates live quotes against user-armed price alerts and
+        // fires INotificationService on a crossing. Singleton so alerts survive page navigation.
+        builder.Services.AddSingleton<IPriceAlertService, PriceAlertService>();
         // Phase 3 Step 7b.1: ApiBotAdminClient is the dashboard's HTTP-backed
         // replacement for the dead in-process AiTradeService.
         builder.Services.AddSingleton<ApiBotAdminClient>();
@@ -247,6 +250,11 @@ public static class MauiProgram
         // before any inbox VM is constructed. Replaces the old client-side
         // NotificationBridgeService, which is gone now that the server generates fills.
         _ = app.Services.GetRequiredService<INotificationService>();
+
+        // Eagerly resolve the price-alert service so its ctor subscribes to
+        // IMarketDataService.QuoteUpdated immediately — otherwise an alert armed before any
+        // page resolves it (indirectly, via injection) could miss the very next quote.
+        _ = app.Services.GetRequiredService<IPriceAlertService>();
 
         // Phase 6c — connection banner singleton. Eager-resolve so its ctor
         // hooks IMarketHubClient.StateChanged before the first transition.
