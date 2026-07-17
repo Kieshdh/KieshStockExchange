@@ -25,6 +25,7 @@ public sealed class KseDbContext : DbContext
     public DbSet<UserPreferencesRow> UserPreferences => Set<UserPreferencesRow>();
     public DbSet<UserWatchlistEntryRow> UserWatchlists => Set<UserWatchlistEntryRow>();
     public DbSet<AIUserRow> AIUsers => Set<AIUserRow>();
+    public DbSet<UserDrawingRow> UserDrawings => Set<UserDrawingRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -188,6 +189,20 @@ public sealed class KseDbContext : DbContext
             b.HasIndex(x => new { x.StockId, x.Currency, x.BucketSeconds, x.OpenTime })
              .IsUnique()
              .HasDatabaseName("IX_Candle_Key");
+        });
+
+        modelBuilder.Entity<UserDrawingRow>(b =>
+        {
+            b.ToTable("UserDrawings");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedOnAdd();
+            b.Property(x => x.Json).HasColumnType("text");   // opaque "v":1 blob, unbounded (cap lives at the controller)
+            b.Property(x => x.UpdatedAt).HasColumnType(TimestampTz);
+            b.Property(x => x.Currency).HasMaxLength(8);
+            // Must match the store's ON CONFLICT target.
+            b.HasIndex(x => new { x.UserId, x.StockId, x.Currency })
+             .IsUnique()
+             .HasDatabaseName("IX_UserDrawing_Key");
         });
 
         modelBuilder.Entity<MessageRow>(b =>

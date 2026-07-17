@@ -181,6 +181,15 @@ builder.Services.AddSingleton<IDataBaseService, PgDBService>();
 // interface (no second instance; never enters the shared IDataBaseService / the client).
 builder.Services.AddSingleton<IBotMaintenanceQueries>(sp => (PgDBService)sp.GetRequiredService<IDataBaseService>());
 
+// UP-STORE — per-user chart drawings. The same singleton PgDBService also serves the server-only
+// IUserDrawingQueries (cast, like IBotMaintenanceQueries above — never enters the client). The
+// buffered write-behind store is BOTH a singleton (receives Enqueue from the controller) AND a
+// hosted service (runs the flush loop): register the singleton, then hand that same instance to the
+// host so only one instance exists (same pattern as StopTriggerWatcher below).
+builder.Services.AddSingleton<IUserDrawingQueries>(sp => (PgDBService)sp.GetRequiredService<IDataBaseService>());
+builder.Services.AddSingleton<UserDrawingStore>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UserDrawingStore>());
+
 // SeparatorLogger options — engine helpers construct SeparatorLogger<T> inline.
 builder.Services.Configure<SeparatorLoggerOptions>(_ => { });
 
@@ -326,6 +335,19 @@ builder.Services.AddRateLimiter(options =>
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+    // UP-STORE — per-user drawings POST. Debounced client-side, but a stock-switch flush can burst
+    // several keys at once, so allow more headroom than "orders". Per authenticated user (IP fallback).
+    options.AddPolicy("drawings", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.GetUserId()?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));

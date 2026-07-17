@@ -9,6 +9,7 @@ using KieshStockExchange.Models.ChartDrawing.Objects;
 using KieshStockExchange.Models.ChartDrawing.Style;
 using KieshStockExchange.Models.ChartDrawing.Tools;
 using KieshStockExchange.Services.BackgroundServices.Interfaces;
+using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
@@ -399,6 +400,11 @@ public partial class ChartViewModel : StockAwareViewModel
     private const string DrawingsPrefKeyBase = "chart_drawings_";
     // Preferences key for the currently loaded stock+currency, or null when nothing is selected.
     private string? _drawingsKey;
+    // The (stockId, currency) the current _drawingsKey was built from. PersistDrawings saves under
+    // THIS captured identity, never live Selected — which may already point at the next stock by the
+    // time a queued save runs (both seams run on the threadpool), which would misfile A's drawings
+    // under B's key. Also guards the async reconcile against a stale stock-switch.
+    private (int StockId, CurrencyType Currency)? _loadedKey;
 
     // Session reference = the open of the first buffered candle on the latest candle's UTC day.
     // Drives the price-axis % tag ("today's" change). Approximate when the buffer starts mid-day.
@@ -636,6 +642,7 @@ public partial class ChartViewModel : StockAwareViewModel
     private readonly IUserSessionService _session;
     private readonly IMarketMoodService _mood;
     private readonly IOrderBookFeed _orderBook;
+    private readonly IDrawingStore _store;
 
     // §F7: one-shot viewport restore. Seeded from the session at construction and consumed once on the
     // first candle load so a later stock switch still snaps to live instead of re-applying a stale view.
@@ -650,7 +657,7 @@ public partial class ChartViewModel : StockAwareViewModel
     public ChartViewModel(ILogger<ChartViewModel> logger, ICandleService candles, IMarketDataService market,
         IOrderCacheService orderCache, IAuthService auth, IOrderEditService editService,
         ISelectedStockService selected, INotificationService notification, ITransactionService transactions,
-        IUserSessionService session, IMarketMoodService mood, IOrderBookFeed orderBook)
+        IUserSessionService session, IMarketMoodService mood, IOrderBookFeed orderBook, IDrawingStore store)
         : base(selected, notification, logger)
     {
         _candles = candles ?? throw new ArgumentNullException(nameof(candles));
@@ -662,6 +669,7 @@ public partial class ChartViewModel : StockAwareViewModel
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _mood = mood ?? throw new ArgumentNullException(nameof(mood));
         _orderBook = orderBook ?? throw new ArgumentNullException(nameof(orderBook));
+        _store = store ?? throw new ArgumentNullException(nameof(store));
 
         // §F7: restore the saved resolution + viewport. Seed the resolution before InitializeSelection
         // kicks off the first stream so it loads at the remembered resolution; the viewport (count /
@@ -1383,16 +1391,19 @@ public partial class ChartViewModel : StockAwareViewModel
     // envelope; this "v":1 shape is UP-STORE's client<->server wire contract.
     private const int DrawingsSchemaVersion = 1;
 
-    /// <summary>Serializes the current drawings to Preferences under the selected stock's key.</summary>
+    /// <summary>Serializes the current drawings via the store under the LOADED stock's key.</summary>
     public void PersistDrawings()
     {
-        if (_drawingsKey is null) return;
+        // Save under the captured loaded identity, NOT live Selected (which may have moved on).
+        if (_drawingsKey is null || _loadedKey is not { } key) return;
         try
         {
             // Always write the v1 envelope (one-way migration on next save). A legacy bare-array blob
-            // is read back by LoadDrawingsForSelected via root-token sniffing.
+            // is read back by LoadDrawingsForSelected via root-token sniffing. The store owns the
+            // local Preferences cache + debounce + server push.
             var envelope = new DrawingEnvelope(DrawingsSchemaVersion, Drawings.ToList());
-            Preferences.Default.Set(_drawingsKey, JsonSerializer.Serialize(envelope, _drawingJson));
+            _store.Save(key.StockId, key.Currency.ToString(),
+                JsonSerializer.Serialize(envelope, _drawingJson));
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Saving chart drawings failed."); }
     }
@@ -1405,41 +1416,76 @@ public partial class ChartViewModel : StockAwareViewModel
     {
         Drawings.Clear();
         SelectedDrawingId = null;   // a stale selection from the previous stock must not linger
-        if (!Selected.HasSelectedStock) { _drawingsKey = null; return; }
+        if (!Selected.HasSelectedStock) { _drawingsKey = null; _loadedKey = null; return; }
 
-        _drawingsKey = $"{DrawingsPrefKeyBase}{Selected.StockId!.Value}_{Selected.Currency}";
-        var json = Preferences.Default.Get(_drawingsKey, string.Empty);
-        if (string.IsNullOrEmpty(json)) return;
+        var stockId = Selected.StockId!.Value;
+        var currency = Selected.Currency;
+        _drawingsKey = $"{DrawingsPrefKeyBase}{stockId}_{currency}";
+        _loadedKey = (stockId, currency);
+        // Load through the store (local cache first, then a best-effort server reconcile). Fire-and-
+        // forget — the stock-switch path must not block the new stock's render behind HTTP.
+        _ = LoadDrawingsAsync(stockId, currency);
+    }
+
+    // Loads (stockId, currency)'s saved drawings via the store and repopulates Drawings on the UI
+    // thread, but only if the selection hasn't moved on and the user hasn't started drawing — so a
+    // slow/stale reconcile can never wipe in-progress work or land in the wrong stock's view.
+    private async Task LoadDrawingsAsync(int stockId, CurrencyType currency)
+    {
         try
         {
-            // Sniff the root token: a bare array is the legacy (pre-v1) blob; an object is the v1
-            // envelope. Pass _drawingJson on BOTH branches so the ColorJsonConverter parses "#RRGGBBAA".
-            using var doc = JsonDocument.Parse(json);
-            bool legacy = doc.RootElement.ValueKind == JsonValueKind.Array;
-            List<DrawingObject>? saved =
-                legacy
-                    ? doc.RootElement.Deserialize<List<DrawingObject>>(_drawingJson)
-                : doc.RootElement.TryGetProperty("drawings", out var arr)
-                    ? arr.Deserialize<List<DrawingObject>>(_drawingJson)
-                    : null;
+            var json = await _store.LoadAsync(stockId, currency.ToString()).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(json) || !IsStillLoaded(stockId, currency)) return;
 
-            if (saved is not null)
-                foreach (var raw in saved)
-                {
-                    // A legacy bare-array blob predates the trailing fields, so STJ read them as
-                    // default(T); re-apply the non-zero defaults (a v1 envelope carries them explicitly).
-                    var d = legacy ? DrawingBackCompat.ApplyLegacyTrailingDefaults(raw) : raw;
-                    var style = (d.Style.Color is null || d.Style.Thickness <= 0f)
-                        ? DrawStyle.Default
-                        : d.Style;
-                    // Migrate the legacy arrowhead bool to a line-ending, then retire Arrow on the record.
-                    if (style.Ending == LineEnding.None && style.Arrow)
-                        style = style with { Ending = LineEnding.End };
-                    if (style.Arrow) style = style with { Arrow = false };
-                    Drawings.Add(d with { Style = style });
-                }
+            var parsed = ParseSavedDrawings(json);
+            if (parsed is null || parsed.Count == 0) return;
+
+            void Apply()
+            {
+                // Apply-time re-check: selection unchanged AND nothing drawn/loaded yet.
+                if (!IsStillLoaded(stockId, currency) || Drawings.Count > 0) return;
+                foreach (var d in parsed) Drawings.Add(d);
+            }
+            if (MainThread.IsMainThread) Apply();
+            else MainThread.BeginInvokeOnMainThread(Apply);
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Loading chart drawings failed."); }
+    }
+
+    private bool IsStillLoaded(int stockId, CurrencyType currency)
+        => _loadedKey is { } k && k.StockId == stockId && k.Currency == currency;
+
+    // Parse a persisted blob into normalized DrawingObjects. Sniffs the root token (legacy bare array
+    // vs the v1 envelope), passing _drawingJson on BOTH branches so the ColorJsonConverter parses
+    // "#RRGGBBAA"; applies DrawingBackCompat on the legacy branch, then normalizes style.
+    private List<DrawingObject>? ParseSavedDrawings(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        bool legacy = doc.RootElement.ValueKind == JsonValueKind.Array;
+        List<DrawingObject>? saved =
+            legacy
+                ? doc.RootElement.Deserialize<List<DrawingObject>>(_drawingJson)
+            : doc.RootElement.TryGetProperty("drawings", out var arr)
+                ? arr.Deserialize<List<DrawingObject>>(_drawingJson)
+                : null;
+        if (saved is null) return null;
+
+        var result = new List<DrawingObject>(saved.Count);
+        foreach (var raw in saved)
+        {
+            // A legacy bare-array blob predates the trailing fields, so STJ read them as default(T);
+            // re-apply the non-zero defaults (a v1 envelope carries them explicitly).
+            var d = legacy ? DrawingBackCompat.ApplyLegacyTrailingDefaults(raw) : raw;
+            var style = (d.Style.Color is null || d.Style.Thickness <= 0f)
+                ? DrawStyle.Default
+                : d.Style;
+            // Migrate the legacy arrowhead bool to a line-ending, then retire Arrow on the record.
+            if (style.Ending == LineEnding.None && style.Arrow)
+                style = style with { Ending = LineEnding.End };
+            if (style.Arrow) style = style with { Arrow = false };
+            result.Add(d with { Style = style });
+        }
+        return result;
     }
 
     /// <summary>

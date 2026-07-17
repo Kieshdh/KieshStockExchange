@@ -28,9 +28,10 @@ public sealed class AuthService : IAuthService
     private readonly IMarketHubClient _hub;
     private readonly TokenStore _tokens;
     private readonly ILogger<AuthService> _logger;
+    private readonly IDrawingStore _drawings;
 
     public AuthService(IDataBaseService db, IHttpClientFactory httpFactory,
-        IMarketHubClient hub, TokenStore tokens, ILogger<AuthService> logger)
+        IMarketHubClient hub, TokenStore tokens, ILogger<AuthService> logger, IDrawingStore drawings)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _http = httpFactory?.CreateClient("KSE.Server")
@@ -38,6 +39,7 @@ public sealed class AuthService : IAuthService
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
         _tokens = tokens ?? throw new ArgumentNullException(nameof(tokens));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _drawings = drawings ?? throw new ArgumentNullException(nameof(drawings));
     }
     #endregion
 
@@ -142,6 +144,12 @@ public sealed class AuthService : IAuthService
             catch (Exception ex) { _logger.LogDebug(ex, "Session logout notify failed."); }
             try { await _hub.LeaveUserGroupsAsync(prev.UserId, ct).ConfigureAwait(false); }
             catch (Exception ex) { _logger.LogDebug(ex, "Hub LeaveUserGroups failed for #{UserId}", prev.UserId); }
+
+            // UP-STORE: push pending chart drawings BEFORE clearing the token (after Clear() the POST
+            // has no bearer and is bounced). Bounded so it can't stall the LoginPage redirect; on a
+            // 401-driven logout the token is already invalid so this fails — local cache is the fallback.
+            try { await _drawings.FlushAsync().WaitAsync(TimeSpan.FromSeconds(2), ct).ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Drawings flush on logout failed."); }
         }
         _tokens.Clear();
     }

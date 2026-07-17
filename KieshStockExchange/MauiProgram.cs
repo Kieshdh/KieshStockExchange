@@ -111,6 +111,8 @@ public static class MauiProgram
 
         // Services
         builder.Services.AddSingleton<IDataBaseService, ApiDataBaseService>();
+        // UP-STORE — per-user chart drawings: server-backed store fronted by the local Preferences cache.
+        builder.Services.AddSingleton<IDrawingStore, CachedDrawingStore>();
         // IEngineCommandClient / EngineCommandClient deleted in Step 0e — the
         // 4 engine bundle endpoints were already removed in Phase 3 Step 6,
         // and the 2 portfolio bundles now route through ApiPortfolioClient.
