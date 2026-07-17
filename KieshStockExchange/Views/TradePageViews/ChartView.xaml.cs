@@ -1,8 +1,11 @@
+using System.IO;
+using CommunityToolkit.Maui.Alerts;
 using KieshStockExchange.Models.ChartDrawing.Objects;
 using KieshStockExchange.Models.ChartDrawing.Style;
 using KieshStockExchange.Models.ChartDrawing.Tools;
 using KieshStockExchange.Services.MarketDataServices;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
+using KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.ViewModels.TradeViewModels;
@@ -422,6 +425,40 @@ public partial class ChartView : ContentView
             _vm.ManualYMin = null;
             _vm.ManualYMax = null;
             _vm.IsYAutoFit = true;
+        }
+    }
+
+    // §Snapshot (LP1): render the current chart offscreen to a PNG saved in Pictures (fallback: cache)
+    // via UP-CORE's ChartSnapshotRenderer, then toast the file name. Deterministic — no gestures.
+    private async void OnSnapshotClicked(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_vm is null) return;
+            int w = (int)Math.Round(Chart.Width);
+            int h = (int)Math.Round(Chart.Height);
+            if (w <= 1 || h <= 1) return;   // not laid out yet
+
+            UpdateDrawable();               // reflect the exact current view
+            var png = ChartSnapshotRenderer.Render(_drawable, w, h);
+
+            var name = $"KSE-chart-{DateTime.Now:yyyyMMdd-HHmmss}.png";
+            string dir;
+            try
+            {
+                dir = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) dir = FileSystem.Current.CacheDirectory;
+            }
+            catch { dir = FileSystem.Current.CacheDirectory; }
+
+            var path = Path.Combine(dir, name);
+            await File.WriteAllBytesAsync(path, png);
+            await Toast.Make($"Snapshot saved: {name}").Show();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Chart snapshot failed: {ex}");
+            try { await Toast.Make("Snapshot failed.").Show(); } catch { /* toast best-effort */ }
         }
     }
 

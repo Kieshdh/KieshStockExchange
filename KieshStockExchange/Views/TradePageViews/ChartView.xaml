@@ -21,7 +21,7 @@
 
         <!-- Toolbar -->
         <Grid Grid.Row="0" Style="{StaticResource ChartToolbar}"
-              ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto">
+              ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
             <!-- Resolution segments -->
             <HorizontalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
@@ -224,6 +224,10 @@
                     </DataTrigger>
                 </Button.Triggers>
             </Button>
+            <!-- Snapshot (top-right): render the chart offscreen to a PNG file -->
+            <Button Grid.Column="8" Text="📷"
+                    Style="{StaticResource ChartIconButton}"
+                    Clicked="OnSnapshotClicked" />
         </Grid>
 
         <!-- Chart -->
