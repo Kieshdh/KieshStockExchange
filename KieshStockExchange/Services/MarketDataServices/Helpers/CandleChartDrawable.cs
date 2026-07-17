@@ -670,6 +670,8 @@ public sealed class CandleChartDrawable : IDrawable
                 canvas.StrokeDashPattern = dashPattern;
                 canvas.DrawLine(x, plot.Top, x, plot.Bottom);
                 canvas.StrokeDashPattern = null;
+                // Bottom-axis time tag (mirrors the HLine/HRay price gutter tag).
+                DrawVLineTimeTag(canvas, plot, x, d.T1, color);
                 if (selected)
                 {
                     DrawHandle(canvas, x, plot.Top + 1f, color);
@@ -854,6 +856,21 @@ public sealed class CandleChartDrawable : IDrawable
         canvas.DrawString(CurrencyHelper.Format(price, cur),
             new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
             HorizontalAlignment.Left, VerticalAlignment.Center);
+    }
+
+    // Bottom-axis time pill for a vertical line — the VLine analog of the HLine price gutter tag.
+    private void DrawVLineTimeTag(ICanvas canvas, RectF plot, float x, DateTime t, Color color)
+    {
+        string text = t.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture);
+        float w = Math.Max(74f, text.Length * 6.3f);
+        float lx = Math.Clamp(x - w / 2f, plot.Left, Math.Max(plot.Left, plot.Right - w));
+        var r = new RectF(lx, plot.Bottom + 2, w, BottomAxisH - 2);
+        canvas.FillColor = color;
+        canvas.FillRectangle(r);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = PriceTagFont;
+        canvas.DrawString(text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
+            HorizontalAlignment.Center, VerticalAlignment.Center);
     }
 
     // A small price pill anchored beside a trendline endpoint (flips to the inside edge so it

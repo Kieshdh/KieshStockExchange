@@ -384,13 +384,17 @@ public partial class ChartViewModel : StockAwareViewModel
         OnPropertyChanged(nameof(HasSelectedDrawing));
         OnPropertyChanged(nameof(IsDefaultPenMode));
         OnPropertyChanged(nameof(PenPanelHeader));
-        // Selecting a drawing opens the panel in "selected" mode; deselecting reverts to how it was.
-        if (newValue is not null && oldValue is null)
+        // Colour pickers are per-item popups: any selection change closes them so the next open re-seeds
+        // fresh from the newly-selected drawing's colour (no stale popup carrying the previous item's state).
+        StrokeColorPickerOpen = false;
+        FillColorPickerOpen = false;
+        // Selecting a drawing ALWAYS shows its settings; deselecting reverts to how the panel was before.
+        if (newValue is not null)
         {
-            _penPanelWasOpenBeforeSelect = IsPenPanelOpen;
+            if (oldValue is null) _penPanelWasOpenBeforeSelect = IsPenPanelOpen;
             IsPenPanelOpen = true;
         }
-        else if (newValue is null && oldValue is not null && !_penPanelWasOpenBeforeSelect)
+        else if (oldValue is not null && !_penPanelWasOpenBeforeSelect)
         {
             IsPenPanelOpen = false;
         }
@@ -550,9 +554,9 @@ public partial class ChartViewModel : StockAwareViewModel
     // Fixed tile sets — only each tile's Specimen + IsSelected mutate (see RefreshPenTiles).
     public IReadOnlyList<PenColorTile> PenColorTiles { get; } =
         PenPalette.Select(c => new PenColorTile(c)).ToList();
-    // Three thinnest widths (owner dropped the thickest tile).
+    // Three widths with a clear spread — a hair thin / default / clearly thick.
     public IReadOnlyList<PenWidthTile> PenWidthTiles { get; } =
-        new[] { 1.0, 1.5, 2.0 }.Select(w => new PenWidthTile(w)).ToList();
+        new[] { 0.75, 1.5, 3.5 }.Select(w => new PenWidthTile(w)).ToList();
     public IReadOnlyList<PenDashTile> PenDashTiles { get; } =
         new[] { DashKind.Solid, DashKind.Dash, DashKind.Dot }.Select(d => new PenDashTile(d)).ToList();
     // Owner-trimmed to three: none / end / both-out (Start + BothForward stay in the enum for back-compat).
@@ -610,8 +614,18 @@ public partial class ChartViewModel : StockAwareViewModel
         StrokeColorPickerOpen = false;
     }
 
-    [RelayCommand] private void ApplyCustomStrokeColor() { SetDefaultColor(CustomColorPreview); StrokeColorPickerOpen = false; }
-    [RelayCommand] private void ApplyCustomFillColor()   { SetPenFill(CustomColorPreview);      FillColorPickerOpen = false; }
+    [RelayCommand] private void ApplyCustomStrokeColor() { RememberRecent(CustomColorPreview); SetDefaultColor(CustomColorPreview); StrokeColorPickerOpen = false; }
+    [RelayCommand] private void ApplyCustomFillColor()   { RememberRecent(CustomColorPreview); SetPenFill(CustomColorPreview);      FillColorPickerOpen = false; }
+
+    // Picking a preset swatch AUTO-APPLIES it (no Apply press) and closes that popup.
+    [RelayCommand] private void PickStrokeColor(Color color) { if (color is null) return; SetDefaultColor(color); StrokeColorPickerOpen = false; }
+    [RelayCommand] private void PickFillColor(Color color)   { if (color is null) return; SetPenFill(color);      FillColorPickerOpen = false; }
+
+    // The last custom (RGB-dialled) colour, offered as an extra swatch so it can be re-picked.
+    [ObservableProperty] private Color? _recentCustomColor;
+    public bool HasRecentCustomColor => RecentCustomColor is not null;
+    partial void OnRecentCustomColorChanged(Color? value) => OnPropertyChanged(nameof(HasRecentCustomColor));
+    private void RememberRecent(Color c) => RecentCustomColor = c;
 
     // Fill-colour commands (route through ApplyPenStyle so they hit the selected drawing or the default pen).
     [RelayCommand]
@@ -765,12 +779,12 @@ public partial class ChartViewModel : StockAwareViewModel
 
         // Stamp the shared pen-style commands onto each tile (mirrors MaConfig.RemoveCommand) so the
         // DataTemplate binds Command directly + passes the tile's own value as the parameter.
-        foreach (var t in PenColorTiles)  t.Command = SetDefaultColorCommand;
+        foreach (var t in PenColorTiles)  t.Command = PickStrokeColorCommand;   // auto-apply + close
         foreach (var t in PenWidthTiles)  t.Command = SetDefaultThicknessCommand;
         foreach (var t in PenDashTiles)   t.Command = SetDefaultDashCommand;
         foreach (var t in PenEndingTiles) t.Command = SetDefaultEndingCommand;
         foreach (var t in PenHeadTiles)   t.Command = SetDefaultHeadCommand;
-        foreach (var t in PenFillTiles)   t.Command = SetPenFillCommand;
+        foreach (var t in PenFillTiles)   t.Command = PickFillColorCommand;     // auto-apply + close
 
         // Seed the pen-tray specimens + selection flags from the loaded default pen.
         RefreshPenTiles();

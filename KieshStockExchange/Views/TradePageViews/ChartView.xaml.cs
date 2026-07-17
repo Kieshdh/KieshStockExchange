@@ -488,6 +488,24 @@ public partial class ChartView : ContentView
         Chart.Invalidate();
     }
 
+    // Drag the pen/settings panel around the chart by its header row. Translation is layered on top of
+    // the panel's anchored layout, so it stays wherever the user drops it until the panel is re-opened.
+    private double _penPanStartTX, _penPanStartTY;
+    private void OnPenPanelPan(object? sender, PanUpdatedEventArgs e)
+    {
+        switch (e.StatusType)
+        {
+            case GestureStatus.Started:
+                _penPanStartTX = PenPanel.TranslationX;
+                _penPanStartTY = PenPanel.TranslationY;
+                break;
+            case GestureStatus.Running:
+                PenPanel.TranslationX = _penPanStartTX + e.TotalX;
+                PenPanel.TranslationY = _penPanStartTY + e.TotalY;
+                break;
+        }
+    }
+
 #if WINDOWS
     private void OnChartHandlerChanged(object? sender, EventArgs e)
     {
@@ -602,7 +620,10 @@ public partial class ChartView : ContentView
                 return;
             }
             // Tap-to-select: hitting a drawing selects it (reveals the style-bar) and begins a drag.
+            // Force the panel open too — re-tapping an already-selected drawing leaves SelectedDrawingId
+            // unchanged (no OnChanged), so this guarantees the settings show every time.
             _vm.SelectedDrawingId = dh.Drawing.Id;
+            _vm.IsPenPanelOpen = true;
             BeginDrawingDrag(dh.Drawing, dh.Part, p, isNew: false);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             Chart.Invalidate();
