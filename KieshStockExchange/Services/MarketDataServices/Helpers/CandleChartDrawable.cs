@@ -63,6 +63,9 @@ public sealed class CandleChartDrawable : IDrawable
     // the accumulated segments plus a rubber-band segment to the cursor. Both null when not building.
     public IReadOnlyList<DrawPoint>? BuildingPolyline { get; set; }
     public DrawPoint? BuildingPolylineCursor { get; set; }
+    // The current default pen — so the in-progress polyline preview draws in the exact colour/width/dash
+    // AND ending head(s) the committed line will have (a faithful "what you'll get" preview).
+    public DrawStyle BuildingStyle { get; set; } = DrawStyle.Default;
     // Fallback drawing colour (theme-overridable via a ChartDrawing resource) for drawings whose
     // persisted Style has no colour — new drawings carry their own Style.Color from the style-bar.
     public Color DrawingColor = Color.FromArgb("#4C9AFF");
@@ -654,7 +657,23 @@ public sealed class CandleChartDrawable : IDrawable
                 StylePreviewDrawable.DrawStraightSegment(canvas, x1, y, plot.Right, y,
                     d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
                 DrawGutterPriceTag(canvas, plot, y, d.P1, color, cur);
-                DrawHandle(canvas, x1, y, color);
+                if (selected) DrawHandle(canvas, x1, y, color);
+            }
+            else if (d.Kind == DrawTool.VLine)
+            {
+                // Vertical time line: spans the full plot height at the anchor's time. No ending/head.
+                float x = X(d.T1);
+                if (x < plot.Left || x > plot.Right) { canvas.StrokeDashPattern = null; continue; }
+                canvas.StrokeColor = color;
+                canvas.StrokeSize = stroke;
+                canvas.StrokeDashPattern = dashPattern;
+                canvas.DrawLine(x, plot.Top, x, plot.Bottom);
+                canvas.StrokeDashPattern = null;
+                if (selected)
+                {
+                    DrawHandle(canvas, x, plot.Top + 1f, color);
+                    DrawHandle(canvas, x, plot.Bottom - 1f, color);
+                }
             }
             else if (d.Kind == DrawTool.Polyline)
             {
@@ -707,8 +726,9 @@ public sealed class CandleChartDrawable : IDrawable
                     StylePreviewDrawable.DrawEndings(canvas, fx0, fy0, sx - fx0, sy - fy0,
                         lx, ly, lx - slx, ly - sly, d.Style.Ending, color, polyEff, d.Style.Head, thickness);
                 }
-                for (int k = 0; k < pts.Count; k++)
-                    DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
+                if (selected)
+                    for (int k = 0; k < pts.Count; k++)
+                        DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
             }
             else if (d.Kind == DrawTool.ExtendedLine)
             {
@@ -720,8 +740,11 @@ public sealed class CandleChartDrawable : IDrawable
                 var (bx, by) = RayExit(x1, y1, x1 - x2, y1 - y2, plot);   // backward edge
                 StylePreviewDrawable.DrawStraightSegment(canvas, bx, by, ax, ay,
                     LineEnding.None, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
-                DrawHandle(canvas, x1, y1, color);
-                DrawHandle(canvas, x2, y2, color);
+                if (selected)
+                {
+                    DrawHandle(canvas, x1, y1, color);
+                    DrawHandle(canvas, x2, y2, color);
+                }
             }
             else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse)
             {
@@ -741,8 +764,11 @@ public sealed class CandleChartDrawable : IDrawable
                 canvas.StrokeDashPattern = dashPattern;
                 if (d.Kind == DrawTool.Rectangle) canvas.DrawRectangle(rect); else canvas.DrawEllipse(rect);
 
-                DrawHandle(canvas, x1, y1, color);
-                DrawHandle(canvas, x2, y2, color);
+                if (selected)
+                {
+                    DrawHandle(canvas, x1, y1, color);
+                    DrawHandle(canvas, x2, y2, color);
+                }
             }
             else // Trend or Ray (both a two-anchor segment; Ray extends past anchor2 to the plot edge)
             {
@@ -754,8 +780,11 @@ public sealed class CandleChartDrawable : IDrawable
                 // Origin = anchor1; terminal = anchor2 (Trend) / ray-exit (Ray). Forward = origin→terminal.
                 StylePreviewDrawable.DrawStraightSegment(canvas, x1, y1, farX, farY,
                     d.Style.Ending, color, stroke, dashPattern, d.Style.Head, EndSize(thickness));
-                DrawHandle(canvas, x1, y1, color);
-                DrawHandle(canvas, x2, y2, color);
+                if (selected)
+                {
+                    DrawHandle(canvas, x1, y1, color);
+                    DrawHandle(canvas, x2, y2, color);
+                }
                 // Trendline labels (always-on v1): endpoint prices + a midpoint change/% / bar-count
                 // tag coloured by direction (TradingView convention).
                 DrawTrendLabels(canvas, d, x1, y1, x2, y2, color, cur);
@@ -768,25 +797,39 @@ public sealed class CandleChartDrawable : IDrawable
     }
 
     // Live preview of the polyline being built: the dropped vertices connected in order, plus a
-    // rubber-band segment from the last vertex to the current cursor point. Drawn in the default
-    // style so it reads as "in progress" until the double-click commits it.
+    // rubber-band segment from the last vertex to the current cursor point. Drawn in the CURRENT pen
+    // style (colour/width/dash + ending head) so the in-progress arrow reads exactly as it will commit.
     private void DrawBuildingPolyline(ICanvas canvas, Func<DateTime, float> X, Func<double, float> Y)
     {
         var pts = BuildingPolyline;
         if (pts is null || pts.Count == 0) return;
-        var color = DrawStyle.Default.Color;
+        var style = BuildingStyle;
+        var color = style.Color ?? DrawStyle.Default.Color;
+        float thickness = style.Thickness > 0f ? style.Thickness : DrawStyle.Default.Thickness;
+
+        // Screen-space points: the dropped vertices + (while hovering) the rubber-band cursor point.
+        var scr = new List<(float x, float y)>(pts.Count + 1);
+        for (int k = 0; k < pts.Count; k++) scr.Add((X(pts[k].T), Y((double)pts[k].P)));
+        if (BuildingPolylineCursor is DrawPoint c) scr.Add((X(c.T), Y((double)c.P)));
+
         canvas.StrokeColor = color;
-        canvas.StrokeSize = DrawStyle.Default.Thickness;
+        canvas.StrokeSize = thickness;
+        canvas.StrokeDashPattern = DashPattern(style.Dash);
+        for (int k = 1; k < scr.Count; k++)
+            canvas.DrawLine(scr[k - 1].x, scr[k - 1].y, scr[k].x, scr[k].y);
         canvas.StrokeDashPattern = null;
-        float lastX = X(pts[0].T), lastY = Y((double)pts[0].P);
-        for (int k = 1; k < pts.Count; k++)
+
+        // Ending head(s), on the live segment ends — so the arrowhead shows WHILE drawing, not just once
+        // committed. Start head follows vertex0→vertex1; end head follows the last two screen points.
+        if (scr.Count >= 2 && style.Ending != LineEnding.None)
         {
-            float nx = X(pts[k].T), ny = Y((double)pts[k].P);
-            canvas.DrawLine(lastX, lastY, nx, ny);
-            lastX = nx; lastY = ny;
+            var (sx, sy) = scr[0]; var (s2x, s2y) = scr[1];
+            var (lx, ly) = scr[^1]; var (l2x, l2y) = scr[^2];
+            StylePreviewDrawable.DrawEndings(canvas, sx, sy, s2x - sx, s2y - sy,
+                lx, ly, lx - l2x, ly - l2y, style.Ending, color, EndSize(thickness), style.Head, thickness);
         }
-        if (BuildingPolylineCursor is DrawPoint c)
-            canvas.DrawLine(lastX, lastY, X(c.T), Y((double)c.P));
+
+        // Vertex dots stay visible while building (placement feedback); they vanish on commit.
         for (int k = 0; k < pts.Count; k++)
             DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
     }
@@ -930,6 +973,13 @@ public sealed class CandleChartDrawable : IDrawable
                 float x1 = TimeToPixelX(d.T1), y = PriceToPixelY(d.P1);
                 if (Dist(p.X, p.Y, x1, y) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (p.X >= x1 - DrawHitTol && p.X <= _lastPlot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
+                    return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.VLine)
+            {
+                float x = TimeToPixelX(d.T1);
+                if (x < _lastPlot.Left || x > _lastPlot.Right) continue;
+                if (Math.Abs(p.X - x) <= DrawHitTol && p.Y >= _lastPlot.Top && p.Y <= _lastPlot.Bottom)
                     return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.Polyline)

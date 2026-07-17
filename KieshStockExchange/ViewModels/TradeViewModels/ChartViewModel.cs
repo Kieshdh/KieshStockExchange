@@ -562,6 +562,76 @@ public partial class ChartViewModel : StockAwareViewModel
     public IReadOnlyList<PenHeadTile> PenHeadTiles { get; } =
         new[] { ArrowHeadStyle.FilledTriangle, ArrowHeadStyle.Outline, ArrowHeadStyle.Open }
             .Select(h => new PenHeadTile(h)).ToList();
+    // FILL swatches (shapes only) — same palette, own selection state + SetPenFill command.
+    public IReadOnlyList<PenColorTile> PenFillTiles { get; } =
+        PenPalette.Select(c => new PenColorTile(c)).ToList();
+
+    // --- Colour picker popovers (single "current colour" swatch → a palette + RGB custom) --------------
+    // The stroke + fill swatch buttons each toggle their own inline popover (mutually exclusive so only
+    // one palette is open). The custom RGB row (three 0-255 sliders + a live preview) covers "any colour".
+    [ObservableProperty] private bool _strokeColorPickerOpen;
+    [ObservableProperty] private bool _fillColorPickerOpen;
+
+    // Current effective stroke / fill for the swatch-button backgrounds + the popover seed.
+    public Color CurrentStrokeColor => EffectivePenStyle().Color ?? DrawStyle.Default.Color;
+    public Color CurrentFillColor => EffectivePenStyle().Fill ?? Colors.Transparent;
+    public bool HasFill => EffectivePenStyle().Fill is not null;
+
+    // Custom-colour RGB channels (0..255) + the live preview the sliders drive; Apply commits it.
+    [ObservableProperty] private double _customR = 76;
+    [ObservableProperty] private double _customG = 154;
+    [ObservableProperty] private double _customB = 255;
+    public Color CustomColorPreview =>
+        Color.FromRgb((int)Math.Clamp(CustomR, 0, 255), (int)Math.Clamp(CustomG, 0, 255), (int)Math.Clamp(CustomB, 0, 255));
+    partial void OnCustomRChanged(double v) => OnPropertyChanged(nameof(CustomColorPreview));
+    partial void OnCustomGChanged(double v) => OnPropertyChanged(nameof(CustomColorPreview));
+    partial void OnCustomBChanged(double v) => OnPropertyChanged(nameof(CustomColorPreview));
+
+    private void SeedCustomRgb(Color c)
+    {
+        CustomR = Math.Round(c.Red * 255.0);
+        CustomG = Math.Round(c.Green * 255.0);
+        CustomB = Math.Round(c.Blue * 255.0);
+    }
+
+    [RelayCommand]
+    private void ToggleStrokeColorPicker()
+    {
+        if (!StrokeColorPickerOpen) SeedCustomRgb(CurrentStrokeColor);
+        StrokeColorPickerOpen = !StrokeColorPickerOpen;
+        FillColorPickerOpen = false;
+    }
+
+    [RelayCommand]
+    private void ToggleFillColorPicker()
+    {
+        if (!FillColorPickerOpen) SeedCustomRgb(HasFill ? CurrentFillColor : DrawStyle.Default.Color);
+        FillColorPickerOpen = !FillColorPickerOpen;
+        StrokeColorPickerOpen = false;
+    }
+
+    [RelayCommand] private void ApplyCustomStrokeColor() { SetDefaultColor(CustomColorPreview); StrokeColorPickerOpen = false; }
+    [RelayCommand] private void ApplyCustomFillColor()   { SetPenFill(CustomColorPreview);      FillColorPickerOpen = false; }
+
+    // Fill-colour commands (route through ApplyPenStyle so they hit the selected drawing or the default pen).
+    [RelayCommand]
+    private void SetPenFill(Color color)
+    {
+        if (color is null) return;
+        ApplyPenStyle(s => s with { Fill = color });
+    }
+
+    [RelayCommand] private void ClearPenFill() => ApplyPenStyle(s => s with { Fill = null });
+
+    // Fill opacity (0..1), bound two-way to the panel slider. Guarded so a style-driven refresh (which
+    // pushes the effective value back into the slider) doesn't re-enter ApplyPenStyle and loop.
+    private bool _syncingPenFromStyle;
+    [ObservableProperty] private double _penFillOpacity = 0.15;
+    partial void OnPenFillOpacityChanged(double value)
+    {
+        if (_syncingPenFromStyle) return;
+        ApplyPenStyle(s => s with { FillOpacity = (float)Math.Clamp(value, 0.0, 1.0) });
+    }
 
     public ObservableCollection<MaConfig> MaSeries { get; } = new()
     {
@@ -700,6 +770,7 @@ public partial class ChartViewModel : StockAwareViewModel
         foreach (var t in PenDashTiles)   t.Command = SetDefaultDashCommand;
         foreach (var t in PenEndingTiles) t.Command = SetDefaultEndingCommand;
         foreach (var t in PenHeadTiles)   t.Command = SetDefaultHeadCommand;
+        foreach (var t in PenFillTiles)   t.Command = SetPenFillCommand;
 
         // Seed the pen-tray specimens + selection flags from the loaded default pen.
         RefreshPenTiles();
@@ -1434,6 +1505,10 @@ public partial class ChartViewModel : StockAwareViewModel
         OnPropertyChanged(nameof(ShowPosition));
         OnPropertyChanged(nameof(ShowSize));
         OnPropertyChanged(nameof(ShowSmoothing));
+        // Colour-picker swatches + fill state track the effective style too.
+        OnPropertyChanged(nameof(CurrentStrokeColor));
+        OnPropertyChanged(nameof(CurrentFillColor));
+        OnPropertyChanged(nameof(HasFill));
         var s = EffectivePenStyle();
         var col = s.Color ?? DrawStyle.Default.Color;
         float th = s.Thickness > 0f ? s.Thickness : DrawStyle.Default.Thickness;
@@ -1463,6 +1538,14 @@ public partial class ChartViewModel : StockAwareViewModel
             t.Specimen = MakeSpecimen(col, th, s.Dash, LineEnding.End, t.Head);
             t.IsSelected = t.Head == s.Head;
         }
+        // FILL swatch selection + the opacity slider (guarded so pushing the effective value back into
+        // the slider doesn't re-enter the setter).
+        string fillHex = (s.Fill ?? Colors.Transparent).ToArgbHex(true);
+        foreach (var t in PenFillTiles)
+            t.IsSelected = s.Fill is not null && t.Color.ToArgbHex(true) == fillHex;
+        _syncingPenFromStyle = true;
+        PenFillOpacity = Math.Clamp(s.FillOpacity, 0f, 1f);
+        _syncingPenFromStyle = false;
     }
 
     /// <summary>

@@ -13,7 +13,10 @@ public static class ChartSnapshotRenderer
 {
     // Render at `w`x`h` logical units, upscaled by `scale` for a crisp export, on an OPAQUE background
     // (the offscreen canvas is transparent by default, which reads as a dirty/half-missing image).
-    public static byte[] Render(CandleChartDrawable drawable, int w, int h, Color? background = null, float scale = 2f)
+    // `title` (e.g. "AAPL · USD") is stamped top-left so a saved chart self-identifies — the on-screen
+    // OHLCV/ticker strip is a XAML overlay, NOT part of the drawable, so the snapshot has no ticker otherwise.
+    public static byte[] Render(CandleChartDrawable drawable, int w, int h, Color? background = null,
+        float scale = 2f, string? title = null)
     {
         if (w < 1) w = 1;
         if (h < 1) h = 1;
@@ -36,6 +39,15 @@ public static class ChartSnapshotRenderer
         canvas.Scale(scale, scale);
         drawable.Draw(canvas, new RectF(0, 0, w, h));
         canvas.RestoreState();
+
+        // Ticker watermark, top-left, in pixel space (after RestoreState) so it stays crisp at any scale.
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            canvas.FontColor = Colors.White;
+            canvas.FontSize = 13f * scale;
+            canvas.DrawString(title, 10f * scale, 6f * scale, w - 20f * scale, 22f * scale,
+                HorizontalAlignment.Left, VerticalAlignment.Top);
+        }
 
         using var ms = new MemoryStream();
         ctx.Image.Save(ms);   // PNG by default

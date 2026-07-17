@@ -330,6 +330,7 @@ public partial class ChartView : ContentView
         // brittle if a future feature mutates from a different thread.
         _drawable.Drawings = _vm.DrawingsHidden ? System.Array.Empty<DrawingObject>() : _vm.Drawings.ToArray();
         _drawable.SelectedDrawingId = _vm.SelectedDrawingId;
+        _drawable.BuildingStyle = _vm.DefaultDrawStyle;   // faithful in-progress polyline preview (incl. arrowhead)
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
         _drawable.OpenOrderSellColor = ResolveColor(_vm.SellOrderColorOption.Key);
@@ -442,7 +443,7 @@ public partial class ChartView : ContentView
 
             UpdateDrawable();               // reflect the exact current view
             var bg = TryGetColor("ChartBg", out var c) ? c : Colors.Black;
-            var png = ChartSnapshotRenderer.Render(_drawable, w, h, bg, scale: 2f);
+            var png = ChartSnapshotRenderer.Render(_drawable, w, h, bg, scale: 2f, title: SnapshotTitle());
 
             // Open a native Save-As dialog so the user picks the location/name (CommunityToolkit FileSaver).
             // Default name carries the ticker pairing (e.g. KSE-AAPL-USD-...) so saved charts self-identify.
@@ -470,6 +471,14 @@ public partial class ChartView : ContentView
         var raw = $"{sym}-{ccy}";
         var clean = new string(raw.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
         return clean.Length == 0 ? string.Empty : clean + "-";
+    }
+
+    // Human-readable ticker stamped onto the snapshot image (e.g. "AAPL · USD"). Empty when nothing selected.
+    private string SnapshotTitle()
+    {
+        var sym = _vm?.Selected.Symbol;
+        if (string.IsNullOrWhiteSpace(sym)) return string.Empty;
+        return $"{sym} · {_vm!.Selected.Currency}";
     }
 
     private void ClearHoverOverlay()
@@ -609,10 +618,10 @@ public partial class ChartView : ContentView
         {
             var t = _drawable.PixelToTime(p.X);
             var id = Guid.NewGuid();
-            if (_vm.DrawTool == DrawTool.HLine || _vm.DrawTool == DrawTool.HRay)
+            if (_vm.DrawTool == DrawTool.HLine || _vm.DrawTool == DrawTool.HRay || _vm.DrawTool == DrawTool.VLine)
             {
-                // Stay in pen mode after placing (no auto-select) so the pen panel's tool row remains
-                // visible and the user can keep placing lines / switching tool type. Click the line to edit it.
+                // One-click lines (HLine/HRay at a price, VLine at a time). Stay in pen mode after placing
+                // (no auto-select) so the user can keep placing lines / switching tool type. Click to edit.
                 _vm.AddDrawing(new DrawingObject(id, _vm.DrawTool, t, newPrice, t, newPrice, _vm.DefaultDrawStyle));
                 e.Handled = true;
                 return;
@@ -988,8 +997,9 @@ public partial class ChartView : ContentView
         {
             DrawingHitPart.Anchor1 => d with { T1 = time, P1 = price },
             DrawingHitPart.Anchor2 => d with { T2 = time, P2 = price },
-            // Body: HLine just tracks the cursor price; Trend shifts both anchors by the delta.
+            // Body: HLine tracks the cursor price; VLine tracks the cursor time; Trend shifts both anchors.
             _ when d.Kind == DrawTool.HLine => d with { P1 = price },
+            _ when d.Kind == DrawTool.VLine => d with { T1 = time },
             _ => ShiftTrend(d, time - _drawDragStartTime, price - _drawDragStartPrice),
         };
         upd = upd with { Id = id };
