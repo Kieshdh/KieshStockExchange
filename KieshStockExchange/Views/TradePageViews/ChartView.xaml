@@ -253,7 +253,7 @@
                 Stroke="{DynamicResource ChartGrid}" StrokeThickness="1"
                 StrokeShape="Rectangle">
             <VerticalStackLayout Spacing="3" VerticalOptions="Start">
-                <Button Text="⊘" Style="{StaticResource PenToolTile}"
+                <Button ImageSource="tool_cursor.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.None}">
                     <Button.Triggers>
@@ -261,11 +261,10 @@
                                      Value="{x:Static tools:DrawTool.None}">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-                <Button Text="╱" Style="{StaticResource PenToolTile}"
+                <Button ImageSource="tool_trend.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.Trend}">
                     <Button.Triggers>
@@ -273,11 +272,10 @@
                                      Value="{x:Static tools:DrawTool.Trend}">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-                <Button Text="↗" Style="{StaticResource PenToolTile}"
+                <Button ImageSource="tool_ray.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.Ray}">
                     <Button.Triggers>
@@ -285,11 +283,10 @@
                                      Value="{x:Static tools:DrawTool.Ray}">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-                <Button Text="─" Style="{StaticResource PenToolTile}"
+                <Button ImageSource="tool_hline.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.HLine}">
                     <Button.Triggers>
@@ -297,11 +294,10 @@
                                      Value="{x:Static tools:DrawTool.HLine}">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-                <Button Text="↦" Style="{StaticResource PenToolTile}"
+                <Button ImageSource="tool_hray.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.HRay}">
                     <Button.Triggers>
@@ -309,11 +305,10 @@
                                      Value="{x:Static tools:DrawTool.HRay}">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-                <Button Text="/\/▸" Style="{StaticResource PenToolTile}"
+                <Button ImageSource="tool_polyline.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.Polyline}">
                     <Button.Triggers>
@@ -321,12 +316,11 @@
                                      Value="{x:Static tools:DrawTool.Polyline}">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
                 <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" />
-                <Button Text="⇤⇥" Style="{StaticResource PenToolTile}"
+                <Button ImageSource="tool_measure.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.Measure}">
                     <Button.Triggers>
@@ -334,7 +328,6 @@
                                      Value="{x:Static tools:DrawTool.Measure}">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            <Setter Property="TextColor"       Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
