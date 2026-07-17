@@ -147,20 +147,8 @@
             <Button Text="{Binding ScaleModeLabel}"
                     Style="{StaticResource ChartResolutionButton.Unselected}"
                     Command="{Binding CycleScaleModeCommand}" />
-
-            <!-- Pen tray: a plain text label ("Line" + the current tool glyph) + ▾; tapping toggles
-                 the pen panel. Reaches through to the child Drawing VM. -->
-            <Button Text="{Binding Drawing.PenToolLabel, StringFormat='{0} ▾'}"
-                    Style="{StaticResource ChartResolutionButton.Unselected}"
-                    Command="{Binding Drawing.TogglePenPanelCommand}">
-                <Button.Triggers>
-                    <DataTrigger TargetType="Button"
-                                 Binding="{Binding Drawing.IsPenPanelOpen}" Value="True">
-                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
-                        <Setter Property="TextColor"       Value="{StaticResource White}" />
-                    </DataTrigger>
-                </Button.Triggers>
-            </Button>
+            <!-- (Drawing-tool selection lives in the left rail now; the old top-bar pen selector was removed.
+                 The pen/style panel still opens automatically on placing or selecting a drawing.) -->
         </HorizontalStackLayout>
 
         <!-- Spacer -->

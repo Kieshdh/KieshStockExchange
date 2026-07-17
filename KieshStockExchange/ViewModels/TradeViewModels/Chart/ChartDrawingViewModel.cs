@@ -26,6 +26,8 @@ public partial class ChartDrawingViewModel : ObservableObject
 
     private Func<decimal?>? _currentPrice;
     private Action? _requestRedraw;
+    private Func<bool>? _canZoomOut;
+    private Action? _zoomOut;
 
     public ChartDrawingViewModel(ILogger<ChartDrawingViewModel> logger, IDrawingStore store)
     {
@@ -47,15 +49,31 @@ public partial class ChartDrawingViewModel : ObservableObject
         RefreshPenTiles();
     }
 
-    // Wire the two canvas seams once, from ChartViewModel's constructor.
-    public void Attach(Func<decimal?> currentPrice, Action requestRedraw)
+    // Wire the canvas seams once, from ChartViewModel's constructor: the live price ("+ Line at current
+    // price"), the coalesced redraw, and the Magnifier zoom-out (state + stack live on the canvas VM).
+    public void Attach(Func<decimal?> currentPrice, Action requestRedraw, Func<bool> canZoomOut, Action zoomOut)
     {
         _currentPrice = currentPrice;
         _requestRedraw = requestRedraw;
+        _canZoomOut = canZoomOut;
+        _zoomOut = zoomOut;
     }
 
     // Route every redraw through the parent's coalescer (the single 16ms/Interlocked instance).
     private void RequestRedraw() => _requestRedraw?.Invoke();
+
+    // Magnifier zoom-OUT (the − rail button): visible only while the canvas holds a pushed zoom state, and
+    // steps back one box-zoom. Both delegate to the canvas VM (which owns the viewport + the history stack).
+    public bool CanZoomOut => _canZoomOut?.Invoke() ?? false;
+
+    [RelayCommand]
+    private void ZoomOutViewport() => _zoomOut?.Invoke();
+
+    public void NotifyZoomOutChanged()
+    {
+        OnPropertyChanged(nameof(CanZoomOut));
+        ZoomOutViewportCommand.NotifyCanExecuteChanged();
+    }
 
     // --- Drawings collection + selection ------------------------------------------------------------
     // User drawings for the selected stock, anchored in (time, price) so they survive pan/zoom.

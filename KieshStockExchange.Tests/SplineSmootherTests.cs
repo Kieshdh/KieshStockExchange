@@ -1,54 +1,45 @@
-using KieshStockExchange.Models.ChartDrawing.Objects;
 using KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
+using Microsoft.Maui.Graphics;
 
 namespace KieshStockExchange.Tests;
 
 /// <summary>
-/// UP-CORE — SplineSmoother: decimation drops points closer than minPx (endpoints always kept), and
-/// Evaluate at tension 0 produces a polyline that passes through every input point.
+/// SplineSmoother.SimplifyRdp reduces a dense pixel stroke to its curvature-significant points
+/// (Ramer–Douglas–Peucker): a collinear run collapses to its endpoints, a corner beyond the tolerance
+/// is kept, a corner within it is dropped, and short strokes are returned whole.
 /// </summary>
 public sealed class SplineSmootherTests
 {
-    // All points share the origin time, so ToXy maps them to X=0 and Y=P — pixel distance == |ΔP|.
-    private static DrawPoint P(decimal price) => new(DateTime.UnixEpoch, price);
+    private static int[] Simplify(PointF[] pts, float tolerancePx)
+        => SplineSmoother.SimplifyRdp(pts, tolerancePx).ToArray();
 
     [Fact]
-    public void Decimate_DropsSubMinPxPoint_KeepsEndpoints()
+    public void SimplifyRdp_CollinearRun_KeepsOnlyEndpoints()
     {
-        var pts = new[] { P(0m), P(0.5m), P(5m) };   // middle point is 0.5px from the first
-        var kept = SplineSmoother.Decimate(pts, minPx: 1f);
-
-        Assert.Equal(2, kept.Count);                 // the near middle point is dropped
-        Assert.Equal(0m, kept[0].P);
-        Assert.Equal(5m, kept[^1].P);                // terminal point preserved
+        var pts = new[] { new PointF(0, 0), new PointF(1, 0), new PointF(2, 0), new PointF(3, 0), new PointF(4, 0) };
+        Assert.Equal(new[] { 0, 4 }, Simplify(pts, tolerancePx: 1f));
     }
 
     [Fact]
-    public void Decimate_KeepsPointsBeyondThreshold()
+    public void SimplifyRdp_KeepsCornerBeyondTolerance()
     {
-        var pts = new[] { P(0m), P(3m), P(6m) };     // every gap is 3px >= minPx
-        var kept = SplineSmoother.Decimate(pts, minPx: 1f);
-
-        Assert.Equal(3, kept.Count);
+        // The middle point sits 5px off the chord from first→last ⇒ kept.
+        var pts = new[] { new PointF(0, 0), new PointF(2, 5), new PointF(4, 0) };
+        Assert.Equal(new[] { 0, 1, 2 }, Simplify(pts, tolerancePx: 1f));
     }
 
     [Fact]
-    public void Evaluate_TensionZero_PassesThroughPoints()
+    public void SimplifyRdp_DropsCornerWithinTolerance()
     {
-        var pts = new[] { P(0m), P(10m), P(4m) };
-        var path = SplineSmoother.Evaluate(pts, tension: 0f);
-
-        // A MoveTo + LineTo per subsequent point ⇒ one path point per input point, in order.
-        Assert.Equal(pts.Length, path.Count);
-        Assert.Equal(0f, path[0].Y, 3);
-        Assert.Equal(10f, path[1].Y, 3);
-        Assert.Equal(4f, path[2].Y, 3);
+        // Same corner but only 0.5px off the chord ⇒ within tolerance ⇒ dropped.
+        var pts = new[] { new PointF(0, 0), new PointF(2, 0.5f), new PointF(4, 0) };
+        Assert.Equal(new[] { 0, 2 }, Simplify(pts, tolerancePx: 1f));
     }
 
     [Fact]
-    public void Evaluate_Empty_ReturnsEmptyPath()
+    public void SimplifyRdp_TwoOrFewer_KeepsAll()
     {
-        var path = SplineSmoother.Evaluate(Array.Empty<DrawPoint>(), tension: 0.5f);
-        Assert.Equal(0, path.Count);
+        var pts = new[] { new PointF(0, 0), new PointF(10, 10) };
+        Assert.Equal(new[] { 0, 1 }, Simplify(pts, tolerancePx: 100f));
     }
 }

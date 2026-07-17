@@ -6,139 +6,120 @@
              x:Class="KieshStockExchange.Views.TradePageViews.ChartToolRailView"
              x:DataType="vm:ChartDrawingViewModel">
 
-    <!-- LEFT DRAWING-TOOL RAIL (TradingView-style, GROUPED). The rail sits in column 0; its group flyouts
-         hover in column 1 OVER the chart, so the view spans both columns. The root is InputTransparent with
-         CascadeInputTransparent=False so the empty flyout column passes pan/wheel through to the chart while
-         the rail + open flyouts still receive taps. Binds the Drawing VM (set by ChartView). -->
-    <Grid ColumnDefinitions="Auto,*"
-          InputTransparent="True" CascadeInputTransparent="False">
+    <!-- LEFT DRAWING-TOOL RAIL — a SELF-CONTAINED sidebar in its own column; the chart sits ENTIRELY to its
+         right (nothing overlaps). Each group tile arms its last-picked tool and carries a thin › click-strip
+         beside it that opens the group flyout — the flyout itself is hosted by the shell as an overlay OVER
+         the chart, so this rail never spans onto it. No border stroke: the panel fill alone defines the
+         sidebar. Binds the Drawing VM (set by ChartView). -->
+    <Border VerticalOptions="Fill" HorizontalOptions="Start"
+            Padding="3"
+            BackgroundColor="{DynamicResource ChartPanel}"
+            StrokeThickness="0"
+            StrokeShape="Rectangle">
+        <VerticalStackLayout Spacing="3" VerticalOptions="Start" HorizontalOptions="Start">
+            <!-- Cursor -->
+            <Button ImageSource="tool_cursor.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding SelectDrawToolCommand}"
+                    CommandParameter="{x:Static tools:DrawTool.None}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
+                                 Value="{x:Static tools:DrawTool.None}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
 
-        <!-- The rail column. Each group shows its LAST-PICKED tool as the rail icon; the › opens a named
-             flyout of that group's tools. Cursor and Measure are single tools; undo/redo/eye are actions. -->
-        <Border Grid.Column="0"
-                VerticalOptions="Fill" HorizontalOptions="Start"
-                Margin="0" Padding="3"
-                BackgroundColor="{DynamicResource ChartPanel}"
-                Stroke="{DynamicResource ChartGrid}" StrokeThickness="1"
-                StrokeShape="Rectangle">
-            <VerticalStackLayout Spacing="3" VerticalOptions="Start">
-                <!-- Cursor -->
-                <Button ImageSource="tool_cursor.png" Style="{StaticResource PenToolTile}"
-                        Command="{Binding SelectDrawToolCommand}"
-                        CommandParameter="{x:Static tools:DrawTool.None}">
+            <!-- LINES group: the tile arms the current line tool; a thin › click-strip beside it toggles
+                 the group flyout (highlights on hover). -->
+            <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="2" HorizontalOptions="Start">
+                <Button Grid.Column="0" ImageSource="{Binding LinesGroupIcon}" Style="{StaticResource PenToolTile}"
+                        Command="{Binding SelectDrawToolCommand}" CommandParameter="{Binding LinesGroupTool}">
                     <Button.Triggers>
-                        <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                     Value="{x:Static tools:DrawTool.None}">
+                        <DataTrigger TargetType="Button" Binding="{Binding IsLinesGroupActive}" Value="True">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
-                <!-- LINES group: icon arms the current line tool; › opens the flyout -->
-                <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="1">
-                    <Button Grid.Column="0" ImageSource="{Binding LinesGroupIcon}" Style="{StaticResource PenToolTile}"
-                            Command="{Binding SelectDrawToolCommand}" CommandParameter="{Binding LinesGroupTool}">
-                        <Button.Triggers>
-                            <DataTrigger TargetType="Button" Binding="{Binding IsLinesGroupActive}" Value="True">
-                                <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
-                                <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            </DataTrigger>
-                        </Button.Triggers>
-                    </Button>
-                    <Button Grid.Column="1" Text="›" FontSize="16" WidthRequest="14" Padding="0"
-                            Style="{StaticResource ChartIconButton}"
-                            Command="{Binding ToggleToolGroupCommand}" CommandParameter="lines" />
-                </Grid>
-                <!-- SHAPES group -->
-                <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="1">
-                    <Button Grid.Column="0" ImageSource="{Binding ShapesGroupIcon}" Style="{StaticResource PenToolTile}"
-                            Command="{Binding SelectDrawToolCommand}" CommandParameter="{Binding ShapesGroupTool}">
-                        <Button.Triggers>
-                            <DataTrigger TargetType="Button" Binding="{Binding IsShapesGroupActive}" Value="True">
-                                <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
-                                <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                            </DataTrigger>
-                        </Button.Triggers>
-                    </Button>
-                    <Button Grid.Column="1" Text="›" FontSize="16" WidthRequest="14" Padding="0"
-                            Style="{StaticResource ChartIconButton}"
-                            Command="{Binding ToggleToolGroupCommand}" CommandParameter="shapes" />
-                </Grid>
-                <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" />
-                <!-- Measure (single) -->
-                <Button ImageSource="tool_measure.png" Style="{StaticResource PenToolTile}"
-                        Command="{Binding SelectDrawToolCommand}"
-                        CommandParameter="{x:Static tools:DrawTool.Measure}">
+                <Button Grid.Column="1" Style="{StaticResource ToolGroupStrip}"
+                        Command="{Binding ToggleToolGroupCommand}" CommandParameter="lines" />
+            </Grid>
+
+            <!-- SHAPES group: tile arms the current shape; thin › click-strip beside it toggles the flyout. -->
+            <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="2" HorizontalOptions="Start">
+                <Button Grid.Column="0" ImageSource="{Binding ShapesGroupIcon}" Style="{StaticResource PenToolTile}"
+                        Command="{Binding SelectDrawToolCommand}" CommandParameter="{Binding ShapesGroupTool}">
                     <Button.Triggers>
-                        <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                     Value="{x:Static tools:DrawTool.Measure}">
+                        <DataTrigger TargetType="Button" Binding="{Binding IsShapesGroupActive}" Value="True">
                             <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
                             <Setter Property="BorderColor"     Value="{StaticResource White}" />
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
+                <Button Grid.Column="1" Style="{StaticResource ToolGroupStrip}"
+                        Command="{Binding ToggleToolGroupCommand}" CommandParameter="shapes" />
+            </Grid>
 
-                <!-- Undo / redo / eye — actions (undo/redo grey out on empty history; eye highlights while hidden). -->
-                <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" />
-                <Button ImageSource="tool_undo.png" Style="{StaticResource PenToolTile}"
-                        Command="{Binding UndoCommand}" />
-                <Button ImageSource="tool_redo.png" Style="{StaticResource PenToolTile}"
-                        Command="{Binding RedoCommand}" />
-                <Button ImageSource="tool_eye.png" Style="{StaticResource PenToolTile}"
-                        Command="{Binding ToggleDrawingsHiddenCommand}">
-                    <Button.Triggers>
-                        <DataTrigger TargetType="Button" Binding="{Binding DrawingsHidden}" Value="True">
-                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
-                            <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                        </DataTrigger>
-                    </Button.Triggers>
-                </Button>
-            </VerticalStackLayout>
-        </Border>
+            <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" HorizontalOptions="Start" WidthRequest="32" />
 
-        <!-- LINES group flyout: a named row of the group's tools, over the chart just right of the rail. -->
-        <Border Grid.Column="1" IsVisible="{Binding IsLinesGroupOpen}"
-                HorizontalOptions="Start" VerticalOptions="Start" Margin="4,40,0,0"
-                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
-                StrokeThickness="1" StrokeShape="RoundRectangle 6" Padding="4">
-            <HorizontalStackLayout Spacing="2">
-                <Button ImageSource="tool_trend.png" Text="Trend" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Trend}" />
-                <Button ImageSource="tool_ray.png" Text="Ray" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Ray}" />
-                <Button ImageSource="tool_extendedline.png" Text="Extended" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.ExtendedLine}" />
-                <Button ImageSource="tool_hline.png" Text="Horizontal" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.HLine}" />
-                <Button ImageSource="tool_hray.png" Text="H-Ray" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.HRay}" />
-                <Button ImageSource="tool_vline.png" Text="Vertical" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.VLine}" />
-                <Button ImageSource="tool_polyline.png" Text="Polyline" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Polyline}" />
-            </HorizontalStackLayout>
-        </Border>
+            <!-- Measure (single) -->
+            <Button ImageSource="tool_measure.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding SelectDrawToolCommand}"
+                    CommandParameter="{x:Static tools:DrawTool.Measure}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
+                                 Value="{x:Static tools:DrawTool.Measure}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
 
-        <!-- SHAPES group flyout. -->
-        <Border Grid.Column="1" IsVisible="{Binding IsShapesGroupOpen}"
-                HorizontalOptions="Start" VerticalOptions="Start" Margin="4,77,0,0"
-                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
-                StrokeThickness="1" StrokeShape="RoundRectangle 6" Padding="4">
-            <HorizontalStackLayout Spacing="2">
-                <Button ImageSource="tool_rectangle.png" Text="Rectangle" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Rectangle}" />
-                <Button ImageSource="tool_ellipse.png" Text="Ellipse" ContentLayout="Left,4" FontSize="11"
-                        Style="{StaticResource ChartLiveButton.Off}"
-                        Command="{Binding PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Ellipse}" />
-            </HorizontalStackLayout>
-        </Border>
-    </Grid>
+            <!-- Freehand brush (standalone drawing tool). -->
+            <Button ImageSource="tool_freehand.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding SelectDrawToolCommand}"
+                    CommandParameter="{x:Static tools:DrawTool.Freehand}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
+                                 Value="{x:Static tools:DrawTool.Freehand}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <!-- Magnifier box-zoom IN (standalone, one-shot: drag a box, release zooms to it). -->
+            <Button ImageSource="tool_magnifier.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding SelectDrawToolCommand}"
+                    CommandParameter="{x:Static tools:DrawTool.Magnifier}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
+                                 Value="{x:Static tools:DrawTool.Magnifier}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <!-- Magnifier zoom-OUT (an action; steps back the box-zoom stack; hidden when the stack is empty). -->
+            <Button ImageSource="tool_magnifier_minus.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    IsVisible="{Binding CanZoomOut}"
+                    Command="{Binding ZoomOutViewportCommand}" />
+
+            <!-- Undo / redo / eye — actions (undo/redo grey out on empty history; eye highlights while hidden). -->
+            <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" HorizontalOptions="Start" WidthRequest="32" />
+            <Button ImageSource="tool_undo.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding UndoCommand}" />
+            <Button ImageSource="tool_redo.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding RedoCommand}" />
+            <Button ImageSource="tool_eye.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding ToggleDrawingsHiddenCommand}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button" Binding="{Binding DrawingsHidden}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+        </VerticalStackLayout>
+    </Border>
 </ContentView>

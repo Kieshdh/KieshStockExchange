@@ -24,7 +24,7 @@ public static class DrawToolPresets
     public static DrawToolPreset For(DrawTool tool) => tool switch
     {
         // Open two-anchor segments that "stop": stroke + dash + ending/head.
-        DrawTool.Trend or DrawTool.Ray or DrawTool.Polyline or DrawTool.Arrow =>
+        DrawTool.Trend or DrawTool.Ray or DrawTool.Polyline =>
             new(DrawStyle.Default,
                 ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
                 ShowEnding: true, ShowHead: true, ShowText: false, ShowPosition: false,
@@ -39,19 +39,21 @@ public static class DrawToolPresets
                 ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
 
-        // Filled shapes: border stroke + fill colour + fill opacity + dash.
-        DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.RotatedRect or DrawTool.Triangle or DrawTool.Arc =>
+        // Filled shapes: border stroke + fill colour + fill opacity + dash. Arrow is a filled block-arrow
+        // shape (2 anchors = tail/head, fixed aspect), so it takes the same panel sections as Rectangle.
+        DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow
+            or DrawTool.RotatedRect or DrawTool.Triangle or DrawTool.Arc =>
             new(ShapeStyle,
                 ShowStroke: true, ShowFillColor: true, ShowOpacity: true, ShowDash: true,
                 ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
 
-        // Free-drawn path: stroke + spline smoothing.
+        // Free-drawn path: stroke (colour/width) + dash + an optional ending arrow + its head shape.
         DrawTool.Freehand =>
             new(DrawStyle.Default,
-                ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
-                ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: false,
-                ShowSize: false, ShowSmoothing: true),
+                ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
+                ShowEnding: true, ShowHead: true, ShowText: false, ShowPosition: false,
+                ShowSize: false, ShowSmoothing: false),
 
         // Anchored label: text + colour + size.
         DrawTool.Text =>

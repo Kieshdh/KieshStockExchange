@@ -97,7 +97,7 @@
     <!-- Pen-tray TOOL tile: a glyph button; selected tile gets the ChartGrid fill + white ring. -->
     <Style x:Key="PenToolTile" TargetType="Button">
         <Setter Property="Padding"         Value="0" />
-        <Setter Property="WidthRequest"    Value="40" />
+        <Setter Property="WidthRequest"    Value="32" />
         <Setter Property="HeightRequest"   Value="32" />
         <Setter Property="CornerRadius"    Value="4" />
         <Setter Property="FontSize"        Value="14" />
@@ -106,6 +106,46 @@
         <Setter Property="TextColor"       Value="{DynamicResource ChartAxis}" />
         <Setter Property="BorderWidth"     Value="1" />
         <Setter Property="BorderColor"     Value="{DynamicResource ChartGrid}" />
+    </Style>
+
+    <!-- Thin vertical click-strip beside a rail group tile (~1/5 the tile width) carrying a › arrow:
+         click toggles the group flyout, highlights on hover (no hover-open). -->
+    <Style x:Key="ToolGroupStrip" TargetType="Button">
+        <Setter Property="WidthRequest"        Value="8" />
+        <Setter Property="MinimumWidthRequest" Value="8" />
+        <Setter Property="HeightRequest"       Value="32" />
+        <Setter Property="VerticalOptions"     Value="Center" />
+        <!-- Slight top bias nudges the › glyph (which the font sets a hair high) to optical centre. -->
+        <Setter Property="Padding"             Value="0,2,0,0" />
+        <Setter Property="CornerRadius"        Value="2" />
+        <Setter Property="BorderWidth"         Value="0" />
+        <Setter Property="FontSize"            Value="10" />
+        <Setter Property="FontFamily"          Value="OpenSansSemibold" />
+        <Setter Property="Text"                Value="›" />
+        <Setter Property="LineBreakMode"       Value="NoWrap" />
+        <Setter Property="BackgroundColor"     Value="{DynamicResource ChartGrid}" />
+        <Setter Property="TextColor"           Value="{DynamicResource ChartAxis}" />
+        <Setter Property="VisualStateManager.VisualStateGroups">
+            <VisualStateGroupList>
+                <VisualStateGroup x:Name="CommonStates">
+                    <VisualState x:Name="Normal" />
+                    <VisualState x:Name="PointerOver">
+                        <VisualState.Setters>
+                            <Setter Property="BackgroundColor" Value="{DynamicResource ChartAxis}" />
+                            <Setter Property="TextColor"       Value="{DynamicResource ChartPanel}" />
+                        </VisualState.Setters>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateGroupList>
+        </Setter>
+    </Style>
+
+    <!-- Text label beside a boxed tool icon in a group flyout (icon = the boxed button, label sits
+         outside it but styled to match). Made tappable at the call site so the whole row picks the tool. -->
+    <Style x:Key="ToolFlyoutLabel" TargetType="Label">
+        <Setter Property="VerticalOptions" Value="Center" />
+        <Setter Property="FontSize"        Value="12" />
+        <Setter Property="TextColor"       Value="{DynamicResource ChartAxis}" />
     </Style>
 
     <!-- ============================================================

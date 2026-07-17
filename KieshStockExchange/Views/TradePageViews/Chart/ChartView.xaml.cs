@@ -27,7 +27,7 @@ public partial class ChartView : ContentView
     // Active platform-pointer drag (Windows-side). Cross-platform so the
     // (cross-platform) PanGestureRecognizer can suppress its updates while a
     // marker / Y-axis / free-pan drag is in flight.
-    private enum DragMode { None, OpenOrder, YAxis, FreePan, Measure, Drawing }
+    private enum DragMode { None, OpenOrder, YAxis, FreePan, Measure, Drawing, Magnifier, Freehand }
     private DragMode _dragMode = DragMode.None;
 
     // Inertial-pan state. During a free-pan drag we smooth a velocity (candles/sec)

@@ -144,6 +144,52 @@ public partial class ChartViewModel
         OffsetFromLatest = off1;    // OnOffsetFromLatestChanged clamps into [MinOffset, MaxOffset]
     }
 
+    // Frame the viewport to a [from, to] time window (the Magnifier box-zoom): VisibleCount = the bucket
+    // span, OffsetFromLatest so the window's right edge sits at the plot's right edge. Both setters clamp.
+    public void FrameTimeRange(DateTime from, DateTime to)
+    {
+        if (SelectedResolution == CandleResolution.None) return;
+        if (to < from) (from, to) = (to, from);
+        double bucketSec = (int)SelectedResolution;
+        if (bucketSec <= 0) return;
+        int vis = Math.Clamp((int)Math.Round((to - from).TotalSeconds / bucketSec), MinVisible, MaxVisible);
+        var anchor = _candleBuffer.Count > 0 ? _candleBuffer[^1].OpenTime : to;
+        int off = (int)Math.Round((anchor - to).TotalSeconds / bucketSec) + 1;
+        VisibleCount = vis;
+        OffsetFromLatest = Math.Clamp(off, MinOffset, MaxOffset);
+    }
+
+    // --- Magnifier zoom-out stack --------------------------------------------------------------------
+    // Each successful Magnifier box-zoom pushes the PRE-zoom viewport here; the rail's − magnifier pops it,
+    // stepping back one state at a time until the stack empties (then the − button hides — see CanZoomOut).
+    private readonly Stack<(int Vis, int Off, bool YAuto, decimal? YMin, decimal? YMax)> _zoomHistory = new();
+    public bool CanZoomOut => _zoomHistory.Count > 0;
+
+    // Push the current viewport before a box-zoom applies (called from the Magnifier release handler).
+    public void PushZoomState()
+    {
+        _zoomHistory.Push((VisibleCount, OffsetFromLatest, IsYAutoFit, ManualYMin, ManualYMax));
+        NotifyZoomOut();
+    }
+
+    // Step back one box-zoom: restore the last pushed viewport (count / offset / Y-mode).
+    public void ZoomOutViewport()
+    {
+        if (_zoomHistory.Count == 0) return;
+        var s = _zoomHistory.Pop();
+        VisibleCount = s.Vis;
+        OffsetFromLatest = s.Off;
+        if (s.YAuto) { ManualYMin = null; ManualYMax = null; IsYAutoFit = true; }
+        else if (s.YMin is decimal mn && s.YMax is decimal mx) { SetManualYRange(mn, mx); IsYAutoFit = false; }
+        NotifyZoomOut();
+    }
+
+    private void NotifyZoomOut()
+    {
+        OnPropertyChanged(nameof(CanZoomOut));
+        Drawing.NotifyZoomOutChanged();   // the − rail button binds the Drawing VM
+    }
+
     [RelayCommand]
     private void GoLive()
     {

@@ -48,6 +48,9 @@ public sealed class CandleChartDrawable : IDrawable
     // Measure.Active is false the measure pass is skipped.
     public MeasureState Measure { get; set; }
 
+    // Magnifier box-zoom overlay (transient, no readout). ZoomBox.Active gates it; cleared on release.
+    public MeasureState ZoomBox { get; set; }
+
     // Moving-average overlays. Each series carries its own color and a
     // pre-computed list of points against the candle buffer.
     public IReadOnlyList<MovingAverageSeries> MaSeries { get; set; } = Array.Empty<MovingAverageSeries>();
@@ -63,6 +66,9 @@ public sealed class CandleChartDrawable : IDrawable
     // the accumulated segments plus a rubber-band segment to the cursor. Both null when not building.
     public IReadOnlyList<DrawPoint>? BuildingPolyline { get; set; }
     public DrawPoint? BuildingPolylineCursor { get; set; }
+    // True while the in-progress stroke is a FREEHAND drag (continuous) vs a Polyline (click-per-vertex):
+    // freehand previews as a bare smooth line — no per-vertex dots (a dot per sample is unusable).
+    public bool BuildingIsFreehand { get; set; }
     // The current default pen — so the in-progress polyline preview draws in the exact colour/width/dash
     // AND ending head(s) the committed line will have (a faithful "what you'll get" preview).
     public DrawStyle BuildingStyle { get; set; } = DrawStyle.Default;
@@ -361,6 +367,8 @@ public sealed class CandleChartDrawable : IDrawable
         DrawCrosshair(canvas, plot, currency, X);
         // Measure ruler sits above the crosshair while a Shift-drag is in flight.
         DrawMeasure(canvas, plot);
+        // Magnifier box-zoom overlay (a dashed selection rect) while its drag is in flight.
+        DrawZoomBox(canvas, plot);
 
         canvas.RestoreState();
     }
@@ -782,6 +790,72 @@ public sealed class CandleChartDrawable : IDrawable
                     DrawHandle(canvas, x2, y2, color);
                 }
             }
+            else if (d.Kind == DrawTool.Freehand)
+            {
+                // Free-drawn brush: a captured point path rounded by the pen's Smoothing, in the pen's width
+                // + dash. An optional ending head hangs on the terminal point(s); the smooth stroke stops at
+                // the head BASE (like the straight kinds) so the line never shows through a hollow/filled
+                // head. No selection handles — a freehand reads as a clean stroke (owner preference).
+                var fpts = d.Points;
+                if (fpts is null || fpts.Count < 2) { canvas.StrokeDashPattern = null; continue; }
+                var fscr = new PointF[fpts.Count];
+                for (int k = 0; k < fpts.Count; k++) fscr[k] = new PointF(X(fpts[k].T), Y((double)fpts[k].P));
+
+                var fEnding = d.Style.Ending;
+                bool fHeadStart = fEnding is LineEnding.Start or LineEnding.BothOut;
+                bool fHeadEnd = fEnding is LineEnding.End or LineEnding.BothOut or LineEnding.BothForward;
+                bool fCut = d.Style.Head != ArrowHeadStyle.Open;   // Open barb runs the line to the tip
+                float fEff = EndSize(thickness);
+
+                var fbody = fscr;
+                if (fEnding != LineEnding.None && fCut && (fHeadStart || fHeadEnd))
+                {
+                    // Trim past the head base by the round-cap radius + a hair, so the rounded stroke end
+                    // tucks fully under the head (no line poking through the tip).
+                    float fTrim = fEff + stroke * 0.5f + 1.5f;
+                    fbody = (PointF[])fscr.Clone();
+                    if (fHeadEnd) fbody[^1] = PullBack(fscr[^1], fscr[^2], fTrim);
+                    if (fHeadStart) fbody[0] = PullBack(fscr[0], fscr[1], fTrim);
+                }
+
+                canvas.StrokeColor = color;
+                canvas.StrokeSize = stroke;
+                canvas.StrokeDashPattern = dashPattern;
+                DrawFreehandPath(canvas, fbody, d.Smoothing);
+                canvas.StrokeDashPattern = null;
+
+                if (fEnding != LineEnding.None)
+                    StylePreviewDrawable.DrawEndings(canvas,
+                        fscr[0].X, fscr[0].Y, fscr[1].X - fscr[0].X, fscr[1].Y - fscr[0].Y,
+                        fscr[^1].X, fscr[^1].Y, fscr[^1].X - fscr[^2].X, fscr[^1].Y - fscr[^2].Y,
+                        fEnding, color, fEff, d.Style.Head, thickness);
+            }
+            else if (d.Kind == DrawTool.Arrow)
+            {
+                // Filled BLOCK ARROW: anchor1 = tail, anchor2 = head. Fixed aspect (proportional to the
+                // length), so moving the anchors apart just ENLARGES the same pointer. Fill then outline —
+                // the same fill/opacity + stroke treatment as Rectangle/Ellipse.
+                float x1 = X(d.T1), y1 = _scale.PriceToPixelY(d.P1, plot, _lastYMin, _lastYMax, ScaleMode);
+                float x2 = X(d.T2), y2 = _scale.PriceToPixelY(d.P2, plot, _lastYMin, _lastYMax, ScaleMode);
+                var arrow = BlockArrowPath(x1, y1, x2, y2);
+                if (arrow is not null)
+                {
+                    if (d.Style.Fill is Color afill)
+                    {
+                        canvas.FillColor = afill.WithAlpha(Math.Clamp(d.Style.FillOpacity, 0f, 1f));
+                        canvas.FillPath(arrow);
+                    }
+                    canvas.StrokeColor = color;
+                    canvas.StrokeSize = stroke;
+                    canvas.StrokeDashPattern = dashPattern;
+                    canvas.DrawPath(arrow);
+                }
+                if (selected)
+                {
+                    DrawHandle(canvas, x1, y1, color);   // tail
+                    DrawHandle(canvas, x2, y2, color);   // head
+                }
+            }
             else // Trend or Ray (both a two-anchor segment; Ray extends past anchor2 to the plot edge)
             {
                 float x1 = X(d.T1), y1 = Y((double)d.P1);
@@ -827,13 +901,24 @@ public sealed class CandleChartDrawable : IDrawable
         canvas.StrokeColor = color;
         canvas.StrokeSize = thickness;
         canvas.StrokeDashPattern = DashPattern(style.Dash);
-        for (int k = 1; k < scr.Count; k++)
-            canvas.DrawLine(scr[k - 1].x, scr[k - 1].y, scr[k].x, scr[k].y);
+        if (BuildingIsFreehand)
+        {
+            // Preview the SAME B-spline the committed freehand uses (smoothing=1), so the live stroke
+            // rounds toward the captured points exactly as it will look once committed.
+            var braw = new PointF[pts.Count];
+            for (int k = 0; k < pts.Count; k++) braw[k] = new PointF(X(pts[k].T), Y((double)pts[k].P));
+            DrawFreehandPath(canvas, braw, 1f);
+        }
+        else
+        {
+            for (int k = 1; k < scr.Count; k++)
+                canvas.DrawLine(scr[k - 1].x, scr[k - 1].y, scr[k].x, scr[k].y);
+        }
         canvas.StrokeDashPattern = null;
 
-        // Ending head(s), on the live segment ends — so the arrowhead shows WHILE drawing, not just once
-        // committed. Start head follows vertex0→vertex1; end head follows the last two screen points.
-        if (scr.Count >= 2 && style.Ending != LineEnding.None)
+        // Ending head(s) — polyline only (freehand has no ending). Shown on the live segment ends so the
+        // arrowhead reads WHILE drawing. Start head follows vertex0→vertex1; end follows the last two.
+        if (!BuildingIsFreehand && scr.Count >= 2 && style.Ending != LineEnding.None)
         {
             var (sx, sy) = scr[0]; var (s2x, s2y) = scr[1];
             var (lx, ly) = scr[^1]; var (l2x, l2y) = scr[^2];
@@ -841,9 +926,10 @@ public sealed class CandleChartDrawable : IDrawable
                 lx, ly, lx - l2x, ly - l2y, style.Ending, color, EndSize(thickness), style.Head, thickness);
         }
 
-        // Vertex dots stay visible while building (placement feedback); they vanish on commit.
-        for (int k = 0; k < pts.Count; k++)
-            DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
+        // Vertex dots — polyline placement feedback only; a freehand previews as a bare smooth stroke.
+        if (!BuildingIsFreehand)
+            for (int k = 0; k < pts.Count; k++)
+                DrawHandle(canvas, X(pts[k].T), Y((double)pts[k].P), color);
     }
 
     // Solid = no pattern; Dash = medium dashes; Dot = tight dots.
@@ -1018,7 +1104,7 @@ public sealed class CandleChartDrawable : IDrawable
                 if (Math.Abs(p.X - x) <= DrawHitTol && p.Y >= _lastPlot.Top && p.Y <= _lastPlot.Bottom)
                     return (d, DrawingHitPart.Body);
             }
-            else if (d.Kind == DrawTool.Polyline)
+            else if (d.Kind == DrawTool.Polyline || d.Kind == DrawTool.Freehand)
             {
                 var pts = d.Points;
                 if (pts is null || pts.Count == 0) continue;
@@ -1059,6 +1145,19 @@ public sealed class CandleChartDrawable : IDrawable
                      Math.Abs(p.Y - rect.Top) <= DrawHitTol || Math.Abs(p.Y - rect.Bottom) <= DrawHitTol);
                 bool inside = d.Style.Fill is not null && rect.Contains(p);
                 if (onBorder || inside) return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.Arrow)
+            {
+                float x1 = TimeToPixelX(d.T1), y1 = PriceToPixelY(d.P1);
+                float x2 = TimeToPixelX(d.T2), y2 = PriceToPixelY(d.P2);
+                if (Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                // Body = the block-arrow's oriented bounding box (anchors' bbox padded by the head half-width).
+                float amin = Math.Min(x1, x2), amax = Math.Max(x1, x2);
+                float bmin = Math.Min(y1, y2), bmax = Math.Max(y1, y2);
+                float apad = 0.25f * Dist(x1, y1, x2, y2);
+                if (p.X >= amin - apad && p.X <= amax + apad && p.Y >= bmin - apad && p.Y <= bmax + apad)
+                    return (d, DrawingHitPart.Body);
             }
             else // Trend or Ray
             {
@@ -1857,6 +1956,102 @@ public sealed class CandleChartDrawable : IDrawable
         if (t.TotalHours >= 1) return $"{(int)t.TotalHours}h {t.Minutes}m";
         if (t.TotalMinutes >= 1) return $"{(int)t.TotalMinutes}m {t.Seconds}s";
         return $"{(int)t.TotalSeconds}s";
+    }
+
+    // Magnifier box-zoom overlay: a dashed selection rectangle with a faint fill between the anchor and
+    // the cursor. No readout — on release the viewport zooms to the box (see ChartView). Cleared on release.
+    private void DrawZoomBox(ICanvas canvas, RectF plot)
+    {
+        if (!ZoomBox.Active) return;
+        float x0 = Math.Clamp(ZoomBox.X0, plot.Left, plot.Right);
+        float y0 = Math.Clamp(ZoomBox.Y0, plot.Top, plot.Bottom);
+        float x1 = Math.Clamp(ZoomBox.X1, plot.Left, plot.Right);
+        float y1 = Math.Clamp(ZoomBox.Y1, plot.Top, plot.Bottom);
+        var rect = new RectF(Math.Min(x0, x1), Math.Min(y0, y1), Math.Abs(x1 - x0), Math.Abs(y1 - y0));
+        canvas.SaveState();
+        canvas.FillColor = CrosshairColor.WithAlpha(0.10f);
+        canvas.FillRectangle(rect);
+        canvas.StrokeColor = CrosshairColor;
+        canvas.StrokeSize = 1f;
+        canvas.StrokeDashPattern = new float[] { 4f, 3f };
+        canvas.DrawRectangle(rect);
+        canvas.RestoreState();
+    }
+
+    // A 7-vertex filled block arrow from tail(tx,ty) → head(hx,hy). Proportions are FIXED fractions of the
+    // length L, so the pointer enlarges (never distorts) as the anchors move apart. Null for a degenerate one.
+    private static PathF? BlockArrowPath(float tx, float ty, float hx, float hy)
+    {
+        float dx = hx - tx, dy = hy - ty;
+        float len = (float)Math.Sqrt(dx * dx + dy * dy);
+        if (len < 4f) return null;
+        float ux = dx / len, uy = dy / len;      // unit tail→head
+        float nx = -uy, ny = ux;                  // unit perpendicular
+        float headLen = 0.40f * len, headHW = 0.25f * len, shaftHW = 0.12f * len;
+        float bx = hx - ux * headLen, by = hy - uy * headLen;   // head base (shaft ↔ barb junction)
+        var path = new PathF();
+        path.MoveTo(tx + nx * shaftHW, ty + ny * shaftHW);      // shaft back, +side
+        path.LineTo(bx + nx * shaftHW, by + ny * shaftHW);      // shaft front, +side
+        path.LineTo(bx + nx * headHW,  by + ny * headHW);       // barb, +side
+        path.LineTo(hx, hy);                                    // tip
+        path.LineTo(bx - nx * headHW,  by - ny * headHW);       // barb, −side
+        path.LineTo(bx - nx * shaftHW, by - ny * shaftHW);      // shaft front, −side
+        path.LineTo(tx - nx * shaftHW, ty - ny * shaftHW);      // shaft back, −side
+        path.Close();
+        return path;
+    }
+
+    // Uniform cubic B-SPLINE (approximating) over PIXEL control points: the points are CONTROL points and
+    // the curve is pulled TOWARD them (it does NOT pass through the interior ones) via a sliding 4-point
+    // window. The first + last control points are tripled so the stroke is CLAMPED to its ends. smoothing<=0
+    // (or <3 points) falls back to a raw polyline. Round caps/joins so a thick stroke reads as a smooth
+    // ribbon (no spiky corners). Pixel-space so callers can trim a terminal back to a head base.
+    private static void DrawFreehandPath(ICanvas canvas, IReadOnlyList<PointF> raw, float smoothing)
+    {
+        int n = raw.Count;
+        if (n == 0) return;
+
+        var path = new PathF();
+        if (Math.Clamp(smoothing, 0f, 1f) <= 0f || n < 3)
+        {
+            path.MoveTo(raw[0]);
+            for (int i = 1; i < n; i++) path.LineTo(raw[i]);
+        }
+        else
+        {
+            var c = new PointF[n + 4];
+            c[0] = c[1] = raw[0];
+            for (int i = 0; i < n; i++) c[i + 2] = raw[i];
+            c[n + 2] = c[n + 3] = raw[n - 1];
+
+            // Each window → a Bézier (C2-continuous): on-curve endpoint (a+4b+d)/6, handles (2b+d)/3, (b+2d)/3.
+            static PointF OnCurve(PointF a, PointF b, PointF d)
+                => new((a.X + 4f * b.X + d.X) / 6f, (a.Y + 4f * b.Y + d.Y) / 6f);
+
+            path.MoveTo(OnCurve(c[0], c[1], c[2]));
+            for (int i = 1; i + 2 < c.Length; i++)
+            {
+                var b1 = new PointF((2f * c[i].X + c[i + 1].X) / 3f, (2f * c[i].Y + c[i + 1].Y) / 3f);
+                var b2 = new PointF((c[i].X + 2f * c[i + 1].X) / 3f, (c[i].Y + 2f * c[i + 1].Y) / 3f);
+                var b3 = OnCurve(c[i], c[i + 1], c[i + 2]);
+                path.CurveTo(b1, b2, b3);
+            }
+        }
+
+        canvas.StrokeLineCap = LineCap.Round;
+        canvas.StrokeLineJoin = LineJoin.Round;
+        canvas.DrawPath(path);
+        canvas.StrokeLineCap = LineCap.Butt;
+        canvas.StrokeLineJoin = LineJoin.Miter;
+    }
+
+    // Pull `tip` back toward `prev` by `dist` px (ends a freehand stroke at its head's base).
+    private static PointF PullBack(PointF tip, PointF prev, float dist)
+    {
+        float dx = tip.X - prev.X, dy = tip.Y - prev.Y;
+        float len = (float)Math.Sqrt(dx * dx + dy * dy);
+        if (len < 1e-4f) return tip;
+        return new PointF(tip.X - dx / len * dist, tip.Y - dy / len * dist);
     }
     #endregion
 

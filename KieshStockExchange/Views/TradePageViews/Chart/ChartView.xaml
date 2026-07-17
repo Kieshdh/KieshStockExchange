@@ -4,6 +4,7 @@
              xmlns:style="clr-namespace:KieshStockExchange.Models.ChartDrawing.Style"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              xmlns:local="clr-namespace:KieshStockExchange.Views.TradePageViews"
+             xmlns:tools="clr-namespace:KieshStockExchange.Models.ChartDrawing.Tools"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartView"
              x:Name="ChartRoot"
              x:DataType="vm:ChartViewModel">
@@ -27,8 +28,9 @@
                                 YAutoFitRequested="OnYAutoFitClicked"
                                 SnapshotRequested="OnSnapshotClicked" />
 
-        <!-- Row 1: left tool rail (col 0) + the chart & its overlays (col 1) so the chart sits BESIDE
-             the rail, not under it. The toolbar (Row 0) spans the full width above both. -->
+        <!-- Row 1: the left tool rail is a self-contained sidebar in col 0 (Auto width); the chart & its
+             overlays fill col 1 ENTIRELY to its right. The group flyouts are separate col-1 overlays that
+             hover over the chart (below). The toolbar (Row 0) spans the full width above both. -->
         <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
 
         <!-- Chart (Z-order bottom) -->
@@ -40,8 +42,8 @@
             </GraphicsView.GestureRecognizers>
         </GraphicsView>
 
-        <!-- Left tool rail + its group flyouts (spans both columns; root is InputTransparent). -->
-        <local:ChartToolRailView Grid.Column="0" Grid.ColumnSpan="2"
+        <!-- Left tool rail — a self-contained sidebar in col 0 only; the chart sits entirely to its right. -->
+        <local:ChartToolRailView Grid.Column="0"
                                  BindingContext="{Binding Drawing}" />
 
         <!-- OHLCV overlay: top-left of the chart canvas. InputTransparent so
@@ -165,6 +167,114 @@
                         </Picker.ItemDisplayBinding>
                     </Picker>
                 </Grid>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- Group flyouts: a VERTICAL column of the group's tools hovering over the chart just right of the
+             rail, vertically centred. Hosted here (not in the rail view) so the rail stays a clean column;
+             bound through Drawing.* against the shell's ChartViewModel. -->
+        <Border Grid.Column="1" IsVisible="{Binding Drawing.IsLinesGroupOpen}"
+                HorizontalOptions="Start" VerticalOptions="Center" Margin="2,0,0,0"
+                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1" StrokeShape="RoundRectangle 6" Padding="4">
+            <VerticalStackLayout Spacing="3">
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_trend.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Trend}" />
+                    <Label Text="Trend" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Trend}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_ray.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Ray}" />
+                    <Label Text="Ray" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Ray}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_extendedline.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.ExtendedLine}" />
+                    <Label Text="Extended" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.ExtendedLine}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_hline.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.HLine}" />
+                    <Label Text="Horizontal" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.HLine}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_hray.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.HRay}" />
+                    <Label Text="H-Ray" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.HRay}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_vline.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.VLine}" />
+                    <Label Text="Vertical" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.VLine}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_polyline.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Polyline}" />
+                    <Label Text="Polyline" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Polyline}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Border>
+        <Border Grid.Column="1" IsVisible="{Binding Drawing.IsShapesGroupOpen}"
+                HorizontalOptions="Start" VerticalOptions="Center" Margin="2,0,0,0"
+                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1" StrokeShape="RoundRectangle 6" Padding="4">
+            <VerticalStackLayout Spacing="3">
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_rectangle.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Rectangle}" />
+                    <Label Text="Rectangle" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Rectangle}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_ellipse.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Ellipse}" />
+                    <Label Text="Ellipse" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Ellipse}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_arrow.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Arrow}" />
+                    <Label Text="Arrow" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Arrow}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
             </VerticalStackLayout>
         </Border>
 

@@ -71,8 +71,9 @@ public partial class ChartViewModel : StockAwareViewModel
         FillMarkers.CollectionChanged += (_, __) => RequestRedraw();
         TriggerMarkers.CollectionChanged += (_, __) => RequestRedraw();
 
-        // Wire the drawing VM's two canvas seams + watch its pen-panel flag for the MA-panel exclusion.
-        Drawing.Attach(GetCurrentPrice, RequestRedraw);
+        // Wire the drawing VM's canvas seams (price / redraw / Magnifier zoom-out) + watch its pen-panel
+        // flag for the MA-panel exclusion.
+        Drawing.Attach(GetCurrentPrice, RequestRedraw, () => CanZoomOut, ZoomOutViewport);
         Drawing.PropertyChanged += OnDrawingPropertyChanged;
 
         // Keep open-order overlays in sync with the cache. Rebuild on selection

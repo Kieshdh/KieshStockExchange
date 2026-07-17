@@ -1,6 +1,8 @@
 using KieshStockExchange.Models.ChartDrawing.Objects;
+using KieshStockExchange.Models.ChartDrawing.Style;
 using KieshStockExchange.Models.ChartDrawing.Tools;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
+using KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
 
 namespace KieshStockExchange.Views.TradePageViews;
 
@@ -44,6 +46,59 @@ public partial class ChartView
     // here because the gutter press handles the pointer + captures it for the Y-scale drag.
     private long _lastGutterClickMs;
     private const long GutterDoubleClickMs = 400;
+
+    // Freehand capture: append a point only once the cursor has travelled this far (px) from the last
+    // sample — deliberately DENSE, so a slow/paused stroke doesn't stack points but the shape is captured
+    // faithfully. The stroke is then RDP-simplified at commit (tolerance = FreehandRdpTolerancePx).
+    private PointF _freehandLastPixel;
+    private const float FreehandCaptureDistPx = 3f;
+    // RDP simplify tolerance for the committed stroke (px) — Kiesh-tuned; higher = smoother / fewer points.
+    private const float FreehandRdpTolerancePx = 8f;
+    // The pixel positions captured for the current freehand stroke, kept in lockstep with the freehand
+    // entries of _polyPoints so RDP can run in pixel space (where the tolerance is a visible distance).
+    private readonly List<PointF> _freehandPixels = new();
+
+    // Streaming simplification: the frozen prefix is LOCKED (never re-simplified, so the drawn trail stays
+    // put — no wobble); only the short live tail near the cursor re-simplifies each frame. Once the tail
+    // grows past a chunk, its older points are folded into the frozen prefix using FIXED endpoints (stable),
+    // unlike a global RDP against the moving cursor. _freehandFrozenRawIdx = the seam raw index.
+    private readonly List<DrawPoint> _freehandFrozenPts = new();
+    private int _freehandFrozenRawIdx;
+    private const int FreehandCommitChunkPts = 12;   // settle a chunk once the live tail exceeds this many pts
+    private const int FreehandLiveTailPts = 6;        // ...leaving this many recent points live at the cursor
+
+    // Fold settled points into the frozen prefix (fixed-endpoint RDP per chunk ⇒ never revisited/wobbled).
+    private void AdvanceFreehandFrozen()
+    {
+        if (_freehandPixels.Count != _polyPoints.Count) return;
+        int end = _polyPoints.Count - 1;
+        while (end - _freehandFrozenRawIdx >= FreehandCommitChunkPts)
+        {
+            int frontier = end - FreehandLiveTailPts;
+            if (frontier <= _freehandFrozenRawIdx) break;
+            int start = _freehandFrozenRawIdx, count = frontier - start + 1;
+            var keep = SplineSmoother.SimplifyRdp(_freehandPixels.GetRange(start, count), FreehandRdpTolerancePx);
+            if (_freehandFrozenPts.Count == 0) _freehandFrozenPts.Add(_polyPoints[start]);
+            for (int j = 1; j < keep.Count; j++) _freehandFrozenPts.Add(_polyPoints[start + keep[j]]);
+            _freehandFrozenRawIdx = frontier;
+        }
+    }
+
+    // The stroke to draw/commit: the stable frozen prefix + the RDP of just the short live tail (frontier→end).
+    private List<DrawPoint> BuildFreehandStroke()
+    {
+        if (_freehandPixels.Count != _polyPoints.Count) return _polyPoints.ToList();
+        AdvanceFreehandFrozen();
+        var result = new List<DrawPoint>(_freehandFrozenPts);
+        int start = _freehandFrozenRawIdx, count = _polyPoints.Count - start;
+        if (count >= 1)
+        {
+            var keep = SplineSmoother.SimplifyRdp(_freehandPixels.GetRange(start, count), FreehandRdpTolerancePx);
+            for (int j = _freehandFrozenPts.Count > 0 ? 1 : 0; j < keep.Count; j++)
+                result.Add(_polyPoints[start + keep[j]]);
+        }
+        return result;
+    }
 
     private static PointF PlatformPointerToControl(
         Microsoft.UI.Xaml.UIElement el,
@@ -89,6 +144,18 @@ public partial class ChartView
         {
             _dragMode = DragMode.Measure;
             _drawable.Measure = new MeasureState(true, p.X, p.Y, p.X, p.Y);
+            (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
+            Chart.Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        // Priority 0.35: the Magnifier TOOL — drag a box, and on release the viewport zooms to it. A
+        // transient one-shot like Measure: it draws a dashed box and disarms itself on release.
+        if (_vm.Drawing.DrawTool == DrawTool.Magnifier && _drawable.IsInChartArea(p))
+        {
+            _dragMode = DragMode.Magnifier;
+            _drawable.ZoomBox = new MeasureState(true, p.X, p.Y, p.X, p.Y);
             (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
             Chart.Invalidate();
             e.Handled = true;
@@ -151,6 +218,25 @@ public partial class ChartView
         {
             var t = _drawable.PixelToTime(p.X);
             var id = Guid.NewGuid();
+            if (_vm.Drawing.DrawTool == DrawTool.Freehand)
+            {
+                // Freehand brush: capture a point path while dragging (continuous, unlike the polyline's
+                // click-per-vertex). Points accumulate in the move handler; committed on release.
+                _dragMode = DragMode.Freehand;
+                _polyPoints.Clear();
+                _polyPoints.Add(new DrawPoint(t, newPrice));
+                _freehandPixels.Clear();
+                _freehandPixels.Add(p);
+                _freehandFrozenPts.Clear();
+                _freehandFrozenRawIdx = 0;
+                _freehandLastPixel = p;
+                _drawable.BuildingPolyline = _polyPoints.ToList();
+                _drawable.BuildingIsFreehand = true;   // preview as a smooth stroke: no per-vertex dots
+                (el as Microsoft.UI.Xaml.Controls.Control)?.CapturePointer(e.Pointer);
+                Chart.Invalidate();
+                e.Handled = true;
+                return;
+            }
             if (_vm.Drawing.DrawTool == DrawTool.HLine || _vm.Drawing.DrawTool == DrawTool.HRay || _vm.Drawing.DrawTool == DrawTool.VLine)
             {
                 // One-click lines (HLine/HRay at a price, VLine at a time). After placing: revert to the
@@ -169,11 +255,13 @@ public partial class ChartView
                 _lastPolyClickMs = Environment.TickCount64;
                 _drawable.BuildingPolyline = _polyPoints.ToList();
                 _drawable.BuildingPolylineCursor = new DrawPoint(t, newPrice);
+                _drawable.BuildingIsFreehand = false;   // polyline shows click-per-vertex dots
                 Chart.Invalidate();
                 e.Handled = true;
                 return;
             }
-            // Trend or Ray: a two-anchor segment; the second anchor drags to the release point.
+            // Trend / Ray / shapes (Rectangle / Ellipse / the block-Arrow): a two-anchor drag; the second
+            // anchor follows the release point (Arrow: anchor1 = tail, anchor2 = head).
             var seg = new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle);
             _vm.Drawing.AddDrawing(seg);
             // No auto-select — the drag below positions anchor2; the tool row stays visible for the next line.
@@ -321,6 +409,32 @@ public partial class ChartView
                 }
                 break;
 
+            case DragMode.Magnifier:
+                if (_drawable.ZoomBox.Active)
+                {
+                    _drawable.ZoomBox = _drawable.ZoomBox with { X1 = p.X, Y1 = p.Y };
+                    Chart.Invalidate();
+                }
+                break;
+
+            case DragMode.Freehand:
+                // Append a point only once the cursor has moved a dense step (distance-gated, not per-event)
+                // so points don't pile up when slow/paused; RDP simplifies the stroke at commit-time.
+                if (_drawable.PixelToPrice(p.Y) is decimal fpr && fpr > 0m)
+                {
+                    float fdx = p.X - _freehandLastPixel.X, fdy = p.Y - _freehandLastPixel.Y;
+                    if (fdx * fdx + fdy * fdy >= FreehandCaptureDistPx * FreehandCaptureDistPx)
+                    {
+                        _polyPoints.Add(new DrawPoint(_drawable.PixelToTime(p.X), fpr));
+                        _freehandPixels.Add(p);
+                        // Freeze settled points + re-simplify only the live tail so the trail doesn't wobble.
+                        _drawable.BuildingPolyline = BuildFreehandStroke();
+                        _freehandLastPixel = p;
+                        Chart.Invalidate();
+                    }
+                }
+                break;
+
             case DragMode.Drawing:
                 DragDrawing(p);
                 break;
@@ -444,6 +558,61 @@ public partial class ChartView
             Chart.Invalidate();
         }
 
+        if (_dragMode == DragMode.Magnifier)
+        {
+            // Zoom the viewport to the drawn box, then clear it + disarm the tool (one-shot, like Measure).
+            var box = _drawable.ZoomBox;
+            _drawable.ZoomBox = default;
+            if (_vm != null)
+            {
+                float bx0 = Math.Min(box.X0, box.X1), bx1 = Math.Max(box.X0, box.X1);
+                float by0 = Math.Min(box.Y0, box.Y1), by1 = Math.Max(box.Y0, box.Y1);
+                // Ignore a too-small box (a click, not a drag) — just disarm below.
+                if (bx1 - bx0 >= 8f && by1 - by0 >= 8f)
+                {
+                    _vm.PushZoomState();   // remember the pre-zoom viewport so the − magnifier can step back
+                    _vm.FrameTimeRange(_drawable.PixelToTime(bx0), _drawable.PixelToTime(bx1));
+                    // Smaller Y-pixel = higher price, so top-of-box = high, bottom = low.
+                    if (_drawable.PixelToPrice(by0) is decimal hi && _drawable.PixelToPrice(by1) is decimal lo
+                        && hi > lo)
+                    {
+                        _vm.SetManualYRange(lo, hi);
+                        _vm.IsYAutoFit = false;
+                    }
+                }
+                _vm.Drawing.DrawTool = DrawTool.None;
+            }
+            Chart.Invalidate();
+        }
+
+        if (_dragMode == DragMode.Freehand)
+        {
+            // Commit the captured stroke — RDP-simplify the dense capture to its curvature-significant
+            // points (curve stays faithful, straight runs go sparse), then revert to cursor + select it.
+            if (_vm != null && _polyPoints.Count >= 2)
+            {
+                var pts = BuildFreehandStroke();
+                var id = Guid.NewGuid();
+                // Smoothing=1 → the render rounds the kept points into a B-spline (a raw point path
+                // would draw straight, angular segments — the opposite of the intended feel).
+                var freehand = new DrawingObject(
+                    id, DrawTool.Freehand, default, 0m, default, 0m, _vm.Drawing.DefaultDrawStyle, pts)
+                    with { Smoothing = 1f };
+                _vm.Drawing.AddDrawing(freehand);
+                _polyPoints.Clear();
+                _freehandPixels.Clear();
+                _drawable.BuildingPolyline = null;
+                FinishPlacement(id);
+            }
+            else
+            {
+                _polyPoints.Clear();
+                _freehandPixels.Clear();
+                _drawable.BuildingPolyline = null;
+            }
+            Chart.Invalidate();
+        }
+
         if (_dragMode == DragMode.Drawing)
         {
             // A tool-placed trendline the user clicked without dragging is a degenerate dot — drop
@@ -491,6 +660,9 @@ public partial class ChartView
         _drawable.DraggingOrderId = null;
         _drawable.DraggingOrderPrice = null;
         _drawable.Measure = default;
+        _drawable.ZoomBox = default;
+        // An aborted freehand stroke leaves its half-built preview behind — drop it.
+        if (_dragMode == DragMode.Freehand) { _polyPoints.Clear(); _freehandPixels.Clear(); _drawable.BuildingPolyline = null; }
         // An aborted new-drawing drag would otherwise leave a degenerate line behind.
         if (_dragMode == DragMode.Drawing && _drawDragIsNew && _draggingDrawingId is Guid nid)
             _vm?.Drawing.RemoveDrawing(nid);
