@@ -46,6 +46,13 @@
              Link="Drawing\SplineSmoother.cs" />
     <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\Drawing\UndoStack.cs"
              Link="Drawing\UndoStack.cs" />
+    <!-- Pure indicator calculators (each defines its own result record; Candle comes from Shared). -->
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\RsiCalculator.cs"
+             Link="Helpers\RsiCalculator.cs" />
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\BollingerCalculator.cs"
+             Link="Helpers\BollingerCalculator.cs" />
+    <Compile Include="..\KieshStockExchange\Services\MarketDataServices\Helpers\VwapCalculator.cs"
+             Link="Helpers\VwapCalculator.cs" />
   </ItemGroup>
 
   <ItemGroup>
