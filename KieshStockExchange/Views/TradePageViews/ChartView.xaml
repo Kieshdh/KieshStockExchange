@@ -286,6 +286,17 @@
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
+                <Button ImageSource="tool_extendedline.png" Style="{StaticResource PenToolTile}"
+                        Command="{Binding SelectDrawToolCommand}"
+                        CommandParameter="{x:Static tools:DrawTool.ExtendedLine}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
+                                     Value="{x:Static tools:DrawTool.ExtendedLine}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
                 <Button ImageSource="tool_hline.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.HLine}">
@@ -320,6 +331,29 @@
                     </Button.Triggers>
                 </Button>
                 <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" />
+                <Button ImageSource="tool_rectangle.png" Style="{StaticResource PenToolTile}"
+                        Command="{Binding SelectDrawToolCommand}"
+                        CommandParameter="{x:Static tools:DrawTool.Rectangle}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
+                                     Value="{x:Static tools:DrawTool.Rectangle}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button ImageSource="tool_ellipse.png" Style="{StaticResource PenToolTile}"
+                        Command="{Binding SelectDrawToolCommand}"
+                        CommandParameter="{x:Static tools:DrawTool.Ellipse}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
+                                     Value="{x:Static tools:DrawTool.Ellipse}">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" />
                 <Button ImageSource="tool_measure.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding SelectDrawToolCommand}"
                         CommandParameter="{x:Static tools:DrawTool.Measure}">
@@ -331,6 +365,14 @@
                         </DataTrigger>
                     </Button.Triggers>
                 </Button>
+
+                <!-- Undo / redo (LP3): momentary actions (not tools), so no active-highlight trigger;
+                     the bound command's CanExecute greys them out when the history is empty. Also Ctrl+Z / Ctrl+Y. -->
+                <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" />
+                <Button ImageSource="tool_undo.png" Style="{StaticResource PenToolTile}"
+                        Command="{Binding UndoCommand}" />
+                <Button ImageSource="tool_redo.png" Style="{StaticResource PenToolTile}"
+                        Command="{Binding RedoCommand}" />
             </VerticalStackLayout>
         </Border>
 

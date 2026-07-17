@@ -907,6 +907,10 @@ public partial class ChartView : ContentView
             // it rather than leave an invisible zero-length line on the chart.
             if (_drawDragIsNew && !_drawDragMoved && _draggingDrawingId is Guid nid)
                 _vm?.RemoveDrawing(nid);
+            // Record a Move on the undo stack for an EXISTING drawing that actually moved (a brand-new
+            // drawing is already covered by its Add entry, so undo removes the whole creation).
+            else if (!_drawDragIsNew && _drawDragMoved)
+                _vm?.RecordDrawingMoved(_drawDragOrig);
             _vm?.PersistDrawings();
             _draggingDrawingId = null;
             _drawable.DraggingDrawingId = null;
@@ -1086,6 +1090,24 @@ public partial class ChartView : ContentView
                        .GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift)
                        & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
         int step = shift ? 10 : 1;
+
+        // Ctrl+Z = undo, Ctrl+Shift+Z / Ctrl+Y = redo (drawing add/delete/move history).
+        bool ctrl = (Microsoft.UI.Input.InputKeyboardSource
+                       .GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+                       & Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+        if (ctrl && e.Key == Windows.System.VirtualKey.Z)
+        {
+            var cmd = shift ? _vm.RedoCommand : _vm.UndoCommand;
+            if (cmd.CanExecute(null)) cmd.Execute(null);
+            e.Handled = true;
+            return;
+        }
+        if (ctrl && e.Key == Windows.System.VirtualKey.Y)
+        {
+            if (_vm.RedoCommand.CanExecute(null)) _vm.RedoCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
 
         switch (e.Key)
         {
