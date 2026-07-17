@@ -445,7 +445,9 @@ public partial class ChartView : ContentView
             var png = ChartSnapshotRenderer.Render(_drawable, w, h, bg, scale: 2f);
 
             // Open a native Save-As dialog so the user picks the location/name (CommunityToolkit FileSaver).
-            var name = $"KSE-chart-{DateTime.Now:yyyyMMdd-HHmmss}.png";
+            // Default name carries the ticker pairing (e.g. KSE-AAPL-USD-...) so saved charts self-identify.
+            var pair = SnapshotPairTag();
+            var name = $"KSE-{pair}{DateTime.Now:yyyyMMdd-HHmmss}.png";
             using var stream = new MemoryStream(png);
             var result = await FileSaver.Default.SaveAsync(name, stream, CancellationToken.None);
             if (result.IsSuccessful)
@@ -456,6 +458,18 @@ public partial class ChartView : ContentView
             System.Diagnostics.Debug.WriteLine($"Chart snapshot failed: {ex}");
             try { await Toast.Make("Snapshot failed.").Show(); } catch { /* toast best-effort */ }
         }
+    }
+
+    // Build the "SYMBOL-CURRENCY-" filename tag from the current selection (e.g. "AAPL-USD-"). Strips any
+    // filesystem-hostile characters and returns "" when nothing is selected so the name still forms.
+    private string SnapshotPairTag()
+    {
+        var sym = _vm?.Selected.Symbol;
+        if (string.IsNullOrWhiteSpace(sym)) return string.Empty;
+        var ccy = _vm!.Selected.Currency.ToString();
+        var raw = $"{sym}-{ccy}";
+        var clean = new string(raw.Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_').ToArray());
+        return clean.Length == 0 ? string.Empty : clean + "-";
     }
 
     private void ClearHoverOverlay()

@@ -19,15 +19,23 @@ public static class ChartSnapshotRenderer
         if (h < 1) h = 1;
         if (scale < 1f) scale = 1f;
 
-        // SkiaBitmapExportContext(pixelW, pixelH, displayScale): the canvas maps logical units × scale
-        // → pixels, so we draw at logical (w, h) and get a scale×-resolution bitmap.
-        using var ctx = new SkiaBitmapExportContext((int)(w * scale), (int)(h * scale), scale);
+        int pxW = (int)(w * scale);
+        int pxH = (int)(h * scale);
+
+        // displayScale 1 ⇒ 1 logical unit = 1 pixel. Fill the WHOLE pixel bitmap, then scale the canvas
+        // by `scale` so the drawable's logical (w, h) maps edge-to-edge onto (pxW, pxH). (Passing `scale`
+        // as displayScale instead does NOT transform the canvas here, so the chart drew into the top-left
+        // (w, h) sub-region and left the rest blank.)
+        using var ctx = new SkiaBitmapExportContext(pxW, pxH, 1f);
         var canvas = ctx.Canvas;
 
         canvas.FillColor = background ?? Colors.Black;
-        canvas.FillRectangle(0, 0, w, h);
+        canvas.FillRectangle(0, 0, pxW, pxH);
 
+        canvas.SaveState();
+        canvas.Scale(scale, scale);
         drawable.Draw(canvas, new RectF(0, 0, w, h));
+        canvas.RestoreState();
 
         using var ms = new MemoryStream();
         ctx.Image.Save(ms);   // PNG by default
