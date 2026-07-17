@@ -367,7 +367,7 @@ public sealed partial class CandleChartDrawable : IDrawable
             DrawDepth(canvas, plot, Y);
 
         // Crosshair sits on top of everything else so it stays visible against candles.
-        DrawCrosshair(canvas, plot, currency, X);
+        _crosshairRenderer.DrawCrosshair(canvas, frame, theme, Crosshair, Candles);
         // Measure ruler sits above the crosshair while a Shift-drag is in flight.
         _measureRenderer.DrawMeasure(canvas, frame, theme, Measure);
         // Magnifier box-zoom overlay (a dashed selection rect) while its drag is in flight.
@@ -401,6 +401,7 @@ public sealed partial class CandleChartDrawable : IDrawable
 
     // Renderer collaborators (Helpers/Drawing) — stateless, fed (canvas, frame, theme, inputs) per paint.
     private readonly MeasureRenderer _measureRenderer = new();
+    private readonly CrosshairRenderer _crosshairRenderer = new(RightAxisW, BottomAxisH);
 
     // One cohesive palette snapshot per paint, from the frozen public palette fields above.
     private ChartTheme BuildTheme() => new(
