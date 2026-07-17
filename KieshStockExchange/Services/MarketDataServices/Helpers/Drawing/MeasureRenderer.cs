@@ -1,38 +1,33 @@
-using System.Globalization;
-using KieshStockExchange.Models;
-using KieshStockExchange.Models.ChartDrawing.Objects;
-using KieshStockExchange.Models.ChartDrawing.Style;
-using KieshStockExchange.Models.ChartDrawing.Tools;
 using KieshStockExchange.Helpers;
-using KieshStockExchange.Services.MarketDataServices.Helpers;
-using KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
-using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
-namespace KieshStockExchange.Services.MarketDataServices;
+namespace KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
 
-public sealed partial class CandleChartDrawable
+// Measure-ruler + magnifier box-zoom overlays. Stateless renderer collaborator: geometry and
+// inverse transforms arrive in the RenderFrame, colours/fonts in the ChartTheme, and the live
+// drag state per call — no reference back to CandleChartDrawable.
+internal sealed class MeasureRenderer
 {
-    #region Measure ruler drawing
     // Drag-to-measure overlay: a translucent box between the anchor and the cursor plus a
     // label with Δprice, Δ%, Δtime and #bars. Green tint when the end is at/above the start,
     // red when below — the TradingView measure-tool convention. Inverse transforms keep the
     // readout consistent with the axes under every scale mode.
-    private void DrawMeasure(ICanvas canvas, RectF plot)
+    public void DrawMeasure(ICanvas canvas, RenderFrame f, ChartTheme t, MeasureState measure)
     {
-        if (!Measure.Active) return;
+        if (!measure.Active) return;
+        var plot = f.Plot;
 
         // Clamp the ruler into the plot so the box/label never bleed into the axes gutters.
-        float x0 = Math.Clamp(Measure.X0, plot.Left, plot.Right);
-        float y0 = Math.Clamp(Measure.Y0, plot.Top, plot.Bottom);
-        float x1 = Math.Clamp(Measure.X1, plot.Left, plot.Right);
-        float y1 = Math.Clamp(Measure.Y1, plot.Top, plot.Bottom);
+        float x0 = Math.Clamp(measure.X0, plot.Left, plot.Right);
+        float y0 = Math.Clamp(measure.Y0, plot.Top, plot.Bottom);
+        float x1 = Math.Clamp(measure.X1, plot.Left, plot.Right);
+        float y1 = Math.Clamp(measure.Y1, plot.Top, plot.Bottom);
 
-        if (PixelToPrice(y0) is not decimal startPrice || PixelToPrice(y1) is not decimal endPrice) return;
-        var t0 = PixelToTime(x0);
-        var t1 = PixelToTime(x1);
+        if (f.PixelToPrice(y0) is not decimal startPrice || f.PixelToPrice(y1) is not decimal endPrice) return;
+        var t0 = f.PixelToTime(x0);
+        var t1 = f.PixelToTime(x1);
 
         bool up = endPrice >= startPrice;
-        var tint = up ? Bull : Bear;
+        var tint = up ? t.Bull : t.Bear;
 
         // Translucent box + border.
         canvas.SaveState();
@@ -49,10 +44,10 @@ public sealed partial class CandleChartDrawable
         double dPct = startPrice != 0m ? ((double)(endPrice / startPrice) - 1.0) * 100.0 : 0.0;
         var dt = t1 - t0;
         if (dt < TimeSpan.Zero) dt = dt.Negate();
-        int bars = Viewport.Bucket > TimeSpan.Zero
-            ? (int)Math.Round(dt.TotalSeconds / Viewport.Bucket.TotalSeconds)
+        int bars = f.Bucket > TimeSpan.Zero
+            ? (int)Math.Round(dt.TotalSeconds / f.Bucket.TotalSeconds)
             : 0;
-        var cur = Candles.Count > 0 ? Candles[0].CurrencyType : CurrencyType.USD;
+        var cur = f.Currency;
 
         string line1 = $"{(dPrice >= 0 ? "+" : "")}{CurrencyHelper.Format(dPrice, cur)}  ({(dPct >= 0 ? "+" : "")}{dPct:0.00}%)";
         string line2 = $"{ChartGeometry.HumanizeSpan(dt)}  ·  {bars} bar{(bars == 1 ? "" : "s")}";
@@ -70,7 +65,7 @@ public sealed partial class CandleChartDrawable
         canvas.FillColor = tint;
         canvas.FillRectangle(panel);
         canvas.FontColor = Colors.White;
-        canvas.FontSize = PriceTagFont;
+        canvas.FontSize = t.PriceTagFont;
         canvas.DrawString(line1, new RectF(panel.X + 5, panel.Y + 2, panel.Width - 10, 14),
             HorizontalAlignment.Left, VerticalAlignment.Center);
         canvas.DrawString(line2, new RectF(panel.X + 5, panel.Y + 15, panel.Width - 10, 13),
@@ -80,22 +75,22 @@ public sealed partial class CandleChartDrawable
 
     // Magnifier box-zoom overlay: a dashed selection rectangle with a faint fill between the anchor and
     // the cursor. No readout — on release the viewport zooms to the box (see ChartView). Cleared on release.
-    private void DrawZoomBox(ICanvas canvas, RectF plot)
+    public void DrawZoomBox(ICanvas canvas, RenderFrame f, ChartTheme t, MeasureState zoomBox)
     {
-        if (!ZoomBox.Active) return;
-        float x0 = Math.Clamp(ZoomBox.X0, plot.Left, plot.Right);
-        float y0 = Math.Clamp(ZoomBox.Y0, plot.Top, plot.Bottom);
-        float x1 = Math.Clamp(ZoomBox.X1, plot.Left, plot.Right);
-        float y1 = Math.Clamp(ZoomBox.Y1, plot.Top, plot.Bottom);
+        if (!zoomBox.Active) return;
+        var plot = f.Plot;
+        float x0 = Math.Clamp(zoomBox.X0, plot.Left, plot.Right);
+        float y0 = Math.Clamp(zoomBox.Y0, plot.Top, plot.Bottom);
+        float x1 = Math.Clamp(zoomBox.X1, plot.Left, plot.Right);
+        float y1 = Math.Clamp(zoomBox.Y1, plot.Top, plot.Bottom);
         var rect = new RectF(Math.Min(x0, x1), Math.Min(y0, y1), Math.Abs(x1 - x0), Math.Abs(y1 - y0));
         canvas.SaveState();
-        canvas.FillColor = CrosshairColor.WithAlpha(0.10f);
+        canvas.FillColor = t.CrosshairColor.WithAlpha(0.10f);
         canvas.FillRectangle(rect);
-        canvas.StrokeColor = CrosshairColor;
+        canvas.StrokeColor = t.CrosshairColor;
         canvas.StrokeSize = 1f;
         canvas.StrokeDashPattern = new float[] { 4f, 3f };
         canvas.DrawRectangle(rect);
         canvas.RestoreState();
     }
-    #endregion
 }

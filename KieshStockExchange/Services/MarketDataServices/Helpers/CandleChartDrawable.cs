@@ -324,6 +324,8 @@ public sealed partial class CandleChartDrawable : IDrawable
         var frame = new RenderFrame(plot, volRect, moodRect, yMin, yMax, tMin, tMax, spanSec,
             ScaleMode, Viewport.Bucket, currency, _scale);
         _frame = frame;
+        // Palette snapshot alongside the frame — renderer collaborators read the theme, not the fields.
+        var theme = BuildTheme();
 
         // Coordinate transforms from data-space to plot-space. Y routes through PriceToFrac so
         // the log scale (and its inverse in PixelToPrice) share one definition.
@@ -367,9 +369,9 @@ public sealed partial class CandleChartDrawable : IDrawable
         // Crosshair sits on top of everything else so it stays visible against candles.
         DrawCrosshair(canvas, plot, currency, X);
         // Measure ruler sits above the crosshair while a Shift-drag is in flight.
-        DrawMeasure(canvas, plot);
+        _measureRenderer.DrawMeasure(canvas, frame, theme, Measure);
         // Magnifier box-zoom overlay (a dashed selection rect) while its drag is in flight.
-        DrawZoomBox(canvas, plot);
+        _measureRenderer.DrawZoomBox(canvas, frame, theme, ZoomBox);
 
         canvas.RestoreState();
     }
@@ -396,6 +398,16 @@ public sealed partial class CandleChartDrawable : IDrawable
     private double _autoFitLo;
     private double _autoFitHi = 1.0;
     private int _autoFitContractFrames;
+
+    // Renderer collaborators (Helpers/Drawing) — stateless, fed (canvas, frame, theme, inputs) per paint.
+    private readonly MeasureRenderer _measureRenderer = new();
+
+    // One cohesive palette snapshot per paint, from the frozen public palette fields above.
+    private ChartTheme BuildTheme() => new(
+        Bg, Axis, Grid, Bull, Bear, PriceLineUp, PriceLineDown, CrosshairColor,
+        OpenOrderBuyColor, OpenOrderSellColor, OpenOrderStopColor, PositionLineColor,
+        FillBuyColor, FillSellColor, TriggerColor, VolumeBullTint, VolumeBearTint,
+        MoodLineColor, DrawingColor, AxisFont, PriceTagFont);
 
     /// <summary>Rectangle reserved for the volume sub-pane in the most recent paint.</summary>
     public RectF VolumeRect => _frame.VolRect;
