@@ -407,6 +407,63 @@ public sealed partial class CandleChartDrawable : IDrawable
     public double LastYMin => _frame.YMin;
     public double LastYMax => _frame.YMax;
 
+    #region Hit-testing (public — used by ChartView pointer handlers)
+    // Hit-testing lives in ChartHitTester (Helpers/Drawing) — the drawable forwards the last
+    // paint's frame plus the live inputs, so the public surface ChartView consumes is unchanged.
+    private readonly ChartHitTester _hitTester = new(DrawHandleR, DrawHitTol, RightAxisW);
+
+    /// <summary>
+    /// Returns the drawing hit by the pointer and which part (an endpoint, the body, or the ✕
+    /// remove glyph). Searches topmost-first so the most recently added drawing wins overlaps.
+    /// </summary>
+    public (DrawingObject Drawing, DrawingHitPart Part)? HitDrawing(PointF p)
+        => _hitTester.HitDrawing(_frame, Drawings, p);
+
+    /// <summary>
+    /// Returns the open-order line hit by the pointer (within 4 px of the line).
+    /// Covers the full width from the plot left edge to the right-gutter tag.
+    /// </summary>
+    public OpenOrderLine? HitOpenOrderLine(PointF pInControl)
+        => _hitTester.HitOpenOrderLine(_frame, OpenOrderLines, DraggingOrderId, DraggingOrderPrice, pInControl);
+
+    /// <summary>
+    /// Maps a Y pixel inside the plot back to a price using the cached Y-range
+    /// from the most recent paint. Returns null if no successful paint has been
+    /// performed yet.
+    /// </summary>
+    public decimal? PixelToPrice(float yInControl) => _frame.PixelToPrice(yInControl);
+
+    /// <summary>
+    /// Maps an X pixel inside the plot back to a UTC time using the cached time
+    /// range from the most recent paint.
+    /// </summary>
+    public DateTime PixelToTime(float xInControl) => _frame.PixelToTime(xInControl);
+
+    /// <summary>
+    /// Returns the index into <see cref="Candles"/> whose bucket contains the X
+    /// pixel, or null if the pointer falls into empty pre-history / future space.
+    /// Accepts pointer positions inside the price pane or the volume sub-pane —
+    /// both share the same time axis.
+    /// </summary>
+    public int? HitCandleIndex(PointF pInControl)
+        => _hitTester.HitCandleIndex(_frame, Candles, pInControl);
+
+    /// <summary>
+    /// True when the control-space pointer falls inside the price area or the
+    /// volume sub-pane. Used by ChartView to decide when to hide the crosshair.
+    /// </summary>
+    public bool IsInChartArea(PointF pInControl)
+        => _hitTester.IsInChartArea(_frame, pInControl);
+
+    /// <summary>
+    /// True when the pointer is over the right-hand Y-axis gutter — the strip
+    /// to the right of the price plot reserved for price labels. Wheel events
+    /// here zoom the Y axis instead of the X axis.
+    /// </summary>
+    public bool IsInYAxisGutter(PointF pInControl)
+        => _hitTester.IsInYAxisGutter(_frame, pInControl);
+    #endregion
+
     private void DrawNoData(ICanvas canvas, RectF r)
     {
         canvas.FontSize = 12f;
