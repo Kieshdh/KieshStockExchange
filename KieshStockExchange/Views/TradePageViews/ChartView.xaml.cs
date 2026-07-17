@@ -328,7 +328,7 @@ public partial class ChartView : ContentView
         // Snapshot markers to a stable array — Draw runs on the UI thread but
         // ObservableCollection enumeration with concurrent edits would still be
         // brittle if a future feature mutates from a different thread.
-        _drawable.Drawings = _vm.Drawings.ToArray();
+        _drawable.Drawings = _vm.DrawingsHidden ? System.Array.Empty<DrawingObject>() : _vm.Drawings.ToArray();
         _drawable.SelectedDrawingId = _vm.SelectedDrawingId;
         _drawable.OpenOrderLines = _vm.OpenOrderLines.ToArray();
         _drawable.OpenOrderBuyColor  = ResolveColor(_vm.BuyOrderColorOption.Key);
@@ -1140,6 +1140,11 @@ public partial class ChartView : ContentView
             case Windows.System.VirtualKey.Escape:
                 // Escape abandons an in-progress polyline build (mirrors right-click cancel).
                 if (_polyBuilding) { CancelPolyline(); e.Handled = true; }
+                break;
+            case Windows.System.VirtualKey.Delete:
+            case Windows.System.VirtualKey.Back:
+                // Delete / Backspace removes the selected drawing (RemoveDrawing pushes an undoable Delete).
+                if (_vm.SelectedDrawingId is Guid delId) { _vm.RemoveDrawing(delId); e.Handled = true; }
                 break;
         }
     }

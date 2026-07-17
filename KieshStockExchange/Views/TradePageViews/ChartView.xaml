@@ -373,6 +373,16 @@
                         Command="{Binding UndoCommand}" />
                 <Button ImageSource="tool_redo.png" Style="{StaticResource PenToolTile}"
                         Command="{Binding RedoCommand}" />
+                <!-- Hide/show all drawings (non-destructive); highlighted while hidden. -->
+                <Button ImageSource="tool_eye.png" Style="{StaticResource PenToolTile}"
+                        Command="{Binding ToggleDrawingsHiddenCommand}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding DrawingsHidden}" Value="True">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
             </VerticalStackLayout>
         </Border>
 

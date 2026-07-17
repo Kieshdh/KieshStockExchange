@@ -1271,6 +1271,20 @@ public partial class ChartViewModel : StockAwareViewModel
             if (Drawings[i].Id == d.Id) { Drawings[i] = d; return; }
     }
 
+    // Hide/show all drawings (the rail "eye" toggle). Non-destructive: the set is kept + persisted,
+    // the drawable just receives an empty array while hidden (see ChartView.UpdateDrawable). Hiding
+    // also clears any selection so the style-bar doesn't linger over invisible geometry.
+    [ObservableProperty] private bool _drawingsHidden;
+
+    partial void OnDrawingsHiddenChanged(bool value)
+    {
+        if (value) SelectedDrawingId = null;
+        RequestRedraw();
+    }
+
+    [RelayCommand]
+    private void ToggleDrawingsHidden() => DrawingsHidden = !DrawingsHidden;
+
     // --- Pen tray: unified style editing (default pen when nothing selected, else the selection) ---
 
     // Applies a style transform to the selected drawing in place, then persists + repaints.
