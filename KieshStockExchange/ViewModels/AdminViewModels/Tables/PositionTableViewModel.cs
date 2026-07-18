@@ -18,6 +18,8 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
     public const string PivotByStock = "By stock";
     public const string PivotByUser = "By user";
 
+    private const string DefaultSortKey = "UserId";
+
     #region Data properties
     public Dictionary<int, Stock> Stocks = new();
     public Dictionary<int, string> StockSymbols => Stocks.ToDictionary(kv => kv.Key, kv => kv.Value.Symbol);
@@ -78,7 +80,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
         ILogger<PositionTableViewModel> logger) : base(dbService, logger)
     {
         Title = "Positions";
-        SortKey = "UserId";
+        SortKey = DefaultSortKey;
         SortDesc = true;
         _market = market ?? throw new ArgumentNullException(nameof(market));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
@@ -132,7 +134,7 @@ public partial class PositionTableViewModel : BaseTableViewModel<PositionTableOb
             _pickerSelection.StockId,
             inVmSort ? 0 : skip,
             inVmSort ? int.MaxValue : take,
-            inVmSort ? "UserId" : (sortKey ?? "UserId"),
+            inVmSort ? "UserId" : (sortKey ?? DefaultSortKey),
             desc, userFilter, ct);
 
         var rowsResult = await BuildRowsAsync(positions, total, _pickerSelection.StockId, ct);

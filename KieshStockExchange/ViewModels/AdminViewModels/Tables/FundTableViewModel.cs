@@ -14,6 +14,8 @@ public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
 {
     private const string AnyOption = "Any";
 
+    private const string DefaultSortKey = "UserId";
+
     public CurrencyType BaseCurrency = CurrencyType.USD;
 
     #region Fields, filter state and Constructor
@@ -35,7 +37,7 @@ public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
         ILogger<FundTableViewModel> logger) : base(db, logger)
     {
         Title = "Funds";
-        SortKey = "UserId";
+        SortKey = DefaultSortKey;
         SortDesc = false;
         _services = services ?? throw new ArgumentNullException(nameof(services));
         CurrencyFilterOptions = new[] { AnyOption }
@@ -52,7 +54,7 @@ public partial class FundTableViewModel : BaseTableViewModel<FundTableObject>
         string? currencyArg = string.Equals(SelectedCurrencyFilter, AnyOption, StringComparison.Ordinal)
             ? null : SelectedCurrencyFilter;
 
-        var (funds, total) = await _db.GetFundsPageAsync(skip, take, sortKey ?? "UserId", desc,
+        var (funds, total) = await _db.GetFundsPageAsync(skip, take, sortKey ?? DefaultSortKey, desc,
             userIdFilter, HasNonZeroOnly, HasReservedOnly, currencyArg, ct);
 
         if (funds.Count == 0) return (Array.Empty<FundTableObject>(), total);

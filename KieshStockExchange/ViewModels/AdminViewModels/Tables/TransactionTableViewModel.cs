@@ -15,6 +15,8 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
 {
     private const string AnyOption = "Any";
 
+    private const string DefaultSortKey = "Timestamp";
+
     #region Filter state
     [ObservableProperty] private DateTime _fromDate = DateTime.UtcNow.AddMinutes(-5);
     [ObservableProperty] private DateTime _toDate = DateTime.UtcNow;
@@ -62,7 +64,7 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         ILogger<TransactionTableViewModel> logger) : base(dbService, logger)
     {
         Title = "Transactions";
-        SortKey = "Timestamp";
+        SortKey = DefaultSortKey;
         SortDesc = true;
         _dbRef = dbService;
         _services = services ?? throw new ArgumentNullException(nameof(services));
@@ -113,7 +115,7 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         // Combine date+time pickers; clamp upper bound to now.
         var (fromCombined, toCombined) = DateRangeHelper.CombineAndClampRange(FromDate, FromTime, ToDate, ToTime);
 
-        var (transactions, total) = await _dbRef.GetTransactionsPageAsync(skip, take, sortKey ?? "Timestamp", desc,
+        var (transactions, total) = await _dbRef.GetTransactionsPageAsync(skip, take, sortKey ?? DefaultSortKey, desc,
             fromCombined, toCombined,
             userIdFilter, stockIdFilter, currencyArg, excludeIds, ct);
 

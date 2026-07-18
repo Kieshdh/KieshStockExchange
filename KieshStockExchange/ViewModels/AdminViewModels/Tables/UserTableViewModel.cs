@@ -12,6 +12,7 @@ namespace KieshStockExchange.ViewModels.AdminViewModels.Tables;
 public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
 {
     #region Fields, events and Constructor
+    private const string DefaultSortKey = "CreatedAt";
     private readonly IServiceProvider _services;
 
     /// <summary> Raised when a row's View is tapped so AdminViewModel can switch to the User-details tab. </summary>
@@ -30,7 +31,7 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
         : base(dbService, logger)
     {
         Title = "Users";
-        SortKey = "CreatedAt";
+        SortKey = DefaultSortKey;
         SortDesc = true;
         _services = services ?? throw new ArgumentNullException(nameof(services));
     }
@@ -40,7 +41,7 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
     protected override async Task<(IReadOnlyList<UserTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        var (users, total) = await _db.GetUsersPageAsync(skip, take, sortKey ?? "CreatedAt", desc, filter, ct);
+        var (users, total) = await _db.GetUsersPageAsync(skip, take, sortKey ?? DefaultSortKey, desc, filter, ct);
         var rows = users.Select(u => new UserTableObject(u, OpenEditAsync, RaiseUserSelected)).ToList();
         return (rows, total);
     }

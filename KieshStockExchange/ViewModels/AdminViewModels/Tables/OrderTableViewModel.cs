@@ -19,6 +19,8 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
 
     private const string StatusAll = "All";
 
+    private const string DefaultSortKey = "CreatedAt";
+
     #region Filter state
     [ObservableProperty] private DateTime _fromDate = DateTime.UtcNow.AddMinutes(-5);
     [ObservableProperty] private DateTime _toDate = DateTime.UtcNow;
@@ -86,7 +88,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
         IServiceProvider services, ILogger<OrderTableViewModel> logger) : base(dbService, logger)
     {
         Title = "Orders";
-        SortKey = "CreatedAt";
+        SortKey = DefaultSortKey;
         SortDesc = true;
         _dbRef = dbService;
         _execution = execution ?? throw new ArgumentNullException(nameof(execution));
@@ -138,7 +140,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
         // Combine date+time pickers; clamp upper bound to now.
         var (fromCombined, toCombined) = DateRangeHelper.CombineAndClampRange(FromDate, FromTime, ToDate, ToTime);
 
-        var (orders, total) = await _dbRef.GetOrdersPageAsync(skip, take, sortKey ?? "CreatedAt", desc,
+        var (orders, total) = await _dbRef.GetOrdersPageAsync(skip, take, sortKey ?? DefaultSortKey, desc,
             fromCombined, toCombined, statusArg,
             userIdFilter, stockIdFilter, sideArg, typeArg, excludeIds, ct);
 

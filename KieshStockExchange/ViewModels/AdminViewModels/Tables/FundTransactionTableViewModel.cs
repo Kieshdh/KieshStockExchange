@@ -8,6 +8,8 @@ namespace KieshStockExchange.ViewModels.AdminViewModels.Tables;
 public partial class FundTransactionTableViewModel : BaseTableViewModel<FundTransactionTableObject>
 {
     #region Fields and Constructor
+    private const string DefaultSortKey = "CreatedAt";
+
     [ObservableProperty] private string _searchText = string.Empty;
 
     partial void OnSearchTextChanged(string value) => _ = ApplyViewChange();
@@ -16,7 +18,7 @@ public partial class FundTransactionTableViewModel : BaseTableViewModel<FundTran
         ILogger<FundTransactionTableViewModel> logger) : base(dbService, logger)
     {
         Title = "Fund Tx";
-        SortKey = "CreatedAt";
+        SortKey = DefaultSortKey;
         SortDesc = true;
     }
     #endregion
@@ -31,7 +33,7 @@ public partial class FundTransactionTableViewModel : BaseTableViewModel<FundTran
         int? userIdFilter = await ResolveUserIdAsync(ct);
 
         var (txs, total) = await _db.GetFundTransactionsPageAsync(
-            skip, take, sortKey ?? "CreatedAt", desc, userIdFilter, ct);
+            skip, take, sortKey ?? DefaultSortKey, desc, userIdFilter, ct);
 
         if (txs.Count == 0) return (Array.Empty<FundTransactionTableObject>(), total);
 
