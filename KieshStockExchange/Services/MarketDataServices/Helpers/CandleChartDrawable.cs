@@ -342,13 +342,13 @@ public sealed partial class CandleChartDrawable : IDrawable
         if (volRect.Height > 0 && OverlayVolume)
             DrawVolume(canvas, volRect, X);
 
-        DrawCandles(canvas, plot, X, Y);
+        _candleRenderer.DrawCandles(canvas, frame, theme, Candles, Style);
         DrawMovingAverages(canvas, plot, tMin, tMax, yMin, yMax, X, Y);
         DrawOpenOrderLines(canvas, plot, Y, currency);
         DrawPositionLine(canvas, plot, Y, currency);
         DrawFillMarkers(canvas, plot, X, Y);
         DrawTriggerMarkers(canvas, plot, X, Y);
-        DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
+        _candleRenderer.DrawCurrentPriceLine(canvas, frame, theme, Candles, CurrentPrice, SessionOpenPrice);
         _drawingRenderer.DrawDrawings(canvas, frame, theme, Drawings,
             DraggingDrawingId, SelectedDrawingId, SelectedDrawingIds,
             BuildingPolyline, BuildingPolylineCursor, BuildingIsFreehand, BuildingStyle);
@@ -405,6 +405,7 @@ public sealed partial class CandleChartDrawable : IDrawable
     // Renderer collaborators (Helpers/Drawing) — stateless, fed (canvas, frame, theme, inputs) per paint.
     private readonly MeasureRenderer _measureRenderer = new();
     private readonly AxisRenderer _axisRenderer = new(RightAxisW, BottomAxisH);
+    private readonly CandleRenderer _candleRenderer = new(RightAxisW);
     private readonly CrosshairRenderer _crosshairRenderer = new(RightAxisW, BottomAxisH);
     private readonly DrawingRenderer _drawingRenderer = new(DrawHandleR, RightAxisW, BottomAxisH);
 
