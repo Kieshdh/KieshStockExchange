@@ -18,6 +18,15 @@ imperfect oracle exactly where money bugs live (error paths, concurrency, roundi
 - **Pure, stateless helper consolidation** (formatting / parsing / display / ViewModel plumbing / pure
   math with NO I/O, NO locks, NO mutation, NO clock/RNG) where old-vs-new is property-test-equivalent.
 
+### Pass 1b — NEAR-DUPLICATE GENERALIZATION (Kiesh 2026-07-18: "also look for SIMILAR code — copy parts or make it more universal")
+Similar-but-not-identical code → generalize into ONE universal/parameterized helper. This is the NEEDS-CARE
+tier: a generalized helper MUST reproduce EACH call site's exact behaviour. Discipline: (1) diff all N sites,
+enumerate every difference (the params the helper must take); (2) the helper must produce byte-identical
+output for each site's actual inputs; (3) route ONLY the sites that match exactly — any site with a real
+behavioural difference (rounding, error-handling, ordering, extra notify, etc.) is LEFT ALONE or flagged,
+never force-fit; (4) **adversarial review is PER-SITE** (each routed call proven equivalent), not just per-helper;
+(5) still non-CK / non-transaction / non-rounding to run unattended — money-adjacent near-dups → Pass 2.
+
 ### Pass 2 — PROPOSE-ONLY (reviewed diffs for Kiesh, do NOT merge unattended)
 Everything requiring judgment: money/decimal math, rounding, anything touching Fund/Position/reservations,
 transaction-scoped code, reserve→release ordering, records/enums on persisted models, Order-type
