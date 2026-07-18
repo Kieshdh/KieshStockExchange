@@ -398,7 +398,7 @@ public sealed partial class CandleChartDrawable : IDrawable
     private int _autoFitContractFrames;
 
     // Renderer collaborators (Helpers/Drawing) — stateless, fed (canvas, frame, theme, inputs) per paint.
-    private readonly MeasureRenderer _measureRenderer = new();
+    private readonly MeasureRenderer _measureRenderer = new(RightAxisW);
     private readonly AxisRenderer _axisRenderer = new(RightAxisW, BottomAxisH);
     private readonly CandleRenderer _candleRenderer = new(RightAxisW);
     private readonly IndicatorRenderer _indicatorRenderer = new(RightAxisW);

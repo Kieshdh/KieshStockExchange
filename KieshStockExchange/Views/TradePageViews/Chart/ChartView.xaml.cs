@@ -264,6 +264,7 @@ public partial class ChartView : ContentView
         if (_vm != null)
         {
             _vm.RedrawRequested -= OnRedrawRequested;
+            _vm.PropertyChanged -= OnVmCanvasPropertyChanged;
             _vm.Drawing.PropertyChanged -= OnVmPropertyChanged;
             _vm.Drawing.Drawings.CollectionChanged -= OnVmDrawingsChanged;
         }
@@ -275,6 +276,7 @@ public partial class ChartView : ContentView
         if (_vm == null) return;
 
         _vm.RedrawRequested += OnRedrawRequested;
+        _vm.PropertyChanged += OnVmCanvasPropertyChanged;
         _vm.Drawing.PropertyChanged += OnVmPropertyChanged;
         _vm.Drawing.Drawings.CollectionChanged += OnVmDrawingsChanged;
         UpdateDrawable();
@@ -286,6 +288,14 @@ public partial class ChartView : ContentView
     {
         if (e.PropertyName == nameof(ChartDrawingViewModel.DrawTool) && _polyBuilding)
             CancelPolyline();
+    }
+
+    // Reaching the live edge (the LIVE button, or a coast that arrives there) cancels any in-flight
+    // inertial pan — so pressing LIVE pins the view at live instead of the residual coast rolling it back.
+    private void OnVmCanvasPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ChartViewModel.IsLive) && _vm?.IsLive == true)
+            StopInertia();
     }
 
     // A wholesale collection Reset means the drawing set was reloaded (stock/currency switch) — the

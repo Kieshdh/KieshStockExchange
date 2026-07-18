@@ -1,3 +1,4 @@
+using System.Globalization;
 using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
@@ -7,6 +8,9 @@ namespace KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
 // drag state per call — no reference back to CandleChartDrawable.
 internal sealed class MeasureRenderer
 {
+    private readonly float _rightAxisW;   // gutter width for the measure guide price tags
+    public MeasureRenderer(float rightAxisW) => _rightAxisW = rightAxisW;
+
     // Drag-to-measure overlay: a translucent box between the anchor and the cursor plus a
     // label with Δprice, Δ%, Δtime and #bars. Green tint when the end is at/above the start,
     // red when below — the TradingView measure-tool convention. Inverse transforms keep the
@@ -48,6 +52,40 @@ internal sealed class MeasureRenderer
             ? (int)Math.Round(dt.TotalSeconds / f.Bucket.TotalSeconds)
             : 0;
         var cur = f.Currency;
+
+        // Guide bars: from each measure anchor, a dotted line down to the time axis and right to the price
+        // axis, with the price tag in the right gutter + the time tag in the bottom gutter — so both ends'
+        // price and time read straight off the axes while measuring (a dual crosshair for the ruler).
+        void DrawGuide(float px, float py, decimal price, DateTime time)
+        {
+            canvas.StrokeColor = tint;
+            canvas.StrokeSize = 1f;
+            canvas.StrokeDashPattern = new float[] { 2f, 3f };
+            canvas.DrawLine(px, py, plot.Right, py);     // → to the price (y) axis
+            canvas.DrawLine(px, py, px, plot.Bottom);    // ↓ to the time (x) axis
+            canvas.StrokeDashPattern = null;
+
+            var priceTag = new RectF(plot.Right, py - 8f, _rightAxisW, 16f);
+            canvas.FillColor = tint;
+            canvas.FillRectangle(priceTag);
+            canvas.FontColor = Colors.White;
+            canvas.FontSize = t.PriceTagFont;
+            canvas.DrawString(CurrencyHelper.Format(price, cur),
+                new RectF(priceTag.X + 3, priceTag.Y, priceTag.Width - 4, priceTag.Height),
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+
+            string timeText = time.ToLocalTime().ToString("dd MMM HH:mm", CultureInfo.InvariantCulture);
+            float ttW = Math.Max(64f, timeText.Length * 6.3f);
+            float ttx = Math.Clamp(px - ttW / 2f, plot.Left, Math.Max(plot.Left, plot.Right - ttW));
+            var timeTag = new RectF(ttx, plot.Bottom, ttW, 16f);
+            canvas.FillColor = tint;
+            canvas.FillRectangle(timeTag);
+            canvas.DrawString(timeText,
+                new RectF(timeTag.X + 3, timeTag.Y, timeTag.Width - 4, timeTag.Height),
+                HorizontalAlignment.Center, VerticalAlignment.Center);
+        }
+        DrawGuide(x0, y0, startPrice, t0);
+        DrawGuide(x1, y1, endPrice, t1);
 
         string line1 = $"{(dPrice >= 0 ? "+" : "")}{CurrencyHelper.Format(dPrice, cur)}  ({(dPct >= 0 ? "+" : "")}{dPct:0.00}%)";
         string line2 = $"{ChartGeometry.HumanizeSpan(dt)}  ·  {bars} bar{(bars == 1 ? "" : "s")}";
