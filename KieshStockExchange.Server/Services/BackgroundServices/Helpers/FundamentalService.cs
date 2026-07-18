@@ -189,11 +189,6 @@ internal sealed class FundamentalService
         return _seed.TryGetValue(key, out var s) ? s : 0m;
     }
 
-    // Standard normal via Box–Muller.
-    private double Gaussian()
-    {
-        double u1 = 1.0 - _rng.NextDouble();
-        double u2 = 1.0 - _rng.NextDouble();
-        return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
-    }
+    // Standard normal via Box–Muller (shared impl; same two-draw order on _rng).
+    private double Gaussian() => BotMath.NextGaussian(_rng);
 }
