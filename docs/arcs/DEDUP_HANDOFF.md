@@ -4,7 +4,7 @@
 **Rule:** at your clean stopping point, UPDATE this doc (what you just shipped + the exact next candidate),
 commit+push, THEN arm the next +5-min context-freshness timer with the continue-prompt, then STOP producing.
 
-## State (as of commit `c507acf`, 2026-07-19)
+## State (as of commit `d7ac996`, 2026-07-19)
 ## ⚠ DISK GATE ACTIVE (Kiesh 2026-07-19): his PC pegs disk I/O during builds. ALL builds MUST go through the
 ## dynamic disk gate — pre-flight `% Disk Time`, WAIT if ≥ **70%** (5-min cap → else pause+report), then run at
 ## **Idle CPU priority + `-maxcpucount:1`**. Gate via `dotnet test` ALONE for server/shared; scoped client build
@@ -55,6 +55,13 @@ commit+push, THEN arm the next +5-min context-freshness timer with the continue-
   byte-identical); (#22) per-VM `private const string DefaultSortKey` in the 6 admin table VMs (const-from-literal,
   same value → identical IL; Position's separate in-VM-sort base literal left alone). Opus-4.8 executor +
   adversarial PRESERVED ×2 + own read + client build clean + 661/661. Disk stayed 1% (Idle + `-maxcpucount:1`).
+- `d7ac996` **client #10** (2026-07-19, disk-gated): `PageLifecycle.SafeLoad(string tag, Func<Task> load)`
+  extracted; ALL 5 OnAppearing sites routed (Market/Portfolio/Admin/Trade/Login) — a Pass-1b near-dup
+  generalization, each differing only in tag+awaited-call, log format `$"{tag}: {ex}"` byte-identical to every
+  original. PER-SITE adversarial PRESERVED ×5 + helper + own read + client build clean + 661/661. FOLLOW-UP
+  (Pass-2/next): `LoginPage.OnRegisterClicked` is a byte-identical SafeLoad match but is an event handler (out
+  of #10's OnAppearing scope) — would route cleanly (tag "LoginPage.OnRegisterClicked nav failed", load
+  `() => Shell.Current.GoToAsync("RegisterPage")`).
 - REFUSED (correctly, do NOT retry as a merge): the 5 signed-percent formatters are genuinely different
   (decimal vs double, F2/0.00/N2/%-specifier, culture, sign-at-zero) — unifying would change numbers.
 
@@ -71,12 +78,12 @@ route it to **Pass 2 propose-only**, do not ship unattended. (Unit-level determi
 extraction if ever needed, but that's a per-case test, not a whole-sim differ.)
 
 ## NEXT UP (in order) — remaining PROVABLY-SAFE textual identities (client/shared inventories)
-1. Named clean candidates, cheapest first: **client #10** (OnAppearing `SafeLoad` helper — EXACT-match pair
-   Market/PortfolioPage ONLY; the other 3 differ → leave/Pass-2; extract `static Task PageLifecycle.SafeLoad(
-   string tag, Func<Task> load)`) → **shared #15** (`InvertedBoolConverter` delete+repoint IFF CommunityToolkit.Maui
-   referenced — **dep-check first**; XAML converter-reference edit = eyeball, may defer to Pass-2). After those,
-   clean textual candidates are largely EXHAUSTED → move to the Pass-2 propose-only doc (item 2 below). Same proven
-   pipeline; NO differ needed for textual identities. **MODEL ROUTING: Fable-5
+1. **shared #15** (`InvertedBoolConverter`: **dep-check CommunityToolkit.Maui FIRST** — only delete+repoint XAML
+   if the package is referenced AND has a drop-in inverted-bool converter; the XAML converter-reference edit is an
+   EYEBALL item, so if in any doubt DEFER to Pass-2 rather than editing XAML unattended). Optional tiny follow-up:
+   the `LoginPage.OnRegisterClicked` SafeLoad route noted in DONE above (client, same pipeline as #10). After these,
+   clean autonomous textual candidates are EXHAUSTED → move to the Pass-2 propose-only doc (item 2 below). NO differ
+   needed for textual identities. **MODEL ROUTING: Fable-5
    access window closed 2026-07-18 → default executor + adversarial-review agents to Opus 4.8 (`model` omitted or
    "sonnet"/opus); only try Fable if you have positive evidence access is back.**
 2. When the clean textual candidates are exhausted, START `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (propose-only,
