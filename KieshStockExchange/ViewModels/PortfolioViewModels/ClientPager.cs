@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
+using KieshStockExchange.Helpers;
 
 namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 
@@ -29,7 +30,7 @@ public sealed partial class ClientPager<T> : ObservableObject
         ? "No rows"
         : $"Page {CurrentPageDisplay} of {TotalPages} · {TotalRows:N0} rows";
 
-    public List<int> VisiblePages => ComputeVisiblePages();
+    public List<int> VisiblePages => PagerMath.ComputeVisiblePages(CurrentPageDisplay, TotalPages);
 
     public ICommand GoToPageCommand { get; }
     public IRelayCommand GoPrevCommand { get; }
@@ -65,18 +66,6 @@ public sealed partial class ClientPager<T> : ObservableObject
         for (int i = 0; i < PageSize && skip + i < _allItems.Count; i++)
             PagedItems.Add(_allItems[skip + i]);
         NotifyPagerProperties();
-    }
-
-    private List<int> ComputeVisiblePages()
-    {
-        var pages = new HashSet<int>();
-        int current = CurrentPageDisplay;
-        int total = TotalPages;
-        pages.Add(1);
-        if (total > 1) pages.Add(total);
-        for (int i = current - 2; i <= current + 2; i++)
-            if (i > 1 && i < total) pages.Add(i);
-        return pages.OrderBy(x => x).ToList();
     }
 
     private void NotifyPagerProperties()

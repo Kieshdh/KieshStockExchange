@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Input;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.Services.DataServices.Interfaces;
+using KieshStockExchange.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -34,21 +35,7 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
 
     public string PagerSummary => $"Page {CurrentPageDisplay} of {TotalPages} · {TotalRows:N0} rows";
 
-    public List<int> VisiblePages => ComputeVisiblePages();
-
-    private List<int> ComputeVisiblePages()
-    {
-        var pages = new HashSet<int>();
-        int current = CurrentPageDisplay;
-        int total = TotalPages;
-
-        pages.Add(1);
-        if (total > 1) pages.Add(total);
-        for (int i = current - 2; i <= current + 2; i++)
-            if (i > 1 && i < total) pages.Add(i);
-
-        return pages.OrderBy(x => x).ToList();
-    }
+    public List<int> VisiblePages => PagerMath.ComputeVisiblePages(CurrentPageDisplay, TotalPages);
     #endregion
 
     #region Sort / filter state
