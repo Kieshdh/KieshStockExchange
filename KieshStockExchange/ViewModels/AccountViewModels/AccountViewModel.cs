@@ -361,38 +361,3 @@ public partial class AccountViewModel : BaseViewModel, IDisposable
         GC.SuppressFinalize(this);
     }
 }
-
-// Row for the "other currencies" sub-list on the Funds card. Wraps a Fund and projects the
-// display strings the row binds to — keeps the XAML free of nested .Fund.* paths and gives the
-// page a stable shape even if Fund grows new properties.
-public sealed class AccountFundRow
-{
-    public required Fund Fund { get; init; }
-    public string Currency => Fund.CurrencyType.ToString();
-    public string AvailableDisplay => Fund.AvailableBalanceDisplay;
-    public string ReservedDisplay => Fund.ReservedBalanceDisplay;
-    public bool HasReserved => Fund.ReservedBalance > 0m;
-}
-
-// Row for the per-currency Volume sub-list on the Activity card. Currencies don't sum
-// meaningfully, so volume is grouped by CurrencyType and rendered as one row per currency.
-public sealed class AccountVolumeRow
-{
-    public required CurrencyType CurrencyType { get; init; }
-    public required decimal Amount { get; init; }
-    public string Currency => CurrencyType.ToString();
-    public string AmountDisplay => CurrencyHelper.Format(Amount, CurrencyType);
-}
-
-// Row for the per-currency Realised P&L sub-list. Sign is exposed as discrete bools so the XAML
-// can colour positive/negative without a converter, mirroring the data-trigger pattern used
-// elsewhere in the trade tables.
-public sealed class AccountPnLRow
-{
-    public required CurrencyType CurrencyType { get; init; }
-    public required decimal Amount { get; init; }
-    public string Currency => CurrencyType.ToString();
-    public string AmountDisplay => CurrencyHelper.Format(Amount, CurrencyType);
-    public bool IsPositive => Amount > 0m;
-    public bool IsNegative => Amount < 0m;
-}

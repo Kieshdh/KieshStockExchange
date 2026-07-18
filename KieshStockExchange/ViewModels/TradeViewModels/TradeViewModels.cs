@@ -315,9 +315,3 @@ public partial class TradeViewModel : BaseViewModel, IDisposable
     }
     #endregion
 }
-
-/// <summary> One row in the Trade page's stock picker: a (Stock, Currency) listing. </summary>
-public sealed record TradingPair(int StockId, string Symbol, CurrencyType Currency)
-{
-    public string Display => $"{Symbol} - {Currency}";
-}

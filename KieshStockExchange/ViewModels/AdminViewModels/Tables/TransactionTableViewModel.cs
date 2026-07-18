@@ -202,23 +202,3 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
     }
     #endregion
 }
-
-public partial class TransactionTableObject : ObservableObject
-{
-    public Transaction Transaction { get; }
-    public User Buyer { get; }
-    public User Seller { get; }
-    public Stock Stock { get; }
-
-    public IAsyncRelayCommand DetailsCommand { get; }
-
-    public TransactionTableObject(Transaction transaction, User buyer, User seller, Stock stock,
-        Func<Transaction, User, User, Stock, Task> onDetails)
-    {
-        Transaction = transaction;
-        Buyer = buyer;
-        Seller = seller;
-        Stock = stock;
-        DetailsCommand = new AsyncRelayCommand(() => onDetails(transaction, buyer, seller, stock));
-    }
-}

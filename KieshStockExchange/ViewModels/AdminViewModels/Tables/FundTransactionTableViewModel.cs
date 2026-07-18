@@ -59,15 +59,3 @@ public partial class FundTransactionTableViewModel : BaseTableViewModel<FundTran
     }
     #endregion
 }
-
-public sealed class FundTransactionTableObject
-{
-    public FundTransaction Transaction { get; }
-    public string OwnerName { get; }
-
-    public FundTransactionTableObject(FundTransaction transaction, string ownerName)
-    {
-        Transaction = transaction ?? throw new ArgumentNullException(nameof(transaction));
-        OwnerName = ownerName;
-    }
-}

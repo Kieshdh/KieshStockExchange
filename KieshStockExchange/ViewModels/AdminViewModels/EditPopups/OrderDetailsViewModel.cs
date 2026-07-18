@@ -161,17 +161,3 @@ public partial class OrderDetailsViewModel : BaseViewModel
     }
     #endregion
 }
-
-public sealed class OrderLinkedTransactionRow
-{
-    public Transaction Transaction { get; }
-    public string Summary { get; }
-    public IRelayCommand OpenCommand { get; }
-
-    public OrderLinkedTransactionRow(Transaction tx, Action<int> onOpen)
-    {
-        Transaction = tx;
-        Summary = $"Tx #{tx.TransactionId} • {tx.Quantity} @ {tx.PriceDisplay} • {tx.TimestampShort}";
-        OpenCommand = new RelayCommand(() => onOpen(tx.TransactionId));
-    }
-}

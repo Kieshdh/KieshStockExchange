@@ -9,12 +9,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels.Tables;
 
-public interface ILazyTab
-{
-    Task EnsureInitializedAsync();
-    Task RefreshAsync();
-}
-
 public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTab
 {
     // Adaptive page sizing: never fewer than this, even on a tiny window.

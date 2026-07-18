@@ -133,15 +133,3 @@ public partial class PortfolioCurrenciesViewModel : BaseViewModel, IDisposable
         GC.SuppressFinalize(this);
     }
 }
-
-public sealed class CurrencyRow
-{
-    public required CurrencyType Currency { get; init; }
-    public required string CurrencyCode { get; init; }
-    public required string BalanceDisplay { get; init; }
-    public required string ReservedDisplay { get; init; }
-    public required decimal ValueInBase { get; init; }
-    public required string ValueInBaseDisplay { get; init; }
-    public double DepthRatio { get; set; }
-    public bool HasReserved => !string.IsNullOrEmpty(ReservedDisplay);
-}

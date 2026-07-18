@@ -224,20 +224,3 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
     }
     #endregion
 }
-
-public partial class OrderTableObject : ObservableObject
-{
-    public Order Order { get; }
-    public User User { get; }
-    public Stock Stock { get; }
-
-    public IAsyncRelayCommand DetailsCommand { get; }
-
-    public OrderTableObject(Order order, User user, Stock stock, Func<Order, User, Stock, Task> onDetails)
-    {
-        Order = order ?? throw new ArgumentNullException(nameof(order));
-        User = user ?? throw new ArgumentNullException(nameof(user));
-        Stock = stock ?? throw new ArgumentNullException(nameof(stock));
-        DetailsCommand = new AsyncRelayCommand(() => onDetails(Order, User, Stock));
-    }
-}

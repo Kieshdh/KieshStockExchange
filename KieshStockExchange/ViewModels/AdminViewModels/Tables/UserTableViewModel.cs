@@ -69,18 +69,3 @@ public partial class UserTableViewModel : BaseTableViewModel<UserTableObject>
     }
     #endregion
 }
-
-public partial class UserTableObject : ObservableObject
-{
-    public User User { get; }
-
-    public IAsyncRelayCommand EditCommand { get; }
-    public IRelayCommand ViewCommand { get; }
-
-    public UserTableObject(User user, Func<User, Task> onEdit, Action<int> onView)
-    {
-        User = user ?? throw new ArgumentNullException(nameof(user));
-        EditCommand = new AsyncRelayCommand(() => onEdit(User));
-        ViewCommand = new RelayCommand(() => onView(User.UserId));
-    }
-}
