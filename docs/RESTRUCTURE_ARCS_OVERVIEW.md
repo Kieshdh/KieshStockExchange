@@ -173,6 +173,39 @@ only), **BracketCoordinator release seam**, **OrderBook** single `_gate` lock (`
 
 ## 7. Status
 
+### ★ AUTONOMOUS SERVER-ARC RUN — 2026-07-18 (branch `feature/bot-market-realism-v2`)
+The council-ordered Auto backlog is **COMPLETE**. Shipped byte-identical (build + FULL suite + independent
+moves-only diff; CK smokes where noted), newest last:
+- **Arc 1** `5162397` — client-VM one-class-per-file: 29 trailing row/DTO/enum types out of 21 host VMs (flat siblings).
+- **Arc 2a** `3bd8900` — CandleService 1051→430 spine + `.Read`/`.Maintenance`/`.Aggregation`. **15m CK smoke = 0.**
+- **Arc 2b** `927c6bc` — `CandleAggregationMath` pure-static helpers (WeightedClose forwarder keeps the test oracle).
+- **Arc 3** `a4a25a7` — AccountsCache 1014→203 spine + `.Hydration`/`.Reseed`/`.Reconcile` (all state/gate fields +
+  nested release classes stay in spine → invariant intact). **10m CK smoke = 0.**
+- **De-flake** `f57aa13` — the two known-flaky tests (`SharedScanEquivalence`, `BankEstimateAnchorPivot`) had ONE
+  root cause: a parallel test stomping the process-global `TimeHelper.NowUtc`. Fixed test-only via a
+  `[CollectionDefinition("ClockSerial", DisableParallelization=true)]` grouping. Verified 10/10 clean full runs.
+  **The suite is now reliably 661/661 — any failure is a REAL regression.**
+- **BotDashboardViewModel** `d9298e9` — 754→175 spine + `.LiveStatus`/`.Panels`/`.Controls` (client VM, zero CK).
+- **Decision docs** `457634d`, **Attended prep maps** `3e5741e`.
+
+**Triaged decisions (flagged for Kiesh):**
+- **BracketCoordinator → ATTENDED** (was "Auto→Attended if seam moves"): reservation-release invariant is
+  inline-welded across long+short handlers → a partial split fragments it. `docs/arcs/ARC_bracketcoordinator_TRIAGE.md`.
+- **NO-SPLIT (cohesive, correctly declined):** MarketViewModel (612), BotSentimentService (716) — comment-inflated,
+  concerns interwoven through private call chains; a split would scatter one flow. Recorded in `docs/arcs/`.
+- **Attended-arc prep maps** written for all 3 CK-critical giants (`docs/arcs/ATTENDED_*.md`): AiBotDecisionService
+  (BotDecisionConfig extraction feasible, zero mutation blockers), OrderExecutionService (GroupCommitCoordinator = one
+  whole tx-unit; RejectedFillRollback already static), AiTradeService (BatchSubmissionService separable; design the
+  session-counter seam first). Each ends with a one-extraction-per-CK-soak sequence.
+
+**Remaining = Attended (need Kiesh) or the marginal tail** (PlaceOrderViewModel 700, ApiDataBaseService 575,
+UserPortfolioService 737 [CK-adjacent], ConvictionDecisionService 914 + OrderBook 937 [Attended-adjacent]) — each
+needs its OWN triage (no inherited momentum); the tail is trending NO-SPLIT. **Deferred polish** (per council):
+arc-1 file renames, `MarketViewModels.cs`→`MarketViewModel.cs`, empty regions left by the partial splits.
+
+> §6 backlog below is the ORIGINAL audit; the `CandleChartDrawable` row there is STALE (done in the chart phase).
+
+### CHART arcs (prior phase)
 - **CHART arcs: ALL DONE** (branch `feature/bot-market-realism-v2`, tip `da91346`):
   - VM/View split (`61687fd`) — `ChartViewModel`+`ChartView` → `Chart/` folders, `ChartDrawingViewModel` extracted.
   - `CandleChartDrawable` byte-identical partial split (`2d4491f`) → 9 files.
