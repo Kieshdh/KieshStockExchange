@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace KieshStockExchange.Helpers;
 
-public class ParsingHelper
+public static class ParsingHelper
 {
     public static bool TryToDecimal(object? o, out decimal value)
     {
