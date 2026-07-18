@@ -35,7 +35,13 @@ Both halves land under 500.
 ---
 
 ## 2. AiBotContext — 637 LOC — `Server/Services/BackgroundServices/Helpers/AiBotContext.cs`
-**VERDICT: AUTO-PARTIAL** (borderline — heavily comment-inflated)
+**VERDICT: NO-SPLIT** (deeper Phase-0 overturned the tentative AUTO-PARTIAL below — the "borderline
+comment-inflated" flag was correct). Only ~355 substantive LOC (44% is comment/blank/region);
+the one cleanly-peelable region (`Financial Computations`) is ~40 real lines, every other region drags
+a field-relocation cost, and the type owns RNG-draw-order determinism (`AiUserRngs`/`GetRandom`) —
+so a split trades a real determinism-review burden for cosmetic size. Bias-to-NO-SPLIT applies. Left intact.
+
+_Original tentative rationale (superseded):_ **AUTO-PARTIAL** (borderline — heavily comment-inflated)
 
 A per-tick data container: 3 ctor params (`accounts` + two bool flags), and a large but cohesive
 field block (~lines 33–187) that is mostly Concurrent/plain dictionaries with multi-line WHY
@@ -112,9 +118,9 @@ Both halves land under 500.
 ### Roll-up
 | File | LOC | Verdict |
 |------|----:|---------|
-| AiBotStateService | 646 | AUTO-PARTIAL (spine + `.Pruning`) |
-| AiBotContext | 637 | AUTO-PARTIAL (spine + `.Computations`; borderline, comment-inflated) |
+| AiBotStateService | 646 | ✅ SHIPPED — AUTO-PARTIAL (spine + `.Pruning`) `612fcc4` |
+| AiBotContext | 637 | NO-SPLIT (deeper Phase-0: ~355 real LOC, RNG-order-sensitive, one ~40-line peelable region) |
 | PgDBService.Orders.cs | 637 | NO-SPLIT (already entity-partial) |
 | PgDBService.Portfolio.cs | 567 | NO-SPLIT (already entity-partial) |
 | Order.cs | 586 | NO-SPLIT (cohesive, invariant/CK-welded) |
-| ExcelSeedService | 559 | AUTO-PARTIAL (spine + `.Steps`) |
+| ExcelSeedService | 559 | ✅ SHIPPED — AUTO-PARTIAL (spine + `.Seeds`/`.AiProfiles`) `704776d` |
