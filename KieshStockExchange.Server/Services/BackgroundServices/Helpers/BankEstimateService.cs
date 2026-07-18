@@ -31,8 +31,8 @@ internal sealed class BankEstimateService
     // Deterministic seed, distinct from sentiment(43)/fx(47)/regime(53)/fundamental(71)/shock(89).
     private const int RngSeed = 101;
 
-    private const double MinDtSec = 0.05;
-    private const double MaxDtSec = 60.0;
+    private const double MinDtSec = BotMath.TickMinDtSec;
+    private const double MaxDtSec = BotMath.TickMaxDtSec;
 
     // ±1 of zero-meaned sentiment maps to this fractional deviation of seed (keeps the estimate in band units).
     private const double SentimentToDevScale = 0.05;

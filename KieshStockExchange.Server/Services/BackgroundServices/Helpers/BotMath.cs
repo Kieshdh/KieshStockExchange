@@ -8,6 +8,11 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 /// </summary>
 internal static class BotMath
 {
+    /// <summary>Canonical per-tick dt clamp bounds shared by the bot-loop helpers (guards clock skew / long stalls).</summary>
+    internal const double TickMinDtSec = 0.05;
+    internal const double TickMaxDtSec = 60.0;
+
+
     /// <summary>
     /// Stable per-key unit value in [0,1) — a single-input avalanche mix (same family as
     /// <see cref="StockProfileService"/>). Deterministic, call-order-independent, advances no RNG, so adjacent

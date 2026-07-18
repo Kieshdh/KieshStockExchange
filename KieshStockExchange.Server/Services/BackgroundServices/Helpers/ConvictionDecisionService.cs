@@ -58,8 +58,8 @@ internal sealed partial class ConvictionDecisionService
     // currency-consistent (buys are funded by same-book sell proceeds — no implicit FX).
     private static readonly CurrencyType[] Books = { CurrencyType.USD, CurrencyType.EUR };
 
-    private const double MinDtSec = 0.05;
-    private const double MaxDtSec = 60.0;
+    private const double MinDtSec = BotMath.TickMinDtSec;
+    private const double MaxDtSec = BotMath.TickMaxDtSec;
 
     // Per-(bot,stock) idiosyncratic term (a small personal view → heterogeneity, no lockstep), gap-comparable scale.
     private const double IdioScale = 0.05;

@@ -50,8 +50,8 @@ internal sealed class BotSentimentService
     private const int RngSeed = 43;
 
     // Clamp the per-tick elapsed time so a stalled or first-after-reset loop can't distort α.
-    private const double MinDtSec = 0.05;
-    private const double MaxDtSec = 60.0;
+    private const double MinDtSec = BotMath.TickMinDtSec;
+    private const double MaxDtSec = BotMath.TickMaxDtSec;
 
     // 50 stocks × 60s sampling × ~33 hours of runway. Each row is small.
     private const int RecentSamplesMax = 100_000;

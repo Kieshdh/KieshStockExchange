@@ -22,8 +22,8 @@ internal sealed class BotRegimeService
     private const int RngSeed = 53;
 
     // Clamp the per-tick elapsed time so a stalled or first-after-reset loop can't distort the flip rate.
-    private const double MinDtSec = 0.05;
-    private const double MaxDtSec = 60.0;
+    private const double MinDtSec = BotMath.TickMinDtSec;
+    private const double MaxDtSec = BotMath.TickMaxDtSec;
     #endregion
 
     #region State

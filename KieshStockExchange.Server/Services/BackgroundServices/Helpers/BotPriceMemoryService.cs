@@ -26,8 +26,8 @@ internal sealed class BotPriceMemoryService
 {
     // Mirror BotSentimentService: clamp dt so a stalled or first-after-reset tick can't poison
     // the EWMA or the day-window accumulator.
-    private const double MinDtSec = 0.05;
-    private const double MaxDtSec = 60.0;
+    private const double MinDtSec = BotMath.TickMinDtSec;
+    private const double MaxDtSec = BotMath.TickMaxDtSec;
     // §adaptive liveliness-log cadence (~ the soak sampler's 10-min interval). RNG-free.
     private const double AnchorLogIntervalSec = 600.0;
 

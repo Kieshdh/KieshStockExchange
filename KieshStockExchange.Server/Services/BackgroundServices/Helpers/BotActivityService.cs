@@ -27,8 +27,8 @@ internal sealed class BotActivityService
 {
     #region Configuration / seed
     private const int RngSeed = 59; // deterministic, distinct from sentiment(43)/fx(47)/fundamental(71)/regime(53)
-    private const double MinDtSec = 0.05;
-    private const double MaxDtSec = 60.0;
+    private const double MinDtSec = BotMath.TickMinDtSec;
+    private const double MaxDtSec = BotMath.TickMaxDtSec;
     private const double Sqrt3    = 1.7320508075688772; // U(-1,1)*√3 == unit variance
 
     private static readonly TimeSpan BDriftPeriod = TimeSpan.FromMinutes(15);

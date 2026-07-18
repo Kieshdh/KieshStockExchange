@@ -30,8 +30,8 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 internal sealed class ExogenousShockService
 {
     #region Configuration / state
-    private const double MinDtSec = 0.05;
-    private const double MaxDtSec = 60.0;
+    private const double MinDtSec = BotMath.TickMinDtSec;
+    private const double MaxDtSec = BotMath.TickMaxDtSec;
     private const int RecentSamplesMax = 100_000;
 
     private readonly IStockService _stocks;

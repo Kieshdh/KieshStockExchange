@@ -30,8 +30,8 @@ namespace KieshStockExchange.Services.BackgroundServices.Helpers;
 internal sealed class JumpService
 {
     #region Constants
-    private const double MinDtSec = 0.05;
-    private const double MaxDtSec = 60.0;
+    private const double MinDtSec = BotMath.TickMinDtSec;
+    private const double MaxDtSec = BotMath.TickMaxDtSec;
     // Each primary slice walks ~this fraction of the resting opposite-side depth, then we re-read the mark and
     // stop at target — keeps a single slice from blowing through a thin book while still making fast progress.
     private const double SliceFracOfDepth = 0.20;
