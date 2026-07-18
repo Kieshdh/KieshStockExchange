@@ -76,11 +76,6 @@ public sealed partial class CandleChartDrawable : IDrawable
     // persisted Style has no colour — new drawings carry their own Style.Color from the style-bar.
     public Color DrawingColor = Color.FromArgb("#4C9AFF");
 
-    // Fixed, always-readable pill background for the axis TAGS (price gutter + VLine time). Using the
-    // drawing's own colour made light/yellow labels unreadable; a standard dark slate + white text reads
-    // on any theme. The line's colour is kept as a thin border so the tag still identifies its drawing.
-    private static readonly Color LabelPillBg = Color.FromArgb("#2A2E39");
-
     // The full drawing selection set (multi-select via shift-click). A drawing is "selected" (shows
     // handles + thicker stroke) when it is in this set OR is the single SelectedDrawingId primary.
     public IReadOnlyCollection<Guid>? SelectedDrawingIds { get; set; }
@@ -180,6 +175,12 @@ public sealed partial class CandleChartDrawable : IDrawable
     const float VolumePaneMinChartHeight = 80f;  // skip volume pane on tiny charts
     const float MoodPaneRatio = 0.16f;    // 16% of total plot height for the mood sub-pane
     const float MoodPaneGap = 4f;
+
+    // Drawing geometry — the single source shared by DrawingRenderer (drawn handles) and
+    // ChartHitTester (clickable zones), injected into both so the visible shape and its
+    // hit zone never drift apart.
+    const float DrawHandleR = 4f;    // endpoint drag-handle radius
+    const float DrawHitTol = 5f;     // extra pixel slack when hit-testing a line/handle
     #endregion
 
     #region IDrawable Implementation
@@ -348,7 +349,9 @@ public sealed partial class CandleChartDrawable : IDrawable
         DrawFillMarkers(canvas, plot, X, Y);
         DrawTriggerMarkers(canvas, plot, X, Y);
         DrawCurrentPriceLine(canvas, plot, Y, currency, tMin, tMax);
-        DrawDrawings(canvas, plot, X, Y, currency);
+        _drawingRenderer.DrawDrawings(canvas, frame, theme, Drawings,
+            DraggingDrawingId, SelectedDrawingId, SelectedDrawingIds,
+            BuildingPolyline, BuildingPolylineCursor, BuildingIsFreehand, BuildingStyle);
 
         // Border around the plot area.
         canvas.StrokeColor = Grid;
@@ -402,6 +405,7 @@ public sealed partial class CandleChartDrawable : IDrawable
     // Renderer collaborators (Helpers/Drawing) — stateless, fed (canvas, frame, theme, inputs) per paint.
     private readonly MeasureRenderer _measureRenderer = new();
     private readonly CrosshairRenderer _crosshairRenderer = new(RightAxisW, BottomAxisH);
+    private readonly DrawingRenderer _drawingRenderer = new(DrawHandleR, RightAxisW, BottomAxisH);
 
     // One cohesive palette snapshot per paint, from the frozen public palette fields above.
     private ChartTheme BuildTheme() => new(

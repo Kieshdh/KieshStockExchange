@@ -11,4 +11,13 @@ internal readonly record struct ChartTheme(
     Color OpenOrderBuyColor, Color OpenOrderSellColor, Color OpenOrderStopColor,
     Color PositionLineColor, Color FillBuyColor, Color FillSellColor, Color TriggerColor,
     Color VolumeBullTint, Color VolumeBearTint, Color MoodLineColor, Color DrawingColor,
-    float AxisFont, float PriceTagFont);
+    float AxisFont, float PriceTagFont)
+{
+    // Dark background → light outline, light background → dark outline (relative luminance).
+    // The drawable's OutlineForBackground(), computed from the theme's Bg (Arc-2 §4.2).
+    public Color Outline()
+    {
+        double lum = 0.299 * Bg.Red + 0.587 * Bg.Green + 0.114 * Bg.Blue;
+        return lum < 0.5 ? Color.FromRgba(1f, 1f, 1f, 0.85f) : Color.FromRgba(0f, 0f, 0f, 0.85f);
+    }
+}
