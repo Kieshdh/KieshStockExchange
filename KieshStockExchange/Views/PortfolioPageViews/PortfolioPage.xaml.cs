@@ -31,12 +31,11 @@ public partial class PortfolioPage : ContentPage
     {
         base.OnAppearing();
         // Best-effort load — a load failure must not crash the app via async void.
-        try
+        await PageLifecycle.SafeLoad("PortfolioPage.OnAppearing load failed", async () =>
         {
             if (_vm.RefreshCommand.CanExecute(null))
                 await _vm.RefreshCommand.ExecuteAsync(null);
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"PortfolioPage.OnAppearing load failed: {ex}"); }
+        });
     }
 
     protected override void OnDisappearing()

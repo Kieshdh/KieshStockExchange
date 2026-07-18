@@ -1,3 +1,4 @@
+using KieshStockExchange.Helpers;
 using KieshStockExchange.ViewModels.AdminViewModels;
 using KieshStockExchange.Services;
 
@@ -53,8 +54,7 @@ public partial class AdminPage : ContentPage
     {
         base.OnAppearing();
         // Best-effort load — a load failure must not crash the app via async void.
-        try { await _vm.InitializeAsync(); }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"AdminPage.OnAppearing load failed: {ex}"); }
+        await PageLifecycle.SafeLoad("AdminPage.OnAppearing load failed", () => _vm.InitializeAsync());
     }
 
     protected override void OnDisappearing()

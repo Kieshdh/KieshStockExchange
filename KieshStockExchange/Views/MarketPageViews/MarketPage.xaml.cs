@@ -1,3 +1,4 @@
+using KieshStockExchange.Helpers;
 using KieshStockExchange.ViewModels.MarketViewModels;
 
 namespace KieshStockExchange.Views.MarketPageViews;
@@ -18,12 +19,11 @@ public partial class MarketPage : ContentPage
         base.OnAppearing();
         // Subscribe-all + first poll, then start the 5 s timer. Best-effort — a load
         // failure must not crash the app through the async-void path.
-        try
+        await PageLifecycle.SafeLoad("MarketPage.OnAppearing load failed", async () =>
         {
             if (_vm.RefreshCommand.CanExecute(null))
                 await _vm.RefreshCommand.ExecuteAsync(null);
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"MarketPage.OnAppearing load failed: {ex}"); }
+        });
     }
 
     protected override void OnDisappearing()

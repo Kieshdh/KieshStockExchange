@@ -1,3 +1,4 @@
+using KieshStockExchange.Helpers;
 using KieshStockExchange.ViewModels.TradeViewModels;
 
 namespace KieshStockExchange.Views.TradePageViews;
@@ -98,8 +99,7 @@ public partial class TradePage : ContentPage
         base.OnAppearing();
         // Best-effort load — a failure (server down / mid-reconnect) must not crash the
         // app through the async-void path. Log it, don't throw.
-        try { await _vm.InitializeAsync(1); }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"TradePage.OnAppearing load failed: {ex}"); }
+        await PageLifecycle.SafeLoad("TradePage.OnAppearing load failed", () => _vm.InitializeAsync(1));
     }
 
     protected override void OnDisappearing()

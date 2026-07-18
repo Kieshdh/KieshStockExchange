@@ -1,3 +1,4 @@
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Services;
 using KieshStockExchange.ViewModels.UserViewModels;
 
@@ -25,8 +26,7 @@ public partial class LoginPage : ContentPage
     {
         base.OnAppearing();
         // Best-effort auto-login — a failure must not crash the app via async void.
-        try { await _vm.AutoLogin(); }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"LoginPage.OnAppearing auto-login failed: {ex}"); }
+        await PageLifecycle.SafeLoad("LoginPage.OnAppearing auto-login failed", () => _vm.AutoLogin());
     }
 
 }
