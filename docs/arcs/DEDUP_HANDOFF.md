@@ -4,7 +4,12 @@
 **Rule:** at your clean stopping point, UPDATE this doc (what you just shipped + the exact next candidate),
 commit+push, THEN arm the next +5-min context-freshness timer with the continue-prompt, then STOP producing.
 
-## State (as of commit `60ba106`, 2026-07-18 ~23:25)
+## State (as of commit `b486f80`, 2026-07-19)
+## ⚠ DISK GATE ACTIVE (Kiesh 2026-07-19): his PC pegs disk I/O during builds. ALL builds MUST go through the
+## dynamic disk gate — pre-flight `% Disk Time`, WAIT if ≥ **70%** (5-min cap → else pause+report), then run at
+## **Idle CPU priority + `-maxcpucount:1`**. Gate via `dotnet test` ALONE for server/shared; scoped client build
+## only for client-only changes; NEVER `dotnet clean`; low cadence. See `docs/DISK_USAGE_NOTES.md`.
+
 - Branch `feature/bot-market-realism-v2` = **FEATURE BRANCH — never merge/deploy to master/prod unattended**
   (prod runs `master` on the Netcup VPS; my pushes are branch backups only). Tree clean, all pushed.
 - Governing plan: `docs/arcs/DEDUP_ARC_PLAN.md` (two-pass structure, qualifying rule, HARD BANS, gate).
@@ -39,6 +44,12 @@ commit+push, THEN arm the next +5-min context-freshness timer with the continue-
   Conviction keeps a static forwarder since its calls live in `.TradeBook.cs`); (C) 8 helpers' `MinDtSec=0.05
   /MaxDtSec=60.0` → `BotMath.TickMin/MaxDtSec` const-from-const (same IL; MarketMood's 0.05/10.0 excluded).
   Fable-5 executor + Fable-5 per-candidate adversarial review (PRESERVED x3) + own read + 661/661.
+- `41b600e`/`8e595c6`/`b486f80` **3 textual-identity dedups** (2026-07-19): (A) `Order.cs` `IsKnownStatus`
+  predicate extract (Status setter + `IsValidStatus` shared the 5-value check; NOT an enum conversion);
+  (B) `ApiDataBaseService.Users.cs` `GetUsersByIds` → existing `PostListAsync` helper (operation-identical);
+  (C) new `KieshStockExchange/Helpers/DateRangeHelper.cs` — byte-identical date+time combine/clamp block from
+  `Order/TransactionTableViewModel` → one pure static. Fable-5 executor + adversarial PRESERVED ×3 + own read +
+  client+server build clean + 661/661.
 - REFUSED (correctly, do NOT retry as a merge): the 5 signed-percent formatters are genuinely different
   (decimal vs double, F2/0.00/N2/%-specifier, culture, sign-at-zero) — unifying would change numbers.
 
@@ -54,10 +65,15 @@ route it to **Pass 2 propose-only**, do not ship unattended. (Unit-level determi
 `*DeterminismTests` drive helper `Tick/Step` with injected fixed dt+seed — usable to LOCK a specific
 extraction if ever needed, but that's a per-case test, not a whole-sim differ.)
 
-## NEXT UP (in order)
-1. Pull the next **PROVABLY-SAFE textual/compiler identity** from `docs/arcs/DEDUP_client_INVENTORY.md` /
-   `DEDUP_shared_helpers_INVENTORY.md` (exact-duplicate extraction, rename, value-identical const hoist,
-   token-identical method → shared helper). Same proven pipeline; NO differ needed for textual identities.
+## NEXT UP (in order) — remaining PROVABLY-SAFE textual identities (client/shared inventories)
+1. Named clean candidates, cheapest first: **client #28** (`CurrencyType.ToString()` → `CurrencyHelper.GetIsoCode`
+   at Account row DTOs — GetIsoCode IS `ToString()`, byte-identical) → **client #10** (OnAppearing `SafeLoad`
+   helper — EXACT-match pair Market/PortfolioPage only; the other 3 are near-dup → leave/Pass-2) → **client #22**
+   (per-VM `private const string DefaultSortKey` to kill the twice-typed default; NOT the enum part) → **shared
+   #15** (`InvertedBoolConverter` delete+repoint IFF CommunityToolkit.Maui referenced — dep check first; XAML
+   edit = eyeball). Same proven pipeline; NO differ needed for textual identities. **MODEL ROUTING: Fable-5
+   access window closed 2026-07-18 → default executor + adversarial-review agents to Opus 4.8 (`model` omitted or
+   "sonnet"/opus); only try Fable if you have positive evidence access is back.**
 2. When the clean textual candidates are exhausted, START `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (propose-only,
    do NOT merge) — begin with the `CloseRequested` handler-leak BUG (real fix) + the NEEDS-CARE server math
    now blocked by the infeasible differ + the rest of the Pass-2 list below.
