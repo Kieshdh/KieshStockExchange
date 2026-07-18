@@ -285,8 +285,11 @@ internal sealed class DrawingRenderer
                 if (d.Kind == DrawTool.Ray)
                     (farX, farY) = ChartGeometry.RayExit(x1, y1, x2 - x1, y2 - y1, plot);
                 // Origin = anchor1; terminal = anchor2 (Trend) / ray-exit (Ray). Forward = origin→terminal.
+                // Ray runs to infinity past anchor2, so it never carries an ending head (matches the pen
+                // panel hiding End/Head for it, and forcing None so a shared default-pen ending can't leak).
+                var trendEnding = d.Kind == DrawTool.Ray ? LineEnding.None : d.Style.Ending;
                 StylePreviewDrawable.DrawStraightSegment(canvas, x1, y1, farX, farY,
-                    d.Style.Ending, color, stroke, dashPattern, d.Style.Head, ChartGeometry.EndSize(thickness));
+                    trendEnding, color, stroke, dashPattern, d.Style.Head, ChartGeometry.EndSize(thickness));
                 if (selected)
                 {
                     DrawHandle(canvas, t, x1, y1, color);

@@ -51,9 +51,12 @@ public partial class ChartView
         {
             DrawingHitPart.Anchor1 => d with { T1 = time, P1 = price },
             DrawingHitPart.Anchor2 => d with { T2 = time, P2 = price },
-            // Body: HLine tracks the cursor price; VLine tracks the cursor time; Trend shifts both anchors.
+            // Body: HLine tracks the cursor price; VLine tracks the cursor time; multi-point strokes
+            // (polyline/freehand) shift every point by the data-space delta; Trend shifts both anchors.
             _ when d.Kind == DrawTool.HLine => d with { P1 = price },
             _ when d.Kind == DrawTool.VLine => d with { T1 = time },
+            _ when d.Kind == DrawTool.Polyline || d.Kind == DrawTool.Freehand
+                => ShiftPoints(d, time - _drawDragStartTime, price - _drawDragStartPrice),
             _ => ShiftTrend(d, time - _drawDragStartTime, price - _drawDragStartPrice),
         };
         upd = upd with { Id = id };
@@ -62,6 +65,16 @@ public partial class ChartView
 
     private static DrawingObject ShiftTrend(DrawingObject d, TimeSpan dt, decimal dPrice)
         => d with { T1 = d.T1 + dt, P1 = d.P1 + dPrice, T2 = d.T2 + dt, P2 = d.P2 + dPrice };
+
+    // Shift every vertex of a multi-point stroke (polyline/freehand) by the data-space delta, so a
+    // body-drag moves the whole stroke rigidly (its geometry lives in Points, not the T1/P1/T2/P2 anchors).
+    private static DrawingObject ShiftPoints(DrawingObject d, TimeSpan dt, decimal dPrice)
+    {
+        if (d.Points is not { Count: > 0 } pts) return d;
+        var moved = new List<DrawPoint>(pts.Count);
+        foreach (var pt in pts) moved.Add(pt with { T = pt.T + dt, P = pt.P + dPrice });
+        return d with { Points = moved };
+    }
 
     // Finish the in-progress polyline: commit the accumulated vertices as one drawing (needs ≥ 2),
     // select it for immediate styling, then clear the building state.

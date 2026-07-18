@@ -24,15 +24,16 @@ public static class DrawToolPresets
     public static DrawToolPreset For(DrawTool tool) => tool switch
     {
         // Open two-anchor segments that "stop": stroke + dash + ending/head.
-        DrawTool.Trend or DrawTool.Ray or DrawTool.Polyline =>
+        DrawTool.Trend or DrawTool.Polyline =>
             new(DrawStyle.Default,
                 ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
                 ShowEnding: true, ShowHead: true, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
 
-        // Straight lines with NO directional ending (they don't stop): stroke + dash only. ExtendedLine
-        // runs to infinity BOTH ways, so — like H/V lines — it carries no head/arrow.
-        DrawTool.HLine or DrawTool.HRay or DrawTool.VLine or DrawTool.ExtendedLine
+        // Straight lines with NO directional ending (they don't "stop" at a second anchor): stroke + dash
+        // only. Ray + HRay run to infinity ONE way and ExtendedLine BOTH ways, so — like H/V lines — none
+        // carry a head/arrow at a terminus that isn't there.
+        DrawTool.HLine or DrawTool.HRay or DrawTool.Ray or DrawTool.VLine or DrawTool.ExtendedLine
             or DrawTool.Alert or DrawTool.FibRetracement =>
             new(DrawStyle.Default,
                 ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,

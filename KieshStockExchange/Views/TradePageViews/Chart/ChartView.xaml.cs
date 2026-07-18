@@ -63,6 +63,10 @@ public partial class ChartView : ContentView
     private readonly List<DrawPoint> _polyPoints = new();
     private long _lastPolyClickMs;
     private const long PolyDoubleClickMs = 400;
+    // Pixel of the last dropped polyline vertex; clicking on/near it again ends the polyline there
+    // (rather than stacking a duplicate point on top).
+    private PointF _lastPolyVertexPixel;
+    private const float PolyEndTolPx = 8f;
 
     // Open-order-drag state — set when _dragMode == OpenOrder.
     private int? _draggingOrderId;

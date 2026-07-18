@@ -172,7 +172,13 @@ public partial class ChartView
             bool dbl = nowMs - _lastPolyClickMs <= PolyDoubleClickMs;
             _lastPolyClickMs = nowMs;
             if (dbl && _polyPoints.Count >= 2) { CommitPolyline(); e.Handled = true; return; }
+            // Clicking on/near the last dropped vertex ENDS the polyline there (don't stack a duplicate).
+            if (_polyPoints.Count >= 2
+                && Math.Abs(p.X - _lastPolyVertexPixel.X) <= PolyEndTolPx
+                && Math.Abs(p.Y - _lastPolyVertexPixel.Y) <= PolyEndTolPx)
+            { CommitPolyline(); e.Handled = true; return; }
             _polyPoints.Add(new DrawPoint(_drawable.PixelToTime(p.X), plp));
+            _lastPolyVertexPixel = p;
             _drawable.BuildingPolyline = _polyPoints.ToList();
             Chart.Invalidate();
             e.Handled = true;
@@ -252,6 +258,7 @@ public partial class ChartView
                 _polyBuilding = true;
                 _polyPoints.Clear();
                 _polyPoints.Add(new DrawPoint(t, newPrice));
+                _lastPolyVertexPixel = p;
                 _lastPolyClickMs = Environment.TickCount64;
                 _drawable.BuildingPolyline = _polyPoints.ToList();
                 _drawable.BuildingPolylineCursor = new DrawPoint(t, newPrice);
