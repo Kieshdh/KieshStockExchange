@@ -60,8 +60,15 @@ shape (which the CHART arc validated in flight). **Every role runs in a SEPARATE
 
   (Referencor/Safety are NOT advisors — they are the Phase-0 contract and the Phase-3 gate.
   Regionor/Naming-invertor/Commenter/Compactor are NOT structural agents — they belong to the polish arc.)
-- **Phase 2 — COUNCIL (Fable-5), ONLY if the planners actually conflict.** Narrow job: resolve overlaps
-  into ONE ordered change-set. Skip it when the planners agree.
+- **Phase 2 — COUNCIL.** Resolve planner overlaps into ONE ordered change-set.
+  > **★ OWNER PREFERENCE (Kiesh, 2026-07-18): invoke the council LIBERALLY, not just on planner conflict.**
+  > Route to the council ANY decision it might be able to solve — arc ordering, owner-level calls, scope
+  > (which files to attempt vs queue), split-vs-no-split judgment, methodology, and any fork in the process
+  > — rather than deciding solo. Invoke it MORE OFTEN mid-process whenever that seems more helpful. **Hard /
+  > high-stakes problems → run the council on FABLE 5** (`model: fable` advisors); routine decisions can use
+  > the default advisor model. The goal: solve most problems yourself via the council instead of escalating
+  > to Kiesh. (Clear-cut, low-ambiguity mechanical calls with proven precedent don't need a council — use
+  > judgment, but bias toward councilling when there's genuine ambiguity or owner-level weight.)
 - **Phase 3 — EXECUTOR: MECHANICAL MOVES ONLY.** Cut/paste members into new files, zero logic edits.
   **Runs on Opus 4.8 (`claude-opus-4-8`)** (owner preference — spawn the executor agent with
   `model: opus`). GATE = `git diff` moves-only + `dotnet build` + FULL `dotnet test` green (+ human
@@ -132,6 +139,30 @@ Codified from the CHART precedent, Kiesh-approved. Every future Splittor + Execu
 12. Build + full test after each step. **UI/XAML/gesture behaviour is NOT covered by tests → human eyeball
     is a REQUIRED gate** (pan/zoom/crosshair under overlays, panel drag/auto-open, mutual-close). **No
     comment/rename/compaction in a structural diff** — that is the separate polish arc.
+
+### 4bis. CK-ADJACENT partial-split gate + the Attended line (Fable-5 council, 2026-07-18)
+
+A PURE byte-identical partial split (redistribute intact members, add `partial`, ZERO body edits) is
+behavior-invariant *by construction*, so CK-adjacent files are eligible to ship UNATTENDED — BUT the
+moves-only-diff + full-suite gate is NOT a complete oracle. Before shipping a CK-adjacent split, ALSO:
+- **Field/ctor spine check (the #1 hazard):** ALL fields + field-initializers + constructors + any static
+  ctor stay in the SPINE. Assert **ZERO field/ctor declarations in the new partial files** (grep). Cross-file
+  field-initializer execution order is compiler-dependent → keeping every field in one file eliminates it.
+- **Exact using block:** each new partial carries the original file's using block VERBATIM (a different
+  per-file using set can silently rebind an extension method / unqualified type while compiling clean).
+- **Order-sensitivity grep:** confirm the type has NO `[StructLayout(Sequential/Explicit)]`, NO
+  `[CallerFilePath]`/`[CallerLineNumber]`, and is NOT consumed by member-declaration-order-dependent
+  reflection/serialization (Newtonsoft member order, EF property discovery, DI scanning, golden JSON).
+- **moves-only diff** via `git diff --color-moved` (all lines render moved); **full suite ×2** for CK files
+  (concurrency-flake catch); **CK smoke** sized to blast radius.
+
+**The Attended line = BLAST RADIUS, not merely "body edits."** "Attended" flags the code the owner wants
+eyes on. Unattended-eligible (with the enhanced gate + CK smoke): OrderBook `.Admin`, ConvictionDecisionService,
+order-entry/portfolio-style services. **PREPARE-BUT-HOLD for the owner (stage the plan, do NOT merge
+unattended): TradeSettler / the settlement core** — reserve→settle→release is where every oracle blind spot
+converges with an unrecoverable failure mode. **Skip low-ROI splits** that don't even meet the ~500 cap
+(e.g. a service whose CK-mutation core is ~450 LOC that must stay welded in the spine). Future upgrade
+(Expansionist): a Roslyn member-token IL-identity gate would make the byte-identity claim self-serve.
 
 ---
 
