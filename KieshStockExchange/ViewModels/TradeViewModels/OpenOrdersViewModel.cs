@@ -127,8 +127,7 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
 
     private OpenOrderRow CreateOpenOrderRow(Order order)
     {
-        if (!_stocks.TryGetSymbol(order.StockId, out string symbol))
-            symbol = "-";
+        var symbol = _stocks.SymbolOrDash(order.StockId);
         return new OpenOrderRow
         {
             Order = order,

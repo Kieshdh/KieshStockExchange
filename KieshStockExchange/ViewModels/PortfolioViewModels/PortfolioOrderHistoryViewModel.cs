@@ -67,8 +67,7 @@ public partial class PortfolioOrderHistoryViewModel : BaseViewModel, IDisposable
 
     private ClosedOrderRow CreateRow(Order order)
     {
-        if (!_stocks.TryGetSymbol(order.StockId, out string symbol))
-            symbol = "-";
+        var symbol = _stocks.SymbolOrDash(order.StockId);
         return new ClosedOrderRow { Order = order, Symbol = symbol };
     }
 

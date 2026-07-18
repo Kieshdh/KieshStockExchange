@@ -119,8 +119,7 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
 
     private PositionRow CreatePositionRow(Position pos, CurrencyType currency)
     {
-        if (!_stocks.TryGetSymbol(pos.StockId, out string symbol))
-            symbol = "-";
+        var symbol = _stocks.SymbolOrDash(pos.StockId);
 
         var key = (pos.StockId, currency);
         if (_subscriptions.Add(key))

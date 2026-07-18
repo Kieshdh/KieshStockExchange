@@ -84,8 +84,7 @@ public partial class OrderHistoryViewModel : TradeTableViewModelBase<ClosedOrder
 
     private ClosedOrderRow CreateClosedOrderRow(Order order)
     {
-        if (!_stocks.TryGetSymbol(order.StockId, out string symbol))
-            symbol = "-";
+        var symbol = _stocks.SymbolOrDash(order.StockId);
         return new ClosedOrderRow { Order = order, Symbol = symbol, GoToStockCommand = GoToStockCommand };
     }
 

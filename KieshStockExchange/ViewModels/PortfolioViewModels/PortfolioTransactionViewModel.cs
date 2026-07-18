@@ -67,8 +67,7 @@ public partial class PortfolioTransactionViewModel : BaseViewModel, IDisposable
 
     private TransactionRow CreateRow(Transaction tx)
     {
-        if (!_stocks.TryGetSymbol(tx.StockId, out string symbol))
-            symbol = "-";
+        var symbol = _stocks.SymbolOrDash(tx.StockId);
         return new TransactionRow
         {
             Tx     = tx,
