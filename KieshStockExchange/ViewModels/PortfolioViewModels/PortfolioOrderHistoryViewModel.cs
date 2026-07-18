@@ -40,18 +40,11 @@ public partial class PortfolioOrderHistoryViewModel : BaseViewModel, IDisposable
     [RelayCommand]
     public async Task RefreshAsync()
     {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             await _cache.RefreshAsync(_auth.CurrentUserId);
             RebuildView();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error refreshing order history.");
-        }
-        finally { IsBusy = false; }
+        }, ex => _logger.LogError(ex, "Error refreshing order history."));
     }
 
     private void RebuildView()

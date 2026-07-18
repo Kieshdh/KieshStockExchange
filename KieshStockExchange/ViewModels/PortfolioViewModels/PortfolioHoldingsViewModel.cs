@@ -56,18 +56,11 @@ public partial class PortfolioHoldingsViewModel : BaseViewModel, IDisposable
     [RelayCommand]
     public async Task RefreshAsync()
     {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             await _portfolio.RefreshAsync(_auth.CurrentUserId);
             RebuildView();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error refreshing portfolio holdings.");
-        }
-        finally { IsBusy = false; }
+        }, ex => _logger.LogError(ex, "Error refreshing portfolio holdings."));
     }
 
     [RelayCommand]

@@ -65,18 +65,11 @@ public partial class UserPositionsViewModel : TradeTableViewModelBase<PositionRo
     #region Commands
     [RelayCommand] public async Task RefreshAsync()
     {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             await _portfolio.RefreshAsync(_auth.CurrentUserId);
             UpdateFromCache();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error refreshing user positions.");
-        }
-        finally { IsBusy = false; }
+        }, ex => _logger.LogError(ex, "Error refreshing user positions."));
     }
 
     #endregion

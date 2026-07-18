@@ -110,9 +110,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
     [RelayCommand]
     private async Task RefreshAsync()
     {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             await Task.WhenAll(
                 CurrenciesVm.RefreshCommand.ExecuteAsync(null),
@@ -123,12 +121,7 @@ public partial class PortfolioViewModel : BaseViewModel, IDisposable
                 FundsHistoryVm.RefreshCommand.ExecuteAsync(null));
 
             RefreshMetrics();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to refresh portfolio.");
-        }
-        finally { IsBusy = false; }
+        }, ex => _logger.LogError(ex, "Failed to refresh portfolio."));
     }
 
     private void OnPortfolioChanged(object? sender, EventArgs e) =>

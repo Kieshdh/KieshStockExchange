@@ -50,18 +50,11 @@ public partial class OpenOrdersViewModel : TradeTableViewModelBase<OpenOrderRow>
     #region Commands
     [RelayCommand] public async Task RefreshAsync()
     {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             await _cache.RefreshAsync(_auth.CurrentUserId);
             UpdateFromCache();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error refreshing open orders.");
-        }
-        finally { IsBusy = false; }
+        }, ex => _logger.LogError(ex, "Error refreshing open orders."));
     }
 
     [RelayCommand] private async Task CancelAsync(Order order)

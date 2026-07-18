@@ -40,18 +40,11 @@ public partial class PortfolioTransactionViewModel : BaseViewModel, IDisposable
     [RelayCommand]
     public async Task RefreshAsync()
     {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             await _tx.RefreshAsync(_auth.CurrentUserId);
             RebuildView();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error refreshing transaction history.");
-        }
-        finally { IsBusy = false; }
+        }, ex => _logger.LogError(ex, "Error refreshing transaction history."));
     }
 
     private void RebuildView()

@@ -42,18 +42,11 @@ public partial class TransactionHistoryViewModel : TradeTableViewModelBase<Trans
     #region Commands
     [RelayCommand] public async Task RefreshAsync()
     {
-        if (IsBusy) return;
-        IsBusy = true;
-        try
+        await RunBusyAsync(async () =>
         {
             await _tx.RefreshAsync(_auth.CurrentUserId);
             UpdateFromCache();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error refreshing transaction history.");
-        }
-        finally { IsBusy = false; }
+        }, ex => _logger.LogError(ex, "Error refreshing transaction history."));
     }
     #endregion
 
