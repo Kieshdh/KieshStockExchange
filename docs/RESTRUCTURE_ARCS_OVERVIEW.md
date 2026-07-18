@@ -63,8 +63,8 @@ shape (which the CHART arc validated in flight). **Every role runs in a SEPARATE
 - **Phase 2 — COUNCIL (Fable-5), ONLY if the planners actually conflict.** Narrow job: resolve overlaps
   into ONE ordered change-set. Skip it when the planners agree.
 - **Phase 3 — EXECUTOR: MECHANICAL MOVES ONLY.** Cut/paste members into new files, zero logic edits.
-  **Runs on the Fable 5 model (`claude-fable-5`)** (owner preference — spawn the executor agent with
-  `model: fable`). GATE = `git diff` moves-only + `dotnet build` + FULL `dotnet test` green (+ human
+  **Runs on Opus 4.8 (`claude-opus-4-8`)** (owner preference — spawn the executor agent with
+  `model: opus`). GATE = `git diff` moves-only + `dotnet build` + FULL `dotnet test` green (+ human
   eyeball for UI/XAML/gesture behaviour). The orchestrator verifies the gate independently before commit.
 
 ---
