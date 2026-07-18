@@ -248,7 +248,7 @@ public sealed partial class CandleService
         CheckKey(key);
 
         // Determine bucket-aligned time range
-        var (bucket, from, to) = AlignRange(resolution, fromUtc, toUtc);
+        var (bucket, from, to) = CandleAggregationMath.AlignRange(resolution, fromUtc, toUtc);
 
         // Load existing candles in range
         var existing = await _db.GetCandlesByStockIdAndTimeRange(
