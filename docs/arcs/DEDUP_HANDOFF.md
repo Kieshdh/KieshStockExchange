@@ -4,7 +4,7 @@
 **Rule:** at your clean stopping point, UPDATE this doc (what you just shipped + the exact next candidate),
 commit+push, THEN arm the next +5-min context-freshness timer with the continue-prompt, then STOP producing.
 
-## State (as of commit `3b8dfcd`, 2026-07-18 ~23:10)
+## State (as of commit `60ba106`, 2026-07-18 ~23:25)
 - Branch `feature/bot-market-realism-v2` = **FEATURE BRANCH — never merge/deploy to master/prod unattended**
   (prod runs `master` on the Netcup VPS; my pushes are branch backups only). Tree clean, all pushed.
 - Governing plan: `docs/arcs/DEDUP_ARC_PLAN.md` (two-pass structure, qualifying rule, HARD BANS, gate).
@@ -33,14 +33,34 @@ commit+push, THEN arm the next +5-min context-freshness timer with the continue-
   own logger + exact message → logs stay byte-identical). 31 variant sites LEFT untouched (ConfigureAwait
   bodies, no-guard, rethrow, DisplayAlert-in-catch, CTS/CancellationToken, return values, code after finally).
   Fable-5 executor + Fable-5 adversarial review (PRESERVED x10) + own read + 661/661.
+- `9c7d05c`/`f0f8c97`/`60ba106` **Server-non-CK math** (3 commits): (A) `FundamentalService.Gaussian` → one-line
+  forwarder to `BotMath.NextGaussian(_rng)` (byte-identical Box-Muller, same u1/u2 draw order → RNG stream
+  unchanged); (B) 3 token-identical `RecordFills` → `DecisionFillRecorder` static helper (pure telemetry,
+  Conviction keeps a static forwarder since its calls live in `.TradeBook.cs`); (C) 8 helpers' `MinDtSec=0.05
+  /MaxDtSec=60.0` → `BotMath.TickMin/MaxDtSec` const-from-const (same IL; MarketMood's 0.05/10.0 excluded).
+  Fable-5 executor + Fable-5 per-candidate adversarial review (PRESERVED x3) + own read + 661/661.
 - REFUSED (correctly, do NOT retry as a merge): the 5 signed-percent formatters are genuinely different
   (decimal vs double, F2/0.00/N2/%-specifier, culture, sign-at-zero) — unifying would change numbers.
 
+## ★ FINDING (2026-07-18): the SHADOW-RUN DIFFER IS INFEASIBLE — do NOT try to build it.
+The sim engine is NOT byte-reproducible run-to-run even with no code change: the tick loop is WALL-CLOCK paced
+(`dt = (now-last).TotalSeconds`, real elapsed time via `TimeHelper.NowUtc`, no fixed-step/accelerated server
+mode) AND settlement runs bots in PARALLEL groups with JITTERED-backoff retry (`OrderExecutionService`
+`Task.WhenAll` + `RetryBackoffMs` jitter). Baseline ≠ baseline, so a before/after CSV differ can't be an
+oracle. CONSEQUENCE: the arc's remaining autonomous runway = **TEXTUAL/COMPILER identities ONLY** (Pass-1
+qualifying rule). Any server-math change whose equivalence needs RUNTIME observation (true near-dup
+generalization: cohort filter-sort, arrival-prob, non-identical math) is NOT autonomously verifiable →
+route it to **Pass 2 propose-only**, do not ship unattended. (Unit-level determinism tests exist —
+`*DeterminismTests` drive helper `Tick/Step` with injected fixed dt+seed — usable to LOCK a specific
+extraction if ever needed, but that's a per-case test, not a whole-sim differ.)
+
 ## NEXT UP (in order)
-1. **Server-non-CK math** (RNG-order-sensitive → BUILD THE SHADOW-RUN DIFFER FIRST): FundamentalService
-   `.Gaussian`→`BotMath.NextGaussian` (preserve exact 2-draw order/count), `RecordFills`×3 → shared helper,
-   `MinDtSec/MaxDtSec` literals → BotMath const.
-2. NEEDS-CARE server math (careful per-site + shadow-run differ): cohort filter-sort, dt-clamp, arrival-prob.
+1. Pull the next **PROVABLY-SAFE textual/compiler identity** from `docs/arcs/DEDUP_client_INVENTORY.md` /
+   `DEDUP_shared_helpers_INVENTORY.md` (exact-duplicate extraction, rename, value-identical const hoist,
+   token-identical method → shared helper). Same proven pipeline; NO differ needed for textual identities.
+2. When the clean textual candidates are exhausted, START `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (propose-only,
+   do NOT merge) — begin with the `CloseRequested` handler-leak BUG (real fix) + the NEEDS-CARE server math
+   now blocked by the infeasible differ + the rest of the Pass-2 list below.
 
 ## MODEL ROUTING (Kiesh steer 2026-07-18): route the heavy executor + adversarial-review agents onto
 **Fable 5** (`fable`) while Kiesh's access holds — no model-level retirement (capacity/subscription window
