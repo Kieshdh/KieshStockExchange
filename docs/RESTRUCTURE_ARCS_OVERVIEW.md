@@ -173,15 +173,19 @@ only), **BracketCoordinator release seam**, **OrderBook** single `_gate` lock (`
 
 ## 7. Status
 
-- **CHART arc: DONE** (commit `61687fd`) — the precedent. `ChartViewModel` + `ChartView` → `Chart/` folders,
-  `ChartDrawingViewModel` extracted, VMs partial-carved ≤~490 lines, 619 tests green.
-- **Next up, per Kiesh's ordering:**
-  1. **Finish the chart drawing TOOLS** (the remaining chart feature work).
-  2. **A NAMING-CONVENTIONS polish arc** (the first polish arc — comment format, naming, regions).
-  3. **The server structural arcs** (backlog §6, lowest-risk-first).
-- The restructure **runs autonomously when Kiesh is away**; the CK-critical server arcs
-  (OrderExecutionService, AiTradeService, AiBotDecisionService) are **Attended** — never soak-gate or flip a
-  bake unattended.
+- **CHART arcs: ALL DONE** (branch `feature/bot-market-realism-v2`, tip `da91346`):
+  - VM/View split (`61687fd`) — `ChartViewModel`+`ChartView` → `Chart/` folders, `ChartDrawingViewModel` extracted.
+  - `CandleChartDrawable` byte-identical partial split (`2d4491f`) → 9 files.
+  - `CandleChartDrawable` **Arc-2 COMPOSITION** — reified `RenderFrame`/`ChartTheme`/`ChartGeometry` + 8 collaborator
+    classes (Axis/Candle/Indicator/Overlay/Drawing/Crosshair/Measure renderers + ChartHitTester), each step gated by
+    the `KieshStockExchange.RenderHarness` golden-image tool (byte-exact PNG + hit-test probe dumps). Spine ~544 lines.
+  - Chart tool fixes + Fib/Alert/indicator (RSI/Bollinger/VWAP) calculators shipped alongside.
+- **★ NOW (2026-07-18): the SERVER structural arcs, run FULLY AUTONOMOUSLY for multiple days on Kiesh's GREEN LIGHT**
+  (see memory `feedback_autonomous_restructure_mandate`). **The council decides the arc order** from §6 (and any
+  owner-level call); executor on **Opus 4.8**, heavy problems on **Fable 5**; **isolated agents** to keep context low.
+- **Auto vs Attended:** run only **Auto** arcs unattended (multi-class cheap wins, CandleService, AccountsCache,
+  BracketCoordinator). The CK-critical **AiTradeService / OrderExecutionService / AiBotDecisionService** are
+  **Attended** — never soak-gate or flip a bake unattended; STOP and flag them for Kiesh.
 
 ---
 
