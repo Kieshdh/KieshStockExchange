@@ -237,7 +237,7 @@ internal sealed class RotatorDecisionService
         if (sellReqs.Count > 0)
         {
             var sellResults = await _entry.PlaceTrueMarketSellBatchAsync(sellReqs, ct).ConfigureAwait(false);
-            for (int i = 0; i < sellOwners.Count; i++) RecordFills(sellOwners[i], sellResults[i]);
+            for (int i = 0; i < sellOwners.Count; i++) DecisionFillRecorder.RecordFills(sellOwners[i], sellResults[i]);
         }
 
         // Pass 2 — one BUY per firing bot, sized from the FRESH post-sell AvailableBalance and TURNOVER-CAPPED so a
@@ -258,7 +258,7 @@ internal sealed class RotatorDecisionService
         if (buyReqs.Count > 0)
         {
             var buyResults = await _entry.PlaceTrueMarketBuyBatchAsync(buyReqs, ct).ConfigureAwait(false);
-            for (int i = 0; i < buyOwners.Count; i++) RecordFills(buyOwners[i], buyResults[i]);
+            for (int i = 0; i < buyOwners.Count; i++) DecisionFillRecorder.RecordFills(buyOwners[i], buyResults[i]);
         }
     }
 
@@ -267,13 +267,6 @@ internal sealed class RotatorDecisionService
         foreach (var l in _stocks.GetListings(stockId))
             if (l.CurrencyType == ccy) return l.SeedPrice;
         return 0m;
-    }
-
-    private void RecordFills(AIUser user, OrderResult result)
-    {
-        if (result.FillTransactions.Count == 0) return;
-        for (int i = 0; i < result.FillTransactions.Count; i++)
-            user.RecordTrade(result.FillTransactions[i]);
     }
     #endregion
 }

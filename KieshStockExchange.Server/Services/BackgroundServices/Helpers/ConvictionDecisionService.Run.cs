@@ -82,10 +82,7 @@ internal sealed partial class ConvictionDecisionService
         return 0m;
     }
 
-    private void RecordFills(AIUser user, OrderResult result)
-    {
-        if (result.FillTransactions.Count == 0) return;
-        for (int i = 0; i < result.FillTransactions.Count; i++)
-            user.RecordTrade(result.FillTransactions[i]);
-    }
+    // Forwarder: call sites live in the TradeBook partial; shared impl in DecisionFillRecorder.
+    private static void RecordFills(AIUser user, OrderResult result)
+        => DecisionFillRecorder.RecordFills(user, result);
 }

@@ -290,7 +290,7 @@ internal sealed class ArbitrageDecisionService
             user.UserId, opp.StockId, p.Qty, p.Avail, opp.BuyCcy, ct).ConfigureAwait(false);
         int filled = buy.TotalFilledQuantity;
         if (filled <= 0) return opp.StockId;
-        RecordFills(user, buy);
+        DecisionFillRecorder.RecordFills(user, buy);
 
         // Leg 2 — market-sell the filled qty on the expensive book, but only the part the engine
         // confirms is available (never oversell into a short). Any unsold remainder is left as
@@ -301,7 +301,7 @@ internal sealed class ArbitrageDecisionService
 
         var sell = await _entry.PlaceTrueMarketSellOrderAsync(
             user.UserId, opp.StockId, sellable, opp.SellCcy, ct).ConfigureAwait(false);
-        RecordFills(user, sell);
+        DecisionFillRecorder.RecordFills(user, sell);
         return opp.StockId;
     }
 
@@ -331,7 +331,7 @@ internal sealed class ArbitrageDecisionService
             var buy = buyResults[i];
             int filled = buy.TotalFilledQuantity;
             if (filled <= 0) continue;
-            RecordFills(user, buy);
+            DecisionFillRecorder.RecordFills(user, buy);
 
             var afterBuy = _accounts.GetPosition(user.UserId, plan.Opp.StockId);
             int sellable = Math.Min(filled, afterBuy?.AvailableQuantity ?? 0);
@@ -345,7 +345,7 @@ internal sealed class ArbitrageDecisionService
 
         var sellResults = await _entry.PlaceTrueMarketSellBatchAsync(sellReqs, ct).ConfigureAwait(false);
         for (int i = 0; i < sellEntries.Count; i++)
-            RecordFills(sellEntries[i].User, sellResults[i]);
+            DecisionFillRecorder.RecordFills(sellEntries[i].User, sellResults[i]);
     }
 
     // Flatten any leftover position on a cross-listed stock by selling on the higher-bidding book
@@ -373,7 +373,7 @@ internal sealed class ArbitrageDecisionService
         if (qty <= 0) return null;
 
         var sell = await _entry.PlaceTrueMarketSellOrderAsync(user.UserId, stockId, qty, ccy, ct).ConfigureAwait(false);
-        RecordFills(user, sell);
+        DecisionFillRecorder.RecordFills(user, sell);
         return stockId;
     }
     #endregion
@@ -440,13 +440,6 @@ internal sealed class ArbitrageDecisionService
             if (roll <= acc) return o;
         }
         return opps[^1];
-    }
-
-    private void RecordFills(AIUser user, OrderResult result)
-    {
-        if (result.FillTransactions.Count == 0) return;
-        for (int i = 0; i < result.FillTransactions.Count; i++)
-            user.RecordTrade(result.FillTransactions[i]);
     }
 
     private static int Min4(int a, int b, int c, int d) => Math.Min(Math.Min(a, b), Math.Min(c, d));
