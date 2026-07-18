@@ -328,11 +328,6 @@ public sealed partial class CandleChartDrawable : IDrawable
         // Palette snapshot alongside the frame — renderer collaborators read the theme, not the fields.
         var theme = BuildTheme();
 
-        // Coordinate transforms from data-space to plot-space. Y routes through PriceToFrac so
-        // the log scale (and its inverse in PixelToPrice) share one definition.
-        Func<DateTime, float> X = frame.MapX;
-        Func<double, float> Y = frame.MapY;
-
         _axisRenderer.DrawYGridAndLabels(canvas, frame, theme, Candles);
         _axisRenderer.DrawXGridAndLabels(canvas, frame, theme);
 
@@ -344,10 +339,10 @@ public sealed partial class CandleChartDrawable : IDrawable
 
         _candleRenderer.DrawCandles(canvas, frame, theme, Candles, Style);
         _indicatorRenderer.DrawMovingAverages(canvas, frame, theme, MaSeries, Viewport.IsValid);
-        DrawOpenOrderLines(canvas, plot, Y, currency);
-        DrawPositionLine(canvas, plot, Y, currency);
-        DrawFillMarkers(canvas, plot, X, Y);
-        DrawTriggerMarkers(canvas, plot, X, Y);
+        _overlayRenderer.DrawOpenOrderLines(canvas, frame, theme, OpenOrderLines, DraggingOrderId, DraggingOrderPrice);
+        _overlayRenderer.DrawPositionLine(canvas, frame, theme, Position);
+        _overlayRenderer.DrawFillMarkers(canvas, frame, theme, FillMarkers, Candles);
+        _overlayRenderer.DrawTriggerMarkers(canvas, frame, theme, TriggerMarkers, Candles);
         _candleRenderer.DrawCurrentPriceLine(canvas, frame, theme, Candles, CurrentPrice, SessionOpenPrice);
         _drawingRenderer.DrawDrawings(canvas, frame, theme, Drawings,
             DraggingDrawingId, SelectedDrawingId, SelectedDrawingIds,
@@ -407,6 +402,7 @@ public sealed partial class CandleChartDrawable : IDrawable
     private readonly AxisRenderer _axisRenderer = new(RightAxisW, BottomAxisH);
     private readonly CandleRenderer _candleRenderer = new(RightAxisW);
     private readonly IndicatorRenderer _indicatorRenderer = new(RightAxisW);
+    private readonly OverlayRenderer _overlayRenderer = new(RightAxisW);
     private readonly CrosshairRenderer _crosshairRenderer = new(RightAxisW, BottomAxisH);
     private readonly DrawingRenderer _drawingRenderer = new(DrawHandleR, RightAxisW, BottomAxisH);
 

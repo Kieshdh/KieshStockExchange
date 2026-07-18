@@ -1,17 +1,22 @@
-using System.Globalization;
-using KieshStockExchange.Models;
-using KieshStockExchange.Models.ChartDrawing.Objects;
-using KieshStockExchange.Models.ChartDrawing.Style;
-using KieshStockExchange.Models.ChartDrawing.Tools;
 using KieshStockExchange.Helpers;
-using KieshStockExchange.Services.MarketDataServices.Helpers;
-using KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
-using KieshStockExchange.Services.MarketDataServices.Interfaces;
+using KieshStockExchange.Models;
 
-namespace KieshStockExchange.Services.MarketDataServices;
+namespace KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
 
-public sealed partial class CandleChartDrawable
+// Trading overlays: open-order lines, the position line, fill triangles and fired-trigger
+// arrows. Stateless renderer collaborator: geometry and transforms arrive in the RenderFrame
+// (f.Plot / f.MapX / f.MapY / f.Currency), colours/fonts in the ChartTheme, and the order/
+// position/marker inputs per call — no reference back to CandleChartDrawable. Gutter size is
+// the spine's layout const, injected once at construction (the CandleRenderer pattern).
+internal sealed class OverlayRenderer
 {
+    private readonly float RightAxisW;
+
+    public OverlayRenderer(float rightAxisW)
+    {
+        RightAxisW = rightAxisW;
+    }
+
     /// <summary>
     /// Draw a dashed horizontal line at each open-order price.  TradingView /
     /// Binance convention:
@@ -21,23 +26,25 @@ public sealed partial class CandleChartDrawable
     ///     of the plot so the user sees side + quantity at a glance without the
     ///     numbers clashing with the gridline price tags.
     /// </summary>
-    private void DrawOpenOrderLines(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)
+    public void DrawOpenOrderLines(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<OpenOrderLine> openOrderLines, int? draggingOrderId, decimal? draggingOrderPrice)
     {
-        if (OpenOrderLines.Count == 0) return;
+        if (openOrderLines.Count == 0) return;
+        var plot = f.Plot;
         canvas.SaveState();
-        for (int i = 0; i < OpenOrderLines.Count; i++)
+        for (int i = 0; i < openOrderLines.Count; i++)
         {
-            var line = OpenOrderLines[i];
-            bool dragging = DraggingOrderId == line.OrderId;
-            decimal price = dragging && DraggingOrderPrice is decimal dp ? dp : line.Price;
-            float y = Y((double)price);
+            var line = openOrderLines[i];
+            bool dragging = draggingOrderId == line.OrderId;
+            decimal price = dragging && draggingOrderPrice is decimal dp ? dp : line.Price;
+            float y = f.MapY((double)price);
             if (y < plot.Top || y > plot.Bottom) continue;
 
             // §3.6 P3: a stop trigger line is amber with a tighter dash so it stands apart
             // from the green/red resting-limit lines; limits keep the {4,4} dash + side colour.
             // §F12: a dormant bracket child draws in the same colour but at 45 % alpha to convey
             // "not live yet" — the parent hasn't filled, so the leg hasn't armed/rested either.
-            var baseColor = line.IsStop ? OpenOrderStopColor : (line.IsBuy ? OpenOrderBuyColor : OpenOrderSellColor);
+            var baseColor = line.IsStop ? t.OpenOrderStopColor : (line.IsBuy ? t.OpenOrderBuyColor : t.OpenOrderSellColor);
             var color = line.IsDormant ? baseColor.WithAlpha(0.45f) : baseColor;
             canvas.StrokeColor = color;
             canvas.StrokeSize = dragging ? 2f : 1f;
@@ -50,8 +57,8 @@ public sealed partial class CandleChartDrawable
             canvas.FillColor = color;
             canvas.FillRectangle(tagRect);
             canvas.FontColor = Colors.White;
-            canvas.FontSize = PriceTagFont;
-            canvas.DrawString(CurrencyHelper.Format(price, cur),
+            canvas.FontSize = t.PriceTagFont;
+            canvas.DrawString(CurrencyHelper.Format(price, f.Currency),
                 new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, tagRect.Height),
                 HorizontalAlignment.Left, VerticalAlignment.Center);
 
@@ -79,18 +86,19 @@ public sealed partial class CandleChartDrawable
     /// right edge, and a right-gutter tag showing the live unrealized P&L (currency on top, % below)
     /// tinted green when in profit / red when in loss. Skipped when flat or off-screen.
     /// </summary>
-    private void DrawPositionLine(ICanvas canvas, RectF plot, Func<double, float> Y, CurrencyType cur)
+    public void DrawPositionLine(ICanvas canvas, RenderFrame f, ChartTheme t, PositionLine? position)
     {
-        if (Position is not PositionLine pos || pos.Quantity == 0m) return;
-        float y = Y((double)pos.AvgPrice);
+        if (position is not PositionLine pos || pos.Quantity == 0m) return;
+        var plot = f.Plot;
+        float y = f.MapY((double)pos.AvgPrice);
         if (y < plot.Top || y > plot.Bottom) return;
 
         bool profit = pos.UnrealizedPnl >= 0m;
-        var pnlColor = profit ? Bull : Bear;
+        var pnlColor = profit ? t.Bull : t.Bear;
 
         canvas.SaveState();
         // Solid line — contrasts with the dashed order / live-price lines.
-        canvas.StrokeColor = PositionLineColor;
+        canvas.StrokeColor = t.PositionLineColor;
         canvas.StrokeSize = 1.5f;
         canvas.DrawLine(plot.Left, y, plot.Right, y);
 
@@ -99,10 +107,10 @@ public sealed partial class CandleChartDrawable
         string sizeText = $"{(isLong ? "LONG" : "SHORT")} {Math.Abs(pos.Quantity):0.####}";
         float sizeW = Math.Max(52f, sizeText.Length * 7f);
         var sizeRect = new RectF(plot.Right - sizeW - 4f, y - 8, sizeW, 16);
-        canvas.FillColor = PositionLineColor;
+        canvas.FillColor = t.PositionLineColor;
         canvas.FillRectangle(sizeRect);
         canvas.FontColor = Colors.White;
-        canvas.FontSize = PriceTagFont;
+        canvas.FontSize = t.PriceTagFont;
         canvas.DrawString(sizeText, sizeRect, HorizontalAlignment.Center, VerticalAlignment.Center);
 
         // Right-gutter P&L tag: currency on top, % below, tinted by profit/loss.
@@ -110,11 +118,11 @@ public sealed partial class CandleChartDrawable
         canvas.FillColor = pnlColor;
         canvas.FillRectangle(tagRect);
         canvas.FontColor = Colors.White;
-        canvas.FontSize = PriceTagFont;
-        canvas.DrawString($"{(pos.UnrealizedPnl >= 0m ? "+" : "")}{CurrencyHelper.Format(pos.UnrealizedPnl, cur)}",
+        canvas.FontSize = t.PriceTagFont;
+        canvas.DrawString($"{(pos.UnrealizedPnl >= 0m ? "+" : "")}{CurrencyHelper.Format(pos.UnrealizedPnl, f.Currency)}",
             new RectF(tagRect.X + 3, tagRect.Y, tagRect.Width - 6, 14f),
             HorizontalAlignment.Left, VerticalAlignment.Top);
-        canvas.FontSize = PriceTagFont - 1f;
+        canvas.FontSize = t.PriceTagFont - 1f;
         canvas.DrawString($"{(pos.UnrealizedPct >= 0 ? "+" : "")}{pos.UnrealizedPct:0.00}%",
             new RectF(tagRect.X + 3, tagRect.Y + 13f, tagRect.Width - 6, 12f),
             HorizontalAlignment.Left, VerticalAlignment.Center);
@@ -127,22 +135,24 @@ public sealed partial class CandleChartDrawable
     /// a sell is a down-pointing triangle just ABOVE the price (apex pointing down at it). The
     /// base is short and the sides long so the markers read as crisp arrows, not blobs.
     /// </summary>
-    private void DrawFillMarkers(ICanvas canvas, RectF plot, Func<DateTime, float> X, Func<double, float> Y)
+    public void DrawFillMarkers(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<FillMarker> fillMarkers, IReadOnlyList<Candle> candles)
     {
-        if (FillMarkers.Count == 0) return;
+        if (fillMarkers.Count == 0) return;
+        var plot = f.Plot;
         const float baseHalf = 4f;  // half the (short) base → 8px wide
         const float height = 16f;   // long sides → tall arrow
         const float gap = 5f;       // offset between the apex and the fill price
-        var outline = OutlineForBackground();
+        var outline = t.Outline();
         canvas.SaveState();
-        for (int i = 0; i < FillMarkers.Count; i++)
+        for (int i = 0; i < fillMarkers.Count; i++)
         {
-            var m = FillMarkers[i];
+            var m = fillMarkers[i];
             // Snap to the center of the candle that contains the fill time so the arrow lines up
             // with its bar (esp. on higher timeframes) instead of landing between two candles.
-            float x = SnapToCandleCenterX(m.AtTime, X);
+            float x = SnapToCandleCenterX(f, candles, m.AtTime);
             if (x < plot.Left || x > plot.Right) continue;
-            float yPrice = Y((double)m.Price);
+            float yPrice = f.MapY((double)m.Price);
             if (yPrice < plot.Top || yPrice > plot.Bottom) continue;
 
             var path = new PathF();
@@ -155,7 +165,7 @@ public sealed partial class CandleChartDrawable
                 path.LineTo(x - baseHalf, baseY);
                 path.LineTo(x + baseHalf, baseY);
                 path.Close();
-                canvas.FillColor = FillBuyColor;
+                canvas.FillColor = t.FillBuyColor;
             }
             else
             {
@@ -166,7 +176,7 @@ public sealed partial class CandleChartDrawable
                 path.LineTo(x - baseHalf, baseY);
                 path.LineTo(x + baseHalf, baseY);
                 path.Close();
-                canvas.FillColor = FillSellColor;
+                canvas.FillColor = t.FillSellColor;
             }
             canvas.FillPath(path);
             // Theme-aware outline: keeps the arrow legible against both candles and the background.
@@ -183,19 +193,21 @@ public sealed partial class CandleChartDrawable
     /// two distinct things: "filled here" (solid green/red) vs "trigger crossed here" (blue arrow).
     /// Up for a buy trigger, down for a sell.
     /// </summary>
-    private void DrawTriggerMarkers(ICanvas canvas, RectF plot, Func<DateTime, float> X, Func<double, float> Y)
+    public void DrawTriggerMarkers(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<TriggerMarker> triggerMarkers, IReadOnlyList<Candle> candles)
     {
-        if (TriggerMarkers.Count == 0) return;
+        if (triggerMarkers.Count == 0) return;
+        var plot = f.Plot;
         const float baseHalf = 6f;  // wider than the fill triangle (4f)
         const float height = 18f;   // taller too
         const float gap = 6f;
         canvas.SaveState();
-        for (int i = 0; i < TriggerMarkers.Count; i++)
+        for (int i = 0; i < triggerMarkers.Count; i++)
         {
-            var m = TriggerMarkers[i];
-            float x = SnapToCandleCenterX(m.AtTime, X);
+            var m = triggerMarkers[i];
+            float x = SnapToCandleCenterX(f, candles, m.AtTime);
             if (x < plot.Left || x > plot.Right) continue;
-            float yPrice = Y((double)m.Price);
+            float yPrice = f.MapY((double)m.Price);
             if (yPrice < plot.Top || yPrice > plot.Bottom) continue;
 
             var path = new PathF();
@@ -220,35 +232,28 @@ public sealed partial class CandleChartDrawable
                 path.Close();
             }
             // Hollow: low-alpha blue wash + a bold blue outline, vs the fill triangle's solid fill.
-            canvas.FillColor = TriggerColor.WithAlpha(0.22f);
+            canvas.FillColor = t.TriggerColor.WithAlpha(0.22f);
             canvas.FillPath(path);
-            canvas.StrokeColor = TriggerColor;
+            canvas.StrokeColor = t.TriggerColor;
             canvas.StrokeSize = 2f;
             canvas.DrawPath(path);
         }
         canvas.RestoreState();
     }
 
-    // Center x of the candle bucket that contains t; falls back to the raw time x when no candle
+    // Center x of the candle bucket that contains time; falls back to the raw time x when no candle
     // covers it (a fill in a gap / outside the loaded slice).
-    private float SnapToCandleCenterX(DateTime t, Func<DateTime, float> X)
+    private static float SnapToCandleCenterX(RenderFrame f, IReadOnlyList<Candle> candles, DateTime time)
     {
-        int lo = 0, hi = Candles.Count - 1;
+        int lo = 0, hi = candles.Count - 1;
         while (lo <= hi)
         {
             int mid = lo + ((hi - lo) >> 1);
-            var c = Candles[mid];
-            if (t < c.OpenTime) hi = mid - 1;
-            else if (t >= c.CloseTime) lo = mid + 1;
-            else return (X(c.OpenTime) + X(c.CloseTime)) * 0.5f;
+            var c = candles[mid];
+            if (time < c.OpenTime) hi = mid - 1;
+            else if (time >= c.CloseTime) lo = mid + 1;
+            else return (f.MapX(c.OpenTime) + f.MapX(c.CloseTime)) * 0.5f;
         }
-        return X(t);
-    }
-
-    // Dark background → light outline, light background → dark outline (relative luminance).
-    private Color OutlineForBackground()
-    {
-        double lum = 0.299 * Bg.Red + 0.587 * Bg.Green + 0.114 * Bg.Blue;
-        return lum < 0.5 ? Color.FromRgba(1f, 1f, 1f, 0.85f) : Color.FromRgba(0f, 0f, 0f, 0.85f);
+        return f.MapX(time);
     }
 }
