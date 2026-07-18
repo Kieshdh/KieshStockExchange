@@ -14,6 +14,7 @@ namespace KieshStockExchange.Tests;
 /// that with every lever OFF the cap decision is exactly today's (byte-identical control path), which the
 /// 430-suite cannot show because it never instantiates the scaler.
 /// </summary>
+[Collection("ClockSerial")]
 public sealed class BotScalerOnTickTests : IDisposable
 {
     // §B levers are wall-clock/EWMA driven, NOT part of seed replay; the clock is a process-static Func,
@@ -199,3 +200,7 @@ public sealed class BotScalerOnTickTests : IDisposable
         Assert.True(shrink < 1000, $"expected the unset/off path to shrink like today, got {shrink}");
     }
 }
+
+/// <summary>Serial collection so the process-global <see cref="TimeHelper.NowUtc"/> clock can't leak across parallel tests.</summary>
+[CollectionDefinition("ClockSerial", DisableParallelization = true)]
+public sealed class ClockSerialCollection { }

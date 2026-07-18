@@ -14,6 +14,7 @@ namespace KieshStockExchange.Tests;
 /// and (2) an extreme estimate never escapes the hard band AND the OU still diffuses (the parked-at-the-band
 /// diffusion-death pathology is guarded).
 /// </summary>
+[Collection("ClockSerial")]
 public class BankEstimateAnchorPivotTests
 {
     private const CurrencyType Usd = CurrencyType.USD;

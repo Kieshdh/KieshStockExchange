@@ -28,6 +28,7 @@ namespace KieshStockExchange.Tests;
 /// touched top so later scans in the tick see the moved book. Fills are reported as 0 (empty txs) — the
 /// consumption alone drives the scan divergence, applied identically to both arms, isolating the map.
 /// </summary>
+[Collection("ClockSerial")]
 public class SharedScanEquivalenceTests
 {
     private const CurrencyType USD = CurrencyType.USD;
