@@ -4,7 +4,7 @@
 **Rule:** at your clean stopping point, UPDATE this doc (what you just shipped + the exact next candidate),
 commit+push, THEN arm the next +5-min context-freshness timer with the continue-prompt, then STOP producing.
 
-## State (as of commit `483dd5e`, 2026-07-18 ~22:35)
+## State (as of commit `3b8dfcd`, 2026-07-18 ~23:10)
 - Branch `feature/bot-market-realism-v2` = **FEATURE BRANCH — never merge/deploy to master/prod unattended**
   (prod runs `master` on the Netcup VPS; my pushes are branch backups only). Tree clean, all pushed.
 - Governing plan: `docs/arcs/DEDUP_ARC_PLAN.md` (two-pass structure, qualifying rule, HARD BANS, gate).
@@ -27,18 +27,24 @@ commit+push, THEN arm the next +5-min context-freshness timer with the continue-
 - `a1878bf` ParsingHelper `class`→`static class` (compiler-proven).
 - `d6e9635` GetListAsync<T> — 29 list-GET call sites generalized.
 - `483dd5e` SymbolOrDash extension — 8 sites.
+- `3b8dfcd` **RunBusyAsync base-VM helper** — 9 byte-identical `RefreshAsync` busy-guards routed through a new
+  `protected async Task RunBusyAsync(Func<Task> work, Action<Exception> onError)` on `BaseViewModel`.
+  DESIGN NOTE: base VM has NO logger, so the catch/log is passed as an `onError` delegate (each VM keeps its
+  own logger + exact message → logs stay byte-identical). 31 variant sites LEFT untouched (ConfigureAwait
+  bodies, no-guard, rethrow, DisplayAlert-in-catch, CTS/CancellationToken, return values, code after finally).
+  Fable-5 executor + Fable-5 adversarial review (PRESERVED x10) + own read + 661/661.
 - REFUSED (correctly, do NOT retry as a merge): the 5 signed-percent formatters are genuinely different
   (decimal vs double, F2/0.00/N2/%-specifier, culture, sign-at-zero) — unifying would change numbers.
 
 ## NEXT UP (in order)
-1. **RunBusyAsync base-VM helper** (~22 `RefreshAsync` busy-guards; client, non-CK, NEEDS-CARE). Pattern:
-   `if(IsBusy)return; IsBusy=true; try{...}catch(ex){log}finally{IsBusy=false;}`. Add a protected
-   `RunBusyAsync(Func<Task> work,...)` on the base VM; route ONLY sites whose guard/catch/finally is
-   byte-identical; leave variants (different catch, no-guard, extra logic). Per-site adversarial review.
-2. **Server-non-CK math** (RNG-order-sensitive → BUILD THE SHADOW-RUN DIFFER FIRST): FundamentalService
+1. **Server-non-CK math** (RNG-order-sensitive → BUILD THE SHADOW-RUN DIFFER FIRST): FundamentalService
    `.Gaussian`→`BotMath.NextGaussian` (preserve exact 2-draw order/count), `RecordFills`×3 → shared helper,
    `MinDtSec/MaxDtSec` literals → BotMath const.
-3. NEEDS-CARE server math (careful per-site + shadow-run differ): cohort filter-sort, dt-clamp, arrival-prob.
+2. NEEDS-CARE server math (careful per-site + shadow-run differ): cohort filter-sort, dt-clamp, arrival-prob.
+
+## MODEL ROUTING (Kiesh steer 2026-07-18): route the heavy executor + adversarial-review agents onto
+**Fable 5** (`fable`) while Kiesh's access holds — no model-level retirement (capacity/subscription window
+only); resume on Opus 4.8 when access lapses. RunBusyAsync (`3b8dfcd`) was done this way.
 
 ## PASS-2 — PROPOSE-ONLY doc for Kiesh (build `docs/arcs/DEDUP_PASS2_PROPOSALS.md`; do NOT merge)
 ReservationMath client/server drift (CK), OrderValidator overlap, lot-math sharing, `int.TryParse`→
