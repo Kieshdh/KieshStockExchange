@@ -333,8 +333,8 @@ public sealed partial class CandleChartDrawable : IDrawable
         Func<DateTime, float> X = frame.MapX;
         Func<double, float> Y = frame.MapY;
 
-        DrawYGridAndLabels(canvas, plot, yMin, yMax, currency);
-        DrawXGridAndLabels(canvas, plot, tMin, tMax);
+        _axisRenderer.DrawYGridAndLabels(canvas, frame, theme, Candles);
+        _axisRenderer.DrawXGridAndLabels(canvas, frame, theme);
 
         // Overlay-mode volume renders BEFORE candles so the bars sit visually
         // behind them (TradingView style). Sub-pane mode renders after the
@@ -404,6 +404,7 @@ public sealed partial class CandleChartDrawable : IDrawable
 
     // Renderer collaborators (Helpers/Drawing) — stateless, fed (canvas, frame, theme, inputs) per paint.
     private readonly MeasureRenderer _measureRenderer = new();
+    private readonly AxisRenderer _axisRenderer = new(RightAxisW, BottomAxisH);
     private readonly CrosshairRenderer _crosshairRenderer = new(RightAxisW, BottomAxisH);
     private readonly DrawingRenderer _drawingRenderer = new(DrawHandleR, RightAxisW, BottomAxisH);
 
