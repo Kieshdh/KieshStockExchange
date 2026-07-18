@@ -77,13 +77,21 @@ route it to **Pass 2 propose-only**, do not ship unattended. (Unit-level determi
 `*DeterminismTests` drive helper `Tick/Step` with injected fixed dt+seed — usable to LOCK a specific
 extraction if ever needed, but that's a per-case test, not a whole-sim differ.)
 
-## NEXT UP (in order) — remaining PROVABLY-SAFE textual identities (client/shared inventories)
-1. **shared #15** (`InvertedBoolConverter`: **dep-check CommunityToolkit.Maui FIRST** — only delete+repoint XAML
-   if the package is referenced AND has a drop-in inverted-bool converter; the XAML converter-reference edit is an
-   EYEBALL item, so if in any doubt DEFER to Pass-2 rather than editing XAML unattended). Optional tiny follow-up:
-   the `LoginPage.OnRegisterClicked` SafeLoad route noted in DONE above (client, same pipeline as #10). After these,
-   clean autonomous textual candidates are EXHAUSTED → move to the Pass-2 propose-only doc (item 2 below). NO differ
-   needed for textual identities. **MODEL ROUTING: Fable-5
+## ★ PASS-1 AUTONOMOUS TEXTUAL CANDIDATES = EXHAUSTED (2026-07-19). AWAITING KIESH REVIEW of Pass-2.
+The cleanly-autonomous textual/compiler-identity dedups are all shipped (see DONE list). **#15 assessed →
+LEAVE AS-IS** (CommunityToolkit.Maui IS referenced, but its typed converter throws on null/non-bool where the
+local one defensively returns true/false → not a behaviour-preserving drop-in; low value, real risk — details
+in the Pass-2 doc). Everything remaining needs OWNER judgment (behaviour change / XAML-eyeball / money-CK / a
+real bug) → captured in **`docs/arcs/DEDUP_PASS2_PROPOSALS.md`** (propose-only, NOT merged):
+- P2-1 `CloseRequested` handler-leak BUG (9 popups; genuine fix; needs popup base + per-VM idempotent Dispose + XAML-eyeball)
+- P2-2 InvertedBoolConverter (recommend leave), P2-3 LoginPage.OnRegisterClicked SafeLoad (tiny optional)
+- P2-4 structural client bases (PortfolioTableVMBase, DateRangeTableVM<T>, ModalFormVM, ...), P2-5 money/CK
+  (ReservationMath drift — CK soak, OrderValidator overlap, cost-basis lot math), P2-6 int.TryParse→ParsingHelper.
+
+**No more autonomous CODE candidates remain without Kiesh's decisions.** A resumed session should either (a) keep
+EXPANDING the Pass-2 doc with more diff-sketches (doc-only, disk-free) if Kiesh wants, or (b) if Kiesh has picked
+Pass-2 items to execute, run them via the proven pipeline (many are XAML-eyeball / CK → confirm scope first).
+The Attended giants (AiTradeService / OES / AiBotDecision) + BracketCoordinator remain owner-gated as always. **MODEL ROUTING: Fable-5
    access window closed 2026-07-18 → default executor + adversarial-review agents to Opus 4.8 (`model` omitted or
    "sonnet"/opus); only try Fable if you have positive evidence access is back.**
 2. When the clean textual candidates are exhausted, START `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (propose-only,
