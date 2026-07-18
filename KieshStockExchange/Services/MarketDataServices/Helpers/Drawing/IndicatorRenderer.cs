@@ -1,32 +1,38 @@
-using System.Globalization;
 using KieshStockExchange.Models;
-using KieshStockExchange.Models.ChartDrawing.Objects;
-using KieshStockExchange.Models.ChartDrawing.Style;
-using KieshStockExchange.Models.ChartDrawing.Tools;
-using KieshStockExchange.Helpers;
-using KieshStockExchange.Services.MarketDataServices.Helpers;
-using KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
-using KieshStockExchange.Services.MarketDataServices.Interfaces;
 
-namespace KieshStockExchange.Services.MarketDataServices;
+namespace KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
 
-public sealed partial class CandleChartDrawable
+// Indicator passes: MA polylines over the price plot, volume bars (overlay or sub-pane),
+// the Fear/Greed mood strip, and the order-book depth histogram. Stateless renderer
+// collaborator: geometry and transforms arrive in the RenderFrame (f.VolRect / f.MoodRect /
+// f.Bucket carry the pane rects + half-bucket MA shift), colours/fonts in the ChartTheme,
+// and the series per call — no reference back to CandleChartDrawable. Gutter size is the
+// spine's layout const, injected once at construction (the CandleRenderer pattern).
+internal sealed class IndicatorRenderer
 {
-    private void DrawMovingAverages(ICanvas canvas, RectF plot,
-        DateTime tMin, DateTime tMax, double yMin, double yMax,
-        Func<DateTime, float> X, Func<double, float> Y)
-    {
-        if (MaSeries.Count == 0) return;
+    private readonly float RightAxisW;
 
-        // MaPoint.AtTime is OpenTime; shift to candle centre so the line tracks
-        // the middle of each bucket rather than the left edge.
-        var halfBucket = Viewport.IsValid
-            ? TimeSpan.FromTicks(Viewport.Bucket.Ticks / 2)
+    public IndicatorRenderer(float rightAxisW)
+    {
+        RightAxisW = rightAxisW;
+    }
+
+    public void DrawMovingAverages(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<MovingAverageSeries> maSeries, bool viewportValid)
+    {
+        if (maSeries.Count == 0) return;
+
+        // MaPoint.AtTime is OpenTime; shift to candle centre so the line tracks the middle
+        // of each bucket rather than the left edge. Guard on the source viewport's validity
+        // (Bucket > 0 AND ViewEnd > ViewStart), not just Bucket > 0, to match the pre-split
+        // behaviour exactly — a degenerate range with a positive bucket must not shift.
+        var halfBucket = viewportValid
+            ? TimeSpan.FromTicks(f.Bucket.Ticks / 2)
             : TimeSpan.Zero;
 
         canvas.SaveState();
         canvas.StrokeSize = 1.5f;
-        foreach (var series in MaSeries)
+        foreach (var series in maSeries)
         {
             var pts = series.Points;
             if (pts == null || pts.Count == 0) continue;
@@ -37,13 +43,13 @@ public sealed partial class CandleChartDrawable
             for (int i = 0; i < pts.Count; i++)
             {
                 var p = pts[i];
-                var t = p.AtTime + halfBucket;
-                if (t < tMin) continue;
-                if (t > tMax) break;
-                if (p.Value < yMin || p.Value > yMax) { started = false; continue; }
+                var time = p.AtTime + halfBucket;
+                if (time < f.TMin) continue;
+                if (time > f.TMax) break;
+                if (p.Value < f.YMin || p.Value > f.YMax) { started = false; continue; }
 
-                float px = X(t);
-                float py = Y(p.Value);
+                float px = f.MapX(time);
+                float py = f.MapY(p.Value);
                 if (!started) { path.MoveTo(px, py); started = true; }
                 else path.LineTo(px, py);
             }
@@ -52,35 +58,38 @@ public sealed partial class CandleChartDrawable
         canvas.RestoreState();
     }
 
-    private void DrawVolume(ICanvas canvas, RectF volRect, Func<DateTime, float> X)
+    public void DrawVolume(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<Candle> candles, bool overlayVolume)
     {
+        var volRect = f.VolRect;
+
         // Sub-pane mode draws a border so the panel reads as distinct. Overlay
         // mode shares the price plot's rectangle so a second border would just
         // cut a horizontal line across the chart.
-        if (!OverlayVolume)
+        if (!overlayVolume)
         {
-            canvas.StrokeColor = Grid;
+            canvas.StrokeColor = t.Grid;
             canvas.StrokeSize = 1f;
             canvas.DrawRectangle(volRect);
         }
 
-        if (Candles.Count == 0) return;
+        if (candles.Count == 0) return;
 
         long maxVol = 0L;
-        for (int i = 0; i < Candles.Count; i++)
-            if (Candles[i].Volume > maxVol) maxVol = Candles[i].Volume;
+        for (int i = 0; i < candles.Count; i++)
+            if (candles[i].Volume > maxVol) maxVol = candles[i].Volume;
         if (maxVol <= 0) return;
 
         // Overlay mode lowers alpha further so candles drawn on top stay legible.
-        float overlayAlpha = OverlayVolume ? 0.35f : 0.6f;
-        var bullTint = VolumeBullTint.Alpha > 0 ? VolumeBullTint : Bull.WithAlpha(overlayAlpha);
-        var bearTint = VolumeBearTint.Alpha > 0 ? VolumeBearTint : Bear.WithAlpha(overlayAlpha);
+        float overlayAlpha = overlayVolume ? 0.35f : 0.6f;
+        var bullTint = t.VolumeBullTint.Alpha > 0 ? t.VolumeBullTint : t.Bull.WithAlpha(overlayAlpha);
+        var bearTint = t.VolumeBearTint.Alpha > 0 ? t.VolumeBearTint : t.Bear.WithAlpha(overlayAlpha);
 
-        for (int i = 0; i < Candles.Count; i++)
+        for (int i = 0; i < candles.Count; i++)
         {
-            var c = Candles[i];
-            float xOpen = X(c.OpenTime);
-            float xClose = X(c.CloseTime);
+            var c = candles[i];
+            float xOpen = f.MapX(c.OpenTime);
+            float xClose = f.MapX(c.CloseTime);
             float cx = (xOpen + xClose) * 0.5f;
             float bodyW = Math.Max(1f, Math.Abs(xClose - xOpen) * 0.7f);
 
@@ -95,13 +104,16 @@ public sealed partial class CandleChartDrawable
     /// <summary>
     /// §market-mood: draw the accumulated Fear/Greed series in its own sub-pane on a FIXED 0..100 scale.
     /// Red band below 30 (fear) and green band above 70 (greed) wash the zones; 0/50/100 gridlines label
-    /// the axis; the line is plotted against the shared X() time transform so it lines up with the candles.
+    /// the axis; the line is plotted against the shared MapX time transform so it lines up with the candles.
     /// A current-value pill (score + label) sits top-left of the strip.
     /// </summary>
-    private void DrawMood(ICanvas canvas, RectF r, Func<DateTime, float> X, DateTime tMin, DateTime tMax)
+    public void DrawMood(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<(DateTime Time, double Value)> moodSeries)
     {
+        var r = f.MoodRect;
+
         // Sub-pane border, matching the volume sub-pane.
-        canvas.StrokeColor = Grid;
+        canvas.StrokeColor = t.Grid;
         canvas.StrokeSize = 1f;
         canvas.DrawRectangle(r);
 
@@ -109,18 +121,18 @@ public sealed partial class CandleChartDrawable
 
         // Fear (<30) / greed (>70) zone washes so the strip reads at a glance.
         float y30 = MoodY(30), y70 = MoodY(70);
-        canvas.FillColor = Bear.WithAlpha(0.10f);
+        canvas.FillColor = t.Bear.WithAlpha(0.10f);
         canvas.FillRectangle(r.X, y30, r.Width, r.Bottom - y30);
-        canvas.FillColor = Bull.WithAlpha(0.10f);
+        canvas.FillColor = t.Bull.WithAlpha(0.10f);
         canvas.FillRectangle(r.X, r.Y, r.Width, y70 - r.Y);
 
         // 0 / 50 / 100 gridlines + right-gutter labels.
-        canvas.FontColor = Axis;
-        canvas.FontSize = AxisFont;
+        canvas.FontColor = t.Axis;
+        canvas.FontSize = t.AxisFont;
         foreach (var lvl in new[] { 0.0, 50.0, 100.0 })
         {
             float y = MoodY(lvl);
-            canvas.StrokeColor = Grid.WithAlpha(0.5f);
+            canvas.StrokeColor = t.Grid.WithAlpha(0.5f);
             canvas.StrokeSize = 1f;
             canvas.DrawLine(r.Left, y, r.Right, y);
             canvas.DrawString($"{lvl:0}",
@@ -129,34 +141,34 @@ public sealed partial class CandleChartDrawable
         }
 
         // Accumulated series polyline. Clipped to the visible time window; values map on the fixed scale.
-        if (MoodSeries.Count > 0)
+        if (moodSeries.Count > 0)
         {
             var path = new PathF();
             bool started = false;
-            for (int i = 0; i < MoodSeries.Count; i++)
+            for (int i = 0; i < moodSeries.Count; i++)
             {
-                var (t, v) = MoodSeries[i];
-                if (t < tMin || t > tMax) { started = false; continue; }
-                float px = X(t), py = MoodY(v);
+                var (time, v) = moodSeries[i];
+                if (time < f.TMin || time > f.TMax) { started = false; continue; }
+                float px = f.MapX(time), py = MoodY(v);
                 if (!started) { path.MoveTo(px, py); started = true; }
                 else path.LineTo(px, py);
             }
-            canvas.StrokeColor = MoodLineColor;
+            canvas.StrokeColor = t.MoodLineColor;
             canvas.StrokeSize = 1.6f;
             canvas.StrokeLineJoin = LineJoin.Round;
             canvas.DrawPath(path);
 
             // Current-value pill top-left: latest score + fear/greed word, tinted by zone.
-            double latest = MoodSeries[^1].Value;
-            var (word, tint) = latest >= 70 ? ("Greed", Bull)
-                             : latest <= 30 ? ("Fear", Bear)
-                             : ("Neutral", MoodLineColor);
+            double latest = moodSeries[^1].Value;
+            var (word, tint) = latest >= 70 ? ("Greed", t.Bull)
+                             : latest <= 30 ? ("Fear", t.Bear)
+                             : ("Neutral", t.MoodLineColor);
             string label = $"Mood {latest:0}  {word}";
             var pill = new RectF(r.Left + 4, r.Top + 3, Math.Max(96f, label.Length * 6.5f), 15f);
             canvas.FillColor = tint.WithAlpha(0.85f);
             canvas.FillRectangle(pill);
             canvas.FontColor = Colors.White;
-            canvas.FontSize = AxisFont;
+            canvas.FontSize = t.AxisFont;
             canvas.DrawString(label, new RectF(pill.X + 4, pill.Y, pill.Width - 6, pill.Height),
                 HorizontalAlignment.Left, VerticalAlignment.Center);
         }
@@ -164,20 +176,23 @@ public sealed partial class CandleChartDrawable
 
     /// <summary>
     /// §depth-overlay: draw the live order-book resting liquidity as a horizontal histogram in the right
-    /// portion of the price plot. Each level is a thin bar at Y(price), anchored at the plot's right edge
+    /// portion of the price plot. Each level is a thin bar at MapY(price), anchored at the plot's right edge
     /// and extending left by (level.Quantity / maxQuantity) × a fraction of the plot width. Bids paint
     /// green, asks red, both at low alpha so the candles underneath stay legible. Levels whose price is
     /// outside the visible Y range are skipped (they'd land off-plot anyway).
     /// </summary>
-    private void DrawDepth(ICanvas canvas, RectF plot, Func<double, float> Y)
+    public void DrawDepth(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<DepthLevel> depthLevels)
     {
-        if (DepthLevels.Count == 0) return;
+        if (depthLevels.Count == 0) return;
+
+        var plot = f.Plot;
 
         // Normalize against the largest level so the biggest bar spans MaxDepthBarFrac of the plot width
         // and every other bar scales in proportion — a relative "where's the liquidity" read.
         decimal maxQty = 0m;
-        for (int i = 0; i < DepthLevels.Count; i++)
-            if (DepthLevels[i].Quantity > maxQty) maxQty = DepthLevels[i].Quantity;
+        for (int i = 0; i < depthLevels.Count; i++)
+            if (depthLevels[i].Quantity > maxQty) maxQty = depthLevels[i].Quantity;
         if (maxQty <= 0m) return;
 
         const float MaxDepthBarFrac = 0.30f;  // biggest bar reaches 30% of the plot width in from the right
@@ -185,16 +200,16 @@ public sealed partial class CandleChartDrawable
         float maxW = plot.Width * MaxDepthBarFrac;
 
         canvas.SaveState();
-        for (int i = 0; i < DepthLevels.Count; i++)
+        for (int i = 0; i < depthLevels.Count; i++)
         {
-            var lvl = DepthLevels[i];
-            float y = Y((double)lvl.Price);
+            var lvl = depthLevels[i];
+            float y = f.MapY((double)lvl.Price);
             if (y < plot.Top || y > plot.Bottom) continue;  // off-screen level
 
             float w = (float)((double)(lvl.Quantity / maxQty) * maxW);
             if (w < 1f) w = 1f;
             // Low alpha keeps price legible; bids green, asks red (Binance/TradingView convention).
-            canvas.FillColor = (lvl.IsBid ? Bull : Bear).WithAlpha(0.22f);
+            canvas.FillColor = (lvl.IsBid ? t.Bull : t.Bear).WithAlpha(0.22f);
             canvas.FillRectangle(plot.Right - w, y - BarHalfH, w, BarHalfH * 2f);
         }
         canvas.RestoreState();

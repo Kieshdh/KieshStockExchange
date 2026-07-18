@@ -340,10 +340,10 @@ public sealed partial class CandleChartDrawable : IDrawable
         // behind them (TradingView style). Sub-pane mode renders after the
         // border below so it lives in its own panel.
         if (volRect.Height > 0 && OverlayVolume)
-            DrawVolume(canvas, volRect, X);
+            _indicatorRenderer.DrawVolume(canvas, frame, theme, Candles, OverlayVolume);
 
         _candleRenderer.DrawCandles(canvas, frame, theme, Candles, Style);
-        DrawMovingAverages(canvas, plot, tMin, tMax, yMin, yMax, X, Y);
+        _indicatorRenderer.DrawMovingAverages(canvas, frame, theme, MaSeries, Viewport.IsValid);
         DrawOpenOrderLines(canvas, plot, Y, currency);
         DrawPositionLine(canvas, plot, Y, currency);
         DrawFillMarkers(canvas, plot, X, Y);
@@ -359,15 +359,15 @@ public sealed partial class CandleChartDrawable : IDrawable
         canvas.DrawRectangle(plot);
 
         if (volRect.Height > 0 && !OverlayVolume)
-            DrawVolume(canvas, volRect, X);
+            _indicatorRenderer.DrawVolume(canvas, frame, theme, Candles, OverlayVolume);
 
-        // §market-mood: the Fear/Greed sub-pane, plotted against the same X() time transform as the candles.
+        // §market-mood: the Fear/Greed sub-pane, plotted against the same MapX time transform as the candles.
         if (moodRect.Height > 0)
-            DrawMood(canvas, moodRect, X, tMin, tMax);
+            _indicatorRenderer.DrawMood(canvas, frame, theme, MoodSeries);
 
         // §depth-overlay: resting-liquidity heatmap in the right portion of the price plot.
         if (ShowDepth)
-            DrawDepth(canvas, plot, Y);
+            _indicatorRenderer.DrawDepth(canvas, frame, theme, DepthLevels);
 
         // Crosshair sits on top of everything else so it stays visible against candles.
         _crosshairRenderer.DrawCrosshair(canvas, frame, theme, Crosshair, Candles);
@@ -406,6 +406,7 @@ public sealed partial class CandleChartDrawable : IDrawable
     private readonly MeasureRenderer _measureRenderer = new();
     private readonly AxisRenderer _axisRenderer = new(RightAxisW, BottomAxisH);
     private readonly CandleRenderer _candleRenderer = new(RightAxisW);
+    private readonly IndicatorRenderer _indicatorRenderer = new(RightAxisW);
     private readonly CrosshairRenderer _crosshairRenderer = new(RightAxisW, BottomAxisH);
     private readonly DrawingRenderer _drawingRenderer = new(DrawHandleR, RightAxisW, BottomAxisH);
 
