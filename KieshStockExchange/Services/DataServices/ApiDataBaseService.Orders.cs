@@ -9,8 +9,8 @@ namespace KieshStockExchange.Services.DataServices;
 
 public sealed partial class ApiDataBaseService
 {
-    public async Task<List<Order>> GetOrdersAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Order>>("api/orders", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Order>> GetOrdersAsync(CancellationToken ct = default)
+        => GetListAsync<Order>("api/orders", ct);
 
     public async Task<(List<Order> Items, int Total)> GetOrdersPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, string? statusFilter, int? userIdFilter = null, int? stockIdFilter = null, string? sideFilter = null, string? typeFilter = null, IList<int>? excludeUserIds = null, CancellationToken ct = default)
     {
@@ -29,14 +29,14 @@ public sealed partial class ApiDataBaseService
     public async Task<List<Order>> GetOrdersByIds(List<int> orderIds, CancellationToken ct = default)
         => await PostListAsync<List<int>, Order>("api/orders/by-ids", orderIds, ct);
 
-    public async Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Order>>($"api/orders/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Order>> GetOrdersByUserId(int userId, CancellationToken ct = default)
+        => GetListAsync<Order>($"api/orders/by-user/{userId}", ct);
 
-    public async Task<List<Order>> GetOrdersByStockId(int stockId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Order>>($"api/orders/by-stock/{stockId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Order>> GetOrdersByStockId(int stockId, CancellationToken ct = default)
+        => GetListAsync<Order>($"api/orders/by-stock/{stockId}", ct);
 
-    public async Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Order>>($"api/orders/open-limit/{stockId}/{currency}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Order>> GetOpenLimitOrders(int stockId, CurrencyType currency, CancellationToken ct = default)
+        => GetListAsync<Order>($"api/orders/open-limit/{stockId}/{currency}", ct);
 
     public async Task<List<Order>> GetOpenOrdersForUsersAsync(List<int> userIds, CancellationToken ct = default)
         => await PostListAsync<List<int>, Order>("api/orders/open-for-users", userIds, ct);
@@ -64,8 +64,8 @@ public sealed partial class ApiDataBaseService
     public Task DeleteOrder(Order order, CancellationToken ct = default)
         => DeleteUrlAsync($"api/orders/{order.OrderId}", ct);
 
-    public async Task<List<Transaction>> GetTransactionsAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Transaction>>("api/transactions", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Transaction>> GetTransactionsAsync(CancellationToken ct = default)
+        => GetListAsync<Transaction>("api/transactions", ct);
 
     public async Task<(List<Transaction> Items, int Total)> GetTransactionsPageAsync(int skip, int take, string sortKey, bool desc, DateTime fromUtc, DateTime toUtc, int? userIdFilter = null, int? stockIdFilter = null, string? currencyFilter = null, IList<int>? excludeBuyerOrSellerIds = null, CancellationToken ct = default)
     {
@@ -81,18 +81,17 @@ public sealed partial class ApiDataBaseService
     public Task<Transaction?> GetTransactionById(int transactionId, CancellationToken ct = default)
         => GetNullableAsync<Transaction>($"api/transactions/{transactionId}", ct);
 
-    public async Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Transaction>>($"api/transactions/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Transaction>> GetTransactionsByUserId(int userId, CancellationToken ct = default)
+        => GetListAsync<Transaction>($"api/transactions/by-user/{userId}", ct);
 
-    public async Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Transaction>>($"api/transactions/by-order/{orderId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Transaction>> GetTransactionsByOrderId(int orderId, CancellationToken ct = default)
+        => GetListAsync<Transaction>($"api/transactions/by-order/{orderId}", ct);
 
     // maxRows is enforced server-side by the controller (a fixed cap, not client-tunable),
     // so it isn't sent on the wire; the parameter exists only to satisfy the interface.
-    public async Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, int? maxRows = null, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Transaction>>(
-            $"api/transactions/by-stock-range/{stockId}/{currency}{new Q().Add("from", from).Add("to", to)}",
-            ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Transaction>> GetTransactionsByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, int? maxRows = null, CancellationToken ct = default)
+        => GetListAsync<Transaction>(
+            $"api/transactions/by-stock-range/{stockId}/{currency}{new Q().Add("from", from).Add("to", to)}", ct);
 
     public async Task<List<Transaction>> GetTransactionsSinceTime(DateTime since, int? limit = null, CancellationToken ct = default)
     {
@@ -101,9 +100,8 @@ public sealed partial class ApiDataBaseService
         // by passing an explicit limit; null is intentionally not forwarded — that would
         // re-enable the unbounded path which the SignalR push (Phase 4) replaces anyway.
         var effective = limit ?? 10_000;
-        return await _http.GetFromJsonAsync<List<Transaction>>(
-            $"api/transactions/since{new Q().Add("since", since).Add("limit", effective)}",
-            ApiJsonOptions.Default, ct) ?? new();
+        return await GetListAsync<Transaction>(
+            $"api/transactions/since{new Q().Add("since", since).Add("limit", effective)}", ct);
     }
 
     public Task<Transaction?> GetLatestTransactionByStockId(int stockId, CurrencyType currency, CancellationToken ct = default)

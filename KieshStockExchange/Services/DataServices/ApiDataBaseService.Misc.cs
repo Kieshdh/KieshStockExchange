@@ -9,19 +9,18 @@ namespace KieshStockExchange.Services.DataServices;
 
 public sealed partial class ApiDataBaseService
 {
-    public async Task<List<Candle>> GetCandlesAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Candle>>("api/candles", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Candle>> GetCandlesAsync(CancellationToken ct = default)
+        => GetListAsync<Candle>("api/candles", ct);
 
     public Task<Candle?> GetCandleById(int candleId, CancellationToken ct = default)
         => GetNullableAsync<Candle>($"api/candles/{candleId}", ct);
 
-    public async Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Candle>>($"api/candles/by-stock/{stockId}/{currency}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Candle>> GetCandlesByStockId(int stockId, CurrencyType currency, CancellationToken ct = default)
+        => GetListAsync<Candle>($"api/candles/by-stock/{stockId}/{currency}", ct);
 
-    public async Task<List<Candle>> GetCandlesByStockIdAndTimeRange(int stockId, CurrencyType currency, TimeSpan resolution, DateTime from, DateTime to, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Candle>>(
-            $"api/candles/by-stock-range/{stockId}/{currency}?resolution={Uri.EscapeDataString(resolution.ToString())}&from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}",
-            ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Candle>> GetCandlesByStockIdAndTimeRange(int stockId, CurrencyType currency, TimeSpan resolution, DateTime from, DateTime to, CancellationToken ct = default)
+        => GetListAsync<Candle>(
+            $"api/candles/by-stock-range/{stockId}/{currency}?resolution={Uri.EscapeDataString(resolution.ToString())}&from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}", ct);
 
     public Task CreateCandle(Candle candle, CancellationToken ct = default)
         => PostWriteBackAsync("api/candles", candle, (d, r) => { if (d.CandleId == 0) d.CandleId = r.CandleId; }, ct);
@@ -42,14 +41,14 @@ public sealed partial class ApiDataBaseService
         resp.EnsureSuccessStatusCode();
     }
 
-    public async Task<List<Message>> GetMessagesAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Message>>("api/messages", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Message>> GetMessagesAsync(CancellationToken ct = default)
+        => GetListAsync<Message>("api/messages", ct);
 
     public Task<Message?> GetMessageById(int messageId, CancellationToken ct = default)
         => GetNullableAsync<Message>($"api/messages/{messageId}", ct);
 
-    public async Task<List<Message>> GetMessagesByUserId(int userId, bool onlyUnread = false, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Message>>($"api/messages/by-user/{userId}{new Q().Add("onlyUnread", onlyUnread)}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Message>> GetMessagesByUserId(int userId, bool onlyUnread = false, CancellationToken ct = default)
+        => GetListAsync<Message>($"api/messages/by-user/{userId}{new Q().Add("onlyUnread", onlyUnread)}", ct);
 
     public async Task<int> GetUnreadMessageCount(int userId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<int>($"api/messages/unread-count/{userId}", ApiJsonOptions.Default, ct);
@@ -85,8 +84,8 @@ public sealed partial class ApiDataBaseService
     public Task UpsertUserPreferences(UserPreferences prefs, CancellationToken ct = default)
         => PutJsonAsync("api/user-preferences/upsert", prefs, ct);
 
-    public async Task<List<UserWatchlistEntry>> GetWatchlistByUserId(int userId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<UserWatchlistEntry>>($"api/user-watchlist/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<UserWatchlistEntry>> GetWatchlistByUserId(int userId, CancellationToken ct = default)
+        => GetListAsync<UserWatchlistEntry>($"api/user-watchlist/by-user/{userId}", ct);
 
     public Task UpsertWatchlistEntry(UserWatchlistEntry entry, CancellationToken ct = default)
         => PutWriteBackAsync("api/user-watchlist/upsert", entry, (d, r) => { if (d.Id == 0) d.Id = r.Id; }, ct);
@@ -104,14 +103,14 @@ public sealed partial class ApiDataBaseService
         resp.EnsureSuccessStatusCode();
     }
 
-    public async Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<AIUser>>("api/ai-users", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<AIUser>> GetAIUsersAsync(CancellationToken ct = default)
+        => GetListAsync<AIUser>("api/ai-users", ct);
 
     public Task<AIUser?> GetAIUserById(int aiUserId, CancellationToken ct = default)
         => GetNullableAsync<AIUser>($"api/ai-users/{aiUserId}", ct);
 
-    public async Task<List<AIUser>> GetAIUsersByUserId(int userId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<AIUser>>($"api/ai-users/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<AIUser>> GetAIUsersByUserId(int userId, CancellationToken ct = default)
+        => GetListAsync<AIUser>($"api/ai-users/by-user/{userId}", ct);
 
     public Task CreateAIUser(AIUser aiUser, CancellationToken ct = default)
         => PostWriteBackAsync("api/ai-users", aiUser, (d, r) => { if (d.AiUserId == 0) d.AiUserId = r.AiUserId; }, ct);

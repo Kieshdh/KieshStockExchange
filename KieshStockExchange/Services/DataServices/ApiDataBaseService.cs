@@ -32,6 +32,11 @@ public sealed partial class ApiDataBaseService : IDataBaseService
         return await resp.Content.ReadFromJsonAsync<List<TItem>>(ApiJsonOptions.Default, ct).ConfigureAwait(false) ?? new();
     }
 
+    // GET a JSON list, treating a null body as an empty list. Mirrors the hand-rolled
+    // list-GET one-liner that used to be copy-pasted across the entity partials.
+    private async Task<List<T>> GetListAsync<T>(string url, CancellationToken ct)
+        => await _http.GetFromJsonAsync<List<T>>(url, ApiJsonOptions.Default, ct) ?? new();
+
     private async Task<T?> GetNullableAsync<T>(string requestUri, CancellationToken ct) where T : class
     {
         var resp = await _http.GetAsync(requestUri, ct).ConfigureAwait(false);

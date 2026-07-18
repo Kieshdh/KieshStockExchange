@@ -9,8 +9,8 @@ namespace KieshStockExchange.Services.DataServices;
 
 public sealed partial class ApiDataBaseService
 {
-    public async Task<List<User>> GetUsersAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<User>>("api/users", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<User>> GetUsersAsync(CancellationToken ct = default)
+        => GetListAsync<User>("api/users", ct);
 
     public async Task<(List<User> Items, int Total)> GetUsersPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
     {

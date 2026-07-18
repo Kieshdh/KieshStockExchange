@@ -9,8 +9,8 @@ namespace KieshStockExchange.Services.DataServices;
 
 public sealed partial class ApiDataBaseService
 {
-    public async Task<List<Stock>> GetStocksAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Stock>>("api/stocks", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Stock>> GetStocksAsync(CancellationToken ct = default)
+        => GetListAsync<Stock>("api/stocks", ct);
 
     public async Task<Stock?> GetStockById(int stockId, CancellationToken ct = default)
         => await GetNullableAsync<Stock>($"api/stocks/{stockId}", ct);
@@ -30,23 +30,23 @@ public sealed partial class ApiDataBaseService
     public Task DeleteStock(Stock stock, CancellationToken ct = default)
         => DeleteUrlAsync($"api/stocks/{stock.StockId}", ct);
 
-    public async Task<List<StockListing>> GetStockListingsAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<StockListing>>("api/stock-listings", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<StockListing>> GetStockListingsAsync(CancellationToken ct = default)
+        => GetListAsync<StockListing>("api/stock-listings", ct);
 
-    public async Task<List<StockListing>> GetStockListingsByStockId(int stockId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<StockListing>>($"api/stock-listings/by-stock/{stockId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<StockListing>> GetStockListingsByStockId(int stockId, CancellationToken ct = default)
+        => GetListAsync<StockListing>($"api/stock-listings/by-stock/{stockId}", ct);
 
     public Task CreateStockListing(StockListing listing, CancellationToken ct = default)
         => PostWriteBackAsync("api/stock-listings", listing, (d, r) => { if (d.ListingId == 0) d.ListingId = r.ListingId; }, ct);
 
-    public async Task<List<StockPrice>> GetStockPricesAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<StockPrice>>("api/stock-prices", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<StockPrice>> GetStockPricesAsync(CancellationToken ct = default)
+        => GetListAsync<StockPrice>("api/stock-prices", ct);
 
     public Task<StockPrice?> GetStockPriceById(int stockPriceId, CancellationToken ct = default)
         => GetNullableAsync<StockPrice>($"api/stock-prices/{stockPriceId}", ct);
 
-    public async Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<StockPrice>>($"api/stock-prices/by-stock/{stockId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<StockPrice>> GetStockPricesByStockId(int stockId, CancellationToken ct = default)
+        => GetListAsync<StockPrice>($"api/stock-prices/by-stock/{stockId}", ct);
 
     public Task<StockPrice?> GetLatestStockPriceByStockId(int stockId, CurrencyType currency, CancellationToken ct = default)
         => GetNullableAsync<StockPrice>($"api/stock-prices/latest/{stockId}/{currency}", ct);
@@ -54,10 +54,9 @@ public sealed partial class ApiDataBaseService
     public Task<StockPrice?> GetLatestStockPriceBeforeTime(int stockId, CurrencyType currency, DateTime time, CancellationToken ct = default)
         => GetNullableAsync<StockPrice>($"api/stock-prices/latest-before/{stockId}/{currency}?time={Uri.EscapeDataString(time.ToString("O"))}", ct);
 
-    public async Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<StockPrice>>(
-            $"api/stock-prices/by-stock-range/{stockId}/{currency}?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}",
-            ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<StockPrice>> GetStockPricesByStockIdAndTimeRange(int stockId, CurrencyType currency, DateTime from, DateTime to, CancellationToken ct = default)
+        => GetListAsync<StockPrice>(
+            $"api/stock-prices/by-stock-range/{stockId}/{currency}?from={Uri.EscapeDataString(from.ToString("O"))}&to={Uri.EscapeDataString(to.ToString("O"))}", ct);
 
     public Task CreateStockPrice(StockPrice stockPrice, CancellationToken ct = default)
         => PostWriteBackAsync("api/stock-prices", stockPrice, (d, r) => { if (d.PriceId == 0) d.PriceId = r.PriceId; }, ct);

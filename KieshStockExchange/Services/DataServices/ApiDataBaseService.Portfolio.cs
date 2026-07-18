@@ -9,8 +9,8 @@ namespace KieshStockExchange.Services.DataServices;
 
 public sealed partial class ApiDataBaseService
 {
-    public async Task<List<Position>> GetPositionsAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Position>>("api/positions", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Position>> GetPositionsAsync(CancellationToken ct = default)
+        => GetListAsync<Position>("api/positions", ct);
 
     public async Task<(List<Position> Items, int Total)> GetPositionsPageAsync(int stockId, int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
     {
@@ -22,8 +22,8 @@ public sealed partial class ApiDataBaseService
     public Task<Position?> GetPositionById(int positionId, CancellationToken ct = default)
         => GetNullableAsync<Position>($"api/positions/{positionId}", ct);
 
-    public async Task<List<Position>> GetPositionsByUserId(int userId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Position>>($"api/positions/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Position>> GetPositionsByUserId(int userId, CancellationToken ct = default)
+        => GetListAsync<Position>($"api/positions/by-user/{userId}", ct);
 
     public Task<Position?> GetPositionByUserIdAndStockId(int userId, int stockId, CancellationToken ct = default)
         => GetNullableAsync<Position>($"api/positions/by-user-stock/{userId}/{stockId}", ct);
@@ -43,8 +43,8 @@ public sealed partial class ApiDataBaseService
     public Task UpsertPosition(Position position, CancellationToken ct = default)
         => PutWriteBackAsync("api/positions/upsert", position, (d, r) => { if (d.PositionId == 0) d.PositionId = r.PositionId; }, ct);
 
-    public async Task<List<Fund>> GetFundsAsync(CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Fund>>("api/funds", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Fund>> GetFundsAsync(CancellationToken ct = default)
+        => GetListAsync<Fund>("api/funds", ct);
 
     public async Task<(List<int> UserIds, int Total)> GetFundsUserIdsPageAsync(int skip, int take, string sortKey, bool desc, string? filter, CancellationToken ct = default)
     {
@@ -65,8 +65,8 @@ public sealed partial class ApiDataBaseService
     public Task<Fund?> GetFundById(int fundId, CancellationToken ct = default)
         => GetNullableAsync<Fund>($"api/funds/{fundId}", ct);
 
-    public async Task<List<Fund>> GetFundsByUserId(int userId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<Fund>>($"api/funds/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<Fund>> GetFundsByUserId(int userId, CancellationToken ct = default)
+        => GetListAsync<Fund>($"api/funds/by-user/{userId}", ct);
 
     public Task<Fund?> GetFundByUserIdAndCurrency(int userId, CurrencyType currency, CancellationToken ct = default)
         => GetNullableAsync<Fund>($"api/funds/by-user-currency/{userId}/{currency}", ct);
@@ -86,8 +86,8 @@ public sealed partial class ApiDataBaseService
     public Task UpsertFund(Fund fund, CancellationToken ct = default)
         => PutWriteBackAsync("api/funds/upsert", fund, (d, r) => { if (d.FundId == 0) d.FundId = r.FundId; }, ct);
 
-    public async Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default)
-        => await _http.GetFromJsonAsync<List<FundTransaction>>($"api/fund-transactions/by-user/{userId}", ApiJsonOptions.Default, ct) ?? new();
+    public Task<List<FundTransaction>> GetFundTransactionsByUserId(int userId, CancellationToken ct = default)
+        => GetListAsync<FundTransaction>($"api/fund-transactions/by-user/{userId}", ct);
 
     public async Task<(List<FundTransaction> Items, int Total)> GetFundTransactionsPageAsync(int skip, int take, string sortKey, bool desc, int? userIdFilter = null, CancellationToken ct = default)
     {
