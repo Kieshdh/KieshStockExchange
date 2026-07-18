@@ -22,6 +22,6 @@ public sealed class AccountVolumeRow
 {
     public required CurrencyType CurrencyType { get; init; }
     public required decimal Amount { get; init; }
-    public string Currency => CurrencyType.ToString();
+    public string Currency => CurrencyHelper.GetIsoCode(CurrencyType);
     public string AmountDisplay => CurrencyHelper.Format(Amount, CurrencyType);
 }

@@ -23,7 +23,7 @@ public sealed class AccountPnLRow
 {
     public required CurrencyType CurrencyType { get; init; }
     public required decimal Amount { get; init; }
-    public string Currency => CurrencyType.ToString();
+    public string Currency => CurrencyHelper.GetIsoCode(CurrencyType);
     public string AmountDisplay => CurrencyHelper.Format(Amount, CurrencyType);
     public bool IsPositive => Amount > 0m;
     public bool IsNegative => Amount < 0m;

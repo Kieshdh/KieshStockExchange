@@ -22,7 +22,7 @@ namespace KieshStockExchange.ViewModels.AccountViewModels;
 public sealed class AccountFundRow
 {
     public required Fund Fund { get; init; }
-    public string Currency => Fund.CurrencyType.ToString();
+    public string Currency => CurrencyHelper.GetIsoCode(Fund.CurrencyType);
     public string AvailableDisplay => Fund.AvailableBalanceDisplay;
     public string ReservedDisplay => Fund.ReservedBalanceDisplay;
     public bool HasReserved => Fund.ReservedBalance > 0m;
