@@ -27,11 +27,7 @@ public sealed partial class ApiDataBaseService
         => GetNullableAsync<User>($"api/users/by-username/{Uri.EscapeDataString(username)}", ct);
 
     public async Task<List<User>> GetUsersByIds(IReadOnlyList<int> userIds, CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync("api/users/by-ids", userIds, ApiJsonOptions.Default, ct);
-        resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadFromJsonAsync<List<User>>(ApiJsonOptions.Default, ct) ?? new();
-    }
+        => await PostListAsync<IReadOnlyList<int>, User>("api/users/by-ids", userIds, ct);
 
     public async Task<bool> UserExists(int userId, CancellationToken ct = default)
         => await _http.GetFromJsonAsync<bool>($"api/users/{userId}/exists", ApiJsonOptions.Default, ct);
