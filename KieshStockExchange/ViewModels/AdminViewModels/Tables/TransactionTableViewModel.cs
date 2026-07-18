@@ -111,11 +111,7 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         IList<int>? excludeIds = HideAiBots ? _aiUserIds : null;
 
         // Combine date+time pickers; clamp upper bound to now.
-        var fromCombined = (FromDate.Date + FromTime).ToUniversalTime();
-        var toCombined   = (ToDate.Date + ToTime).ToUniversalTime();
-        var now = DateTime.UtcNow;
-        if (toCombined > now) toCombined = now.AddSeconds(1);
-        if (fromCombined > toCombined) fromCombined = toCombined;
+        var (fromCombined, toCombined) = DateRangeHelper.CombineAndClampRange(FromDate, FromTime, ToDate, ToTime);
 
         var (transactions, total) = await _dbRef.GetTransactionsPageAsync(skip, take, sortKey ?? "Timestamp", desc,
             fromCombined, toCombined,

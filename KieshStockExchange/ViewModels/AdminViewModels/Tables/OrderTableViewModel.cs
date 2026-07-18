@@ -136,11 +136,7 @@ public partial class OrderTableViewModel : BaseTableViewModel<OrderTableObject>
         IList<int>? excludeIds = HideAiBots ? _aiUserIds : null;
 
         // Combine date+time pickers; clamp upper bound to now.
-        var fromCombined = (FromDate.Date + FromTime).ToUniversalTime();
-        var toCombined   = (ToDate.Date + ToTime).ToUniversalTime();
-        var now = DateTime.UtcNow;
-        if (toCombined > now) toCombined = now.AddSeconds(1);
-        if (fromCombined > toCombined) fromCombined = toCombined;
+        var (fromCombined, toCombined) = DateRangeHelper.CombineAndClampRange(FromDate, FromTime, ToDate, ToTime);
 
         var (orders, total) = await _dbRef.GetOrdersPageAsync(skip, take, sortKey ?? "CreatedAt", desc,
             fromCombined, toCombined, statusArg,
