@@ -195,15 +195,18 @@ public class Order : IValidatable
     };
 
     // "Open", "Filled", "Cancelled"
+    private static bool IsKnownStatus(string status) =>
+        status == Statuses.Open || status == Statuses.Filled ||
+        status == Statuses.Cancelled || status == Statuses.Pending ||
+        status == Statuses.Attached;
+
     private string _status = Statuses.Open;
     public string Status
     {
         get => _status;
         set
         {
-            if (value == Statuses.Open || value == Statuses.Filled ||
-                value == Statuses.Cancelled || value == Statuses.Pending ||
-                value == Statuses.Attached)
+            if (IsKnownStatus(value))
                 _status = value;
             else throw new ArgumentException("Invalid Status.");
         }
@@ -256,10 +259,7 @@ public class Order : IValidatable
     // Every (Side, Entry, Stop) combination is a defined type; per-combo rules live in the
     // price/budget checks below.
     private bool IsValidOrderType() => true;
-    private bool IsValidStatus() =>
-        Status == Statuses.Open || Status == Statuses.Filled ||
-        Status == Statuses.Cancelled || Status == Statuses.Pending ||
-        Status == Statuses.Attached;
+    private bool IsValidStatus() => IsKnownStatus(Status);
     private bool IsValidCurrency() => CurrencyHelper.IsSupported(Currency);
 
     // An armed (Pending) stop or a dormant (Attached) bracket child has nothing filled yet;
