@@ -91,7 +91,23 @@ real bug) → captured in **`docs/arcs/DEDUP_PASS2_PROPOSALS.md`** (propose-only
 **No more autonomous CODE candidates remain without Kiesh's decisions.** A resumed session should either (a) keep
 EXPANDING the Pass-2 doc with more diff-sketches (doc-only, disk-free) if Kiesh wants, or (b) if Kiesh has picked
 Pass-2 items to execute, run them via the proven pipeline (many are XAML-eyeball / CK → confirm scope first).
-The Attended giants (AiTradeService / OES / AiBotDecision) + BracketCoordinator remain owner-gated as always. **MODEL ROUTING: Fable-5
+The Attended giants (AiTradeService / OES / AiBotDecision) + BracketCoordinator remain owner-gated as always.
+
+## ★ COUNCIL RAN (2026-07-19) — Pass-2 triage decided; Kiesh green-lit executing GO-NOW-within-safety. Full verdict
+in `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (top). **GO-NOW queue (do in this order, agents on Opus 4.8):**
+1. **P2-5 READ-ONLY DIAGNOSTIC (disk-free, do FIRST):** diff the client vs server `ReservationMath` (both at
+   `.../Services/MarketEngineServices/Settlement/ReservationMath.cs`); write a bug-report-with-repro into
+   `DEDUP_PASS2_PROPOSALS.md` (or a new `docs/arcs/RESERVATIONMATH_DRIFT.md`): every diverging method, which side is
+   authoritative (server settles → server is truth), what the client mis-estimates, and the user-facing impact
+   (likely a client display/pre-validation discrepancy, NOT a conservation breach). NO code change. Commit+push.
+2. **CK CHARACTERIZATION TESTS (server/shared → in the test project):** add tests pinning CURRENT behaviour of
+   `ReservationMath` (server), `OrderValidator` rule blocks, and cost-basis lot math. Tests ADD coverage, change no
+   app behaviour; gate = `dotnet test` alone (disk-gated). One test-area per commit. This de-risks the owner's fix.
+3. **P2-3** (LoginPage.OnRegisterClicked → `PageLifecycle.SafeLoad`; true identity; client build via disk gate).
+**PREPARE-FOR-OWNER (implement+validate on branch, but DO NOT rely on it being merged — flag for Kiesh):** P2-1 popup
+base (+ per-popup click-test checklist), P2-4 structural bases (depends on P2-1), P2-6 int-parse (document widened input set).
+**DROP:** P2-2. **Still NEVER autonomous:** the actual ReservationMath UNIFICATION / any Fund/Position/reservation/rounding/
+transaction merge (CK=0 sacred — needs owner + soak). **MODEL ROUTING: Fable-5
    access window closed 2026-07-18 → default executor + adversarial-review agents to Opus 4.8 (`model` omitted or
    "sonnet"/opus); only try Fable if you have positive evidence access is back.**
 2. When the clean textual candidates are exhausted, START `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (propose-only,

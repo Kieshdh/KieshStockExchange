@@ -1,5 +1,29 @@
 # DEDUP Arc — PASS 2 PROPOSALS (propose-only; Kiesh reviews + merges)
 
+## ★ COUNCIL VERDICT (2026-07-19, 5 advisors + 3 peer reviews; Kiesh green-lit executing GO-NOW-within-safety)
+Per-item decision (reframe: score these as bug / latent-bug / cosmetic, NOT "dedup" — the value proxy inverts on CK code):
+- **P2-1 CloseRequested leak → PREPARE-FOR-OWNER.** Real bug, but XAML `x:Class`-root change across ~10 popups +
+  unverified `Dispose` idempotency + non-uniform base (Admin public VM vs Account private `_vm`) + NO client tests
+  → build+review can't catch a runtime/binding regression; needs owner click-test. Build it + a per-popup checklist; hold merge.
+- **P2-2 converter swap → DROP** (unanimous — toolkit throws on null/non-bool; latent NRE).
+- **P2-3 LoginPage.OnRegisterClicked → SafeLoad → GO-NOW** (true identity — the site already swallows+logs).
+- **P2-4 structural client bases → PREPARE-FOR-OWNER** (untestable-without-click; likely DEPENDS on P2-1's base — ordering coupling).
+- **P2-5 ReservationMath/OrderValidator/cost-basis → PREPARE-FOR-OWNER, reframed as a BUG.** Two copies that DISAGREE =
+  one is already wrong; can't be "behavior-preservingly" unified. **Highest-value AUTONOMOUS work = (a) a read-only
+  client-vs-server DIFF/PROBE quantifying the divergence + which side is authoritative + user-facing impact (zero-risk,
+  disk-free — the council's "one thing first"); (b) CHARACTERIZATION TESTS on these CK paths (server/shared → in the
+  test project → real coverage) so the owner's eventual fix lands soak-ready.** NEVER merge the CK unification unattended.
+- **P2-6 int.TryParse→invariant → PREPARE-FOR-OWNER.** Genuine i18n fix (not churn) BUT widens the accepted input set
+  (thousands-separator into a quantity field) = behavior change on the untested client; document the widened set per site, hold.
+
+**GO-NOW execution order (council):** 1) P2-5 read-only drift diagnostic (disk-free) → 2) CK characterization tests
+(server/shared) → 3) P2-3 (batch its client build efficiently). Everything else = PREPARE-FOR-OWNER or DROP.
+**Severity note:** server is authoritative for settlement, so a client ReservationMath drift is most likely a client
+display/pre-validation discrepancy, NOT a conservation breach — the diagnostic confirms.
+
+---
+
+
 **Status:** Pass-1 autonomous TEXTUAL/COMPILER-identity dedups are DONE (see `DEDUP_HANDOFF.md` DONE list,
 commits `f9a009b`…`d7ac996`). Everything below needs OWNER judgment — it changes behaviour, touches XAML
 resource resolution / DI wiring (build won't catch a regression), touches money/CK code, or is a real bug fix.
