@@ -105,12 +105,15 @@ in `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (top). **GO-NOW queue (do in this order,
 2. **CK CHARACTERIZATION TESTS** (server/shared → test project; gate `dotnet test` alone, disk-gated, all green + count rising):
    - ✅ (a) SERVER `ReservationMath` — `43c9e05`, 18 tests, 679/679. Pinned the `ProjectedBuyReservation` asymmetry
      (StopMarketBuy → 0 there vs BuyBudget in Initial; documented, not fixed).
-   - **NEXT (b) `OrderValidator`** rule blocks (`ValidateInput` / `ValidateNew` in
-     `KieshStockExchange.Server/Services/MarketEngineServices/Helpers/OrderValidator.cs`): pin accept/reject +
-     `OrderResultFactory.InvalidParams` message + short-circuit ORDER per entry kind (limit / true-market / slippage).
-   - (c) cost-basis lot math (`ChartMath.AverageCostBasis` / `PositionPnl`, client `Helpers/ChartMath.cs`): pin
-     running weighted-avg + zero-crossing rebase. (Client — but ChartMath is pure/static; if the test project can't
-     see it, note it and skip to P2-3.)
+   - ✅ (b) `OrderValidator` — `93d2ed2`, 50 tests, 729/729. **★ FOR KIESH: pinned 4 real `ValidateInput` vs
+     `ValidateNew` DIVERGENCES** (Input accepts LimitBuy+BuyBudget / TrueMarket-SELL+budget / checks currency /
+     can hit slippage-range msg — New differs on each). Documented, NOT fixed. These are the OrderValidator P2-2/P2-5
+     "rule-drift" concern, now characterized — owner decides whether/how to reconcile ValidateInput to ValidateNew.
+   - **NEXT (c)** cost-basis lot math (`ChartMath.AverageCostBasis` / `PositionPnl`, client `KieshStockExchange/Helpers/ChartMath.cs`):
+     pin running weighted-avg + zero-crossing rebase. ⚠ ChartMath is CLIENT — the test project references Server+Shared,
+     NOT the MAUI client, so it likely CANNOT see `ChartMath`. If so: DOCUMENT that (client cost-basis has no unit
+     coverage by construction; would need the pure math moved to Shared — a Pass-2 item) and SKIP to item #3 (P2-3).
+     Do NOT add the client project to the test project.
 2. **CK CHARACTERIZATION TESTS (server/shared → in the test project):** add tests pinning CURRENT behaviour of
    `ReservationMath` (server), `OrderValidator` rule blocks, and cost-basis lot math. Tests ADD coverage, change no
    app behaviour; gate = `dotnet test` alone (disk-gated). One test-area per commit. This de-risks the owner's fix.
