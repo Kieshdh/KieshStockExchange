@@ -1,13 +1,18 @@
-# Project-specific systems & problem-finders (KieshStockExchange)
+# EXAMPLE (not portable): one project's problem-finders — KieshStockExchange
 
-Companion to the portable **`/CLAUDE_SETUP_PLAYBOOK.md`**. The playbook has the drop-into-any-project methods;
-THIS note catalogs the systems that were built for *this* project — a real-time market **simulator** with bot
-traders, money conservation, and a MAUI charting client. Useful as **inspiration** for similar domains
-(anything with an invariant to protect, a long-running stochastic process to tune, or a golden-output to verify)
-— not as drop-ins.
+> **This is a worked example, not a drop-in.** It's the lab notebook for *this* project — a real-time market
+> **simulator** with bot traders, money conservation, and a MAUI charting client. **The reusable thing is the
+> pattern, not these tools:** *find the one invariant that must never break, build a cheap check that proves it,
+> and gate autonomy on that check* (see `/CLAUDE_SETUP_PLAYBOOK.md` → "The one idea"). Everything in section A
+> below is one instantiation of that pattern. Read it for *how the pattern plays out*, then build the equivalent
+> for your own domain.
 
-Grouped as: (A) problem-finding / correctness systems, (B) domain tooling, (C) project techniques that
-generalize.
+**Jargon used here** (project-specific): **CK=0** = "conservation check equals zero" — total money in the system
+is unchanged by trading (our invariant). **soak** = a long real-time run of the built server used to catch bugs
+that only appear over time or under concurrency. **candle** = an OHLC price bar. **arc** = a phase of this
+project's work.
+
+Grouped as: (A) problem-finding / correctness systems, (B) domain tooling, (C) techniques that generalize.
 
 ---
 
