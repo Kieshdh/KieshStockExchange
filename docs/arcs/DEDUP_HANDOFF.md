@@ -129,6 +129,21 @@ x:Class root + Dispose idempotency), P2-4 structural client bases (depends on P2
 (widens accepted input). DROP P2-2. NEVER autonomous: ReservationMath unification/hoist + any CK merge (owner+soak).
 Also open for owner: the 4 OrderValidator divergences (reconcile ValidateInput→ValidateNew?) + the StopMarketBuy
 ProjectedBuyReservation asymmetry. **The 2-min chain was NOT re-armed (paused for owner); 5h2m backstop `fea77b65` stays armed.**
+
+## ★ KIESH'S CALLS (2026-07-19, via AskUserQuestion) — DEDUP ARC, implement LATER (AFTER the PLAYBOOK-V2 task):
+- **P2-1 (popup CloseRequested leak) = do FIRST.** PREPARE-BUT-HOLD (Kiesh click-tests before final). PREFER the LOW-RISK
+  design: a `Popup` **extension** `WireCloseAndDispose(popup, vm)` (or tiny helper) reproducing the ConvertCurrencyPage
+  pattern (subscribe `CloseRequested` → MainThread close; wire `Closed` → unsubscribe + `vm.Dispose()`) — AVOIDS changing each
+  popup's XAML `x:Class` root type (the biggest eyeball risk) vs. a base class. Needs a common interface
+  (`IClosablePopupViewModel : IDisposable { event EventHandler CloseRequested; }` — the VMs already have the members) OR a
+  delegate form. VERIFY each VM's `Dispose` is idempotent. Adopt across the ~10 leaking popups; leave/route ConvertCurrencyPage.
+  Gate = CLIENT build (disk-gated) + adversarial review; commit labelled **"PREPARE — HOLD FOR KIESH click-test"** + a
+  per-popup click-test checklist doc. Do NOT treat as merged.
+- **OrderValidator divergences = INVESTIGATE-first (read-only, NO code change).** Per divergence, determine whether every path
+  that calls `ValidateInput` ALSO calls `ValidateNew` later (if so the looseness is harmless belt-and-suspenders; if not, Input
+  lets bad orders through), which side is authoritative, what reconciling would newly reject → write
+  `docs/arcs/ORDERVALIDATOR_DIVERGENCES.md` with a per-divergence recommendation. NO reconcile until Kiesh reviews (CK-adjacent).
+- **PRIORITY ORDER:** the **PLAYBOOK-V2 task** (`docs/arcs/PLAYBOOK_V2_TASK.md`) comes FIRST (Kiesh 2026-07-19), THEN this dedup work.
 **PREPARE-FOR-OWNER (implement+validate on branch, but DO NOT rely on it being merged — flag for Kiesh):** P2-1 popup
 base (+ per-popup click-test checklist), P2-4 structural bases (depends on P2-1), P2-6 int-parse (document widened input set).
 **DROP:** P2-2. **Still NEVER autonomous:** the actual ReservationMath UNIFICATION / any Fund/Position/reservation/rounding/
