@@ -18,8 +18,7 @@ public partial class LoginPage : ContentPage
     private async void OnRegisterClicked(object sender, TappedEventArgs e)
     {
         // async void — a failed navigation must not crash the app.
-        try { await Shell.Current.GoToAsync("RegisterPage"); }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"LoginPage.OnRegisterClicked nav failed: {ex}"); }
+        await PageLifecycle.SafeLoad("LoginPage.OnRegisterClicked nav failed", () => Shell.Current.GoToAsync("RegisterPage"));
     }
 
     protected override async void OnAppearing()
