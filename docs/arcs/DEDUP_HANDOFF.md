@@ -130,6 +130,24 @@ x:Class root + Dispose idempotency), P2-4 structural client bases (depends on P2
 Also open for owner: the 4 OrderValidator divergences (reconcile ValidateInput→ValidateNew?) + the StopMarketBuy
 ProjectedBuyReservation asymmetry. **The 2-min chain was NOT re-armed (paused for owner); 5h2m backstop `fea77b65` stays armed.**
 
+## ★★★ BOTH KIESH'S-CALLS DELIVERABLES DONE (2026-07-19) — ARC PAUSED, AWAITING KIESH.
+- **P2-1 popup CloseRequested leak = PREPARED + HELD** (`3700d78`, label "PREPARE — HOLD FOR KIESH click-test").
+  Design = Kiesh's preferred low-risk EXTENSION `Helpers/PopupLifecycle.cs` (`WireCloseAndDispose` + `IClosablePopupViewModel`),
+  NOT a base class → zero XAML `x:Class` changes. All 12 popups rewired (11 leaking + ConvertCurrency reference rerouted
+  onto the shared path); 11 VMs got an idempotent `Dispose()` (guard-first, nulls own `CloseRequested`/`Saved`/`NavigateTo*`).
+  Gate: CLIENT build clean (0 err) + isolated adversarial diff review = **SAFE-FIX** (close behavior byte-for-byte preserved,
+  disposal idempotent + can't throw in `Closed` + no use-after-dispose). **NOT merged** — click-test checklist for Kiesh at
+  `docs/arcs/P2-1_POPUP_LEAK_CLICKTEST.md` (per-popup: open → interact → close-every-way → reopen; ConvertCurrency = regression check).
+- **OrderValidator divergences = INVESTIGATED** (`5697419`, read-only, no code change) → `docs/arcs/ORDERVALIDATOR_DIVERGENCES.md`.
+  Finding: **BENIGN belt-and-suspenders** — all 4 `ValidateInput` call sites are downstream-gated by `ValidateNew` on the same
+  request; no path is `ValidateInput`-gated alone; `CreateOrder` strips `BuyBudget` off non-market-buys. Per-divergence:
+  #1/#2 LEAVE (unreachable inputs), #3 currency = NEEDS-OWNER-CALL (`ValidateInput` is the *stricter/authoritative* side — do
+  NOT relax; port into `ValidateNew` if parity wanted), #4 slippage LEAVE (`ValidateInput`'s check prevents a >100 → HTTP 500).
+  Safest default = LEAVE all four. One non-code confirmation flagged (can model binding deliver `(CurrencyType)999`?).
+- **FOR KIESH:** (1) click-test P2-1 per the checklist → then it can be treated as merged (or say to revert); (2) decide the
+  OrderValidator currency divergence (#3) — the only one with an owner call. **2-min chain NOT re-armed (paused for owner);
+  5h2m backstop `28a9e27f` stays armed.** PLAYBOOK-V2 also done earlier this run (`d3a3dcc`).
+
 ## ★ KIESH'S CALLS (2026-07-19, via AskUserQuestion) — DEDUP ARC, implement LATER (AFTER the PLAYBOOK-V2 task):
 - **P2-1 (popup CloseRequested leak) = do FIRST.** PREPARE-BUT-HOLD (Kiesh click-tests before final). PREFER the LOW-RISK
   design: a `Popup` **extension** `WireCloseAndDispose(popup, vm)` (or tiny helper) reproducing the ConvertCurrencyPage
