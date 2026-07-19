@@ -102,8 +102,15 @@ in `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (top). **GO-NOW queue (do in this order,
 1b. ✅ **DONE (`ff657bd`) — DELETED the dead client `ReservationMath.cs`.** Client build clean + 661/661 →
    compiler-proven no caller. NOT a CK change (server copy untouched). The client side of the drift is resolved
    safely; the feared unification is off the table.
-2b. **NEXT — CK CHARACTERIZATION TESTS** (server/shared → the test project; gate = `dotnet test` alone, disk-gated,
-   all green + count ≥661). See item 2 below.
+2. **CK CHARACTERIZATION TESTS** (server/shared → test project; gate `dotnet test` alone, disk-gated, all green + count rising):
+   - ✅ (a) SERVER `ReservationMath` — `43c9e05`, 18 tests, 679/679. Pinned the `ProjectedBuyReservation` asymmetry
+     (StopMarketBuy → 0 there vs BuyBudget in Initial; documented, not fixed).
+   - **NEXT (b) `OrderValidator`** rule blocks (`ValidateInput` / `ValidateNew` in
+     `KieshStockExchange.Server/Services/MarketEngineServices/Helpers/OrderValidator.cs`): pin accept/reject +
+     `OrderResultFactory.InvalidParams` message + short-circuit ORDER per entry kind (limit / true-market / slippage).
+   - (c) cost-basis lot math (`ChartMath.AverageCostBasis` / `PositionPnl`, client `Helpers/ChartMath.cs`): pin
+     running weighted-avg + zero-crossing rebase. (Client — but ChartMath is pure/static; if the test project can't
+     see it, note it and skip to P2-3.)
 2. **CK CHARACTERIZATION TESTS (server/shared → in the test project):** add tests pinning CURRENT behaviour of
    `ReservationMath` (server), `OrderValidator` rule blocks, and cost-basis lot math. Tests ADD coverage, change no
    app behaviour; gate = `dotnet test` alone (disk-gated). One test-area per commit. This de-risks the owner's fix.
