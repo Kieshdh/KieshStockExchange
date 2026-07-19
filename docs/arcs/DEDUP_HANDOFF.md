@@ -109,15 +109,26 @@ in `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (top). **GO-NOW queue (do in this order,
      `ValidateNew` DIVERGENCES** (Input accepts LimitBuy+BuyBudget / TrueMarket-SELL+budget / checks currency /
      can hit slippage-range msg — New differs on each). Documented, NOT fixed. These are the OrderValidator P2-2/P2-5
      "rule-drift" concern, now characterized — owner decides whether/how to reconcile ValidateInput to ValidateNew.
-   - **NEXT (c)** cost-basis lot math (`ChartMath.AverageCostBasis` / `PositionPnl`, client `KieshStockExchange/Helpers/ChartMath.cs`):
-     pin running weighted-avg + zero-crossing rebase. ⚠ ChartMath is CLIENT — the test project references Server+Shared,
-     NOT the MAUI client, so it likely CANNOT see `ChartMath`. If so: DOCUMENT that (client cost-basis has no unit
-     coverage by construction; would need the pure math moved to Shared — a Pass-2 item) and SKIP to item #3 (P2-3).
-     Do NOT add the client project to the test project.
+   - ⏭ (c) cost-basis lot math — **SKIPPED (documented).** `KieshStockExchange.Tests.csproj` references only
+     Shared+Server and EXPLICITLY forbids referencing the MAUI client ("drags in the workload", csproj:25). So client
+     `ChartMath.AverageCostBasis`/`PositionPnl` has **no unit coverage by construction** — to test it, the pure lot-walk
+     would need moving to `Shared` (a Pass-2 refactor; noted in DEDUP_PASS2_PROPOSALS.md P2-5). No code change.
 2. **CK CHARACTERIZATION TESTS (server/shared → in the test project):** add tests pinning CURRENT behaviour of
    `ReservationMath` (server), `OrderValidator` rule blocks, and cost-basis lot math. Tests ADD coverage, change no
    app behaviour; gate = `dotnet test` alone (disk-gated). One test-area per commit. This de-risks the owner's fix.
-3. **P2-3** (LoginPage.OnRegisterClicked → `PageLifecycle.SafeLoad`; true identity; client build via disk gate).
+3. ✅ **DONE (`2b2d212`) — P2-3** (LoginPage.OnRegisterClicked → `PageLifecycle.SafeLoad`; true identity; 729/729).
+
+## ★★ COUNCIL GO-NOW QUEUE = COMPLETE (2026-07-19 ~04:45). Arc PAUSED for Kiesh's direction.
+Shipped autonomously: P2-5 diagnostic (client copy was dead code) → deleted dead client ReservationMath (`ff657bd`)
+→ ReservationMath char-tests (`43c9e05`) → OrderValidator char-tests (`93d2ed2`, +4 ValidateInput/ValidateNew
+DIVERGENCES found) → cost-basis SKIPPED (client not in test project) → P2-3 (`2b2d212`). Suite 729/729, disk stayed ≤2%.
+**REMAINING = the PREPARE-FOR-OWNER items — NOT started autonomously (they're behavior-changing / XAML-eyeball /
+no-client-test — the council said HOLD, and Kiesh said he'd advise today/tomorrow).** A resumed session should NOT
+build these unattended without Kiesh confirming scope/approach: P2-1 popup CloseRequested base (10 popups, XAML
+x:Class root + Dispose idempotency), P2-4 structural client bases (depends on P2-1), P2-6 int.TryParse→invariant
+(widens accepted input). DROP P2-2. NEVER autonomous: ReservationMath unification/hoist + any CK merge (owner+soak).
+Also open for owner: the 4 OrderValidator divergences (reconcile ValidateInput→ValidateNew?) + the StopMarketBuy
+ProjectedBuyReservation asymmetry. **The 2-min chain was NOT re-armed (paused for owner); 5h2m backstop `fea77b65` stays armed.**
 **PREPARE-FOR-OWNER (implement+validate on branch, but DO NOT rely on it being merged — flag for Kiesh):** P2-1 popup
 base (+ per-popup click-test checklist), P2-4 structural bases (depends on P2-1), P2-6 int-parse (document widened input set).
 **DROP:** P2-2. **Still NEVER autonomous:** the actual ReservationMath UNIFICATION / any Fund/Position/reservation/rounding/
