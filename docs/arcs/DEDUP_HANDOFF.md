@@ -99,11 +99,11 @@ in `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (top). **GO-NOW queue (do in this order,
    `ReservationMath` is DEAD CODE** (zero callers in the client project; `internal` methods, never invoked). The
    drift has NO user impact (client never reserves via it); server is authoritative + the only one used. This
    reclassifies P2-5's client side from "CK unification (owner+soak)" to a **safe dead-code DELETE (Pass-1)**.
-1b. **NEXT — DELETE the client `ReservationMath.cs` (Pass-1 dead-code removal, autonomous).** NOT a CK change
-   (removing unused CLIENT code touches no server settlement). Executor deletes the file; gate = CLIENT build
-   (disk-gated) — if it builds, nothing referenced it (compiler-proven) — + adversarial review confirming no
-   caller; commit+push. FALLBACK: if the client build fails (a missed caller), do NOT delete → that becomes the
-   hoist-server-copy-to-Shared proposal (owner + CK soak). Evidence says clean delete.
+1b. ✅ **DONE (`ff657bd`) — DELETED the dead client `ReservationMath.cs`.** Client build clean + 661/661 →
+   compiler-proven no caller. NOT a CK change (server copy untouched). The client side of the drift is resolved
+   safely; the feared unification is off the table.
+2b. **NEXT — CK CHARACTERIZATION TESTS** (server/shared → the test project; gate = `dotnet test` alone, disk-gated,
+   all green + count ≥661). See item 2 below.
 2. **CK CHARACTERIZATION TESTS (server/shared → in the test project):** add tests pinning CURRENT behaviour of
    `ReservationMath` (server), `OrderValidator` rule blocks, and cost-basis lot math. Tests ADD coverage, change no
    app behaviour; gate = `dotnet test` alone (disk-gated). One test-area per commit. This de-risks the owner's fix.
