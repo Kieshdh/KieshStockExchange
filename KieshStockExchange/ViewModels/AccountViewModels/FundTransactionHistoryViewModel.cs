@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -13,10 +14,11 @@ namespace KieshStockExchange.ViewModels.AccountViewModels;
 /// rows. Companion to <see cref="DepositWithdrawViewModel"/>: each successful
 /// deposit or withdrawal lands here. Newest rows first.
 /// </summary>
-public partial class FundTransactionHistoryViewModel : BaseViewModel
+public partial class FundTransactionHistoryViewModel : BaseViewModel, IClosablePopupViewModel
 {
     private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<FundTransactionHistoryViewModel> _logger;
+    private bool _disposed;
 
     public event EventHandler? CloseRequested;
 
@@ -58,4 +60,12 @@ public partial class FundTransactionHistoryViewModel : BaseViewModel
 
     [RelayCommand]
     private void Close() => CloseRequested?.Invoke(this, EventArgs.Empty);
+
+    // Drop handler refs so the closed popup can be collected; no external subscriptions.
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        CloseRequested = null;
+    }
 }

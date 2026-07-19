@@ -1,13 +1,16 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.ViewModels.OtherViewModels;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
-public partial class TransactionDetailsViewModel : BaseViewModel
+public partial class TransactionDetailsViewModel : BaseViewModel, IClosablePopupViewModel
 {
     #region Events
+    private bool _disposed;
+
     public event EventHandler? CloseRequested;
     public event EventHandler<int>? NavigateToUserRequested;
     public event EventHandler<int>? NavigateToOrderRequested;
@@ -89,4 +92,14 @@ public partial class TransactionDetailsViewModel : BaseViewModel
     [RelayCommand]
     private void Close() => CloseRequested?.Invoke(this, EventArgs.Empty);
     #endregion
+
+    // Drop handler refs so the closed popup can be collected; no external subscriptions.
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        CloseRequested = null;
+        NavigateToUserRequested = null;
+        NavigateToOrderRequested = null;
+    }
 }

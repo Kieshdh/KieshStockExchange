@@ -1,5 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -7,7 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
-public partial class StockEditViewModel : BaseViewModel
+public partial class StockEditViewModel : BaseViewModel, IClosablePopupViewModel
 {
     #region Fields, events and Constructor
     private readonly IDataBaseService _db;
@@ -15,6 +16,7 @@ public partial class StockEditViewModel : BaseViewModel
     private readonly ILogger<StockEditViewModel> _logger;
 
     private Stock? _original;
+    private bool _disposed;
 
     public event EventHandler? CloseRequested;
     public event EventHandler? Saved;
@@ -107,4 +109,13 @@ public partial class StockEditViewModel : BaseViewModel
     [RelayCommand]
     private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
     #endregion
+
+    // Drop handler refs so the closed popup can be collected; no external subscriptions.
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        CloseRequested = null;
+        Saved = null;
+    }
 }

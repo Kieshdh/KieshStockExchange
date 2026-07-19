@@ -1,4 +1,5 @@
 using CommunityToolkit.Maui.Views;
+using KieshStockExchange.Helpers;
 using KieshStockExchange.ViewModels.AccountViewModels;
 
 namespace KieshStockExchange.Views.AccountPageViews;
@@ -12,9 +13,6 @@ public partial class ChangePasswordPage : Popup
         InitializeComponent();
         _vm = vm ?? throw new ArgumentNullException(nameof(vm));
         BindingContext = _vm;
-        _vm.CloseRequested += OnCloseRequested;
+        this.WireCloseAndDispose(_vm);
     }
-
-    private void OnCloseRequested(object? sender, EventArgs e) =>
-        MainThread.BeginInvokeOnMainThread(async () => await CloseAsync());
 }

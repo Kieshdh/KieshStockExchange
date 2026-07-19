@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace KieshStockExchange.ViewModels.AccountViewModels;
 
 /// <summary> Moves cash between two of the user's Fund rows at the live FX rate. </summary>
-public partial class ConvertCurrencyViewModel : BaseViewModel, IDisposable
+public partial class ConvertCurrencyViewModel : BaseViewModel, IClosablePopupViewModel
 {
     private readonly IUserPortfolioService _portfolio;
     private readonly IUserSessionService _session;

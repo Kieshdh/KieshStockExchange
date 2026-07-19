@@ -10,12 +10,13 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AccountViewModels;
 
-public partial class DepositWithdrawViewModel : BaseViewModel
+public partial class DepositWithdrawViewModel : BaseViewModel, IClosablePopupViewModel
 {
     private readonly IUserPortfolioService _portfolio;
     private readonly IUserSessionService _session;
     private readonly INotificationService _notify;
     private readonly ILogger<DepositWithdrawViewModel> _logger;
+    private bool _disposed;
 
     public event EventHandler? CloseRequested;
 
@@ -135,5 +136,13 @@ public partial class DepositWithdrawViewModel : BaseViewModel
             NotificationSeverity.Success).ConfigureAwait(false);
 
         CloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    // Drop handler refs so the closed popup can be collected; no external subscriptions.
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        CloseRequested = null;
     }
 }

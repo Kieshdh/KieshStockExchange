@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
-public partial class FundAdjustViewModel : BaseViewModel
+public partial class FundAdjustViewModel : BaseViewModel, IClosablePopupViewModel
 {
     public const string KindDeposit = "Deposit";
     public const string KindWithdrawal = "Withdrawal";
@@ -15,6 +15,7 @@ public partial class FundAdjustViewModel : BaseViewModel
     #region Fields, events and Constructor
     private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<FundAdjustViewModel> _logger;
+    private bool _disposed;
 
     public IReadOnlyList<string> KindOptions { get; } = new[] { KindDeposit, KindWithdrawal };
 
@@ -107,4 +108,13 @@ public partial class FundAdjustViewModel : BaseViewModel
     [RelayCommand]
     private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
     #endregion
+
+    // Drop handler refs so the closed popup can be collected; no external subscriptions.
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        CloseRequested = null;
+        Saved = null;
+    }
 }
