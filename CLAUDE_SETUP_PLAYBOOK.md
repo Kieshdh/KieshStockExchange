@@ -5,9 +5,12 @@ methods that let it make many changes safely, including unattended, without brea
 long project but written to drop into any repo. Its companion, **`docs/PROJECT_SYSTEMS_AND_PROBES.md`**, is a
 *worked example* (a market simulator) — read it for inspiration, not as a drop-in.
 
-> **The one idea everything rests on:** *find the invariant that must never break in your system, build a cheap
-> check that proves it, and only let the agent act unattended where a compiler, a textual diff, or that check can
-> prove it didn't break anything.* Trust flows from a provable guardrail, not from the agent being careful.
+> **The one idea everything rests on:** *find the invariant that must never break in your system — or, when the
+> output is subjective or random and no test can prove it, build a **scalar proxy** for "good" instead — then
+> build a cheap check around that, and only let the agent act unattended where a compiler, a textual diff, or that
+> check can prove it didn't break anything.* Trust flows from a provable (or measurable) guardrail, not from the
+> agent being careful. Most projects live in the first regime (Tiers 0–2 below); the stochastic/subjective regime
+> is a **second track** (see "When you can't prove it").
 
 ### TL;DR (adopt in this order)
 1. Write a **`CLAUDE.md`** (project rules) — biggest single quality lever, in our experience.
@@ -15,6 +18,9 @@ long project but written to drop into any repo. Its companion, **`docs/PROJECT_S
 3. Only let it run **unattended** where the *compiler or a textual diff* proves the change is behavior-identical;
    everything else is **propose-only** for a human.
 4. For long runs, add a **living `HANDOFF.md`** + the **cron chains**; if builds peg your disk, add the **disk gate**.
+5. *Only if* your output is subjective/random (a sim, a model, a ranking, a growth metric): read the **second
+   track** ("When you can't prove it") — a scalar proxy + concurrent A/B + a resumable STATUS replace the diff-proof.
+   Everyone else can skip it.
 
 ### ⏱ Adopt in 30 minutes — do these 4, skip the rest
 Copy the four templates in **§Templates** below: **`CLAUDE.md`**, **`HANDOFF.md`**, the **executor→gate→review→commit
@@ -33,7 +39,7 @@ rest as you scale into automation.
 ### Mini-glossary (terms used below)
 - **candidate** — one self-contained change (= one commit).
 - **gate** — the automated check a change must pass. We use it three ways, don't conflate them: the **build/test
-  gate** (§T1-2), the **disk gate** (§L3, throttles builds), and a **hardened gate** for risky areas (extra
+  gate** (§T1-2), the **disk gate** (§Templates, throttles builds), and a **hardened gate** for risky areas (extra
   asserts). Context says which.
 - **propose-only** — the agent implements + validates a change but does **not** merge it; a human reviews the diff.
 - **prepare-but-hold** — same, but the change is committed on a branch labelled "HOLD FOR OWNER" so it's ready to
@@ -83,7 +89,7 @@ gate + invariant):
 > **independent adversarial diff review** (a *different* agent, sees only the diff) → **your own read** → **1
 > commit per candidate** (bisectable) → push.
 Rules that made it safe: one candidate = one commit; a **fresh** executor each time (keeps the orchestrator's
-context small — see §L4); gate on the **full** suite, not a subset. → review prompt in §Templates.
+context small — see §T2-2); gate on the **full** suite, not a subset. → review prompt in §Templates.
 
 ### T1-3. Adversarial diff review — the check that actually catches things
 "It compiles and tests pass" misses semantic drift, and tests are weakest exactly where real bugs live (error
@@ -119,6 +125,45 @@ Claude Code can schedule prompts to itself. Two chains, different jobs:
 > set-and-forget. Always pair with `HANDOFF.md` and make every continue-prompt self-contained (re-state the
 > safety rules, point at the handoff) so any single firing is recoverable. → commands in §Templates.
 
+## When you can't prove it — the second track (tuning a system you can't directly verify)
+
+> **Skip this whole section unless your project's output is *subjective or random*** — a simulation, an ML model,
+> a ranking/recommender, a growth or pricing metric — **so that "did it work?" cannot be answered by a passing
+> test.** If your tests either pass or fail, Tiers 0–2 are the whole story; stop there.
+
+Tiers 0–2 rest on one move: *prove behavior didn't change, then automate the boring part.* That proof comes from a
+compiler, a diff, or an invariant. When the output is stochastic or subjective there **is** no such proof — so you
+**substitute continuous instrumentation for the proof.** Same goal (a guardrail you trust more than the agent),
+different instrument. This is a second, coordinate track — not a higher rung — chosen by the *nature of the
+system*, not by how much autonomy you've earned.
+
+> **Honesty caveat:** these were distilled from *one* noisy simulator where runs aren't reproducible and some
+> quality ceilings never moved across dozens of experiments. Treat them as a starting shape to re-validate in your
+> domain, not laws. The worked, project-specific instances live in the companion example note — read it for how
+> this actually played out.
+
+**The three moves that generalize** (the rest is procedure):
+1. **Build a scalar metric first** — turn "does it feel right?" into *one number* (a composite score) before you
+   tune anything. You cannot tune what you cannot measure, and the number is what makes dozens of runs comparable.
+2. **Keep a continuous invariant** — the property that must hold across *every* run regardless of tuning (money
+   conserved, counts balance, nothing negative). It's the diff-proof's replacement; it outlives any one experiment.
+3. **Compare concurrent A/B arms, never before-vs-after** — a non-reproducible system can't reproduce *itself*
+   run-to-run, so a sequential "before change / after change" comparison is noise. Run **both variants at once**
+   (two instances, two configs), compare them side by side, and point your live view at the experimental one so a
+   human can eyeball it. Cap the parallelism (2 arms is usually enough).
+
+**Running experiments as a loop (optional, for long unattended tuning):** make a **plan file the brain** — an
+Open-Questions list, an Experiment queue, an Experiment log, and a one-line **STATUS** that is the recovery anchor
+— and let the **council (D-1) pick the next experiment** at each fork and after each run. Add a liveness watchdog
+and a global time/token cap so a stuck run can't burn the night. → plan-file template in §Templates.
+
+**Performance work, generalized:** *profile to find the ACTUAL bound before optimizing* (I/O- or commit-bound vs
+CPU — optimize the bound you measured, not the one you assumed) → tune **config before touching the engine** →
+**batch the hot path** → ship the lever behind a default-off flag → validate via concurrent A/B (above).
+
+**Match the run length to the question** — a short *smoke* run to check it's alive, a mid run for an A/B verdict,
+a long *bake* run before you flip a default. Don't default to the longest.
+
 ## Decision tools (orthogonal — reach for these at forks, not as steps)
 
 ### D-1. The LLM Council — for expensive, uncertain decisions
@@ -132,11 +177,30 @@ once here:* it reframed a scary money-refactor into a read-only diagnostic that 
 that reframe alone paid for the council. (This very playbook was revised by running the council on it.)
 
 ### D-2. The "ultraplan" pattern — de-risk a big change before writing it
-For a large/high-risk change, plan first: **feasibility probe** → **3 independent architects** propose approaches
-→ **council teardown** scores them → distil into one **fire prompt** (a self-contained implementation brief) with
-a *repo-facts appendix* (exact files/APIs/constraints) and an *acceptance contract* (what "done + correct"
-means). Then one blind patch for low-risk, or stage the risky parts behind a default-off flag. It's a
-methodology, not a skill — template the fire prompt and reuse it.
+For a large or high-risk change, **plan before you write**. A five-step pipeline:
+1. **Feasibility probe** — a quick read-only pass: is this even possible here, and what breaks if we try?
+2. **Three independent architects** — spawn 3 sub-agents *blind to each other*, each proposing a different
+   approach. Independence is the point: you want genuinely divergent designs, not three votes for the obvious one.
+3. **Council teardown** — run D-1 on the three: score them, find each one's fatal flaw, pick or synthesize.
+4. **Distil one "fire prompt"** — a single self-contained implementation brief the executor can run cold, with
+   nothing else in context. Three parts: a **repo-facts appendix** (exact files/APIs/constraints it must respect),
+   an **acceptance contract** (what "done + correct" concretely means — the checks that must pass), and a
+   **fire-contract footer** (the ground rules: what it may NOT touch, when to stop and ask). → template in §Templates.
+5. **Handoff** — record the plan + fire prompt in `HANDOFF.md` so any session (or person) can execute it.
+
+Then choose *how* to run the fire prompt. **"Ultracode"** = fanning the work out across many parallel sub-agents
+(one orchestrator, N workers doing + adversarially cross-checking) — worth it for scale or high assurance.
+**"Local Claude"** = one agent working sequentially — right for a single focused change. Pick by
+*irreversibility × search-space*, not by how much effort it feels like:
+
+| The change is… | Agents | How to run it |
+|---|---|---|
+| One file / low-risk / one obvious approach | 1 | local single-agent, straight through |
+| Multi-file but parallelizable; several plausible designs | 3–5 | ultraplan → ultracode fan-out (architects + parallel executors + cross-review) |
+| Correctness-/money-critical or statistically load-bearing | staged | local, **contract-first**: land the contract/tests, then patch behind a default-off flag |
+
+It's a methodology, not a skill — template the fire prompt (below) and reuse it. Route models per §Other-patterns
+(cheap executors, top-tier for the architects + council).
 
 ---
 
@@ -155,8 +219,12 @@ methodology, not a skill — template the fire prompt and reuse it.
   don't remove your judgment from the loop.
 
 ## Other patterns worth stealing
+- **Decouple *merging* from *activating* (default-off flags):** put a risky lever behind a flag defaulted **off**,
+  merge it dark, validate it over a long run (invariant clean + effect bounded), then flip the default as a
+  separate deliberate act. This makes autonomously merging even risky code safe — because turning it *on* stays a
+  human decision. (Both "ship it dark" and "bake before you flip" are the same one move.)
 - **Model routing:** cheap/fast tier for mechanical executors, the most capable tier for the council and the
-  hardest reviews. Re-check model availability (it changes) and fall back gracefully.
+  hardest reviews. Re-check model availability (it changes) and fall back gracefully. → routing table in §D-2.
 - **`AskUserQuestion` for owner-level forks:** when a choice is genuinely the human's (scope, risk appetite,
   which of two valid designs), ask with explicit options instead of guessing or stalling.
 - **Prepare-but-hold** (glossary): implement + fully validate a risky change, commit it labelled "HOLD FOR
@@ -222,6 +290,42 @@ evaluation/short-circuit order, decimal-vs-double, culture-sensitive ToString/Pa
 lock scope, async/await ordering, null/empty handling, and any moved field/initializer.
 Output a per-hunk verdict PRESERVED / CHANGED / UNSURE with a one-line reason, then an overall verdict
 (PRESERVED only if EVERY hunk is). For anything CHANGED/UNSURE, state exactly what evidence would flip it.
+```
+
+### "Fire prompt" template (the ultraplan output — hand to a cold executor, §D-2)
+```
+GOAL: <one sentence — what "done" looks like>
+APPROACH (chosen by the architects + council): <the design to implement, in 2-4 sentences>
+
+REPO-FACTS APPENDIX (respect these exactly):
+- Files/APIs you will touch: <exact paths + signatures>
+- Constraints/invariants that must not break: <e.g. all multi-table writes via RunInTransactionAsync>
+- Conventions to follow: <naming, layering, existing helpers to reuse instead of duplicating>
+
+ACCEPTANCE CONTRACT (you are done only when ALL hold):
+- [ ] <builds + full test suite green (N/N)>
+- [ ] <the specific new/updated tests that must pass>
+- [ ] <the invariant/metric check that must still hold>
+
+FIRE-CONTRACT FOOTER (ground rules):
+- You may NOT touch: <the hard-ban set>.  Branch: <feature branch>, never main/prod.
+- If a fact here is wrong or missing, STOP and report — do not guess.
+- Make ONE self-contained change; do not commit — return your diff + which contract items you verified.
+```
+
+### Research plan-file + STATUS template (the "brain" for a tuning loop, §second-track)
+```markdown
+# <EXPERIMENT NAME> — research plan (STATUS line = recovery anchor; update every stop)
+## STATUS: <one line: what's running now / what's the next decision / where results land>
+## The metric
+- Scalar for "good": <the number> — computed by <script/how>. Invariant that must hold every run: <the check>.
+## Open questions
+- <question the experiments are trying to answer>
+## Experiment queue (council picks the next at each fork)
+1. <arm A vs arm B — the one variable that differs>
+## Experiment log (append-only; one row per run)
+- <date> <arm> → metric=<n>, invariant=<clean/broke>, verdict=<keep/drop/inconclusive>, note=<...>
+## Caps: max <N> parallel arms · global stop at <time/token budget> · liveness watchdog: <how>
 ```
 
 ### Risk-tier table

@@ -1,5 +1,17 @@
 # PLAYBOOK-V2 task — add the missing (generalized) techniques, council-improved
 
+> **★ DONE (2026-07-19).** Full 5-advisor + 5-peer-review LLM council run; chairman synthesis applied to
+> `/CLAUDE_SETUP_PLAYBOOK.md`. Council's key call: this is NOT a "Tier 3" rung — it's a coordinate **second
+> track** ("When you can't prove it") selected by the system's *nature* (stochastic/subjective output), gated by a
+> self-select sentence + honesty caveat. Applied: (1) reframed the "one idea" to *invariant OR scalar proxy*;
+> (2) new second-track section with the 3-move spine (scalar metric / continuous invariant / concurrent A/B) +
+> generalized perf + tiered-run guidance; (3) fleshed D-2 ultraplan (5-step pipeline + Fire-Prompt template +
+> ultracode-vs-local routing table, model-routing folded in); (4) merged redundancies (#5/#6/#7 → one
+> "decouple merge from activation" pattern; tiered durations shrunk); (5) added Fire-Prompt + Research-plan/STATUS
+> templates; (6) fixed two dangling cross-refs. 382→~382 lines (under the ~410 cap). The candidate list below is
+> the input that was fed to the council; kept for provenance. **NEXT = PRIORITY 2 (dedup arc).**
+
+
 **Kiesh (2026-07-19):** "We're missing a lot in the playbook. We used a lot of techniques to make sure the bot
 runs well — add them, but a GENERALIZED version. E.g. I'm missing the ultraplan method (3 architects & council &
 handoff, for ultracode / local-Claude implementation). Let the council improve this."
