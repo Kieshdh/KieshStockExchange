@@ -95,11 +95,15 @@ The Attended giants (AiTradeService / OES / AiBotDecision) + BracketCoordinator 
 
 ## ★ COUNCIL RAN (2026-07-19) — Pass-2 triage decided; Kiesh green-lit executing GO-NOW-within-safety. Full verdict
 in `docs/arcs/DEDUP_PASS2_PROPOSALS.md` (top). **GO-NOW queue (do in this order, agents on Opus 4.8):**
-1. **P2-5 READ-ONLY DIAGNOSTIC (disk-free, do FIRST):** diff the client vs server `ReservationMath` (both at
-   `.../Services/MarketEngineServices/Settlement/ReservationMath.cs`); write a bug-report-with-repro into
-   `DEDUP_PASS2_PROPOSALS.md` (or a new `docs/arcs/RESERVATIONMATH_DRIFT.md`): every diverging method, which side is
-   authoritative (server settles → server is truth), what the client mis-estimates, and the user-facing impact
-   (likely a client display/pre-validation discrepancy, NOT a conservation breach). NO code change. Commit+push.
+1. ✅ **DONE — P2-5 READ-ONLY DIAGNOSTIC** → `docs/arcs/RESERVATIONMATH_DRIFT.md`. FINDING: the **client
+   `ReservationMath` is DEAD CODE** (zero callers in the client project; `internal` methods, never invoked). The
+   drift has NO user impact (client never reserves via it); server is authoritative + the only one used. This
+   reclassifies P2-5's client side from "CK unification (owner+soak)" to a **safe dead-code DELETE (Pass-1)**.
+1b. **NEXT — DELETE the client `ReservationMath.cs` (Pass-1 dead-code removal, autonomous).** NOT a CK change
+   (removing unused CLIENT code touches no server settlement). Executor deletes the file; gate = CLIENT build
+   (disk-gated) — if it builds, nothing referenced it (compiler-proven) — + adversarial review confirming no
+   caller; commit+push. FALLBACK: if the client build fails (a missed caller), do NOT delete → that becomes the
+   hoist-server-copy-to-Shared proposal (owner + CK soak). Evidence says clean delete.
 2. **CK CHARACTERIZATION TESTS (server/shared → in the test project):** add tests pinning CURRENT behaviour of
    `ReservationMath` (server), `OrderValidator` rule blocks, and cost-basis lot math. Tests ADD coverage, change no
    app behaviour; gate = `dotnet test` alone (disk-gated). One test-area per commit. This de-risks the owner's fix.
