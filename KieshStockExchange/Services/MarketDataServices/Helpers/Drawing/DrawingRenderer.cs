@@ -31,6 +31,12 @@ internal sealed class DrawingRenderer
     // on any theme. The line's colour is kept as a thin border so the tag still identifies its drawing.
     private static readonly Color LabelPillBg = Color.FromArgb("#2A2E39");
 
+    // Text-label pill metrics — width sizes to the label length. MUST match ChartHitTester's Text arm so
+    // the clickable zone tracks the drawn pill exactly (there's no shared home across the two collaborators).
+    private const float TextPillCharW = 7f;
+    private const float TextPillMinW = 26f;
+    private const float TextPillH = 16f;
+
     /// <summary>
     /// Draw the user's horizontal lines + trendlines. HLine spans the plot at its price with a
     /// right-gutter price tag; Trend is a segment with a draggable handle at each end. Both carry a
@@ -299,6 +305,29 @@ internal sealed class DrawingRenderer
 
                 DrawGutterPriceTag(canvas, t, plot, y, d.P1, alertColor, cur);
                 if (selected) DrawHandle(canvas, t, plot.Left + 1f, y, alertColor);
+            }
+            else if (d.Kind == DrawTool.Text)
+            {
+                // Anchored label: a readable pill (dark slate + white text + thin colour border) with its
+                // LEFT edge at the (T1,P1) anchor, vertically centred. Reuses the DrawEndpointPriceTag pill
+                // mechanics. Blank text draws nothing; an off-plot anchor is clipped like the level kinds.
+                // Pill metrics MUST mirror ChartHitTester's Text arm so the clickable zone tracks the paint.
+                if (string.IsNullOrEmpty(d.Text)) { canvas.StrokeDashPattern = null; continue; }
+                float ax = X(d.T1), ay = Y((double)d.P1);
+                if (ax < plot.Left || ax > plot.Right || ay < plot.Top || ay > plot.Bottom)
+                { canvas.StrokeDashPattern = null; continue; }
+                float w = Math.Max(TextPillMinW, d.Text.Length * TextPillCharW);
+                var r = new RectF(ax, ay - TextPillH / 2f, w, TextPillH);
+                canvas.FillColor = LabelPillBg;
+                canvas.FillRectangle(r);
+                canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
+                canvas.StrokeDashPattern = null;   // the pill border is never dashed (pen dash is for the line kinds)
+                canvas.DrawRectangle(r);
+                canvas.FontColor = Colors.White;
+                canvas.FontSize = t.PriceTagFont + 1f;   // a touch larger than the axis tags so labels read
+                canvas.DrawString(d.Text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                if (selected) DrawHandle(canvas, t, ax, ay, color);
             }
             else // Trend or Ray (both a two-anchor segment; Ray extends past anchor2 to the plot edge)
             {

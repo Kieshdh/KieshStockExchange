@@ -18,6 +18,39 @@ public partial class ChartView
         _vm.Drawing.IsPenPanelOpen = true;
     }
 
+    // Text tool: the anchor was placed at the click; now prompt for the label and commit it. Fire-and-forget
+    // from the (void) pointer handler — Shell.Current is the app's Page host for the modal (ChartView is a
+    // ContentView, so it has no DisplayPromptAsync of its own). A cancelled or blank label removes the just-
+    // added (invisible) placeholder + disarms the tool; a real label commits, persists, and selects it.
+    private async Task PromptTextLabelAsync(Guid id)
+    {
+        if (_vm == null) return;
+        string? txt = null;
+        try
+        {
+            if (Shell.Current is Shell shell)
+                txt = await shell.DisplayPromptAsync("Text", "Label:", initialValue: "");
+        }
+        catch { /* modal host unavailable — treat as a cancel (removes the placeholder below) */ }
+
+        if (string.IsNullOrWhiteSpace(txt))
+        {
+            _vm.Drawing.RemoveDrawing(id);           // don't leave an invisible empty label behind
+            _vm.Drawing.DrawTool = DrawTool.None;    // one-shot: disarm even on cancel
+        }
+        else
+        {
+            var d = _vm.Drawing.Drawings.FirstOrDefault(x => x.Id == id);
+            if (d.Id == id)
+            {
+                _vm.Drawing.UpdateDrawing(d with { Text = txt.Trim() });
+                _vm.Drawing.PersistDrawings();       // UpdateDrawing defers persistence — commit the label now
+            }
+            FinishPlacement(id);                     // revert to cursor + select so the style panel pops up
+        }
+        Chart.Invalidate();
+    }
+
     // Seed the drawing-drag state from the grabbed drawing and the press point. The data-space grab
     // point lets a whole-shape (body) move apply an absolute delta off the original anchors.
     private void BeginDrawingDrag(DrawingObject d, DrawingHitPart part, PointF p, bool isNew)
@@ -56,6 +89,8 @@ public partial class ChartView
             _ when d.Kind == DrawTool.HLine => d with { P1 = price },
             // Alert is a horizontal level like HLine — a body-drag moves its price only.
             _ when d.Kind == DrawTool.Alert => d with { P1 = price },
+            // Text is a single-anchor label — a body-drag moves the whole anchor (both time + price).
+            _ when d.Kind == DrawTool.Text => d with { T1 = time, P1 = price },
             _ when d.Kind == DrawTool.VLine => d with { T1 = time },
             _ when d.Kind == DrawTool.Polyline || d.Kind == DrawTool.Freehand
                 => ShiftPoints(d, time - _drawDragStartTime, price - _drawDragStartPrice),

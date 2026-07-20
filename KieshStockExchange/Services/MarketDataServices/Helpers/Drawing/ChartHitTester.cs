@@ -20,6 +20,12 @@ internal sealed class ChartHitTester
     private readonly float DrawHitTol;
     private readonly float RightAxisW;
 
+    // Text-label pill metrics — kept in lockstep with DrawingRenderer's TextPill* consts so the pill's
+    // clickable zone matches the drawn pill exactly.
+    private const float TextPillCharW = 7f;
+    private const float TextPillMinW = 26f;
+    private const float TextPillH = 16f;
+
     public ChartHitTester(float drawHandleR, float drawHitTol, float rightAxisW)
     {
         DrawHandleR = drawHandleR;
@@ -54,6 +60,18 @@ internal sealed class ChartHitTester
                 if (y < frame.Plot.Top || y > frame.Plot.Bottom) continue;
                 if (p.X >= frame.Plot.Left && p.X <= frame.Plot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.Text)
+            {
+                // Text label: hit anywhere inside the pill rect at the anchor. The rect MUST mirror the
+                // renderer's Text arm — left edge at the anchor X, vertically centred on the anchor Y, width
+                // from the label length (metrics kept in lockstep with DrawingRenderer's TextPill* consts).
+                if (string.IsNullOrEmpty(d.Text)) continue;
+                float ax = frame.TimeToPixelX(d.T1), ay = frame.HitPriceToPixelY(d.P1);
+                if (ax < frame.Plot.Left || ax > frame.Plot.Right || ay < frame.Plot.Top || ay > frame.Plot.Bottom) continue;
+                float w = Math.Max(TextPillMinW, d.Text.Length * TextPillCharW);
+                var r = new RectF(ax, ay - TextPillH / 2f, w, TextPillH);
+                if (r.Contains(p)) return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.HRay)
             {

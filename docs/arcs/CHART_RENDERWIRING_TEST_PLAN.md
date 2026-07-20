@@ -18,4 +18,12 @@ the current price shows fired immediately, and one placed above then crossed *do
 cross-latch + alert-condition UI is deferred to v2. **Also eyeball:** the 🔔 emoji may render as a plain box on the
 canvas depending on font fallback — if so, say the word and I'll swap it for a drawn vector bell.
 
-<!-- feature commits append below: Text, Fibonacci, Position, Bollinger/VWAP, RSI -->
+## 2. Text tool  (commit `<pending>`)
+**What:** a new **Text** annotation tool in the drawing rail's *lines* group — one click drops an anchor and a modal
+prompts for the label; it renders as a readable dark pill with white text anchored at that point. Persists per stock.
+**Test:** pick Text → click on the chart → type a label in the prompt → it appears as a pill; drag it around
+(moves freely in time+price); select it and re-edit the text in the pen panel; reopen the chart → it persisted.
+Cancel or leave the prompt blank → nothing is left behind (no empty label). In-place (type-on-canvas) editing is
+deferred to v2 — v1 uses the modal prompt.
+
+<!-- feature commits append below: Fibonacci, Position, Bollinger/VWAP, RSI -->
