@@ -3,7 +3,7 @@
 > **This is a worked example, not a drop-in.** It's the lab notebook for *this* project — a real-time market
 > **simulator** with bot traders, money conservation, and a MAUI charting client. **The reusable thing is the
 > pattern, not these tools:** *find the one invariant that must never break, build a cheap check that proves it,
-> and gate autonomy on that check* (see `/CLAUDE_SETUP_PLAYBOOK.md` → "The one idea"). Everything in section A
+> and gate autonomy on that check* (see `CLAUDE_SETUP_PLAYBOOK.md` in this folder → "The one idea"). Everything in section A
 > below is one instantiation of that pattern. Read it for *how the pattern plays out*, then build the equivalent
 > for your own domain.
 
