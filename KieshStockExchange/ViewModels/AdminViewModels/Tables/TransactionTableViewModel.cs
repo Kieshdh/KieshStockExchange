@@ -1,60 +1,29 @@
-﻿using CommunityToolkit.Maui.Views;
+using CommunityToolkit.Maui.Views;
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Views.AdminPageViews.EditPopups;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels.Tables;
 
-public partial class TransactionTableViewModel : BaseTableViewModel<TransactionTableObject>
+public partial class TransactionTableViewModel : DateRangeTableViewModel<TransactionTableObject>
 {
-    private const string AnyOption = "Any";
-
     private const string DefaultSortKey = "Timestamp";
 
+    protected override Stock AnyStock => OrderTableViewModel.AnyStockSentinel;
+
     #region Filter state
-    [ObservableProperty] private DateTime _fromDate = DateTime.UtcNow.AddMinutes(-5);
-    [ObservableProperty] private DateTime _toDate = DateTime.UtcNow;
-    [ObservableProperty] private TimeSpan _fromTime = DateTime.UtcNow.AddMinutes(-5).TimeOfDay;
-    [ObservableProperty] private TimeSpan _toTime = DateTime.UtcNow.TimeOfDay;
-    [ObservableProperty] private string _usernameSearch = string.Empty;
     [ObservableProperty] private string _selectedCurrencyFilter = AnyOption;
-    [ObservableProperty] private bool _hideAiBots = false;
 
-    private Stock? _selectedStockFilter;
-    public Stock? SelectedStockFilter
-    {
-        get => _selectedStockFilter;
-        set
-        {
-            if (value == _selectedStockFilter) return;
-            _selectedStockFilter = value;
-            OnPropertyChanged();
-            _ = ApplyViewChange();
-        }
-    }
-
-    public ObservableCollection<Stock> PickerStocks { get; } = new();
     public IReadOnlyList<string> CurrencyFilterOptions { get; }
 
-    partial void OnFromDateChanged(DateTime value) => _ = ApplyViewChange();
-    partial void OnToDateChanged(DateTime value) => _ = ApplyViewChange();
-    partial void OnFromTimeChanged(TimeSpan value) => _ = ApplyViewChange();
-    partial void OnToTimeChanged(TimeSpan value) => _ = ApplyViewChange();
-    partial void OnUsernameSearchChanged(string value) => _ = ApplyViewChange();
     partial void OnSelectedCurrencyFilterChanged(string value) => _ = ApplyViewChange();
-    partial void OnHideAiBotsChanged(bool value) => _ = ApplyViewChange();
     #endregion
 
     #region Fields, events and Constructor
-    private Dictionary<int, Stock> _stocksById = new();
-    private List<int>? _aiUserIds;
-    private readonly IDataBaseService _dbRef;
     private readonly IServiceProvider _services;
 
     public event EventHandler<int>? UserSelected;
@@ -66,7 +35,6 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         Title = "Transactions";
         SortKey = DefaultSortKey;
         SortDesc = true;
-        _dbRef = dbService;
         _services = services ?? throw new ArgumentNullException(nameof(services));
         CurrencyFilterOptions = new[] { AnyOption }
             .Concat(CurrencyHelper.SupportedCurrencies.Select(c => c.ToString()))
@@ -77,35 +45,11 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
     internal void RaiseOrderSelected(int orderId) => OrderSelected?.Invoke(this, orderId);
     #endregion
 
-    #region Initialization and page loading
-    public override async Task EnsureInitializedAsync()
-    {
-        await EnsureStocksLoadedAsync();
-        await base.EnsureInitializedAsync();
-    }
-
-    private async Task EnsureStocksLoadedAsync()
-    {
-        if (PickerStocks.Count > 0) return;
-        var stocks = await _dbRef.GetStocksAsync();
-        _stocksById = stocks.ToDictionary(s => s.StockId);
-        PickerStocks.Add(OrderTableViewModel.AnyStockSentinel);
-        foreach (var s in stocks) PickerStocks.Add(s);
-        _selectedStockFilter ??= OrderTableViewModel.AnyStockSentinel;
-        OnPropertyChanged(nameof(SelectedStockFilter));
-
-        var aiUsers = await _dbRef.GetAIUsersAsync();
-        _aiUserIds = aiUsers.Select(a => a.UserId).Distinct().ToList();
-    }
-
+    #region Page loading
     protected override async Task<(IReadOnlyList<TransactionTableObject> Items, int Total)> LoadPageAsync(
         int skip, int take, string? sortKey, bool desc, string? filter, CancellationToken ct)
     {
-        if (_stocksById.Count == 0)
-        {
-            var stocks = await _dbRef.GetStocksAsync(ct);
-            _stocksById = stocks.ToDictionary(s => s.StockId);
-        }
+        await EnsureStocksByIdAsync(ct);
 
         int? userIdFilter = await ResolveUserIdFilterAsync(ct);
         int? stockIdFilter = SelectedStockFilter is { StockId: > 0 } s ? s.StockId : null;
@@ -115,14 +59,14 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
         // Combine date+time pickers; clamp upper bound to now.
         var (fromCombined, toCombined) = DateRangeHelper.CombineAndClampRange(FromDate, FromTime, ToDate, ToTime);
 
-        var (transactions, total) = await _dbRef.GetTransactionsPageAsync(skip, take, sortKey ?? DefaultSortKey, desc,
+        var (transactions, total) = await _db.GetTransactionsPageAsync(skip, take, sortKey ?? DefaultSortKey, desc,
             fromCombined, toCombined,
             userIdFilter, stockIdFilter, currencyArg, excludeIds, ct);
 
         if (transactions.Count == 0) return (Array.Empty<TransactionTableObject>(), total);
 
         var userIds = transactions.SelectMany(t => new[] { t.BuyerId, t.SellerId }).Distinct().ToList();
-        var users = await _dbRef.GetUsersByIds(userIds, ct);
+        var users = await _db.GetUsersByIds(userIds, ct);
         var usersById = users.ToDictionary(u => u.UserId, u => u);
 
         var rows = transactions.Select(t =>
@@ -151,7 +95,7 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
     }
     #endregion
 
-    #region Details popup and helpers
+    #region Details popup
     private async Task OpenDetailsAsync(Transaction tx, User buyer, User seller, Stock stock)
     {
         var page = Shell.Current?.CurrentPage
@@ -171,32 +115,6 @@ public partial class TransactionTableViewModel : BaseTableViewModel<TransactionT
             popup.ViewModel.NavigateToUserRequested -= userNav;
             popup.ViewModel.NavigateToOrderRequested -= orderNav;
         }
-    }
-
-    private async Task<int?> ResolveUserIdFilterAsync(CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(UsernameSearch)) return null;
-
-        var text = UsernameSearch.Trim();
-        if (int.TryParse(text, out var id)) return id;
-
-        var (matches, _) = await _dbRef.GetUsersPageAsync(0, 1, "Username", false, text, ct);
-        return matches.Count > 0 ? matches[0].UserId : -1;
-    }
-
-    [RelayCommand] private void SetLast5Min()  => SetRange(TimeSpan.FromMinutes(5));
-    [RelayCommand] private void SetLast15Min() => SetRange(TimeSpan.FromMinutes(15));
-    [RelayCommand] private void SetLastHour()  => SetRange(TimeSpan.FromHours(1));
-    [RelayCommand] private void SetLast1Day()  => SetRange(TimeSpan.FromDays(1));
-
-    private void SetRange(TimeSpan window)
-    {
-        var now = DateTime.UtcNow;
-        var start = now - window;
-        FromDate = start;
-        FromTime = start.TimeOfDay;
-        ToDate = now;
-        ToTime = now.TimeOfDay;
     }
     #endregion
 }
