@@ -54,6 +54,8 @@ public partial class ChartView
             // Body: HLine tracks the cursor price; VLine tracks the cursor time; multi-point strokes
             // (polyline/freehand) shift every point by the data-space delta; Trend shifts both anchors.
             _ when d.Kind == DrawTool.HLine => d with { P1 = price },
+            // Alert is a horizontal level like HLine — a body-drag moves its price only.
+            _ when d.Kind == DrawTool.Alert => d with { P1 = price },
             _ when d.Kind == DrawTool.VLine => d with { T1 = time },
             _ when d.Kind == DrawTool.Polyline || d.Kind == DrawTool.Freehand
                 => ShiftPoints(d, time - _drawDragStartTime, price - _drawDragStartPrice),

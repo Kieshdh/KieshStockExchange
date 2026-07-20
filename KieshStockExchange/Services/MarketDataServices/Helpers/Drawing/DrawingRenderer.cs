@@ -277,6 +277,29 @@ internal sealed class DrawingRenderer
                     DrawHandle(canvas, t, x2, y2, color);   // head
                 }
             }
+            else if (d.Kind == DrawTool.Alert)
+            {
+                // Price alert: a dashed level at P1 with a bell at the plot's left edge + a right-gutter
+                // price tag (clipped off-plot like HLine). Once the live price has reached/crossed the
+                // level it reads "fired" — solid + thicker line and a warning-tinted bell — so an armed
+                // vs triggered alert is legible at a glance (a proper cross-latch is deferred).
+                float y = Y((double)d.P1);
+                if (y < plot.Top || y > plot.Bottom) { canvas.StrokeDashPattern = null; continue; }
+                bool triggered = f.CurrentPrice is decimal acp && acp >= d.P1;
+                var alertColor = triggered ? t.Bear : color;
+                StylePreviewDrawable.DrawStraightSegment(canvas, plot.Left, y, plot.Right, y,
+                    LineEnding.None, alertColor, triggered ? stroke + 1f : stroke,
+                    triggered ? null : dashPattern, d.Style.Head, ChartGeometry.EndSize(thickness));
+
+                // Bell glyph (🔔) at the left edge, in the line's colour (warning tint when fired).
+                canvas.FontColor = alertColor;
+                canvas.FontSize = t.PriceTagFont + 3f;
+                canvas.DrawString("\U0001F514", new RectF(plot.Left + 1f, y - 9f, 18f, 18f),
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+
+                DrawGutterPriceTag(canvas, t, plot, y, d.P1, alertColor, cur);
+                if (selected) DrawHandle(canvas, t, plot.Left + 1f, y, alertColor);
+            }
             else // Trend or Ray (both a two-anchor segment; Ray extends past anchor2 to the plot edge)
             {
                 float x1 = X(d.T1), y1 = Y((double)d.P1);

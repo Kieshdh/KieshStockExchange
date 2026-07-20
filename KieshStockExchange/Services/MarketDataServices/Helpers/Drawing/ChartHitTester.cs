@@ -47,6 +47,14 @@ internal sealed class ChartHitTester
                 if (p.X >= frame.Plot.Left && p.X <= frame.Plot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }
+            else if (d.Kind == DrawTool.Alert)
+            {
+                // Alert is a horizontal level at P1 — hit anywhere along the line across the plot (like HLine).
+                float y = frame.HitPriceToPixelY(d.P1);
+                if (y < frame.Plot.Top || y > frame.Plot.Bottom) continue;
+                if (p.X >= frame.Plot.Left && p.X <= frame.Plot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
+                    return (d, DrawingHitPart.Body);
+            }
             else if (d.Kind == DrawTool.HRay)
             {
                 float x1 = frame.TimeToPixelX(d.T1), y = frame.HitPriceToPixelY(d.P1);

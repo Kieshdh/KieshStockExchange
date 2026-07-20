@@ -18,6 +18,9 @@ internal sealed class RenderFrame
     public PriceScaleMode Mode { get; }   // captured at build — consumers stop reading the live property
     public TimeSpan Bucket { get; }       // Viewport.Bucket snapshot
     public CurrencyType Currency { get; }
+    // Live price at paint time — nullable + init-only so no existing ctor call / test fixture breaks
+    // (a new ctor param would). Lets a drawing renderer (the Alert level) react to the current price.
+    public decimal? CurrentPrice { get; init; }
     private readonly IScaleTransform _scale;   // stateless; injected from the drawable
 
     public RenderFrame(RectF plot, RectF volRect, RectF moodRect,
@@ -39,7 +42,8 @@ internal sealed class RenderFrame
     // mirrors the old seven-field cache, where the rect fields were written before the no-data /
     // zero-span bailouts but the range fields were not.
     public RenderFrame WithRects(RectF plot, RectF vol, RectF mood)
-        => new(plot, vol, mood, YMin, YMax, TMin, TMax, SpanSec, Mode, Bucket, Currency, _scale);
+        => new(plot, vol, mood, YMin, YMax, TMin, TMax, SpanSec, Mode, Bucket, Currency, _scale)
+        { CurrentPrice = CurrentPrice };
 
     // ---- forward transforms (RENDER form — the old X/Y closures: cast then subtract in float) ----
     public float MapX(DateTime utc)

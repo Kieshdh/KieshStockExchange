@@ -323,7 +323,7 @@ public sealed partial class CandleChartDrawable : IDrawable
         // One frame per paint: pane rects, ranges and every data<->pixel transform committed in a
         // single assignment BEFORE any renderer runs — the old seven-field cache, reified.
         var frame = new RenderFrame(plot, volRect, moodRect, yMin, yMax, tMin, tMax, spanSec,
-            ScaleMode, Viewport.Bucket, currency, _scale);
+            ScaleMode, Viewport.Bucket, currency, _scale) { CurrentPrice = CurrentPrice };
         _frame = frame;
         // Palette snapshot alongside the frame — renderer collaborators read the theme, not the fields.
         var theme = BuildTheme();
