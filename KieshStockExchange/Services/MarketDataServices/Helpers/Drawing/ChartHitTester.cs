@@ -160,6 +160,22 @@ internal sealed class ChartHitTester
                         if (Math.Abs(p.Y - y) <= DrawHitTol) return (d, DrawingHitPart.Body);
                     }
             }
+            else if (d.Kind == DrawTool.Position)
+            {
+                // Long/short box: the two draggable anchors are Entry(T1,P1) + Target(T2,P2) (like Trend);
+                // Body = anywhere inside the box bounds — X between the anchors, Y spanning the entry/target/
+                // stop legs. (The stop leg P3 has no anchor handle in v1.)
+                float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);
+                float x2 = frame.TimeToPixelX(d.T2), y2 = frame.HitPriceToPixelY(d.P2);
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                float y3 = frame.HitPriceToPixelY(d.P3);
+                float left = Math.Min(x1, x2), right = Math.Max(x1, x2);
+                float top = Math.Min(y1, Math.Min(y2, y3)), bottom = Math.Max(y1, Math.Max(y2, y3));
+                if (p.X >= left - DrawHitTol && p.X <= right + DrawHitTol
+                    && p.Y >= top - DrawHitTol && p.Y <= bottom + DrawHitTol)
+                    return (d, DrawingHitPart.Body);
+            }
             else // Trend or Ray
             {
                 float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);

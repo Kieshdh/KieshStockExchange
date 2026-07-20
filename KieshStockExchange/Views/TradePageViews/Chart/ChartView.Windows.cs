@@ -638,7 +638,20 @@ public partial class ChartView
                 _vm?.Drawing.RemoveDrawing(nid);
             // A NEW drawing that was dragged out & kept → revert to cursor + select it (settings pop up).
             else if (_drawDragIsNew && _drawDragMoved && _draggingDrawingId is Guid kid)
+            {
+                // A Position derives its Stop leg ONCE here (mirror of the target across entry), sets its
+                // long/short Direction from target-vs-entry (never re-inferred later, or the box would flip
+                // mid-edit), and defaults to a 1-share size. Every other two-anchor tool finalizes as-is.
+                if (_vm != null
+                    && _vm.Drawing.Drawings.FirstOrDefault(x => x.Id == kid) is { Kind: DrawTool.Position } pos)
+                    _vm.Drawing.UpdateDrawing(pos with
+                    {
+                        P3 = pos.P1 - (pos.P2 - pos.P1),
+                        Direction = pos.P2 >= pos.P1 ? 1 : -1,
+                        Qty = 1,
+                    });
                 FinishPlacement(kid);
+            }
             // Record a Move on the undo stack for an EXISTING drawing that actually moved (a brand-new
             // drawing is already covered by its Add entry, so undo removes the whole creation).
             else if (!_drawDragIsNew && _drawDragMoved)

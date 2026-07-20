@@ -354,6 +354,43 @@ internal sealed class DrawingRenderer
                     DrawHandle(canvas, t, X(d.T2), Y((double)d.P2), color);
                 }
             }
+            else if (d.Kind == DrawTool.Position)
+            {
+                // Long/short risk-reward box: Entry(P1)/Target(P2)/Stop(P3) map through the scale seam like
+                // the Rectangle corners. A translucent GREEN target zone (entry→target) + RED stop zone
+                // (entry→stop) fill the two-anchor box; the entry line + thin bull/bear target/stop borders
+                // read the three legs. One pill shows reward:risk + (live) PnL — PnL is computed at render
+                // from CurrentPrice, never stored.
+                float xa = X(d.T1), xb = X(d.T2);
+                float left = Math.Min(xa, xb), right = Math.Max(xa, xb), boxW = right - left;
+                // While the box is first dragged out the Stop leg isn't derived yet (P3 == 0 — the commit
+                // hook mirrors it across entry on release), so preview a mirror stop so the box reads as a
+                // symmetric R:R 1.0 mid-drag instead of a red zone stretching to price 0.
+                decimal pStop = d.P3 != 0m ? d.P3 : d.P1 - (d.P2 - d.P1);
+                float yEntry = f.ScaleY(d.P1), yTarget = f.ScaleY(d.P2), yStop = f.ScaleY(pStop);
+
+                canvas.FillColor = t.Bull.WithAlpha(0.12f);
+                canvas.FillRectangle(left, Math.Min(yEntry, yTarget), boxW, Math.Abs(yTarget - yEntry));
+                canvas.FillColor = t.Bear.WithAlpha(0.12f);
+                canvas.FillRectangle(left, Math.Min(yEntry, yStop), boxW, Math.Abs(yStop - yEntry));
+
+                // Entry line in the drawing's colour, then thin target/stop edge borders (bull/bear tinted).
+                canvas.StrokeDashPattern = null;
+                canvas.StrokeColor = color; canvas.StrokeSize = stroke;
+                canvas.DrawLine(left, yEntry, right, yEntry);
+                canvas.StrokeSize = 1f;
+                canvas.StrokeColor = t.Bull; canvas.DrawLine(left, yTarget, right, yTarget);
+                canvas.StrokeColor = t.Bear; canvas.DrawLine(left, yStop, right, yStop);
+
+                DrawPositionLabel(canvas, f, t, d, pStop, left, right, yTarget, cur);
+
+                if (selected)
+                {
+                    DrawHandle(canvas, t, xa, yEntry, color);    // entry (T1,P1)
+                    DrawHandle(canvas, t, xb, yTarget, color);   // target (T2,P2)
+                    DrawHandle(canvas, t, xb, yStop, color);     // stop (T2,P3)
+                }
+            }
             else // Trend or Ray (both a two-anchor segment; Ray extends past anchor2 to the plot edge)
             {
                 float x1 = X(d.T1), y1 = Y((double)d.P1);
@@ -511,6 +548,41 @@ internal sealed class DrawingRenderer
         canvas.FontSize = theme.PriceTagFont;
         canvas.DrawString(text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
             HorizontalAlignment.Left, VerticalAlignment.Center);
+    }
+
+    // Position readout: ONE pill with the reward:risk ratio + (when a live price exists) the unrealized
+    // PnL, tinted green/red by PnL sign — falls back to Direction tint when there's no live price. Reuses
+    // the trend midpoint-pill mechanics (tint fill + white text); clamped inside the plot, above the box.
+    private void DrawPositionLabel(ICanvas canvas, RenderFrame f, ChartTheme theme,
+        DrawingObject d, decimal stopPrice, float left, float right, float yTarget, CurrencyType cur)
+    {
+        decimal reward = Math.Abs(d.P2 - d.P1);
+        decimal risk = Math.Abs(d.P1 - stopPrice);
+        string text = $"R:R {(risk > 0m ? $"{(double)(reward / risk):0.0}" : "—")}";
+
+        bool positive = d.Direction >= 0;   // tint fallback when no live price
+        if (f.CurrentPrice is decimal cp)
+        {
+            var (pnl, _) = ChartMath.PositionPnl(cp, d.P1, (int)(d.Qty * d.Direction));
+            positive = pnl >= 0m;
+            text += $"   {CurrencyHelper.Format(pnl, cur)}";
+        }
+        var tint = positive ? theme.Bull : theme.Bear;
+
+        canvas.SaveState();
+        canvas.StrokeDashPattern = null;
+        float w = Math.Max(96f, text.Length * 6.2f);
+        float cx = (left + right) * 0.5f;
+        float lx = Math.Clamp(cx - w / 2f, f.Plot.Left, Math.Max(f.Plot.Left, f.Plot.Right - w));
+        float ly = Math.Clamp(yTarget - 20f, f.Plot.Top, Math.Max(f.Plot.Top, f.Plot.Bottom - 16f));
+        var panel = new RectF(lx, ly, w, 16f);
+        canvas.FillColor = tint;
+        canvas.FillRectangle(panel);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = theme.PriceTagFont;
+        canvas.DrawString(text, new RectF(panel.X + 4, panel.Y, panel.Width - 8, panel.Height),
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+        canvas.RestoreState();
     }
 
     // Trendline readout: a price pill at each endpoint + a midpoint pill with the price change,

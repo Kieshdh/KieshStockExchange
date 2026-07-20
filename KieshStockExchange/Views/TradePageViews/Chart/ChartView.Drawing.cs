@@ -94,6 +94,9 @@ public partial class ChartView
             _ when d.Kind == DrawTool.VLine => d with { T1 = time },
             _ when d.Kind == DrawTool.Polyline || d.Kind == DrawTool.Freehand
                 => ShiftPoints(d, time - _drawDragStartTime, price - _drawDragStartPrice),
+            // Position has a THIRD price leg (P3 = stop) the Trend shift leaves behind — shift all three.
+            _ when d.Kind == DrawTool.Position
+                => ShiftPosition(d, time - _drawDragStartTime, price - _drawDragStartPrice),
             _ => ShiftTrend(d, time - _drawDragStartTime, price - _drawDragStartPrice),
         };
         upd = upd with { Id = id };
@@ -102,6 +105,11 @@ public partial class ChartView
 
     private static DrawingObject ShiftTrend(DrawingObject d, TimeSpan dt, decimal dPrice)
         => d with { T1 = d.T1 + dt, P1 = d.P1 + dPrice, T2 = d.T2 + dt, P2 = d.P2 + dPrice };
+
+    // A Position body-drag shifts all THREE price legs (entry/target/stop) + both time anchors rigidly —
+    // ShiftTrend only moves T1/P1/T2/P2, so the stop leg (P3) would be left behind.
+    private static DrawingObject ShiftPosition(DrawingObject d, TimeSpan dt, decimal dPrice)
+        => d with { T1 = d.T1 + dt, P1 = d.P1 + dPrice, T2 = d.T2 + dt, P2 = d.P2 + dPrice, P3 = d.P3 + dPrice };
 
     // Shift every vertex of a multi-point stroke (polyline/freehand) by the data-space delta, so a
     // body-drag moves the whole stroke rigidly (its geometry lives in Points, not the T1/P1/T2/P2 anchors).

@@ -35,4 +35,18 @@ lines are a touch thicker. Persists per stock.
 anchor handles show; drag a handle to re-anchor, drag the body to move the whole grid; reopen the chart → persisted.
 Zone fills + custom ratios are deferred to v2 (lines + labels only for now).
 
-<!-- feature commits append below: Position, Bollinger/VWAP, RSI -->
+## 4. Position tool  (commit `<pending>`)
+**What:** a new **Position** tool in the drawing rail's *shapes* group — a TradingView-style long/short box. Drag
+from an entry price to a target and it fills a translucent **green target zone** (entry→target) and a **red stop
+zone** (a mirror of the target across entry) with an entry line, thin target/stop borders, and one **R:R + live-PnL
+pill** (PnL updates as the price moves). Long vs short is fixed by the drag direction at creation (never flips
+after — by design). Persists per stock.
+**Test:** pick Position → drag from an entry up to a target → green-up / red-down box + the R:R pill; watch the
+pill's PnL change as the price ticks; select it → three handles (entry / target / stop); drag the entry or target
+handle to re-anchor; drag the body to move the whole box; open the pen panel to set **Qty** (defaults to 1) and
+edit the stop; reopen the chart → persisted.
+**Known v1 (by design):** the stop handle is visual-only — edit the stop via the pen panel (dragging near it moves
+the whole box); dragging the target does NOT re-mirror the stop (direction is set once at creation). Qty=1 default,
+so set a real share count in the panel for a meaningful PnL figure. Multi-target / risk-% are deferred to v2.
+
+<!-- feature commits append below: Bollinger/VWAP, RSI -->

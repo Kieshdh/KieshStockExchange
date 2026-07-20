@@ -73,7 +73,7 @@ public partial class ChartDrawingViewModel
     public string LinesGroupIcon => ToolIcon(LinesGroupTool);
     public string ShapesGroupIcon => ToolIcon(ShapesGroupTool);
     public bool IsLinesGroupActive => LinesGroupContains(DrawTool);
-    public bool IsShapesGroupActive => DrawTool is DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow;
+    public bool IsShapesGroupActive => DrawTool is DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow or DrawTool.Position;
     public bool IsLinesGroupOpen => OpenToolGroup == "lines";
     public bool IsShapesGroupOpen => OpenToolGroup == "shapes";
 
@@ -96,6 +96,7 @@ public partial class ChartDrawingViewModel
         DrawTool.Rectangle => "tool_rectangle.png",
         DrawTool.Ellipse => "tool_ellipse.png",
         DrawTool.Arrow => "tool_arrow.png",
+        DrawTool.Position => "tool_position.png",
         DrawTool.Freehand => "tool_freehand.png",
         DrawTool.Magnifier => "tool_magnifier.png",
         _ => "tool_cursor.png",
@@ -108,7 +109,7 @@ public partial class ChartDrawingViewModel
     private void PickGroupTool(DrawTool tool)
     {
         if (LinesGroupContains(tool)) LinesGroupTool = tool;
-        else if (tool is DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow) ShapesGroupTool = tool;
+        else if (tool is DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow or DrawTool.Position) ShapesGroupTool = tool;
         SelectDrawTool(tool);
         OpenToolGroup = null;
     }
