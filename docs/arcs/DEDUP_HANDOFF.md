@@ -1,6 +1,18 @@
 # DEDUP ARC — LIVING HANDOFF (read FIRST; update at every clean stopping point)
 
 ## ★★★★ KIESH 2026-07-20 — AUTONOMOUS-BATCH POLICY (v2, updated same afternoon)
+
+> **★ PROGRESS (2026-07-20 pm): arc RESUMED. P2-4 #13 DONE** → branch `dedup/p2-4-portfolio-table-base` (pushed):
+> `PortfolioTableViewModelBase<TRow,TSource>` extracted from the 3 near-clone portfolio table VMs; build 0 errors +
+> adversarial review = PRESERVED; logged in `DEDUP_TEST_PLAN.md` #2 (awaiting Kiesh click-test). **NEXT non-CK item =
+> P2-4 #14 `DateRangeTableViewModel<T>`** (Order+Transaction admin tables; ~90 shared lines; care: PickerStocks per-VM,
+> AnyStockSentinel) → then P2-4 #16 ModalFormViewModel / #17 ResolveUserId / #20 ApplySort, then P2-6 int-parse.
+> **★ MECHANISM CORRECTION (Kiesh): "a fresh session = context WIPED ENTIRELY."** The cron/2-min "timer" fires
+> IN-SESSION (does NOT wipe context), so DO NOT use it to chain dedup work. Instead: the assistant does ONE fix →
+> gate → commit on its own branch → push → update this handoff + `DEDUP_TEST_PLAN.md` → **STOP and hand Kiesh a short
+> self-contained continue-prompt**; Kiesh starts a genuinely fresh session (new chat / `/clear`) and pastes it. These
+> handoff docs are the single source of truth so a zero-context session resumes from them alone.
+
 Kiesh authorized doing ALL remaining dedup items autonomously. Key rules (v2 supersedes the morning version):
 - **START ON ANNOUNCEMENT ONLY — no timer is armed until Kiesh says go.** Kiesh is on the CHART (~2h) first; he'll
   ANNOUNCE when the dedup run begins, and THEN a fresh session arms the 2-min driver timer + reads this handoff.
