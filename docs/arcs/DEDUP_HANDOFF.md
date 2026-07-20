@@ -1,5 +1,23 @@
 # DEDUP ARC — LIVING HANDOFF (read FIRST; update at every clean stopping point)
 
+## ★★★★ KIESH 2026-07-20 — AUTONOMOUS-BATCH POLICY (supersedes per-item HOLD for the NON-CK items)
+Kiesh: *"you can do all of them autonomously and when it finished I will test it myself with a test plan."* So the
+remaining **NON-CK** dedup items are now **fully autonomous** — run the proven pipeline end-to-end and **COMMIT**
+each (no per-item hold-for-merge). Kiesh tests the whole batch himself at the end via one consolidated plan.
+- **Do autonomously (COMMIT, don't hold):** **P2-4** structural client bases (PortfolioTableVMBase / DateRangeTableVM<T>
+  / ModalFormVM…) → then **P2-6** `int.TryParse`→`ParsingHelper` (~15 sites; document the widened input) → any other
+  NON-CK Pass-2 item in `DEDUP_PASS2_PROPOSALS.md`. Pipeline per candidate: isolated executor (Opus 4.8) → **disk-gated**
+  gate (client-only → CLIENT build + suite; server/shared → `dotnet test` alone; pre-flight `%Disk Time`<70%, Idle
+  +`-maxcpucount:1`, PARSE logs) → **separate adversarial diff review** → own read → 1 commit/candidate → push.
+- **Log every candidate into `docs/arcs/DEDUP_TEST_PLAN.md`** (the batch test plan for Kiesh — what changed + exactly
+  what to click/verify). **P2-1** (popups, already built) is IN this batch — no separate "merge P2-1"; it's row 1 of the plan.
+- **★ HARD CARVE-OUT — still NOT autonomous (CK=0 sacred):** the money/reservation items — **ProjectedBuyReservation
+  asymmetry** reconcile, **ReservationMath** server/client unification, **cost-basis lot-math → Shared** — are NOT in this
+  batch. A UI test plan can't prove money conservation; they need a **CK=0 conservation soak + explicit Kiesh go**. Leave them.
+- **When the NON-CK batch is done:** PAUSE + report + hand Kiesh `DEDUP_TEST_PLAN.md`. Do not invent new candidates.
+- **FOCUS NOTE:** Kiesh's own attention is back on the **CHART** (tools + changes not finished) — that's interactive/
+  eyeball-gated, done WITH Kiesh, NOT via this autonomous timer. This dedup batch is what the 2-min timer runs unattended.
+
 **Purpose:** a detailed, current handoff so a fresh LOW-CONTEXT session continues the dedup arc seamlessly.
 **Rule:** at your clean stopping point, UPDATE this doc (what you just shipped + the exact next candidate),
 commit+push, THEN arm the next +5-min context-freshness timer with the continue-prompt, then STOP producing.
