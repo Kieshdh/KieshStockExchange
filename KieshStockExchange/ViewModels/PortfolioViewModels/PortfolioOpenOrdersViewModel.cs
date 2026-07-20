@@ -1,31 +1,24 @@
-using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.MarketEngineServices.Interfaces;
 using KieshStockExchange.Services.OtherServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
-using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.ViewModels.TradeViewModels;
 using Microsoft.Extensions.Logging;
-using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 
-public partial class PortfolioOpenOrdersViewModel : BaseViewModel, IDisposable
+public partial class PortfolioOpenOrdersViewModel
+    : PortfolioTableViewModelBase<OpenOrderRow, Order>
 {
-    private bool _disposed;
     private readonly IOrderCacheService  _cache;
     private readonly IOrderEntryService  _orders;
     private readonly IStockService       _stocks;
     private readonly IAuthService        _auth;
     private readonly ISelectedStockService _selected;
     private readonly IOrderEditService   _editService;
-    private readonly ILogger<PortfolioOpenOrdersViewModel> _logger;
-
-    public ClientPager<OpenOrderRow> Pager { get; } = new();
 
     public PortfolioOpenOrdersViewModel(
         IOrderCacheService  cache,
@@ -35,6 +28,7 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel, IDisposable
         ISelectedStockService selected,
         IOrderEditService   editService,
         ILogger<PortfolioOpenOrdersViewModel> logger)
+        : base(logger)
     {
         _cache       = cache       ?? throw new ArgumentNullException(nameof(cache));
         _orders      = orders      ?? throw new ArgumentNullException(nameof(orders));
@@ -42,20 +36,33 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel, IDisposable
         _auth        = auth        ?? throw new ArgumentNullException(nameof(auth));
         _selected    = selected    ?? throw new ArgumentNullException(nameof(selected));
         _editService = editService ?? throw new ArgumentNullException(nameof(editService));
-        _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
 
-        _cache.OrdersChanged += OnOrdersChanged;
+        Subscribe();
     }
 
-    [RelayCommand]
-    public async Task RefreshAsync()
+    protected override IEnumerable<Order> Source => _cache.OpenOrders;
+    protected override int GetStockId(Order order) => order.StockId;
+    protected override DateTime GetSortKey(Order order) => order.UpdatedAt;
+
+    protected override OpenOrderRow CreateRow(Order order)
     {
-        await RunBusyAsync(async () =>
+        var symbol = _stocks.SymbolOrDash(order.StockId);
+        return new OpenOrderRow
         {
-            await _cache.RefreshAsync(_auth.CurrentUserId);
-            RebuildView();
-        }, ex => _logger.LogError(ex, "Error refreshing open orders."));
+            Order = order,
+            Symbol = symbol,
+            ModifyCommand = ModifyCommand,
+            CancelCommand = CancelCommand,
+        };
     }
+
+    protected override Task RefreshSourceAsync() => _cache.RefreshAsync(_auth.CurrentUserId);
+
+    protected override void Subscribe()   => _cache.OrdersChanged += OnSourceChanged;
+    protected override void Unsubscribe() => _cache.OrdersChanged -= OnSourceChanged;
+
+    protected override string RefreshErrorMessage => "Error refreshing open orders.";
+    protected override string UpdateErrorMessage  => "Error updating open orders.";
 
     [RelayCommand]
     private async Task CancelAsync(Order order)
@@ -95,42 +102,5 @@ public partial class PortfolioOpenOrdersViewModel : BaseViewModel, IDisposable
         {
             _logger.LogError(ex, "Failed to navigate to Trade page for modify on #{OrderId}.", order.OrderId);
         }
-    }
-
-    private void RebuildView()
-    {
-        var rows = _cache.OpenOrders
-            .Where(o => o.StockId > 0)
-            .OrderByDescending(o => o.UpdatedAt)
-            .Select(CreateRow)
-            .ToList();
-
-        Pager.SetSource(rows);
-    }
-
-    private OpenOrderRow CreateRow(Order order)
-    {
-        var symbol = _stocks.SymbolOrDash(order.StockId);
-        return new OpenOrderRow
-        {
-            Order = order,
-            Symbol = symbol,
-            ModifyCommand = ModifyCommand,
-            CancelCommand = CancelCommand,
-        };
-    }
-
-    private void OnOrdersChanged(object? s, EventArgs e)
-    {
-        try { MainThread.BeginInvokeOnMainThread(RebuildView); }
-        catch (Exception ex) { _logger.LogError(ex, "Error updating open orders."); }
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _cache.OrdersChanged -= OnOrdersChanged;
-        GC.SuppressFinalize(this);
     }
 }

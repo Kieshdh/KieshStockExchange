@@ -1,64 +1,39 @@
-using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
-using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.Services.MarketDataServices.Interfaces;
 using KieshStockExchange.Services.PortfolioServices.Interfaces;
 using KieshStockExchange.Services.UserServices.Interfaces;
-using KieshStockExchange.ViewModels.OtherViewModels;
 using KieshStockExchange.ViewModels.TradeViewModels;
 using Microsoft.Extensions.Logging;
-using System.Collections.ObjectModel;
 
 namespace KieshStockExchange.ViewModels.PortfolioViewModels;
 
-public partial class PortfolioTransactionViewModel : BaseViewModel, IDisposable
+public partial class PortfolioTransactionViewModel
+    : PortfolioTableViewModelBase<TransactionRow, Transaction>
 {
-    private bool _disposed;
     private readonly ITransactionService _tx;
     private readonly IStockService       _stocks;
     private readonly IAuthService        _auth;
-    private readonly ILogger<PortfolioTransactionViewModel> _logger;
-
-    public ClientPager<TransactionRow> Pager { get; } = new();
 
     public PortfolioTransactionViewModel(
         ITransactionService tx,
         IStockService       stocks,
         IAuthService        auth,
         ILogger<PortfolioTransactionViewModel> logger)
+        : base(logger)
     {
         _tx     = tx     ?? throw new ArgumentNullException(nameof(tx));
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _auth   = auth   ?? throw new ArgumentNullException(nameof(auth));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _tx.TransactionsChanged += OnTransactionsChanged;
+        Subscribe();
     }
 
-    [RelayCommand]
-    public async Task RefreshAsync()
-    {
-        await RunBusyAsync(async () =>
-        {
-            await _tx.RefreshAsync(_auth.CurrentUserId);
-            RebuildView();
-        }, ex => _logger.LogError(ex, "Error refreshing transaction history."));
-    }
+    protected override IEnumerable<Transaction> Source => _tx.AllTransactions;
+    protected override int GetStockId(Transaction tx) => tx.StockId;
+    protected override DateTime GetSortKey(Transaction tx) => tx.Timestamp;
 
-    private void RebuildView()
-    {
-        var rows = _tx.AllTransactions
-            .Where(t => t.StockId > 0)
-            .OrderByDescending(t => t.Timestamp)
-            .Select(CreateRow)
-            .ToList();
-
-        Pager.SetSource(rows);
-    }
-
-    private TransactionRow CreateRow(Transaction tx)
+    protected override TransactionRow CreateRow(Transaction tx)
     {
         var symbol = _stocks.SymbolOrDash(tx.StockId);
         return new TransactionRow
@@ -69,17 +44,11 @@ public partial class PortfolioTransactionViewModel : BaseViewModel, IDisposable
         };
     }
 
-    private void OnTransactionsChanged(object? s, EventArgs e)
-    {
-        try { MainThread.BeginInvokeOnMainThread(RebuildView); }
-        catch (Exception ex) { _logger.LogError(ex, "Error updating transaction history."); }
-    }
+    protected override Task RefreshSourceAsync() => _tx.RefreshAsync(_auth.CurrentUserId);
 
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _tx.TransactionsChanged -= OnTransactionsChanged;
-        GC.SuppressFinalize(this);
-    }
+    protected override void Subscribe()   => _tx.TransactionsChanged += OnSourceChanged;
+    protected override void Unsubscribe() => _tx.TransactionsChanged -= OnSourceChanged;
+
+    protected override string RefreshErrorMessage => "Error refreshing transaction history.";
+    protected override string UpdateErrorMessage  => "Error updating transaction history.";
 }
