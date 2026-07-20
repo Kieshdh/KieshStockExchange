@@ -1,6 +1,5 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KieshStockExchange.Helpers;
 using KieshStockExchange.Models;
 using KieshStockExchange.Services.DataServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
@@ -8,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
-public partial class StockEditViewModel : BaseViewModel, IClosablePopupViewModel
+public partial class StockEditViewModel : ModalFormViewModel
 {
     #region Fields, events and Constructor
     private readonly IDataBaseService _db;
@@ -16,9 +15,7 @@ public partial class StockEditViewModel : BaseViewModel, IClosablePopupViewModel
     private readonly ILogger<StockEditViewModel> _logger;
 
     private Stock? _original;
-    private bool _disposed;
 
-    public event EventHandler? CloseRequested;
     public event EventHandler? Saved;
     #endregion
 
@@ -26,12 +23,6 @@ public partial class StockEditViewModel : BaseViewModel, IClosablePopupViewModel
     [ObservableProperty] private int _stockId;
     [ObservableProperty] private string _symbol = string.Empty;
     [ObservableProperty] private string _companyName = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasError))]
-    private string _errorMessage = string.Empty;
-
-    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
     #endregion
 
     public StockEditViewModel(IDataBaseService db, IStockService stocks, ILogger<StockEditViewModel> logger)
@@ -103,19 +94,10 @@ public partial class StockEditViewModel : BaseViewModel, IClosablePopupViewModel
         }
 
         Saved?.Invoke(this, EventArgs.Empty);
-        CloseRequested?.Invoke(this, EventArgs.Empty);
+        RequestClose();
     }
-
-    [RelayCommand]
-    private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
     #endregion
 
-    // Drop handler refs so the closed popup can be collected; no external subscriptions.
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        CloseRequested = null;
-        Saved = null;
-    }
+    // Drop the Saved handler ref too; the base clears CloseRequested + guards idempotency.
+    protected override void OnDispose() => Saved = null;
 }

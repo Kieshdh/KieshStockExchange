@@ -8,16 +8,14 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
-public partial class UserEditViewModel : BaseViewModel, IClosablePopupViewModel
+public partial class UserEditViewModel : ModalFormViewModel
 {
     #region Fields, events and Constructor
     private readonly IDataBaseService _db;
     private readonly ILogger<UserEditViewModel> _logger;
 
     private User? _original;
-    private bool _disposed;
 
-    public event EventHandler? CloseRequested;
     public event EventHandler? Saved;
     #endregion
 
@@ -28,12 +26,6 @@ public partial class UserEditViewModel : BaseViewModel, IClosablePopupViewModel
     [ObservableProperty] private string _email = string.Empty;
     [ObservableProperty] private string _birthDateText = string.Empty;
     [ObservableProperty] private bool _isAdmin;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasError))]
-    private string _errorMessage = string.Empty;
-
-    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
     #endregion
 
     public UserEditViewModel(IDataBaseService db, ILogger<UserEditViewModel> logger)
@@ -122,19 +114,10 @@ public partial class UserEditViewModel : BaseViewModel, IClosablePopupViewModel
         }
 
         Saved?.Invoke(this, EventArgs.Empty);
-        CloseRequested?.Invoke(this, EventArgs.Empty);
+        RequestClose();
     }
-
-    [RelayCommand]
-    private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
     #endregion
 
-    // Drop handler refs so the closed popup can be collected; no external subscriptions.
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        CloseRequested = null;
-        Saved = null;
-    }
+    // Drop the Saved handler ref too; the base clears CloseRequested + guards idempotency.
+    protected override void OnDispose() => Saved = null;
 }

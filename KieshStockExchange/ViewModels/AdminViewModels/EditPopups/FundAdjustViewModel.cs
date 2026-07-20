@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace KieshStockExchange.ViewModels.AdminViewModels.EditPopups;
 
-public partial class FundAdjustViewModel : BaseViewModel, IClosablePopupViewModel
+public partial class FundAdjustViewModel : ModalFormViewModel
 {
     public const string KindDeposit = "Deposit";
     public const string KindWithdrawal = "Withdrawal";
@@ -15,11 +15,9 @@ public partial class FundAdjustViewModel : BaseViewModel, IClosablePopupViewMode
     #region Fields, events and Constructor
     private readonly IUserPortfolioService _portfolio;
     private readonly ILogger<FundAdjustViewModel> _logger;
-    private bool _disposed;
 
     public IReadOnlyList<string> KindOptions { get; } = new[] { KindDeposit, KindWithdrawal };
 
-    public event EventHandler? CloseRequested;
     public event EventHandler? Saved;
     #endregion
 
@@ -30,12 +28,6 @@ public partial class FundAdjustViewModel : BaseViewModel, IClosablePopupViewMode
     [ObservableProperty] private string _selectedKind = KindDeposit;
     [ObservableProperty] private string _amountText = string.Empty;
     [ObservableProperty] private string _note = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasError))]
-    private string _errorMessage = string.Empty;
-
-    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
     #endregion
 
     public FundAdjustViewModel(IUserPortfolioService portfolio, ILogger<FundAdjustViewModel> logger)
@@ -99,22 +91,13 @@ public partial class FundAdjustViewModel : BaseViewModel, IClosablePopupViewMode
         }
 
         Saved?.Invoke(this, EventArgs.Empty);
-        CloseRequested?.Invoke(this, EventArgs.Empty);
+        RequestClose();
     }
 
     private string? NoteOrDefault() =>
         string.IsNullOrWhiteSpace(Note) ? $"Admin {SelectedKind.ToLowerInvariant()}" : Note.Trim();
-
-    [RelayCommand]
-    private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
     #endregion
 
-    // Drop handler refs so the closed popup can be collected; no external subscriptions.
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        CloseRequested = null;
-        Saved = null;
-    }
+    // Drop the Saved handler ref too; the base clears CloseRequested + guards idempotency.
+    protected override void OnDispose() => Saved = null;
 }

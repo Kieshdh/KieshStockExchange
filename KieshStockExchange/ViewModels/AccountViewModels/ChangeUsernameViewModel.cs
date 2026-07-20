@@ -1,27 +1,17 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using KieshStockExchange.Helpers;
 using KieshStockExchange.Services.UserServices.Interfaces;
 using KieshStockExchange.ViewModels.OtherViewModels;
 using System.Text.RegularExpressions;
 
 namespace KieshStockExchange.ViewModels.AccountViewModels;
 
-public partial class ChangeUsernameViewModel : BaseViewModel, IClosablePopupViewModel
+public partial class ChangeUsernameViewModel : ModalFormViewModel
 {
     private readonly IProfileService _profile;
-    private bool _disposed;
-
-    public event EventHandler? CloseRequested;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasError))]
-    private string _errorMessage = string.Empty;
 
     [ObservableProperty] private string _newUsername = string.Empty;
     [ObservableProperty] private string _currentPassword = string.Empty;
-
-    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
     public ChangeUsernameViewModel(IProfileService profile)
     {
@@ -61,17 +51,6 @@ public partial class ChangeUsernameViewModel : BaseViewModel, IClosablePopupView
             IsBusy = false;
         }
 
-        CloseRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    [RelayCommand]
-    private void Cancel() => CloseRequested?.Invoke(this, EventArgs.Empty);
-
-    // Drop handler refs so the closed popup can be collected; no external subscriptions.
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        CloseRequested = null;
+        RequestClose();
     }
 }
