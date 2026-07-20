@@ -329,6 +329,31 @@ internal sealed class DrawingRenderer
                     HorizontalAlignment.Left, VerticalAlignment.Center);
                 if (selected) DrawHandle(canvas, t, ax, ay, color);
             }
+            else if (d.Kind == DrawTool.FibRetracement)
+            {
+                // Fibonacci retracement grid: the two time anchors bound a box; each ratio level draws a
+                // horizontal line across it with a left-edge "{ratio}  {price}" tag. The 0/0.5/1 lines paint
+                // a touch thicker so the move's ends + midpoint read at a glance. Zone fills deferred (v2).
+                float xa = X(d.T1), xb = X(d.T2);
+                float left = Math.Min(xa, xb), right = Math.Max(xa, xb);
+                foreach (var lvl in FibonacciLevels.Levels(d.P1, d.P2))
+                {
+                    float y = Y((double)lvl.Price);
+                    if (y < plot.Top || y > plot.Bottom) continue;
+                    bool key = lvl.Ratio is 0.0 or 0.5 or 1.0;   // move start / midpoint / end
+                    canvas.StrokeColor = color;
+                    canvas.StrokeSize = key ? stroke + 0.75f : stroke;
+                    canvas.StrokeDashPattern = dashPattern;
+                    canvas.DrawLine(left, y, right, y);
+                    DrawFibLevelTag(canvas, t, plot, left, y, lvl.Ratio, lvl.Price, color, cur);
+                }
+                canvas.StrokeDashPattern = null;
+                if (selected)
+                {
+                    DrawHandle(canvas, t, X(d.T1), Y((double)d.P1), color);
+                    DrawHandle(canvas, t, X(d.T2), Y((double)d.P2), color);
+                }
+            }
             else // Trend or Ray (both a two-anchor segment; Ray extends past anchor2 to the plot edge)
             {
                 float x1 = X(d.T1), y1 = Y((double)d.P1);
@@ -460,6 +485,27 @@ internal sealed class DrawingRenderer
         canvas.FillColor = LabelPillBg;
         canvas.FillRectangle(r);
         canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
+        canvas.DrawRectangle(r);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = theme.PriceTagFont;
+        canvas.DrawString(text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+    }
+
+    // A Fib level tag: a "{ratio}  {price}" pill anchored just LEFT of the grid's left edge (clamped to
+    // the plot). Same readable pill mechanics as DrawEndpointPriceTag, but labels the ratio + level price.
+    private void DrawFibLevelTag(ICanvas canvas, ChartTheme theme, RectF plot, float x, float y,
+        double ratio, decimal price, Color color, CurrencyType cur)
+    {
+        string text = $"{ratio:0.###}  {CurrencyHelper.Format(price, cur)}";
+        float w = Math.Max(64f, text.Length * 6.3f);
+        float lx = Math.Clamp(x - w - 4f, plot.Left, Math.Max(plot.Left, plot.Right - w));
+        float ly = Math.Clamp(y - 8f, plot.Top, Math.Max(plot.Top, plot.Bottom - 16f));
+        var r = new RectF(lx, ly, w, 16f);
+        canvas.FillColor = LabelPillBg;
+        canvas.FillRectangle(r);
+        canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
+        canvas.StrokeDashPattern = null;   // the pill border is never dashed (pen dash is for the level lines)
         canvas.DrawRectangle(r);
         canvas.FontColor = Colors.White;
         canvas.FontSize = theme.PriceTagFont;

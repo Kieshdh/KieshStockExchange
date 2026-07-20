@@ -26,4 +26,13 @@ prompts for the label; it renders as a readable dark pill with white text anchor
 Cancel or leave the prompt blank → nothing is left behind (no empty label). In-place (type-on-canvas) editing is
 deferred to v2 — v1 uses the modal prompt.
 
-<!-- feature commits append below: Fibonacci, Position, Bollinger/VWAP, RSI -->
+## 3. Fibonacci retracement  (commit `<pending>`)
+**What:** a new **Fib retracement** tool in the drawing rail's *lines* group. Drag between two price points (a swing
+low→high or high→low) and it draws the retracement grid — 0 / 23.6 / 38.2 / 50 / 61.8 / 78.6 / 100% plus extensions
+to 261.8% — as horizontal lines inside the two-anchor box, each labelled with its ratio + price; the 0 / 50 / 100%
+lines are a touch thicker. Persists per stock.
+**Test:** pick Fib → drag between two points → the labelled grid appears; click a level line to select it → two
+anchor handles show; drag a handle to re-anchor, drag the body to move the whole grid; reopen the chart → persisted.
+Zone fills + custom ratios are deferred to v2 (lines + labels only for now).
+
+<!-- feature commits append below: Position, Bollinger/VWAP, RSI -->

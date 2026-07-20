@@ -79,7 +79,7 @@ public partial class ChartDrawingViewModel
 
     private static bool LinesGroupContains(DrawTool t) => t is DrawTool.Trend or DrawTool.Ray
         or DrawTool.ExtendedLine or DrawTool.HLine or DrawTool.HRay or DrawTool.VLine
-        or DrawTool.Polyline or DrawTool.Alert or DrawTool.Text;
+        or DrawTool.Polyline or DrawTool.Alert or DrawTool.Text or DrawTool.FibRetracement;
 
     private static string ToolIcon(DrawTool t) => t switch
     {
@@ -92,6 +92,7 @@ public partial class ChartDrawingViewModel
         DrawTool.Polyline => "tool_polyline.png",
         DrawTool.Alert => "tool_alert.png",
         DrawTool.Text => "tool_text.png",
+        DrawTool.FibRetracement => "tool_fib.png",
         DrawTool.Rectangle => "tool_rectangle.png",
         DrawTool.Ellipse => "tool_ellipse.png",
         DrawTool.Arrow => "tool_arrow.png",

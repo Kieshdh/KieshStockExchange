@@ -142,6 +142,24 @@ internal sealed class ChartHitTester
                 if (p.X >= amin - apad && p.X <= amax + apad && p.Y >= bmin - apad && p.Y <= bmax + apad)
                     return (d, DrawingHitPart.Body);
             }
+            else if (d.Kind == DrawTool.FibRetracement)
+            {
+                // A Fib's visible shape is its horizontal levels inside the two-anchor box (NOT the Trend
+                // diagonal). Anchors first so a handle-drag grabs the corners like Trend, then Body = near
+                // ANY level line within the box's X-range.
+                float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);
+                float x2 = frame.TimeToPixelX(d.T2), y2 = frame.HitPriceToPixelY(d.P2);
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                float left = Math.Min(x1, x2), right = Math.Max(x1, x2);
+                if (p.X >= left - DrawHitTol && p.X <= right + DrawHitTol)
+                    foreach (var lvl in FibonacciLevels.Levels(d.P1, d.P2))
+                    {
+                        float y = frame.HitPriceToPixelY(lvl.Price);
+                        if (y < frame.Plot.Top || y > frame.Plot.Bottom) continue;
+                        if (Math.Abs(p.Y - y) <= DrawHitTol) return (d, DrawingHitPart.Body);
+                    }
+            }
             else // Trend or Ray
             {
                 float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);
