@@ -2,7 +2,7 @@
 
 A field-tested setup for working with **Claude Code** (Anthropic's agentic CLI) on a real codebase — the
 methods that let it make many changes safely, including unattended, without breaking things. Distilled from one
-long project but written to drop into any repo. Its companion, **`docs/PROJECT_SYSTEMS_AND_PROBES.md`**, is a
+long project but written to drop into any repo. Its companion, **`PROJECT_SYSTEMS_AND_PROBES.md`** (same folder), is a
 *worked example* (a market simulator) — read it for inspiration, not as a drop-in.
 
 > **The one idea everything rests on:** *find the invariant that must never break in your system — or, when the

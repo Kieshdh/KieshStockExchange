@@ -1,7 +1,7 @@
 # PLAYBOOK-V2 task — add the missing (generalized) techniques, council-improved
 
 > **★ DONE (2026-07-19).** Full 5-advisor + 5-peer-review LLM council run; chairman synthesis applied to
-> `/CLAUDE_SETUP_PLAYBOOK.md`. Council's key call: this is NOT a "Tier 3" rung — it's a coordinate **second
+> `docs/explainers/CLAUDE_SETUP_PLAYBOOK.md`. Council's key call: this is NOT a "Tier 3" rung — it's a coordinate **second
 > track** ("When you can't prove it") selected by the system's *nature* (stochastic/subjective output), gated by a
 > self-select sentence + honesty caveat. Applied: (1) reframed the "one idea" to *invariant OR scalar proxy*;
 > (2) new second-track section with the 3-move spine (scalar metric / continuous invariant / concurrent A/B) +
@@ -16,13 +16,13 @@
 runs well — add them, but a GENERALIZED version. E.g. I'm missing the ultraplan method (3 architects & council &
 handoff, for ultracode / local-Claude implementation). Let the council improve this."
 
-**Goal:** grow `/CLAUDE_SETUP_PLAYBOOK.md` to cover the *tuning / research / performance* methods we used on the
+**Goal:** grow `docs/explainers/CLAUDE_SETUP_PLAYBOOK.md` to cover the *tuning / research / performance* methods we used on the
 simulator, **generalized** (portable to any project), without bloating it or breaking its structure (maturity
 ladder Tier 0/1/2 + orthogonal decision-tools + copy-paste templates + scoped, honest claims). The project-specific
-instances stay in `docs/PROJECT_SYSTEMS_AND_PROBES.md`; only the *pattern* goes in the playbook.
+instances stay in `docs/explainers/PROJECT_SYSTEMS_AND_PROBES.md`; only the *pattern* goes in the playbook.
 
 ## How to run this (fresh session)
-1. Read `/CLAUDE_SETUP_PLAYBOOK.md` (current v2) + `docs/PROJECT_SYSTEMS_AND_PROBES.md` + this file.
+1. Read `docs/explainers/CLAUDE_SETUP_PLAYBOOK.md` (current v2) + `docs/explainers/PROJECT_SYSTEMS_AND_PROBES.md` + this file.
 2. **Run the LLM council** (`/llm-council`, 5 advisors + synthesis; reasoning-only, disk-safe — still disk-pre-flight before spawning) framed as:
    *"Here is the current playbook + this candidate list of tuning/research/perf techniques to ADD, generalized.
    Which to add, how to generalize each cleanly, where they fit the ladder (probably a new 'Tier 3 — tuning/
