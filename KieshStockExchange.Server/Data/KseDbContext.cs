@@ -109,6 +109,10 @@ public sealed class KseDbContext : DbContext
             b.HasIndex(x => new { x.UserId, x.StockId, x.Side })
              .HasDatabaseName("IX_Orders_ArmedStandalone_User_Stock_Side")
              .HasFilter(@"""Status"" = 'Pending' AND ""Stop"" <> 'None' AND ""ParentOrderId"" IS NULL");
+            // Admin Orders table filters + sorts on CreatedAt (default view + the 5m/15m/1h/1d
+            // quick-ranges); without this the time-range page + COUNT do a full table scan.
+            b.HasIndex(x => x.CreatedAt)
+             .HasDatabaseName("IX_Orders_CreatedAt");
         });
 
         modelBuilder.Entity<TransactionRow>(b =>
@@ -125,6 +129,10 @@ public sealed class KseDbContext : DbContext
              .HasDatabaseName("IX_Tx_Stock_Curr_Time");
             b.HasIndex(x => x.BuyerId);
             b.HasIndex(x => x.SellerId);
+            // Admin Transactions table filters + sorts on Timestamp (default view + quick-ranges);
+            // the composite (StockId,Currency,Timestamp) can't serve a stockless time-range scan.
+            b.HasIndex(x => x.Timestamp)
+             .HasDatabaseName("IX_Tx_Timestamp");
         });
 
         modelBuilder.Entity<PositionRow>(b =>
