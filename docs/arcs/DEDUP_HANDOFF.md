@@ -1,22 +1,30 @@
 # DEDUP ARC — LIVING HANDOFF (read FIRST; update at every clean stopping point)
 
-## ★★★★ KIESH 2026-07-20 — AUTONOMOUS-BATCH POLICY (supersedes per-item HOLD for the NON-CK items)
-Kiesh: *"you can do all of them autonomously and when it finished I will test it myself with a test plan."* So the
-remaining **NON-CK** dedup items are now **fully autonomous** — run the proven pipeline end-to-end and **COMMIT**
-each (no per-item hold-for-merge). Kiesh tests the whole batch himself at the end via one consolidated plan.
-- **Do autonomously (COMMIT, don't hold):** **P2-4** structural client bases (PortfolioTableVMBase / DateRangeTableVM<T>
-  / ModalFormVM…) → then **P2-6** `int.TryParse`→`ParsingHelper` (~15 sites; document the widened input) → any other
-  NON-CK Pass-2 item in `DEDUP_PASS2_PROPOSALS.md`. Pipeline per candidate: isolated executor (Opus 4.8) → **disk-gated**
-  gate (client-only → CLIENT build + suite; server/shared → `dotnet test` alone; pre-flight `%Disk Time`<70%, Idle
-  +`-maxcpucount:1`, PARSE logs) → **separate adversarial diff review** → own read → 1 commit/candidate → push.
-- **Log every candidate into `docs/arcs/DEDUP_TEST_PLAN.md`** (the batch test plan for Kiesh — what changed + exactly
-  what to click/verify). **P2-1** (popups, already built) is IN this batch — no separate "merge P2-1"; it's row 1 of the plan.
-- **★ HARD CARVE-OUT — still NOT autonomous (CK=0 sacred):** the money/reservation items — **ProjectedBuyReservation
-  asymmetry** reconcile, **ReservationMath** server/client unification, **cost-basis lot-math → Shared** — are NOT in this
-  batch. A UI test plan can't prove money conservation; they need a **CK=0 conservation soak + explicit Kiesh go**. Leave them.
-- **When the NON-CK batch is done:** PAUSE + report + hand Kiesh `DEDUP_TEST_PLAN.md`. Do not invent new candidates.
-- **FOCUS NOTE:** Kiesh's own attention is back on the **CHART** (tools + changes not finished) — that's interactive/
-  eyeball-gated, done WITH Kiesh, NOT via this autonomous timer. This dedup batch is what the 2-min timer runs unattended.
+## ★★★★ KIESH 2026-07-20 — AUTONOMOUS-BATCH POLICY (v2, updated same afternoon)
+Kiesh authorized doing ALL remaining dedup items autonomously. Key rules (v2 supersedes the morning version):
+- **START ON ANNOUNCEMENT ONLY — no timer is armed until Kiesh says go.** Kiesh is on the CHART (~2h) first; he'll
+  ANNOUNCE when the dedup run begins, and THEN a fresh session arms the 2-min driver timer + reads this handoff.
+- **ONE FIX = ONE BRANCH.** Each candidate gets its OWN branch off `feature/bot-market-realism-v2` (e.g.
+  `dedup/money-reservationmath`, `dedup/p2-4-client-bases`), committed + pushed, so Kiesh can test/merge each
+  independently. (P2-1 + OrderValidator #3 already landed ON the feature branch — leave them; per-branch is for the rest.)
+- **ORDER — MONEY/CK ITEMS FIRST.** Kiesh: the money changes CAN be self-validated in the autonomous run **via a CK=0
+  conservation SOAK the agent runs itself** (NOT a UI test), so do them FIRST (time to soak):
+  1. **Money/CK changes** — own branch each; gate = build/test **+ a CK=0 soak** (45m mid / 2h bake; watch `CK=0 CONS=0`
+     log lines per `docs/arcs/…`/soak harness). **Commit ONLY if the soak is conservation-clean; any CK≠0 → REVERT.**
+     Set = ProjectedBuyReservation asymmetry reconcile + ReservationMath server/client unification + cost-basis
+     lot-math→Shared. **CONFIRM the exact "two money changes" with Kiesh at kickoff** (his words) before building.
+  2. **Then NON-CK:** **P2-4** structural client bases (PortfolioTableVMBase / DateRangeTableVM<T> / ModalFormVM…) →
+     **P2-6** `int.TryParse`→`ParsingHelper` (~15 sites; document widened input) → any other NON-CK Pass-2 item.
+- **Pipeline per candidate:** isolated executor (Opus 4.8, implement-only) → **disk-gated** gate (pre-flight `%Disk
+  Time`<70%, Idle+`-maxcpucount:1`, PARSE logs; client-only→CLIENT build+suite; server/shared→`dotnet test` absolute
+  csproj; money→ + CK soak) → **separate adversarial diff review** → own read → 1 commit on its OWN branch → push →
+  append a row to **`docs/arcs/DEDUP_TEST_PLAN.md`** (branch name + what changed + exactly what to verify).
+- **When all items done:** PAUSE + report + hand Kiesh `DEDUP_TEST_PLAN.md` (a per-branch list to test/merge). Don't invent candidates.
+- **STILL HARD-BAN even with a soak:** the 3 Attended giants (AiTradeService/OES/AiBotDecision) + BracketCoordinator;
+  Order-type→enum; records on persisted models; any settlement/matching/transaction-scope rewrite beyond the named
+  ReservationMath/reservation dedup. If unsure a money change is soak-provable → STOP + ask Kiesh.
+- **FOCUS NOW:** Kiesh + the assistant are on the **CHART** (tools/changes not finished) — interactive, eyeball-gated,
+  NOT autonomous. Dedup is parked until announced.
 
 **Purpose:** a detailed, current handoff so a fresh LOW-CONTEXT session continues the dedup arc seamlessly.
 **Rule:** at your clean stopping point, UPDATE this doc (what you just shipped + the exact next candidate),
