@@ -2,11 +2,17 @@
 
 ## ★★★★ KIESH 2026-07-20 — AUTONOMOUS-BATCH POLICY (v2, updated same afternoon)
 
-> **★ PROGRESS (2026-07-20 pm): arc RESUMED. P2-4 #13 DONE** → branch `dedup/p2-4-portfolio-table-base` (pushed):
-> `PortfolioTableViewModelBase<TRow,TSource>` extracted from the 3 near-clone portfolio table VMs; build 0 errors +
-> adversarial review = PRESERVED; logged in `DEDUP_TEST_PLAN.md` #2 (awaiting Kiesh click-test). **NEXT non-CK item =
-> P2-4 #14 `DateRangeTableViewModel<T>`** (Order+Transaction admin tables; ~90 shared lines; care: PickerStocks per-VM,
-> AnyStockSentinel) → then P2-4 #16 ModalFormViewModel / #17 ResolveUserId / #20 ApplySort, then P2-6 int-parse.
+> **★ PROGRESS (2026-07-20 pm): P2-4 #14 DONE** → branch `dedup/p2-4-daterange-table-base` (pushed, commit `2ddba39`):
+> `DateRangeTableViewModel<TItem>` extracted from the Order+Transaction admin tables (~90 shared lines — date/time
+> filter [ObservableProperty]s + hooks, PickerStocks/SelectedStockFilter, UsernameSearch/HideAiBots, EnsureStocks*
+> lazy-load, ResolveUserIdFilterAsync, SetLast5/15/Hour/Day quick-range). AnyStockSentinel kept on OrderTableViewModel;
+> base reaches it via an abstract `AnyStock` hook (both VMs resolve to the one shared instance). Client build 0 errors
+> + isolated adversarial review = PRESERVED; logged `DEDUP_TEST_PLAN.md` #3 (awaiting Kiesh click-test).
+> *(Prior: P2-4 #13 `PortfolioTableViewModelBase<TRow,TSource>` → branch `dedup/p2-4-portfolio-table-base`, `DEDUP_TEST_PLAN.md` #2.)*
+> **NEXT non-CK item = P2-4 #16 `ModalFormViewModel`** (7 form VMs share ErrorMessage/HasError/CloseRequested/Saved/Cancel
+> boilerplate — the pure-boilerplate part is PROVABLY-SAFE to hoist; the `Save` skeleton is a NEEDS-CARE template — see
+> `DEDUP_client_INVENTORY.md` #16; care: Account VMs have no `Saved`, Admin EditPopups add `Saved` + `_original`
+> clone-draft) → then P2-4 #17 ResolveUserId / #20 ApplySort, then P2-6 int-parse.
 > **★ MECHANISM CORRECTION (Kiesh): "a fresh session = context WIPED ENTIRELY."** The cron/2-min "timer" fires
 > IN-SESSION (does NOT wipe context), so DO NOT use it to chain dedup work. Instead: the assistant does ONE fix →
 > gate → commit on its own branch → push → update this handoff + `DEDUP_TEST_PLAN.md` → **STOP and hand Kiesh a short

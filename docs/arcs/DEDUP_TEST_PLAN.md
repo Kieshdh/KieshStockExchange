@@ -26,5 +26,21 @@ row **Modify** and **Cancel** buttons still act on that row; switch tabs + reope
 **Status:** client build 0 errors + adversarial review = PRESERVED; awaiting Kiesh click-test. **On its own branch**
 `dedup/p2-4-portfolio-table-base` (pushed) so it can be tested/merged independently.
 
-<!-- autonomous sessions append the next item (P2-4 #14, P2-6, …) below in the same shape, each on its OWN branch -->
+## 3. P2-4 #14 — DateRangeTableViewModel&lt;T&gt; extraction  (branch `dedup/p2-4-daterange-table-base`)
+**What changed:** the Order + Transaction **admin** tables (Admin page → Orders / Transactions tabs) shared ~90 lines
+of date/time-range filter code. Lifted the shared skeleton — the From/To date+time pickers + their change hooks, the
+stock picker (`PickerStocks` / `SelectedStockFilter`), the username search + `HideAiBots` toggle, the stock/AI-user
+lazy load, the username→id resolver, and the **5m / 15m / 1h / 1d** quick-range buttons — into a new intermediate base
+`DateRangeTableViewModel<TItem>`. Each concrete table keeps only its own filters (Orders: Status / Side / Type;
+Transactions: Currency) and its row loading. Behavior-preserving.
+**Test (own branch — merge/test separately):** on the **Admin** page, open the **Orders** tab and the **Transactions**
+tab and for each: the **From/To date+time pickers** filter the rows; the **5m / 15m / 1h / 1d** buttons set the range and
+refresh; the **Symbol picker** defaults to "Any" and filtering by a stock works; the **username/id search** box filters;
+the **Hide AI** switch works; sorting by column headers + paging still work. On Orders also check the **Status / Side /
+Type** segment filters; on Transactions the **Currency** picker. Open a row's **Details** popup on each (Orders popup can
+cancel an order → list refreshes after close).
+**Status:** client build 0 errors + isolated adversarial diff review = PRESERVED; awaiting Kiesh click-test. **On its own
+branch** `dedup/p2-4-daterange-table-base` (pushed) so it can be tested/merged independently.
+
+<!-- autonomous sessions append the next item (P2-4 #16, P2-6, …) below in the same shape, each on its OWN branch -->
 
