@@ -2,17 +2,23 @@
 
 ## ★★★★ KIESH 2026-07-20 — AUTONOMOUS-BATCH POLICY (v2, updated same afternoon)
 
-> **★ PROGRESS (2026-07-20 pm): P2-4 #14 DONE** → branch `dedup/p2-4-daterange-table-base` (pushed, commit `2ddba39`):
-> `DateRangeTableViewModel<TItem>` extracted from the Order+Transaction admin tables (~90 shared lines — date/time
-> filter [ObservableProperty]s + hooks, PickerStocks/SelectedStockFilter, UsernameSearch/HideAiBots, EnsureStocks*
-> lazy-load, ResolveUserIdFilterAsync, SetLast5/15/Hour/Day quick-range). AnyStockSentinel kept on OrderTableViewModel;
-> base reaches it via an abstract `AnyStock` hook (both VMs resolve to the one shared instance). Client build 0 errors
-> + isolated adversarial review = PRESERVED; logged `DEDUP_TEST_PLAN.md` #3 (awaiting Kiesh click-test).
-> *(Prior: P2-4 #13 `PortfolioTableViewModelBase<TRow,TSource>` → branch `dedup/p2-4-portfolio-table-base`, `DEDUP_TEST_PLAN.md` #2.)*
-> **NEXT non-CK item = P2-4 #16 `ModalFormViewModel`** (7 form VMs share ErrorMessage/HasError/CloseRequested/Saved/Cancel
-> boilerplate — the pure-boilerplate part is PROVABLY-SAFE to hoist; the `Save` skeleton is a NEEDS-CARE template — see
-> `DEDUP_client_INVENTORY.md` #16; care: Account VMs have no `Saved`, Admin EditPopups add `Saved` + `_original`
-> clone-draft) → then P2-4 #17 ResolveUserId / #20 ApplySort, then P2-6 int-parse.
+> **★ PROGRESS (2026-07-20 pm): P2-4 #16 DONE** → branch `dedup/p2-4-modalform-base` (pushed, commit `66d8d12`):
+> `ModalFormViewModel : BaseViewModel, IClosablePopupViewModel` extracted from the 7 modal-form popup VMs — hoisted the
+> `CloseRequested` event, `ErrorMessage`/`HasError`, the `Cancel` command, and the idempotent close+dispose skeleton
+> (`_disposed` guard, nulls CloseRequested, then a `protected virtual OnDispose()`). An event can only be raised by its
+> declaring type → base adds `protected RequestClose()`; each `Save`/`Cancel` raises through it. `Saved` stays on the 4
+> Admin edit VMs (external `popup.ViewModel.Saved` subscribers) which override `OnDispose() => Saved = null`; `Save`
+> skeletons stay per-VM. Client build 0 errors + isolated adversarial review = PRESERVED; logged `DEDUP_TEST_PLAN.md` #4
+> (awaiting Kiesh click-test; builds on the P2-1 popup-leak fix — same popups, merge/test together).
+> *(Prior: #14 `DateRangeTableViewModel<T>` → `dedup/p2-4-daterange-table-base` (`2ddba39`), test-plan #3; #13
+> `PortfolioTableViewModelBase<TRow,TSource>` → `dedup/p2-4-portfolio-table-base`, test-plan #2.)*
+> **NEXT non-CK item = P2-4 #17 `ResolveUserIdAsync`** (username→id resolver near-identical in 4 admin table VMs —
+> OrderTable/TransactionTable/FundTable/FundTransactionTable, all `int?`, byte-identical bar the source string property →
+> hoist `protected Task<int?> ResolveUserIdAsync(string? search, CancellationToken ct)` onto `BaseTableViewModel`. CARE:
+> PositionTableViewModel's variant returns `int` (not `int?`) and `-1` on EMPTY too — do NOT blind-merge its signature; see
+> `DEDUP_client_INVENTORY.md` #17. NOTE: OrderTable+TransactionTable now live under the new `DateRangeTableViewModel<T>`
+> base from #14 — the resolver could land there OR on `BaseTableViewModel` to also cover Fund/FundTransaction; pick the
+> lowest common base that covers the 4 `int?` sites.) → then P2-4 #20 ApplySort, then P2-6 int-parse.
 > **★ MECHANISM CORRECTION (Kiesh): "a fresh session = context WIPED ENTIRELY."** The cron/2-min "timer" fires
 > IN-SESSION (does NOT wipe context), so DO NOT use it to chain dedup work. Instead: the assistant does ONE fix →
 > gate → commit on its own branch → push → update this handoff + `DEDUP_TEST_PLAN.md` → **STOP and hand Kiesh a short

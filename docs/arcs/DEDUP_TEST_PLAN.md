@@ -42,5 +42,20 @@ cancel an order → list refreshes after close).
 **Status:** client build 0 errors + isolated adversarial diff review = PRESERVED; awaiting Kiesh click-test. **On its own
 branch** `dedup/p2-4-daterange-table-base` (pushed) so it can be tested/merged independently.
 
-<!-- autonomous sessions append the next item (P2-4 #16, P2-6, …) below in the same shape, each on its OWN branch -->
+## 4. P2-4 #16 — ModalFormViewModel base extraction  (branch `dedup/p2-4-modalform-base`)
+**What changed:** the 7 modal-form popup VMs shared the same boilerplate — a `CloseRequested` event, the
+`ErrorMessage`/`HasError` error state, a `Cancel` command, and the close+dispose skeleton. Lifted all of it into a new
+`ModalFormViewModel` base; each form keeps only its own fields, validation and `Save`. The 4 admin edit popups keep their
+`Saved` event (external code subscribes to it). Close/cancel/error/dispose behavior is unchanged. Affected popups: **Change
+Password / Change Email / Change Username** (Account page) and **Edit User / Edit Stock / Edit Position / Adjust Funds**
+(Admin page edit dialogs).
+**Test (own branch — merge/test separately):** open each of the 7 popups and confirm: it opens with the right title;
+**Cancel / X** closes it; a **validation error** (e.g. blank fields, mismatched passwords, bad amount) shows the red error
+text and does NOT close; a **valid Save** persists and closes, and the underlying admin table refreshes (Edit User/Stock/
+Position/Adjust Funds → the row reflects the change). Open→close→reopen each once (no stale error text or leaked state).
+**Status:** client build 0 errors + isolated adversarial diff review = PRESERVED; awaiting Kiesh click-test. **On its own
+branch** `dedup/p2-4-modalform-base` (pushed) so it can be tested/merged independently. NOTE: builds on the P2-1 popup-leak
+fix (row #1) — those two touch the same popups, so if merging both, merge/test them together.
+
+<!-- autonomous sessions append the next item (P2-4 #17, P2-6, …) below in the same shape, each on its OWN branch -->
 
