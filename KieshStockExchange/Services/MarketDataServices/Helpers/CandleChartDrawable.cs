@@ -163,6 +163,12 @@ public sealed partial class CandleChartDrawable : IDrawable
     public IReadOnlyList<(DateTime Time, double Value)> MoodSeries { get; set; } = Array.Empty<(DateTime, double)>();
     public Color MoodLineColor = Color.FromArgb("#B39DDB"); // soft violet, distinct from candle/volume palette
 
+    // §rsi: an always-separate sub-pane (below volume, just above the mood strip) plotting Wilder's RSI
+    // (0..100) on a FIXED scale, against the SAME time axis as the candles. Off by default; the 30/70
+    // guides wash oversold/overbought like the mood strip's fear/greed zones. The VM pushes the series.
+    public bool ShowRsiPane { get; set; } = false;
+    public IReadOnlyList<RsiPoint> RsiSeries { get; set; } = Array.Empty<RsiPoint>();
+
     // §depth-overlay: live order-book resting liquidity, drawn as a horizontal histogram anchored at the
     // plot's right edge — each level a thin bar at Y(price) whose length ∝ its quantity (normalized to the
     // snapshot's largest level). Bids paint green / asks red at low alpha so candles stay readable. Off by
@@ -183,6 +189,7 @@ public sealed partial class CandleChartDrawable : IDrawable
     const float VolumePaneMinChartHeight = 80f;  // skip volume pane on tiny charts
     const float MoodPaneRatio = 0.16f;    // 16% of total plot height for the mood sub-pane
     const float MoodPaneGap = 4f;
+    const float RsiPaneRatio = 0.16f;     // 16% of total plot height for the RSI sub-pane
 
     // Drawing geometry — the single source shared by DrawingRenderer (drawn handles) and
     // ChartHitTester (clickable zones), injected into both so the visible shape and its
@@ -215,6 +222,17 @@ public sealed partial class CandleChartDrawable : IDrawable
             float moodH = fullPlot.Height * MoodPaneRatio;
             moodRect = new RectF(fullPlot.X, fullPlot.Bottom - moodH, fullPlot.Width, moodH);
             baseArea = new RectF(fullPlot.X, fullPlot.Y, fullPlot.Width, fullPlot.Height - moodH - MoodPaneGap);
+        }
+        // §rsi: reserve the RSI strip off the bottom of the remaining area (just above the mood strip),
+        // BEFORE the volume split, so it only shrinks the price plot when ON and volume/mood behaviour is
+        // byte-identical when OFF (baseArea unchanged). Height is a fixed fraction of the whole chart and
+        // the gap mirrors the mood strip's spacing.
+        RectF rsiRect = default;
+        if (ShowRsiPane && baseArea.Height >= VolumePaneMinChartHeight)
+        {
+            float rsiH = fullPlot.Height * RsiPaneRatio;
+            rsiRect = new RectF(baseArea.X, baseArea.Bottom - rsiH, baseArea.Width, rsiH);
+            baseArea = new RectF(baseArea.X, baseArea.Y, baseArea.Width, baseArea.Height - rsiH - MoodPaneGap);
         }
 
         RectF plot = baseArea;
@@ -258,14 +276,14 @@ public sealed partial class CandleChartDrawable : IDrawable
         {
             // Bailout still commits the NEW pane rects (old ranges kept) — mirrors the old cache,
             // which wrote the rect fields before this early return.
-            _frame = _frame.WithRects(plot, volRect, moodRect);
+            _frame = _frame.WithRects(plot, volRect, moodRect, rsiRect);
             DrawNoData(canvas, dirtyRect);
             canvas.RestoreState();
             return;
         }
 
         double spanSec = (tMax - tMin).TotalSeconds;
-        if (spanSec <= 0) { _frame = _frame.WithRects(plot, volRect, moodRect); canvas.RestoreState(); return; }
+        if (spanSec <= 0) { _frame = _frame.WithRects(plot, volRect, moodRect, rsiRect); canvas.RestoreState(); return; }
 
         double yMin, yMax;
         if (YAutoFit)
@@ -331,7 +349,7 @@ public sealed partial class CandleChartDrawable : IDrawable
         // One frame per paint: pane rects, ranges and every data<->pixel transform committed in a
         // single assignment BEFORE any renderer runs — the old seven-field cache, reified.
         var frame = new RenderFrame(plot, volRect, moodRect, yMin, yMax, tMin, tMax, spanSec,
-            ScaleMode, Viewport.Bucket, currency, _scale) { CurrentPrice = CurrentPrice };
+            ScaleMode, Viewport.Bucket, currency, _scale) { CurrentPrice = CurrentPrice, RsiRect = rsiRect };
         _frame = frame;
         // Palette snapshot alongside the frame — renderer collaborators read the theme, not the fields.
         var theme = BuildTheme();
@@ -369,6 +387,10 @@ public sealed partial class CandleChartDrawable : IDrawable
         // §market-mood: the Fear/Greed sub-pane, plotted against the same MapX time transform as the candles.
         if (moodRect.Height > 0)
             _indicatorRenderer.DrawMood(canvas, frame, theme, MoodSeries);
+
+        // §rsi: the RSI sub-pane (fixed 0..100), plotted against the same MapX time transform as the candles.
+        if (frame.RsiRect.Height > 0)
+            _indicatorRenderer.DrawRsi(canvas, frame, theme, RsiSeries);
 
         // §depth-overlay: resting-liquidity heatmap in the right portion of the price plot.
         if (ShowDepth)

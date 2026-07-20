@@ -152,6 +152,12 @@
                            Style="{StaticResource ChartOhlcValue}"
                            VerticalOptions="Center" />
                 </Grid>
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Padding="0,2">
+                    <Switch Grid.Column="0" IsToggled="{Binding ShowRsi}" />
+                    <Label Grid.Column="1" Text="RSI"
+                           Style="{StaticResource ChartOhlcValue}"
+                           VerticalOptions="Center" />
+                </Grid>
 
                 <!-- Open-order line colours. Two pickers: one each for the buy
                      and sell limit lines drawn on the chart. Defaults to the

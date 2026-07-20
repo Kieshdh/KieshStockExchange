@@ -21,6 +21,9 @@ internal sealed class RenderFrame
     // Live price at paint time — nullable + init-only so no existing ctor call / test fixture breaks
     // (a new ctor param would). Lets a drawing renderer (the Alert level) react to the current price.
     public decimal? CurrentPrice { get; init; }
+    // §rsi: RSI sub-pane rect — init-only for the SAME reason as CurrentPrice (a new ctor param would
+    // break the many existing new RenderFrame(...) fixtures). default() ⇒ Height 0 ⇒ the RSI pass no-ops.
+    public RectF RsiRect { get; init; }
     private readonly IScaleTransform _scale;   // stateless; injected from the drawable
 
     public RenderFrame(RectF plot, RectF volRect, RectF moodRect,
@@ -41,9 +44,9 @@ internal sealed class RenderFrame
     // Early-return paths in Draw() commit the NEW pane rects while KEEPING the previous ranges —
     // mirrors the old seven-field cache, where the rect fields were written before the no-data /
     // zero-span bailouts but the range fields were not.
-    public RenderFrame WithRects(RectF plot, RectF vol, RectF mood)
+    public RenderFrame WithRects(RectF plot, RectF vol, RectF mood, RectF rsi)
         => new(plot, vol, mood, YMin, YMax, TMin, TMax, SpanSec, Mode, Bucket, Currency, _scale)
-        { CurrentPrice = CurrentPrice };
+        { CurrentPrice = CurrentPrice, RsiRect = rsi };
 
     // ---- forward transforms (RENDER form — the old X/Y closures: cast then subtract in float) ----
     public float MapX(DateTime utc)

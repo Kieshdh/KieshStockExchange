@@ -255,6 +255,92 @@ internal sealed class IndicatorRenderer
         }
     }
 
+    // RSI line accent — a gold distinct from the mood strip's violet so the two sub-panes never read alike.
+    private static readonly Color RsiLineColor = Color.FromArgb("#F0B90B");
+
+    /// <summary>
+    /// §rsi: draw the RSI series in its own sub-pane on a FIXED 0..100 scale. Light oversold (&lt;30) /
+    /// overbought (&gt;70) zone washes + dashed 30/70 guide lines flag the extremes; 0/50/100 gridlines
+    /// label the axis; the line plots against the shared MapX time transform (half-bucket centre-shift,
+    /// like the MA/Bollinger/VWAP passes) so it lines up with the candles. A current-value pill sits
+    /// top-left. Mirrors DrawMood's layout so the sub-panes read alike. No-op on an empty series / zero height.
+    /// </summary>
+    public void DrawRsi(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<RsiPoint> series)
+    {
+        var r = f.RsiRect;
+        if (series.Count == 0 || r.Height <= 0) return;
+
+        // Sub-pane border, matching the volume + mood sub-panes.
+        canvas.StrokeColor = t.Grid;
+        canvas.StrokeSize = 1f;
+        canvas.DrawRectangle(r);
+
+        float RsiY(double v) => r.Bottom - (float)(Math.Clamp(v, 0, 100) / 100.0 * r.Height);
+
+        // Oversold (<30) / overbought (>70) zone washes so the strip reads at a glance (green = oversold
+        // buy zone, red = overbought sell zone — the RSI convention, inverse of the mood strip's tinting).
+        float y30 = RsiY(30), y70 = RsiY(70);
+        canvas.FillColor = t.Bull.WithAlpha(0.10f);
+        canvas.FillRectangle(r.X, y30, r.Width, r.Bottom - y30);
+        canvas.FillColor = t.Bear.WithAlpha(0.10f);
+        canvas.FillRectangle(r.X, r.Y, r.Width, y70 - r.Y);
+
+        // 30 / 70 guide lines, dashed so the extremes read distinctly from the plain 0/50/100 gridlines.
+        canvas.StrokeColor = t.Grid.WithAlpha(0.7f);
+        canvas.StrokeSize = 1f;
+        canvas.StrokeDashPattern = new float[] { 3f, 3f };
+        canvas.DrawLine(r.Left, y30, r.Right, y30);
+        canvas.DrawLine(r.Left, y70, r.Right, y70);
+        canvas.StrokeDashPattern = null;
+
+        // 0 / 50 / 100 gridlines + right-gutter labels.
+        canvas.FontColor = t.Axis;
+        canvas.FontSize = t.AxisFont;
+        foreach (var lvl in new[] { 0.0, 50.0, 100.0 })
+        {
+            float y = RsiY(lvl);
+            canvas.StrokeColor = t.Grid.WithAlpha(0.5f);
+            canvas.StrokeSize = 1f;
+            canvas.DrawLine(r.Left, y, r.Right, y);
+            canvas.DrawString($"{lvl:0}",
+                new RectF(r.Right + 4, y - 7, RightAxisW - 8, 14),
+                HorizontalAlignment.Left, VerticalAlignment.Center);
+        }
+
+        // RSI polyline. RsiPoint.Time is the candle OpenTime; half-bucket centre-shift + viewport clip
+        // match the MA/Bollinger/VWAP passes so the line tracks candle centres. Values map on the fixed scale.
+        var halfBucket = TimeSpan.FromTicks(f.Bucket.Ticks / 2);
+        var path = new PathF();
+        bool started = false;
+        for (int i = 0; i < series.Count; i++)
+        {
+            var time = series[i].Time + halfBucket;
+            if (time < f.TMin || time > f.TMax) { started = false; continue; }
+            float px = f.MapX(time), py = RsiY(series[i].Value);
+            if (!started) { path.MoveTo(px, py); started = true; }
+            else path.LineTo(px, py);
+        }
+        canvas.StrokeColor = RsiLineColor;
+        canvas.StrokeSize = 1.6f;
+        canvas.StrokeLineJoin = LineJoin.Round;
+        canvas.DrawPath(path);
+
+        // Current-value pill top-left: latest RSI + zone word, tinted by zone.
+        double latest = series[^1].Value;
+        var (word, tint) = latest >= 70 ? ("Overbought", t.Bear)
+                         : latest <= 30 ? ("Oversold", t.Bull)
+                         : ("RSI", t.Grid);
+        string label = $"RSI {latest:0}  {word}";
+        var pill = new RectF(r.Left + 4, r.Top + 3, Math.Max(96f, label.Length * 6.5f), 15f);
+        canvas.FillColor = tint.WithAlpha(0.85f);
+        canvas.FillRectangle(pill);
+        canvas.FontColor = Colors.White;
+        canvas.FontSize = t.AxisFont;
+        canvas.DrawString(label, new RectF(pill.X + 4, pill.Y, pill.Width - 6, pill.Height),
+            HorizontalAlignment.Left, VerticalAlignment.Center);
+    }
+
     /// <summary>
     /// §depth-overlay: draw the live order-book resting liquidity as a horizontal histogram in the right
     /// portion of the price plot. Each level is a thin bar at MapY(price), anchored at the plot's right edge

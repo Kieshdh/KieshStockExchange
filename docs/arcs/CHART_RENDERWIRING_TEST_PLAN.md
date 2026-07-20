@@ -58,4 +58,15 @@ session-only (no persistence).
 over the candles; flip **VWAP** on → the magenta VWAP line draws; toggle each off → it disappears. Pan/zoom → the
 lines track the candles (warmup for Bollinger is the first 20 bars). Band-fill + intraday VWAP session-reset are v2.
 
-<!-- feature commit appends below: RSI -->
+## 6. RSI  (commit `<pending>`)
+**What:** the RSI momentum indicator in its own **opt-in sub-pane** below the chart (like the Fear/Greed strip) —
+a fixed 0–100 scale with **30 / 70 guide lines** + oversold(<30)/overbought(>70) zone washes, a gold RSI line, and
+a current-value pill. **Off by default;** toggle it in the chart settings "Indicators" section (next to Bollinger/VWAP).
+**Test:** open chart settings → flip **RSI** on → a new pane appears at the bottom and the price plot shrinks to make
+room; the RSI line rides 0–100 with the 30/70 bands. **Verify (the risky part):** the crosshair still tracks over the
+candles and does NOT draw into the RSI pane; clicks in the RSI pane don't select candles/drawings (they still work in
+the price/volume area). Toggle off → the pane disappears and the plot returns to full height. Needs >14 candles to warm up.
+
+---
+**★ ALL 6 render-wiring features shipped.** A follow-up "round 2" (per Kiesh) reworks Text (plain text + font-size
+control), adds a **Comment** tool, realigns the rail groups, and moves Alert to a top-row button — tracked separately.

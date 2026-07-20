@@ -40,9 +40,12 @@ public partial class ChartViewModel
     // re-pushes the series on the next redraw; the drawable no-ops an empty series when off.
     [ObservableProperty] private bool _showBollinger;
     [ObservableProperty] private bool _showVwap;
+    // §rsi: opt-in RSI(14) sub-pane. Same session-only toggle pattern as Bollinger/VWAP.
+    [ObservableProperty] private bool _showRsi;
 
     partial void OnShowBollingerChanged(bool value) => RequestRedraw();
     partial void OnShowVwapChanged(bool value) => RequestRedraw();
+    partial void OnShowRsiChanged(bool value) => RequestRedraw();
 
     public IReadOnlyList<MaKind> MaKinds { get; } = new[] { MaKind.Sma, MaKind.Ema };
     public IReadOnlyList<MaColorOption> MaColorOptions => MaColorOption.All;
@@ -151,6 +154,11 @@ public partial class ChartViewModel
     /// <summary>Cumulative VWAP points against the current candle buffer when enabled, else empty.</summary>
     public IReadOnlyList<VwapPoint> BuildVwap()
         => ShowVwap ? VwapCalculator.Vwap(_candleBuffer) : Array.Empty<VwapPoint>();
+
+    /// <summary>Wilder's RSI(14) points against the current candle buffer when enabled, else an empty
+    /// list so the drawable's sub-pane render pass no-ops.</summary>
+    public IReadOnlyList<RsiPoint> BuildRsi()
+        => ShowRsi ? RsiCalculator.Rsi(_candleBuffer) : Array.Empty<RsiPoint>();
 
     private void OnOrdersChanged(object? sender, EventArgs e)
     {

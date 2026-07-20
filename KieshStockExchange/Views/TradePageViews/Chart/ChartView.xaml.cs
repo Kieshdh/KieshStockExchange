@@ -342,6 +342,9 @@ public partial class ChartView : ContentView
         _drawable.BollingerColor = ResolveColor("ChartBollinger");
         _drawable.VwapSeries = _vm.BuildVwap();
         _drawable.VwapColor = ResolveColor("ChartVwap");
+        // §rsi: opt-in RSI sub-pane — feed the series + pane visibility (empty series no-ops when off).
+        _drawable.RsiSeries = _vm.BuildRsi();
+        _drawable.ShowRsiPane = _vm.ShowRsi;
         _drawable.YAutoFit = _vm.IsYAutoFit;
         _drawable.ManualYMin = _vm.ManualYMin;
         _drawable.ManualYMax = _vm.ManualYMax;
