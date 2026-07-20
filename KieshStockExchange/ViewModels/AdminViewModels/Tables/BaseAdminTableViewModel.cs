@@ -12,12 +12,6 @@ namespace KieshStockExchange.ViewModels.AdminViewModels.Tables;
 
 public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTab
 {
-    // Adaptive page sizing: never fewer than this, even on a tiny window.
-    private const int MinPageSize = 20;
-    // Approx rendered height of one table row in DIPs; the MinPageSize floor and the
-    // CollectionView's own scrolling absorb any error in this estimate.
-    private const double RowHeightPx = 40;
-
     #region Page properties
     [ObservableProperty] private ObservableCollection<TItem> _pagedItems = new();
     [ObservableProperty] private int _pageNumber;
@@ -135,21 +129,6 @@ public abstract partial class BaseTableViewModel<TItem> : BaseViewModel, ILazyTa
     #endregion
 
     #region Helpers
-    /// <summary>
-    /// Size the page so a full page fills <paramref name="dataAreaHeightPx"/> (the table
-    /// viewport height minus header/pager chrome), then reload. For lazy tabs not yet
-    /// initialized this just stores the size; <see cref="EnsureInitializedAsync"/> loads
-    /// at the new size when the tab is first shown. Page resets to 1 on a size change.
-    /// </summary>
-    public Task ApplyViewportHeightAsync(double dataAreaHeightPx)
-    {
-        if (dataAreaHeightPx <= 0) return Task.CompletedTask;
-        int fit = Math.Max(MinPageSize, (int)Math.Floor(dataAreaHeightPx / RowHeightPx));
-        if (fit == PageSize) return Task.CompletedTask;
-        PageSize = fit; // OnPageSizeChanged repages (resets to page 1) when initialized
-        return Task.CompletedTask;
-    }
-
     protected async Task ApplyViewChange()
     {
         PageNumber = 0;
