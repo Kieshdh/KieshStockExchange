@@ -1,7 +1,7 @@
 # CHART render-wiring — BATCH TEST PLAN (for Kiesh)
 
-The 5 deferred chart tools are being wired up autonomously (ultraplan: `docs/ultraplans/ultraplan-chart-renderwiring.md`),
-one feature per commit on `feature/bot-market-realism-v2`. Each is build-gated + adversarially reviewed (11 existing
+The 5 deferred chart tools are being wired up autonomously via the **ultradesign method** (fire prompt at
+`docs/ultradesigns/ultradesign-chart-renderwiring.md`), one feature per commit on `feature/bot-market-realism-v2`. Each is build-gated + adversarially reviewed (11 existing
 tools confirmed untouched). **Kiesh visually tests each below**, then says keep / tweak / revert. Run the client:
 `dotnet run --project KieshStockExchange/KieshStockExchange.csproj -f net9.0-windows10.0.19041.0`, open a stock's chart.
 

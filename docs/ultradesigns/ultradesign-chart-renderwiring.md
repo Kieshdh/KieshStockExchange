@@ -1,6 +1,7 @@
-# Ultraplan — Chart deferred render-wiring (5 tools)
+# Ultradesign — Chart deferred render-wiring (5 tools)
 
-Feasibility → 3 architects → council teardown DONE (2026-07-20). This is the FIRE PROMPT for local implementation.
+**Ultradesign method** (feasibility → 3 independent architects → council teardown → fire prompt) DONE (2026-07-20).
+The **fire prompt** below is the resulting ultraplan for local implementation.
 Branch `feature/bot-market-realism-v2` (client-only MAUI; **no money/CK**). User visually tests after (one commit/feature).
 
 ## Goal
