@@ -137,6 +137,22 @@
                         Style="{StaticResource ChartLiveButton.Off}"
                         Command="{Binding AddMaCommand}" />
 
+                <!-- Single-instance price-plot indicators: Bollinger Bands + VWAP. Session-only
+                     toggles (no colour picker for v1); colours come from the theme dictionary. -->
+                <Label Text="Indicators" Style="{StaticResource ChartOhlcValue}" Margin="0,8,0,0" />
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Padding="0,2">
+                    <Switch Grid.Column="0" IsToggled="{Binding ShowBollinger}" />
+                    <Label Grid.Column="1" Text="Bollinger Bands"
+                           Style="{StaticResource ChartOhlcValue}"
+                           VerticalOptions="Center" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" Padding="0,2">
+                    <Switch Grid.Column="0" IsToggled="{Binding ShowVwap}" />
+                    <Label Grid.Column="1" Text="VWAP"
+                           Style="{StaticResource ChartOhlcValue}"
+                           VerticalOptions="Center" />
+                </Grid>
+
                 <!-- Open-order line colours. Two pickers: one each for the buy
                      and sell limit lines drawn on the chart. Defaults to the
                      Bull/Bear theme colours (Binance/TradingView convention). -->

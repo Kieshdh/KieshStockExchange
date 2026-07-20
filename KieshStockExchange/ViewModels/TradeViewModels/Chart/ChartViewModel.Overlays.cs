@@ -35,6 +35,15 @@ public partial class ChartViewModel
         new MaConfig { Period = 200, Kind = MaKind.Sma, ColorKey = "ChartMaColor3" },
     };
 
+    // Bollinger Bands + VWAP price-plot overlays — single-instance indicators (not the MA list), toggled
+    // from the MA settings overlay. Session-only state (no persistence), off by default. A toggle just
+    // re-pushes the series on the next redraw; the drawable no-ops an empty series when off.
+    [ObservableProperty] private bool _showBollinger;
+    [ObservableProperty] private bool _showVwap;
+
+    partial void OnShowBollingerChanged(bool value) => RequestRedraw();
+    partial void OnShowVwapChanged(bool value) => RequestRedraw();
+
     public IReadOnlyList<MaKind> MaKinds { get; } = new[] { MaKind.Sma, MaKind.Ema };
     public IReadOnlyList<MaColorOption> MaColorOptions => MaColorOption.All;
     private static readonly string[] _maColorRotation = new[]
@@ -133,6 +142,15 @@ public partial class ChartViewModel
         }
         return enabled;
     }
+
+    /// <summary>Bollinger Band points (SMA20 ± 2σ) against the current candle buffer when enabled,
+    /// else an empty list so the drawable's render pass no-ops.</summary>
+    public IReadOnlyList<BollingerPoint> BuildBollinger()
+        => ShowBollinger ? BollingerCalculator.Bollinger(_candleBuffer) : Array.Empty<BollingerPoint>();
+
+    /// <summary>Cumulative VWAP points against the current candle buffer when enabled, else empty.</summary>
+    public IReadOnlyList<VwapPoint> BuildVwap()
+        => ShowVwap ? VwapCalculator.Vwap(_candleBuffer) : Array.Empty<VwapPoint>();
 
     private void OnOrdersChanged(object? sender, EventArgs e)
     {

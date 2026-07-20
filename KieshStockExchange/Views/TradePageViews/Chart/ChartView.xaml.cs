@@ -336,6 +336,12 @@ public partial class ChartView : ContentView
         _drawable.XPaddingPercent = _vm.XPaddingPercent;
         _drawable.CurrentPrice = _vm.GetCurrentPrice();
         _drawable.MaSeries = _vm.BuildEnabledMas(ResolveColor);
+        // Bollinger + VWAP overlays — rebuilt on every redraw (same path as the MAs) so a candle tick
+        // or a toggle re-pushes. Colours resolve from the theme dictionary here (VM stays theme-free).
+        _drawable.BollingerSeries = _vm.BuildBollinger();
+        _drawable.BollingerColor = ResolveColor("ChartBollinger");
+        _drawable.VwapSeries = _vm.BuildVwap();
+        _drawable.VwapColor = ResolveColor("ChartVwap");
         _drawable.YAutoFit = _vm.IsYAutoFit;
         _drawable.ManualYMin = _vm.ManualYMin;
         _drawable.ManualYMax = _vm.ManualYMax;

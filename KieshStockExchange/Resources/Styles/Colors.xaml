@@ -22,6 +22,11 @@
     <Color x:Key="ChartMaColor4">#06B6D4</Color>  <!-- cyan -->
     <Color x:Key="ChartMaColor5">#FACC15</Color>  <!-- yellow -->
 
+    <!-- Bollinger Bands (SMA middle ± 2σ envelope) + cumulative VWAP price-plot overlays. Distinct from
+         the MA hues so a stacked indicator set stays readable; themes can override individually. -->
+    <Color x:Key="ChartBollinger">#94A3B8</Color>  <!-- slate -->
+    <Color x:Key="ChartVwap">#E879F9</Color>        <!-- magenta -->
+
     <!-- Price-marker line accent. Drawn for user-placed horizontal markers. -->
     <Color x:Key="ChartMarker">#EAB308</Color>
 

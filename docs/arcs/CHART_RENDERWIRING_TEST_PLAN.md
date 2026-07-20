@@ -49,4 +49,13 @@ edit the stop; reopen the chart → persisted.
 the whole box); dragging the target does NOT re-mirror the stop (direction is set once at creation). Qty=1 default,
 so set a real share count in the panel for a meaningful PnL figure. Multi-target / risk-% are deferred to v2.
 
-<!-- feature commits append below: Bollinger/VWAP, RSI -->
+## 5. Bollinger Bands + VWAP  (commit `<pending>`)
+**What:** two price-plot indicator overlays (like the moving averages), toggled from the chart's **MA/settings
+overlay** under a new **"Indicators"** heading. Bollinger = SMA-20 middle ± 2σ envelope (three lines, the envelope
+a touch lighter); VWAP = cumulative volume-weighted average price line (magenta). Both **off by default**,
+session-only (no persistence).
+**Test:** open the chart settings/MA overlay → flip **Bollinger Bands** on → the middle + upper/lower envelope draw
+over the candles; flip **VWAP** on → the magenta VWAP line draws; toggle each off → it disappears. Pan/zoom → the
+lines track the candles (warmup for Bollinger is the first 20 bars). Band-fill + intraday VWAP session-reset are v2.
+
+<!-- feature commit appends below: RSI -->

@@ -58,6 +58,87 @@ internal sealed class IndicatorRenderer
         canvas.RestoreState();
     }
 
+    public void DrawBollinger(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<BollingerPoint> series, Color color, bool viewportValid)
+    {
+        if (series.Count == 0) return;
+
+        // BollingerPoint.Time is OpenTime; shift to candle centre so the bands track the middle of
+        // each bucket rather than its left edge — identical clip/shift to the MA pass above.
+        var halfBucket = viewportValid
+            ? TimeSpan.FromTicks(f.Bucket.Ticks / 2)
+            : TimeSpan.Zero;
+
+        // Three parallel polylines share the same X sweep; each carries its own started flag so a
+        // value clipped out of the Y range breaks only its own band, not the others.
+        var mid = new PathF(); bool midStarted = false;
+        var upper = new PathF(); bool upperStarted = false;
+        var lower = new PathF(); bool lowerStarted = false;
+        for (int i = 0; i < series.Count; i++)
+        {
+            var p = series[i];
+            var time = p.Time + halfBucket;
+            if (time < f.TMin) continue;
+            if (time > f.TMax) break;
+            float px = f.MapX(time);
+            AppendBandPoint(mid, ref midStarted, f, px, p.Middle);
+            AppendBandPoint(upper, ref upperStarted, f, px, p.Upper);
+            AppendBandPoint(lower, ref lowerStarted, f, px, p.Lower);
+        }
+
+        canvas.SaveState();
+        canvas.StrokeSize = 1.5f;
+        // Envelope a touch lighter so the SMA middle reads as the primary line.
+        canvas.StrokeColor = color.WithAlpha(0.7f);
+        canvas.DrawPath(upper);
+        canvas.DrawPath(lower);
+        canvas.StrokeColor = color;
+        canvas.DrawPath(mid);
+        canvas.RestoreState();
+    }
+
+    // One band vertex: Y-range guard (break the line on a clipped value) + started-flag bookkeeping,
+    // matching the MA polyline's per-point handling.
+    private static void AppendBandPoint(PathF path, ref bool started, RenderFrame f, float px, double value)
+    {
+        if (value < f.YMin || value > f.YMax) { started = false; return; }
+        float py = f.MapY(value);
+        if (!started) { path.MoveTo(px, py); started = true; }
+        else path.LineTo(px, py);
+    }
+
+    public void DrawVwap(ICanvas canvas, RenderFrame f, ChartTheme t,
+        IReadOnlyList<VwapPoint> series, Color color, bool viewportValid)
+    {
+        if (series.Count == 0) return;
+
+        // VwapPoint.Time is OpenTime; same half-bucket centre-shift + viewport clip as the MA pass.
+        var halfBucket = viewportValid
+            ? TimeSpan.FromTicks(f.Bucket.Ticks / 2)
+            : TimeSpan.Zero;
+
+        canvas.SaveState();
+        canvas.StrokeSize = 1.5f;
+        canvas.StrokeColor = color;
+        var path = new PathF();
+        bool started = false;
+        for (int i = 0; i < series.Count; i++)
+        {
+            var p = series[i];
+            var time = p.Time + halfBucket;
+            if (time < f.TMin) continue;
+            if (time > f.TMax) break;
+            if (p.Value < f.YMin || p.Value > f.YMax) { started = false; continue; }
+
+            float px = f.MapX(time);
+            float py = f.MapY(p.Value);
+            if (!started) { path.MoveTo(px, py); started = true; }
+            else path.LineTo(px, py);
+        }
+        canvas.DrawPath(path);
+        canvas.RestoreState();
+    }
+
     public void DrawVolume(ICanvas canvas, RenderFrame f, ChartTheme t,
         IReadOnlyList<Candle> candles, bool overlayVolume)
     {

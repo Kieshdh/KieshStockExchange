@@ -55,6 +55,14 @@ public sealed partial class CandleChartDrawable : IDrawable
     // pre-computed list of points against the candle buffer.
     public IReadOnlyList<MovingAverageSeries> MaSeries { get; set; } = Array.Empty<MovingAverageSeries>();
 
+    // Bollinger Bands overlay (SMA middle ± k·stdev envelope) + VWAP overlay, each a price-plot
+    // polyline set keyed off the shared X/Y transform. Empty series render as a no-op, so a disabled
+    // indicator costs nothing. Colours are pushed by ChartView from the theme dictionary.
+    public IReadOnlyList<BollingerPoint> BollingerSeries { get; set; } = Array.Empty<BollingerPoint>();
+    public Color BollingerColor { get; set; } = Color.FromArgb("#94A3B8");  // slate — theme overrides via ChartBollinger
+    public IReadOnlyList<VwapPoint> VwapSeries { get; set; } = Array.Empty<VwapPoint>();
+    public Color VwapColor { get; set; } = Color.FromArgb("#E879F9");       // magenta — theme overrides via ChartVwap
+
     // User drawings (horizontal lines + trendlines), anchored in data space so they hold their
     // place through pan/zoom. The currently-dragged drawing (if any) paints with extra emphasis;
     // the selected drawing (if any) shows grab-handles and drives the floating style-bar.
@@ -339,6 +347,8 @@ public sealed partial class CandleChartDrawable : IDrawable
 
         _candleRenderer.DrawCandles(canvas, frame, theme, Candles, Style);
         _indicatorRenderer.DrawMovingAverages(canvas, frame, theme, MaSeries, Viewport.IsValid);
+        _indicatorRenderer.DrawBollinger(canvas, frame, theme, BollingerSeries, BollingerColor, Viewport.IsValid);
+        _indicatorRenderer.DrawVwap(canvas, frame, theme, VwapSeries, VwapColor, Viewport.IsValid);
         _overlayRenderer.DrawOpenOrderLines(canvas, frame, theme, OpenOrderLines, DraggingOrderId, DraggingOrderPrice);
         _overlayRenderer.DrawPositionLine(canvas, frame, theme, Position);
         _overlayRenderer.DrawFillMarkers(canvas, frame, theme, FillMarkers, Candles);
