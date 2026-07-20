@@ -4,6 +4,12 @@
 **Source:** `KieshStockExchange.Server/Services/MarketEngineServices/Helpers/OrderValidator.cs`
 **Characterization fence:** `KieshStockExchange.Tests/OrderValidatorCharacterizationTests.cs` (commit `93d2ed2`)
 
+> **★ UPDATE (2026-07-20): divergence #3 RECONCILED (`b48d002`).** Per Kiesh + a full council (Option B), the
+> shared core checks were extracted into one private `CheckCore` that BOTH `ValidateInput` and `ValidateNew` call —
+> which adds the currency-support guard to `ValidateNew` (closing #3's gap) in the safe additive-reject direction,
+> and adds a differential drift-guard test so the two can't silently diverge again. #1/#2/#4 left as-is (benign).
+> 730/730 tests, adversarial review = SAFE (ValidateInput byte-identical; ValidateNew rejects more, never less).
+
 ## Summary — benign, not a gap
 
 The four pinned divergences are **benign belt-and-suspenders, not a real acceptance gap.** Two independent facts make them harmless:
