@@ -54,20 +54,8 @@ public sealed class OrderValidator : IOrderValidator
     {
         if (userId <= 0)
             return OrderResultFactory.InvalidParams("Invalid user ID.");
-        if (stockId <= 0 || !_stock.TryGetById(stockId, out _))
-            return OrderResultFactory.InvalidParams("Invalid stock ID.");
-        if (quantity <= 0)
-            return OrderResultFactory.InvalidParams("Quantity must be positive.");
-        if (quantity > MaxOrderQuantity)
-            return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
-        if (NotionalOverflows(price, quantity))
-            return OrderResultFactory.InvalidParams("Price is too large.");
-        if (!CurrencyHelper.IsSupported(currency))
-            return OrderResultFactory.InvalidParams("Unsupported currency.");
-        // Reject phantom (StockId, Currency) books.
-        if (!_stock.IsListedIn(stockId, currency))
-            return OrderResultFactory.InvalidParams(
-                $"Stock {stockId} is not listed in {currency}.");
+        var core = CheckCore(stockId, quantity, price, currency);
+        if (core is not null) return core;
 
         // Limit order: must have positive price and no slippage.
         if (limitOrder)
@@ -105,17 +93,8 @@ public sealed class OrderValidator : IOrderValidator
     public OrderResult? ValidateNew(Order order)
     {
         if (order is null) return OrderResultFactory.InvalidParams("Order is null.");
-        if (order.Quantity <= 0) return OrderResultFactory.InvalidParams("Quantity must be positive.");
-        if (order.Quantity > MaxOrderQuantity)
-            return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
-        if (NotionalOverflows(order.Price, order.Quantity))
-            return OrderResultFactory.InvalidParams("Price is too large.");
-        if (!_stock.TryGetById(order.StockId, out _))
-            return OrderResultFactory.InvalidParams("Invalid stock ID.");
-        // Reject phantom (StockId, Currency) books.
-        if (!_stock.IsListedIn(order.StockId, order.CurrencyType))
-            return OrderResultFactory.InvalidParams(
-                $"Stock {order.StockId} is not listed in {order.CurrencyType}.");
+        var core = CheckCore(order.StockId, order.Quantity, order.Price, order.CurrencyType);
+        if (core is not null) return core;
 
         // Limit order: Price must be positive and cannot have slippage.
         if (order.IsLimitOrder)
@@ -316,6 +295,27 @@ public sealed class OrderValidator : IOrderValidator
             return OrderResultFactory.InvalidParams("Invalid stock ID.");
 
         if (order.IsInvalid) return OrderResultFactory.InvalidParams("Order is invalid.");
+        return null;
+    }
+
+    // Shared primitive checks for both entry points — one source of truth so the two
+    // validators can't drift on the core rules.
+    private OrderResult? CheckCore(int stockId, int quantity, decimal price, CurrencyType currency)
+    {
+        if (stockId <= 0 || !_stock.TryGetById(stockId, out _))
+            return OrderResultFactory.InvalidParams("Invalid stock ID.");
+        if (quantity <= 0)
+            return OrderResultFactory.InvalidParams("Quantity must be positive.");
+        if (quantity > MaxOrderQuantity)
+            return OrderResultFactory.InvalidParams($"Quantity exceeds the maximum of {MaxOrderQuantity:N0}.");
+        if (NotionalOverflows(price, quantity))
+            return OrderResultFactory.InvalidParams("Price is too large.");
+        if (!CurrencyHelper.IsSupported(currency))
+            return OrderResultFactory.InvalidParams("Unsupported currency.");
+        // Reject phantom (StockId, Currency) books.
+        if (!_stock.IsListedIn(stockId, currency))
+            return OrderResultFactory.InvalidParams(
+                $"Stock {stockId} is not listed in {currency}.");
         return null;
     }
 

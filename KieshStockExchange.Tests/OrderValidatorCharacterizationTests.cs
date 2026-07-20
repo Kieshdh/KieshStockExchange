@@ -491,13 +491,93 @@ public class OrderValidatorCharacterizationTests
     }
 
     [Fact]
-    public void Divergence_unsupported_currency_only_input_checks_it()
+    public void Reconciled_unsupported_currency_rejected_by_both()
     {
-        // characterization: ValidateInput rejects an unsupported currency; ValidateNew has NO
-        // currency-support check at all (an Order can only hold a declared CurrencyType, so the guard
-        // was never added there). Both paths otherwise agree.
+        // Was divergence #3: ValidateInput rejected an unsupported currency while ValidateNew had NO
+        // currency-support check at all. Deliberately reconciled by the shared CheckCore helper —
+        // both entry points now run the same "Unsupported currency." guard.
         var v = MakeValidator();
         AssertRejected(v.ValidateInput(userId: 1, stockId: 1, quantity: 4, price: 2.50m,
             currency: (CurrencyType)999, buyOrder: true, limitOrder: true), "Unsupported currency.");
+
+        var o = LimitBuy(); o.CurrencyType = (CurrencyType)999;
+        AssertRejected(v.ValidateNew(o), "Unsupported currency.");
+    }
+
+    // =====================================================================================
+    //  DRIFT GUARD — the two validators must AGREE on the shared CORE rules (CheckCore)
+    // =====================================================================================
+
+    [Fact]
+    public void Core_rules_agree_between_ValidateInput_and_ValidateNew()
+    {
+        // Differential fence: for every core-invalid input, ValidateInput and ValidateNew must reject
+        // with the SAME message (they share CheckCore now), and for a valid baseline both must accept.
+        // Plain limit orders so no shape/stop rule interferes with the core comparison.
+
+        // Each case: a description, the raw params for ValidateInput, and a matching Order for
+        // ValidateNew. null expected message == both must ACCEPT; otherwise both must reject with it.
+        var known = MakeValidator();                 // stock known + listed
+        var unknown = MakeValidator(known: false);   // TryGetById → false
+        var unlisted = MakeValidator(listed: false); // IsListedIn → false
+
+        // Unsupported currency (out-of-range cast — every declared CurrencyType is supported).
+        AssertSameCoreOutcome("Unsupported currency.",
+            () => known.ValidateInput(userId: 1, stockId: 1, quantity: 4, price: 2.50m,
+                currency: (CurrencyType)999, buyOrder: true, limitOrder: true),
+            () => { var o = LimitBuy(); o.CurrencyType = (CurrencyType)999; return known.ValidateNew(o); });
+
+        // Quantity zero.
+        AssertSameCoreOutcome("Quantity must be positive.",
+            () => known.ValidateInput(userId: 1, stockId: 1, quantity: 0, price: 2.50m,
+                currency: USD, buyOrder: true, limitOrder: true),
+            () => { var o = LimitBuy(); o.Quantity = 0; return known.ValidateNew(o); });
+
+        // Quantity over the max.
+        AssertSameCoreOutcome(MaxQtyMessage,
+            () => known.ValidateInput(userId: 1, stockId: 1, quantity: 1_000_001, price: 2.50m,
+                currency: USD, buyOrder: true, limitOrder: true),
+            () => { var o = LimitBuy(); o.Quantity = 1_000_001; return known.ValidateNew(o); });
+
+        // Invalid stock id (catalog does not know it).
+        AssertSameCoreOutcome("Invalid stock ID.",
+            () => unknown.ValidateInput(userId: 1, stockId: 1, quantity: 4, price: 2.50m,
+                currency: USD, buyOrder: true, limitOrder: true),
+            () => unknown.ValidateNew(LimitBuy()));
+
+        // Overflowing price (notional would overflow decimal).
+        AssertSameCoreOutcome("Price is too large.",
+            () => known.ValidateInput(userId: 1, stockId: 1, quantity: 1000, price: decimal.MaxValue,
+                currency: USD, buyOrder: true, limitOrder: true),
+            () => { var o = LimitBuy(qty: 1000); o.Price = decimal.MaxValue; return known.ValidateNew(o); });
+
+        // Stock not listed in the currency.
+        AssertSameCoreOutcome("Stock 1 is not listed in USD.",
+            () => unlisted.ValidateInput(userId: 1, stockId: 1, quantity: 4, price: 2.50m,
+                currency: USD, buyOrder: true, limitOrder: true),
+            () => unlisted.ValidateNew(LimitBuy()));
+
+        // Valid baseline — both accept on the core (plain limit buy).
+        AssertSameCoreOutcome(null,
+            () => known.ValidateInput(userId: 1, stockId: 1, quantity: 4, price: 2.50m,
+                currency: USD, buyOrder: true, limitOrder: true),
+            () => known.ValidateNew(LimitBuy()));
+    }
+
+    // Asserts the two validators produce the SAME core outcome: both accept when expectedMessage is
+    // null, otherwise both reject with that exact message.
+    private static void AssertSameCoreOutcome(string? expectedMessage,
+        Func<OrderResult?> input, Func<OrderResult?> @new)
+    {
+        if (expectedMessage is null)
+        {
+            AssertAccepted(input());
+            AssertAccepted(@new());
+        }
+        else
+        {
+            AssertRejected(input(), expectedMessage);
+            AssertRejected(@new(), expectedMessage);
+        }
     }
 }
