@@ -425,30 +425,41 @@ internal sealed class DrawingRenderer
             }
             else if (d.Kind == DrawTool.PriceLabel)
             {
-                // Price callout: a rounded bubble beside the (T1,P1) anchor showing the PRICE at that point
-                // (auto-formatted, never typed). Filled with the style's Fill+opacity; text + border in the pen
-                // colour. A small dot marks the exact anchor. Off-plot anchors are clipped like Text/Comment.
+                // Price callout (speech-bubble look): a rounded bubble sitting UP-RIGHT of the exact price point
+                // (T1,P1), with a "<" tail dropping from its bottom-left corner DOWN-LEFT to that point (a bit of
+                // distance so it reads as a pointer). Price is CENTRED; filled with the style Fill+opacity; text +
+                // border in the pen colour. NO anchor dot (the point is DB-only). Off-plot anchors clip like Text.
                 float ax = X(d.T1), ay = Y((double)d.P1);
                 if (ax < plot.Left || ax > plot.Right || ay < plot.Top || ay > plot.Bottom)
                 { canvas.StrokeDashPattern = null; continue; }
                 string priceText = CurrencyHelper.Format(d.P1, cur);
                 float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
-                const float padX = 6f, padY = 4f, gap = 8f, dotR = 2.5f;
+                const float padX = 8f, padY = 4f, tailGap = 8f;
                 float bw = Math.Max(TextMinW, priceText.Length * fontSize * TextGlyphWFactor) + padX * 2f;
                 float bh = fontSize + padY * 2f;
-                var bubble = new RectF(ax + gap, ay - bh / 2f, bw, bh);
+                var bubble = new RectF(ax + tailGap, ay - bh - tailGap, bw, bh);
+                var fill = d.Style.Fill is Color fc ? fc.WithAlpha(d.Style.FillOpacity) : LabelPillBg;
                 canvas.StrokeDashPattern = null;
-                // Fill with the style tint (fall back to the readable pill bg when the style carries no fill).
-                canvas.FillColor = d.Style.Fill is Color fc ? fc.WithAlpha(d.Style.FillOpacity) : LabelPillBg;
+                canvas.FillColor = fill;
                 canvas.FillRoundedRectangle(bubble, 5f);
                 canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
                 canvas.DrawRoundedRectangle(bubble, 5f);
-                canvas.FillColor = color;
-                canvas.FillCircle(ax, ay, dotR);
+                // "<" tail: two base points at the bubble's bottom-left corner, apex at the price point.
+                float b1x = bubble.Left + 6f, b1y = bubble.Bottom;
+                float b2x = bubble.Left, b2y = bubble.Bottom - 6f;
+                var tailPath = new PathF();
+                tailPath.MoveTo(b1x, b1y);
+                tailPath.LineTo(b2x, b2y);
+                tailPath.LineTo(ax, ay);
+                tailPath.Close();
+                canvas.FillColor = fill;
+                canvas.FillPath(tailPath);
+                canvas.DrawLine(b1x, b1y, ax, ay);
+                canvas.DrawLine(b2x, b2y, ax, ay);
                 canvas.FontColor = color;
                 canvas.FontSize = fontSize;
                 canvas.DrawString(priceText, new RectF(bubble.X + padX, bubble.Y, bubble.Width - padX * 2f, bubble.Height),
-                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                    HorizontalAlignment.Center, VerticalAlignment.Center);
                 if (selected) DrawHandle(canvas, t, ax, ay, color);
             }
             else if (d.Kind == DrawTool.FibRetracement)
@@ -458,7 +469,9 @@ internal sealed class DrawingRenderer
                 // a touch thicker so the move's ends + midpoint read at a glance. Zone fills deferred (v2).
                 float xa = X(d.T1), xb = X(d.T2);
                 float left = Math.Min(xa, xb), right = Math.Max(xa, xb);
-                foreach (var lvl in FibonacciLevels.Levels(d.P1, d.P2))
+                // First anchor (P1) = the 1.0 level, second (P2) = 0.0 — so drawing left→right lands "1" under the
+                // first dot and "0" auto-adjusting to the second (TradingView retracement convention). Hence P2,P1.
+                foreach (var lvl in FibonacciLevels.Levels(d.P2, d.P1))
                 {
                     float y = Y((double)lvl.Price);
                     if (y < plot.Top || y > plot.Bottom) continue;

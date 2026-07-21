@@ -105,11 +105,11 @@ internal sealed class ChartHitTester
                 float ax = frame.TimeToPixelX(d.T1), ay = frame.HitPriceToPixelY(d.P1);
                 if (ax < frame.Plot.Left || ax > frame.Plot.Right || ay < frame.Plot.Top || ay > frame.Plot.Bottom) continue;
                 float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
-                const float padX = 6f, padY = 4f, gap = 8f;
+                const float padX = 8f, padY = 4f, tailGap = 8f;
                 int estLen = d.P1.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture).Length + 2;
                 float bw = Math.Max(TextMinW, estLen * fontSize * TextGlyphWFactor) + padX * 2f;
                 float bh = fontSize + padY * 2f;
-                var r = new RectF(ax + gap, ay - bh / 2f, bw, bh);
+                var r = new RectF(ax + tailGap, ay - bh - tailGap, bw, bh);   // bubble sits up-right of the anchor
                 if (r.Contains(p) || ChartGeometry.Dist(p.X, p.Y, ax, ay) <= DrawHandleR + DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }

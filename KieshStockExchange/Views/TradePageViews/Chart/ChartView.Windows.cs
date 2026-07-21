@@ -787,6 +787,10 @@ public partial class ChartView
 
     private void OnPlatformPointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
+        // While an inline text edit is open, DON'T pull focus back to the chart — doing so would blur the
+        // overlay Entry the moment the pointer moves over the chart, which reads as a premature commit/delete.
+        // The label commits only on Enter or a genuine click elsewhere (the press handler), never on hover.
+        if (_vm?.Drawing.InlineEditActive == true) return;
         if (sender is Microsoft.UI.Xaml.Controls.Control ctrl)
             ctrl.Focus(Microsoft.UI.Xaml.FocusState.Programmatic);
     }
