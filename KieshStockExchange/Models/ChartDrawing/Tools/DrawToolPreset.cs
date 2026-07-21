@@ -64,10 +64,11 @@ public static class DrawToolPresets
                 ShowEnding: false, ShowHead: false, ShowText: true, ShowPosition: false,
                 ShowSize: true, ShowSmoothing: false),
 
-        // Long/short risk-reward box: stroke + the Position section.
-        DrawTool.Position =>
+        // Long/short risk-reward box: entry-line stroke + the Position section (numeric legs; no width tiles).
+        // The Long/Short/Manual arming tools share the row so the panel shows while arming, not just when selected.
+        DrawTool.Position or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual =>
             new(ShapeStyle,
-                ShowStroke: true, ShowWidth: true, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
+                ShowStroke: true, ShowWidth: false, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
                 ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: true,
                 ShowSize: false, ShowSmoothing: false),
 

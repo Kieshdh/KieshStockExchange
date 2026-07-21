@@ -263,6 +263,19 @@ public partial class ChartView
                 e.Handled = true;
                 return;
             }
+            if (_vm.Drawing.DrawTool == DrawTool.PositionManual)
+            {
+                // Manual position: one-click drop of a default LONG box (entry at click, target/stop at ±2%,
+                // ~80px wide), then auto-select so the numeric legs open for editing — no drag (docs spec).
+                decimal off = newPrice * 0.02m;
+                var t2 = _drawable.PixelToTime(p.X + 80f);
+                var box = new DrawingObject(id, DrawTool.Position, t, newPrice, t2, newPrice + off,
+                    _vm.Drawing.DefaultDrawStyle) with { P3 = newPrice - off, Direction = 1, Qty = 1 };
+                _vm.Drawing.AddDrawing(box);
+                FinishPlacement(id);
+                e.Handled = true;
+                return;
+            }
             if (_vm.Drawing.DrawTool == DrawTool.Polyline)
             {
                 // Start a new in-progress polyline anchored at the click; subsequent clicks append.
@@ -278,9 +291,12 @@ public partial class ChartView
                 e.Handled = true;
                 return;
             }
-            // Trend / Ray / shapes (Rectangle / Ellipse / the block-Arrow): a two-anchor drag; the second
-            // anchor follows the release point (Arrow: anchor1 = tail, anchor2 = head).
-            var seg = new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle);
+            // Trend / Ray / shapes (Rectangle / Ellipse / the block-Arrow) + Position Long/Short: a two-anchor
+            // drag; the second anchor follows the release point (Arrow: anchor1 = tail, anchor2 = head). The
+            // Position Long/Short arming tools persist as Kind=Position (Direction is fixed on release, below).
+            var placeKind = _vm.Drawing.DrawTool is DrawTool.PositionLong or DrawTool.PositionShort
+                ? DrawTool.Position : _vm.Drawing.DrawTool;
+            var seg = new DrawingObject(id, placeKind, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle);
             _vm.Drawing.AddDrawing(seg);
             // No auto-select — the drag below positions anchor2; the tool row stays visible for the next line.
             BeginDrawingDrag(seg, DrawingHitPart.Anchor2, p, isNew: true);
@@ -640,15 +656,16 @@ public partial class ChartView
             // A NEW drawing that was dragged out & kept → revert to cursor + select it (settings pop up).
             else if (_drawDragIsNew && _drawDragMoved && _draggingDrawingId is Guid kid)
             {
-                // A Position derives its Stop leg ONCE here (mirror of the target across entry), sets its
-                // long/short Direction from target-vs-entry (never re-inferred later, or the box would flip
-                // mid-edit), and defaults to a 1-share size. Every other two-anchor tool finalizes as-is.
+                // A Position derives its Stop leg ONCE here (mirror of the target across entry), fixes its
+                // long/short Direction from the CHOSEN arming tool (PositionShort ⇒ short; Long/else ⇒ long —
+                // never inferred from drag direction, so a down-drag Long stays long), and defaults to 1 share.
+                // Every other two-anchor tool finalizes as-is.
                 if (_vm != null
                     && _vm.Drawing.Drawings.FirstOrDefault(x => x.Id == kid) is { Kind: DrawTool.Position } pos)
                     _vm.Drawing.UpdateDrawing(pos with
                     {
                         P3 = pos.P1 - (pos.P2 - pos.P1),
-                        Direction = pos.P2 >= pos.P1 ? 1 : -1,
+                        Direction = _vm.Drawing.DrawTool == DrawTool.PositionShort ? -1 : 1,
                         Qty = 1,
                     });
                 FinishPlacement(kid);

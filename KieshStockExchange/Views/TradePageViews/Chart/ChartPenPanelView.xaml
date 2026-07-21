@@ -259,6 +259,25 @@
                             Command="{Binding StepFontSizeDownCommand}" />
                 </Grid>
 
+                <!-- POSITION: numeric Entry/Target/Stop legs + Risk% + read-only R:R. Zones are fixed bull/bear
+                     (opacity-only, no per-zone colour). Editing a leg repositions that leg of the selected box. -->
+                <VerticalStackLayout Spacing="4" IsVisible="{Binding ShowPosition}">
+                    <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6" RowDefinitions="Auto,Auto" RowSpacing="4">
+                        <Label Grid.Row="0" Grid.Column="0" Text="Entry" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Entry Grid.Row="0" Grid.Column="1" Keyboard="Numeric" Text="{Binding PositionEntry, Mode=TwoWay}" />
+                        <Label Grid.Row="0" Grid.Column="2" Text="Target" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Entry Grid.Row="0" Grid.Column="3" Keyboard="Numeric" Text="{Binding PositionTarget, Mode=TwoWay}" />
+                        <Label Grid.Row="1" Grid.Column="0" Text="Stop" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Entry Grid.Row="1" Grid.Column="1" Keyboard="Numeric" Text="{Binding PositionStop, Mode=TwoWay}" />
+                        <Label Grid.Row="1" Grid.Column="2" Text="Risk %" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Entry Grid.Row="1" Grid.Column="3" Keyboard="Numeric" Text="{Binding PositionRiskPct, Mode=TwoWay}" />
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                        <Label Grid.Column="0" Text="R:R" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Label Grid.Column="1" Text="{Binding PositionRiskReward}" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    </Grid>
+                </VerticalStackLayout>
+
                 <!-- Footer: default mode = add a line; selected mode = set-as-default + delete -->
                 <Button Text="+ Line at current price"
                         IsVisible="{Binding IsDefaultPenMode}"
@@ -266,6 +285,7 @@
                         Command="{Binding AddHLineAtCurrentCommand}" />
                 <HorizontalStackLayout Spacing="6" IsVisible="{Binding HasSelectedDrawing}">
                     <Button Text="Set as default ✓"
+                            IsVisible="{Binding CanSetAsDefault}"
                             Style="{StaticResource ChartLiveButton.Off}"
                             Command="{Binding SetSelectedAsDefaultCommand}" />
                     <Button Text="🗑 Delete"

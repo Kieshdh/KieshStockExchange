@@ -64,7 +64,7 @@ public partial class ChartDrawingViewModel
     [ObservableProperty] private DrawTool _linesGroupTool = DrawTool.Trend;
     [ObservableProperty] private DrawTool _shapesGroupTool = DrawTool.Rectangle;
     [ObservableProperty] private DrawTool _drawingGroupTool = DrawTool.Freehand;
-    [ObservableProperty] private DrawTool _positionGroupTool = DrawTool.Position;
+    [ObservableProperty] private DrawTool _positionGroupTool = DrawTool.PositionLong;
     [ObservableProperty] private DrawTool _textGroupTool = DrawTool.Text;
     [ObservableProperty] private string? _openToolGroup;   // "lines"|"shapes"|"drawing"|"position"|"text"|null (one open)
 
@@ -105,7 +105,8 @@ public partial class ChartDrawingViewModel
         or DrawTool.Polyline or DrawTool.FibRetracement;
     private static bool ShapesGroupContains(DrawTool t) => t is DrawTool.Rectangle or DrawTool.Ellipse;
     private static bool DrawingGroupContains(DrawTool t) => t is DrawTool.Freehand or DrawTool.Arrow;
-    private static bool PositionGroupContains(DrawTool t) => t is DrawTool.Position;
+    private static bool PositionGroupContains(DrawTool t) => t is DrawTool.Position
+        or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual;
     private static bool TextGroupContains(DrawTool t) => t is DrawTool.Text or DrawTool.Comment;
 
     private static string ToolIcon(DrawTool t) => t switch
@@ -124,7 +125,7 @@ public partial class ChartDrawingViewModel
         DrawTool.Rectangle => "tool_rectangle.png",
         DrawTool.Ellipse => "tool_ellipse.png",
         DrawTool.Arrow => "tool_arrow.png",
-        DrawTool.Position => "tool_position.png",
+        DrawTool.Position or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual => "tool_position.png",
         DrawTool.Freehand => "tool_freehand.png",
         DrawTool.Magnifier => "tool_magnifier.png",
         _ => "tool_cursor.png",
@@ -191,6 +192,8 @@ public partial class ChartDrawingViewModel
     public bool ShowPosition  => EditingPreset.ShowPosition;
     public bool ShowSize      => EditingPreset.ShowSize;
     public bool ShowSmoothing => EditingPreset.ShowSmoothing;
+    // Position is Delete-only (a default entry/target price is incoherent) — hide "Set as default" for it.
+    public bool CanSetAsDefault => !EditingPreset.ShowPosition;
 
     // The live specimen of the current pen (or selected line), bound by the toolbar pen button and the
     // panel preview. Rebuilt as a fresh instance on every effective-style change so its hosts repaint.
@@ -349,6 +352,25 @@ public partial class ChartDrawingViewModel
         PenFontSize = StandardFontSizes[Math.Clamp(idx + dir, 0, StandardFontSizes.Length - 1)];
     }
 
+    // --- Position panel (numeric legs + Risk% + read-only R:R) --------------------------------------
+    // The three legs edit the SELECTED Position through the SetSelected*Price seams; Risk% is a single
+    // global Preferences scalar (per the design — not per-drawing); R:R is derived |Target−Entry|/|Entry−Stop|.
+    // All re-synced from the selected drawing in RefreshPenTiles (guarded so the push-back doesn't re-enter).
+    private const string PositionRiskPctPrefKey = "chart_position_risk_pct";
+    [ObservableProperty] private decimal _positionEntry;
+    [ObservableProperty] private decimal _positionTarget;
+    [ObservableProperty] private decimal _positionStop;
+    [ObservableProperty] private double _positionRiskPct = Preferences.Default.Get(PositionRiskPctPrefKey, 1.0);
+    [ObservableProperty] private string _positionRiskReward = "—";
+
+    partial void OnPositionEntryChanged(decimal value)  { if (!_syncingPenFromStyle) SetSelectedEntryPrice(value); }
+    partial void OnPositionTargetChanged(decimal value) { if (!_syncingPenFromStyle) SetSelectedTargetPrice(value); }
+    partial void OnPositionStopChanged(decimal value)   { if (!_syncingPenFromStyle) SetSelectedStopPrice(value); }
+    partial void OnPositionRiskPctChanged(double value)
+    {
+        if (!_syncingPenFromStyle) Preferences.Default.Set(PositionRiskPctPrefKey, value);
+    }
+
     // "Set as default ✓": copy the selected line's style to the default pen.
     [RelayCommand]
     private void SetSelectedAsDefault()
@@ -394,6 +416,7 @@ public partial class ChartDrawingViewModel
         OnPropertyChanged(nameof(ShowHead));
         OnPropertyChanged(nameof(ShowText));
         OnPropertyChanged(nameof(ShowPosition));
+        OnPropertyChanged(nameof(CanSetAsDefault));
         OnPropertyChanged(nameof(ShowSize));
         OnPropertyChanged(nameof(ShowSmoothing));
         // Colour-picker swatches + fill state track the effective style too.
@@ -437,6 +460,14 @@ public partial class ChartDrawingViewModel
         _syncingPenFromStyle = true;
         PenFontSize = s.FontSize > 0 ? s.FontSize : DefaultFontSize;
         PenFillOpacity = Math.Clamp(s.FillOpacity, 0f, 1f);
+        // Position legs + R:R — only meaningful when a Position drawing is selected.
+        if (EditingKind == DrawTool.Position && SelectedDrawingId is Guid posId
+            && Drawings.FirstOrDefault(d => d.Id == posId) is { Kind: DrawTool.Position } pos)
+        {
+            PositionEntry = pos.P1; PositionTarget = pos.P2; PositionStop = pos.P3;
+            decimal reward = Math.Abs(pos.P2 - pos.P1), risk = Math.Abs(pos.P1 - pos.P3);
+            PositionRiskReward = risk > 0m ? $"{(double)(reward / risk):0.00}" : "—";
+        }
         _syncingPenFromStyle = false;
     }
 }
