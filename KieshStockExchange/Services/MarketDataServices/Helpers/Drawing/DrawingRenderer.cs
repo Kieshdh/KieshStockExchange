@@ -38,9 +38,22 @@ internal sealed class DrawingRenderer
     private const float TextDefaultFont = 12f;
     private const float TextGlyphWFactor = 0.6f;
 
-    // Fixed Fib tag width so every level's pill lines up in one clean column (ratio flush-left,
-    // price flush-right). Variable-width tags made the price digits ragged across levels.
-    private const float FibTagW = 104f;
+    // Fib band tint opacity — the fixed (no-slider) fill between adjacent levels.
+    private const float FibBandOpacity = 0.10f;
+
+    // Fib rainbow palette: a distinct colour per level, sweeping red→violet. Indexed by level position
+    // (wraps if a custom ratio set has more than 12 levels). Single-colour mode ignores this.
+    private static readonly Color[] FibSpectrum =
+    {
+        Color.FromArgb("#F23645"), Color.FromArgb("#FF6D00"), Color.FromArgb("#FF9800"),
+        Color.FromArgb("#FFD54F"), Color.FromArgb("#AEEA00"), Color.FromArgb("#00C853"),
+        Color.FromArgb("#00BFA5"), Color.FromArgb("#00B8D4"), Color.FromArgb("#2962FF"),
+        Color.FromArgb("#5E35B1"), Color.FromArgb("#8E24AA"), Color.FromArgb("#D500F9"),
+    };
+
+    // The colour for Fib level i: its spectrum swatch in rainbow mode, else the single pen colour.
+    private static Color FibLineColor(int i, bool rainbow, Color single)
+        => rainbow ? FibSpectrum[i % FibSpectrum.Length] : single;
 
     /// <summary>
     /// Draw the user's horizontal lines + trendlines. HLine spans the plot at its price with a
@@ -465,22 +478,37 @@ internal sealed class DrawingRenderer
             else if (d.Kind == DrawTool.FibRetracement)
             {
                 // Fibonacci retracement grid: the two time anchors bound a box; each ratio level draws a
-                // horizontal line across it with a left-edge "{ratio}  {price}" tag. The 0/0.5/1 lines paint
-                // a touch thicker so the move's ends + midpoint read at a glance. Zone fills deferred (v2).
+                // horizontal line across it with a right-aligned "{ratio} ({price})" tag just left of the grid.
+                // The 0/0.5/1 lines paint a touch thicker. Each ADJACENT pair of levels gets a tinted band fill
+                // (fixed low opacity). Rainbow mode gives every line its own spectrum colour (band = that line's
+                // colour); single mode uses the pen colour for all. First anchor (P1) = 1.0, second (P2) = 0.0.
                 float xa = X(d.T1), xb = X(d.T2);
                 float left = Math.Min(xa, xb), right = Math.Max(xa, xb);
-                // First anchor (P1) = the 1.0 level, second (P2) = 0.0 — so drawing left→right lands "1" under the
-                // first dot and "0" auto-adjusting to the second (TradingView retracement convention). Hence P2,P1.
-                foreach (var lvl in FibonacciLevels.Levels(d.P2, d.P1))
+                bool rainbow = d.Style.FibRainbow;
+                var levels = FibonacciLevels.Levels(d.P2, d.P1);
+                canvas.StrokeDashPattern = null;
+                // Band fills first (behind the lines): tint the zone between each consecutive level pair.
+                for (int bi = 0; bi < levels.Count - 1; bi++)
                 {
-                    float y = Y((double)lvl.Price);
+                    float y0 = Y((double)levels[bi].Price), y1 = Y((double)levels[bi + 1].Price);
+                    float top = Math.Max(Math.Min(y0, y1), plot.Top);
+                    float bot = Math.Min(Math.Max(y0, y1), plot.Bottom);
+                    if (bot <= top) continue;
+                    canvas.FillColor = FibLineColor(bi, rainbow, color).WithAlpha(FibBandOpacity);
+                    canvas.FillRectangle(left, top, right - left, bot - top);
+                }
+                // Level lines + tags on top, each in its own colour.
+                for (int li = 0; li < levels.Count; li++)
+                {
+                    float y = Y((double)levels[li].Price);
                     if (y < plot.Top || y > plot.Bottom) continue;
-                    bool key = lvl.Ratio is 0.0 or 0.5 or 1.0;   // move start / midpoint / end
-                    canvas.StrokeColor = color;
+                    var lc = FibLineColor(li, rainbow, color);
+                    bool key = levels[li].Ratio is 0.0 or 0.5 or 1.0;   // move start / midpoint / end
+                    canvas.StrokeColor = lc;
                     canvas.StrokeSize = key ? stroke + 0.75f : stroke;
                     canvas.StrokeDashPattern = dashPattern;
                     canvas.DrawLine(left, y, right, y);
-                    DrawFibLevelTag(canvas, t, plot, left, y, lvl.Ratio, lvl.Price, color, cur);
+                    DrawFibLevelTag(canvas, t, plot, left, y, levels[li].Ratio, levels[li].Price, lc, cur);
                 }
                 canvas.StrokeDashPattern = null;
                 if (selected)
@@ -664,26 +692,18 @@ internal sealed class DrawingRenderer
             HorizontalAlignment.Left, VerticalAlignment.Center);
     }
 
-    // A Fib level tag: a "{ratio}  {price}" pill anchored just LEFT of the grid's left edge (clamped to
-    // the plot). Same readable pill mechanics as DrawEndpointPriceTag, but labels the ratio + level price.
+    // A Fib level tag: PLAIN "{ratio} ({price})" text (no pill/box) in the level's colour, RIGHT-ALIGNED so it
+    // ends just left of the grid's left edge. Right-aligning keeps the bracketed prices in one clean column.
     private void DrawFibLevelTag(ICanvas canvas, ChartTheme theme, RectF plot, float x, float y,
         double ratio, decimal price, Color color, CurrencyType cur)
     {
-        float w = FibTagW;
-        float lx = Math.Clamp(x - w - 4f, plot.Left, Math.Max(plot.Left, plot.Right - w));
-        float ly = Math.Clamp(y - 8f, plot.Top, Math.Max(plot.Top, plot.Bottom - 16f));
-        var r = new RectF(lx, ly, w, 16f);
-        canvas.FillColor = LabelPillBg;
-        canvas.FillRectangle(r);
-        canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
-        canvas.StrokeDashPattern = null;   // the pill border is never dashed (pen dash is for the level lines)
-        canvas.DrawRectangle(r);
-        canvas.FontColor = Colors.White;
+        canvas.StrokeDashPattern = null;   // text only — never inherit the level line's dash
+        string text = $"{ratio:0.###} ({CurrencyHelper.Format(price, cur)})";
+        float rightX = Math.Max(plot.Left + 40f, x - 4f);
+        var textRect = new RectF(plot.Left, y - 8f, rightX - plot.Left, 16f);
+        canvas.FontColor = color;
         canvas.FontSize = theme.PriceTagFont;
-        // Ratio flush-left, price flush-right in the same fixed rect so the columns align across levels.
-        var textRect = new RectF(r.X + 3, r.Y, r.Width - 6, r.Height);
-        canvas.DrawString($"{ratio:0.###}", textRect, HorizontalAlignment.Left, VerticalAlignment.Center);
-        canvas.DrawString(CurrencyHelper.Format(price, cur), textRect, HorizontalAlignment.Right, VerticalAlignment.Center);
+        canvas.DrawString(text, textRect, HorizontalAlignment.Right, VerticalAlignment.Center);
     }
 
     // Position readout: ONE pill with the reward:risk ratio + (when a live price exists) the unrealized

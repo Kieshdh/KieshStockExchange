@@ -72,6 +72,30 @@
                            Style="{StaticResource ChartOhlcValue}" WidthRequest="42" VerticalOptions="Center" />
                 </Grid>
 
+                <!-- FIB colour mode (Fib only): Single pen colour vs Rainbow (a colour per level + tinted bands).
+                     No opacity slider — the band tint is fixed. Last-used mode becomes the default for new Fibs. -->
+                <Grid ColumnDefinitions="Auto,*,*" ColumnSpacing="6" IsVisible="{Binding ShowFibPalette}">
+                    <Label Grid.Column="0" Text="Colours" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                    <Button Grid.Column="1" Text="🌈 Rainbow" FontSize="12" Padding="6,2" CornerRadius="4"
+                            Command="{Binding SetFibRainbowCommand}">
+                        <Button.CommandParameter><x:Boolean>True</x:Boolean></Button.CommandParameter>
+                        <Button.Triggers>
+                            <DataTrigger TargetType="Button" Binding="{Binding IsFibRainbow}" Value="True">
+                                <Setter Property="BackgroundColor" Value="{DynamicResource Primary}" />
+                            </DataTrigger>
+                        </Button.Triggers>
+                    </Button>
+                    <Button Grid.Column="2" Text="Single" FontSize="12" Padding="6,2" CornerRadius="4"
+                            Command="{Binding SetFibRainbowCommand}">
+                        <Button.CommandParameter><x:Boolean>False</x:Boolean></Button.CommandParameter>
+                        <Button.Triggers>
+                            <DataTrigger TargetType="Button" Binding="{Binding IsFibRainbow}" Value="False">
+                                <Setter Property="BackgroundColor" Value="{DynamicResource Primary}" />
+                            </DataTrigger>
+                        </Button.Triggers>
+                    </Button>
+                </Grid>
+
                 <!-- WIDTH | DASH (row 0) and END | HEAD (row 1) — the compact 2×8 grid. Row 1 collapses for
                      tools with no directional ending (shapes / H·V lines) via the ShowEnding/ShowHead gates. -->
                 <Grid ColumnDefinitions="Auto,*,*,*,Auto,*,*,*"

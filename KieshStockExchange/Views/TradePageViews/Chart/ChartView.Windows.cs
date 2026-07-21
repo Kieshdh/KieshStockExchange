@@ -308,7 +308,11 @@ public partial class ChartView
             // Position Long/Short arming tools persist as Kind=Position (Direction is fixed on release, below).
             var placeKind = _vm.Drawing.DrawTool is DrawTool.PositionLong or DrawTool.PositionShort
                 ? DrawTool.Position : _vm.Drawing.DrawTool;
-            var seg = new DrawingObject(id, placeKind, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle);
+            // A new Fib inherits the last-used colour mode (single vs rainbow); everything else takes the pen.
+            var placeStyle = placeKind == DrawTool.FibRetracement
+                ? _vm.Drawing.DefaultDrawStyle with { FibRainbow = _vm.Drawing.FibRainbowDefault }
+                : _vm.Drawing.DefaultDrawStyle;
+            var seg = new DrawingObject(id, placeKind, t, newPrice, t, newPrice, placeStyle);
             _vm.Drawing.AddDrawing(seg);
             // No auto-select — the drag below positions anchor2; the tool row stays visible for the next line.
             BeginDrawingDrag(seg, DrawingHitPart.Anchor2, p, isNew: true);

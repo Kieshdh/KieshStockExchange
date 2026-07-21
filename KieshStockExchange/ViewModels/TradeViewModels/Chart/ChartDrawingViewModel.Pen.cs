@@ -338,6 +338,8 @@ public partial class ChartDrawingViewModel
         OnPropertyChanged(nameof(CanSetAsDefault));
         OnPropertyChanged(nameof(ShowSize));
         OnPropertyChanged(nameof(ShowSmoothing));
+        OnPropertyChanged(nameof(ShowFibPalette));   // Fib colour-mode row (single vs rainbow)
+        OnPropertyChanged(nameof(IsFibRainbow));
         // Colour-picker swatches + fill state track the effective style too.
         OnPropertyChanged(nameof(CurrentStrokeColor));
         OnPropertyChanged(nameof(CurrentFillColor));
