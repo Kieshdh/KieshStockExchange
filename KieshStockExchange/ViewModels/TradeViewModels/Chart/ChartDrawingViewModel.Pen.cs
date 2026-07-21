@@ -55,6 +55,10 @@ public partial class ChartDrawingViewModel
     {
         DrawTool = tool;
         Preferences.Default.Set(DrawToolLastPrefKey, tool.ToString());
+        // Auto-show: arming a drawing-placing tool while drawings are hidden flips back to SHOW so the placed
+        // drawing is visible. Cursor/Measure/Magnifier place nothing, so they leave the hidden state alone.
+        if (DrawingsHidden && tool is not (DrawTool.None or DrawTool.Measure or DrawTool.Magnifier))
+            DrawingsHidden = false;
     }
 
     // (Left-rail tool GROUPS moved to ChartDrawingViewModel.Rail.cs — a distinct responsibility from the

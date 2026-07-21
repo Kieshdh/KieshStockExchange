@@ -10,6 +10,8 @@ using KieshStockExchange.Services.DataServices;
 using KieshStockExchange.Services.MarketDataServices.Helpers;
 using KieshStockExchange.Services.MarketDataServices.Helpers.Drawing;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Controls;
+using System.Linq;
 
 namespace KieshStockExchange.ViewModels.TradeViewModels;
 
@@ -237,6 +239,27 @@ public partial class ChartDrawingViewModel : ObservableObject
     private void DeleteSelectedDrawing()
     {
         if (SelectedDrawingId is Guid id) RemoveDrawing(id);
+    }
+
+    // Delete-all rail action: a Delete last / Delete all / Cancel action sheet (matches the repo's inline
+    // Shell.Current dialog pattern). Both destructive branches SPARE locked drawings and route through
+    // RemoveDrawing (each undoable). Runs on the UI thread (button-invoked).
+    [RelayCommand]
+    private async Task DeleteAllAsync()
+    {
+        if (Drawings.Count == 0) return;
+        string choice = await Shell.Current.DisplayActionSheet(
+            "Delete drawings?", "Cancel", null, "Delete last", "Delete all");
+        if (choice == "Delete last")
+        {
+            for (int i = Drawings.Count - 1; i >= 0; i--)
+                if (!Drawings[i].Locked) { RemoveDrawing(Drawings[i].Id); break; }
+        }
+        else if (choice == "Delete all")
+        {
+            foreach (var id in Drawings.Where(d => !d.Locked).Select(d => d.Id).ToList())
+                RemoveDrawing(id);
+        }
     }
 
     // --- Per-stock load ------------------------------------------------------------------------------

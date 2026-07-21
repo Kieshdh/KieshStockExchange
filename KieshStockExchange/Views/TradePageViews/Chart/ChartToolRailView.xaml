@@ -16,6 +16,8 @@
             BackgroundColor="{DynamicResource ChartPanel}"
             StrokeThickness="0"
             StrokeShape="Rectangle">
+        <!-- Scroll the tool list so every group stays reachable when the rail is taller than the window. -->
+        <ScrollView VerticalScrollBarVisibility="Default">
         <VerticalStackLayout Spacing="3" VerticalOptions="Start" HorizontalOptions="Start">
             <!-- Cursor -->
             <Button ImageSource="tool_cursor.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
@@ -129,6 +131,9 @@
                     Command="{Binding UndoCommand}" />
             <Button ImageSource="tool_redo.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
                     Command="{Binding RedoCommand}" />
+            <!-- Delete-all — opens a Delete last / Delete all / Cancel sheet (spares locked). TODO tool_delete.png icon. -->
+            <Button Text="🗑" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding DeleteAllCommand}" />
             <Button ImageSource="tool_eye.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
                     Command="{Binding ToggleDrawingsHiddenCommand}">
                 <Button.Triggers>
@@ -139,5 +144,6 @@
                 </Button.Triggers>
             </Button>
         </VerticalStackLayout>
+        </ScrollView>
     </Border>
 </ContentView>
