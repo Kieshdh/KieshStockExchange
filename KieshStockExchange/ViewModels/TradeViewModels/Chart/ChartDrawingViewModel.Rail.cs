@@ -17,32 +17,38 @@ public partial class ChartDrawingViewModel
     [ObservableProperty] private DrawTool _shapesGroupTool = DrawTool.Arrow;
     [ObservableProperty] private DrawTool _drawingGroupTool = DrawTool.Freehand;   // "Draw" group = brush + text
     [ObservableProperty] private DrawTool _positionGroupTool = DrawTool.PositionLong;
-    [ObservableProperty] private string? _openToolGroup;   // "lines"|"shapes"|"position"|"drawing"|null (one open)
+    [ObservableProperty] private DrawTool _measureGroupTool = DrawTool.Magnifier;   // Measure + Magnifier(+); zoom-out(−) stays a standalone button
+    [ObservableProperty] private string? _openToolGroup;   // "lines"|"shapes"|"position"|"drawing"|"measure"|null (one open)
 
     partial void OnLinesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(LinesGroupIcon));
     partial void OnShapesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(ShapesGroupIcon));
     partial void OnDrawingGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(DrawingGroupIcon));
     partial void OnPositionGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(PositionGroupIcon));
+    partial void OnMeasureGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(MeasureGroupIcon));
     partial void OnOpenToolGroupChanged(string? value)
     {
         OnPropertyChanged(nameof(IsLinesGroupOpen));
         OnPropertyChanged(nameof(IsShapesGroupOpen));
         OnPropertyChanged(nameof(IsDrawingGroupOpen));
         OnPropertyChanged(nameof(IsPositionGroupOpen));
+        OnPropertyChanged(nameof(IsMeasureGroupOpen));
     }
 
     public string LinesGroupIcon => ToolIcon(LinesGroupTool);
     public string ShapesGroupIcon => ToolIcon(ShapesGroupTool);
     public string DrawingGroupIcon => ToolIcon(DrawingGroupTool);
     public string PositionGroupIcon => ToolIcon(PositionGroupTool);
+    public string MeasureGroupIcon => ToolIcon(MeasureGroupTool);
     public bool IsLinesGroupActive => LinesGroupContains(DrawTool);
     public bool IsShapesGroupActive => ShapesGroupContains(DrawTool);
     public bool IsDrawingGroupActive => DrawingGroupContains(DrawTool);
     public bool IsPositionGroupActive => PositionGroupContains(DrawTool);
+    public bool IsMeasureGroupActive => MeasureGroupContains(DrawTool);
     public bool IsLinesGroupOpen => OpenToolGroup == "lines";
     public bool IsShapesGroupOpen => OpenToolGroup == "shapes";
     public bool IsDrawingGroupOpen => OpenToolGroup == "drawing";
     public bool IsPositionGroupOpen => OpenToolGroup == "position";
+    public bool IsMeasureGroupOpen => OpenToolGroup == "measure";
 
     // Group membership — the rail's designed groups (2026-07-21 revision). Fib now sits in Position; Arrow in
     // Shapes; the combined Draw group ("drawing" key) holds the brush + text tools. Alert lives on the toolbar.
@@ -53,6 +59,7 @@ public partial class ChartDrawingViewModel
     private static bool DrawingGroupContains(DrawTool t) => t is DrawTool.Freehand or DrawTool.Text or DrawTool.Comment;
     private static bool PositionGroupContains(DrawTool t) => t is DrawTool.Position
         or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual or DrawTool.FibRetracement;
+    private static bool MeasureGroupContains(DrawTool t) => t is DrawTool.Measure or DrawTool.Magnifier;
 
     private static string ToolIcon(DrawTool t) => t switch
     {
@@ -72,6 +79,7 @@ public partial class ChartDrawingViewModel
         DrawTool.Arrow => "tool_arrow.png",
         DrawTool.Position or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual => "tool_position.png",
         DrawTool.Freehand => "tool_freehand.png",
+        DrawTool.Measure => "tool_measure.png",
         DrawTool.Magnifier => "tool_magnifier.png",
         _ => "tool_cursor.png",
     };
@@ -86,6 +94,7 @@ public partial class ChartDrawingViewModel
         else if (ShapesGroupContains(tool)) ShapesGroupTool = tool;
         else if (DrawingGroupContains(tool)) DrawingGroupTool = tool;
         else if (PositionGroupContains(tool)) PositionGroupTool = tool;
+        else if (MeasureGroupContains(tool)) MeasureGroupTool = tool;
         SelectDrawTool(tool);
         OpenToolGroup = null;
     }
