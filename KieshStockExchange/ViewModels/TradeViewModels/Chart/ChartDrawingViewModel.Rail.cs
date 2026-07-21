@@ -1,0 +1,98 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using KieshStockExchange.Models.ChartDrawing.Tools;
+
+namespace KieshStockExchange.ViewModels.TradeViewModels;
+
+// The LEFT DRAWING-TOOL RAIL: the TradingView-style tool GROUPS (Lines/Shapes/Drawing/Position/Text), each
+// showing its last-picked tool as the rail icon with a "›" flyout, plus per-group open/active state and the
+// tool→icon map. Arming routes through SelectDrawTool (in the Pen partial, which owns the armed-tool state);
+// the pen STYLE panel + panel-section gates live in ChartDrawingViewModel.Pen.cs.
+public partial class ChartDrawingViewModel
+{
+    // Each group shows its LAST-PICKED tool as the rail icon; the ">" opens a named flyout of the group's
+    // tools. Picking one arms it + becomes the group's icon. The group icon itself arms its current tool.
+    [ObservableProperty] private DrawTool _linesGroupTool = DrawTool.Trend;
+    [ObservableProperty] private DrawTool _shapesGroupTool = DrawTool.Rectangle;
+    [ObservableProperty] private DrawTool _drawingGroupTool = DrawTool.Freehand;
+    [ObservableProperty] private DrawTool _positionGroupTool = DrawTool.PositionLong;
+    [ObservableProperty] private DrawTool _textGroupTool = DrawTool.Text;
+    [ObservableProperty] private string? _openToolGroup;   // "lines"|"shapes"|"drawing"|"position"|"text"|null (one open)
+
+    partial void OnLinesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(LinesGroupIcon));
+    partial void OnShapesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(ShapesGroupIcon));
+    partial void OnDrawingGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(DrawingGroupIcon));
+    partial void OnPositionGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(PositionGroupIcon));
+    partial void OnTextGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(TextGroupIcon));
+    partial void OnOpenToolGroupChanged(string? value)
+    {
+        OnPropertyChanged(nameof(IsLinesGroupOpen));
+        OnPropertyChanged(nameof(IsShapesGroupOpen));
+        OnPropertyChanged(nameof(IsDrawingGroupOpen));
+        OnPropertyChanged(nameof(IsPositionGroupOpen));
+        OnPropertyChanged(nameof(IsTextGroupOpen));
+    }
+
+    public string LinesGroupIcon => ToolIcon(LinesGroupTool);
+    public string ShapesGroupIcon => ToolIcon(ShapesGroupTool);
+    public string DrawingGroupIcon => ToolIcon(DrawingGroupTool);
+    public string PositionGroupIcon => ToolIcon(PositionGroupTool);
+    public string TextGroupIcon => ToolIcon(TextGroupTool);
+    public bool IsLinesGroupActive => LinesGroupContains(DrawTool);
+    public bool IsShapesGroupActive => ShapesGroupContains(DrawTool);
+    public bool IsDrawingGroupActive => DrawingGroupContains(DrawTool);
+    public bool IsPositionGroupActive => PositionGroupContains(DrawTool);
+    public bool IsTextGroupActive => TextGroupContains(DrawTool);
+    public bool IsLinesGroupOpen => OpenToolGroup == "lines";
+    public bool IsShapesGroupOpen => OpenToolGroup == "shapes";
+    public bool IsDrawingGroupOpen => OpenToolGroup == "drawing";
+    public bool IsPositionGroupOpen => OpenToolGroup == "position";
+    public bool IsTextGroupOpen => OpenToolGroup == "text";
+
+    // Group membership — the rail's designed groups. Alert lives on the top toolbar (not a rail group).
+    private static bool LinesGroupContains(DrawTool t) => t is DrawTool.Trend or DrawTool.Ray
+        or DrawTool.ExtendedLine or DrawTool.HLine or DrawTool.HRay or DrawTool.VLine
+        or DrawTool.Polyline or DrawTool.FibRetracement;
+    private static bool ShapesGroupContains(DrawTool t) => t is DrawTool.Rectangle or DrawTool.Ellipse;
+    private static bool DrawingGroupContains(DrawTool t) => t is DrawTool.Freehand or DrawTool.Arrow;
+    private static bool PositionGroupContains(DrawTool t) => t is DrawTool.Position
+        or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual;
+    private static bool TextGroupContains(DrawTool t) => t is DrawTool.Text or DrawTool.Comment;
+
+    private static string ToolIcon(DrawTool t) => t switch
+    {
+        DrawTool.Trend => "tool_trend.png",
+        DrawTool.Ray => "tool_ray.png",
+        DrawTool.ExtendedLine => "tool_extendedline.png",
+        DrawTool.HLine => "tool_hline.png",
+        DrawTool.HRay => "tool_hray.png",
+        DrawTool.VLine => "tool_vline.png",
+        DrawTool.Polyline => "tool_polyline.png",
+        DrawTool.Alert => "tool_alert.png",
+        DrawTool.Text => "tool_text.png",
+        DrawTool.Comment => "tool_text.png",   // TODO: dedicated tool_comment.png asset
+        DrawTool.FibRetracement => "tool_fib.png",
+        DrawTool.Rectangle => "tool_rectangle.png",
+        DrawTool.Ellipse => "tool_ellipse.png",
+        DrawTool.Arrow => "tool_arrow.png",
+        DrawTool.Position or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual => "tool_position.png",
+        DrawTool.Freehand => "tool_freehand.png",
+        DrawTool.Magnifier => "tool_magnifier.png",
+        _ => "tool_cursor.png",
+    };
+
+    [RelayCommand] private void ToggleToolGroup(string key) => OpenToolGroup = OpenToolGroup == key ? null : key;
+
+    // Pick a tool from a group flyout: it becomes that group's current tool, is armed, and the flyout closes.
+    [RelayCommand]
+    private void PickGroupTool(DrawTool tool)
+    {
+        if (LinesGroupContains(tool)) LinesGroupTool = tool;
+        else if (ShapesGroupContains(tool)) ShapesGroupTool = tool;
+        else if (DrawingGroupContains(tool)) DrawingGroupTool = tool;
+        else if (PositionGroupContains(tool)) PositionGroupTool = tool;
+        else if (TextGroupContains(tool)) TextGroupTool = tool;
+        SelectDrawTool(tool);
+        OpenToolGroup = null;
+    }
+}
