@@ -137,13 +137,13 @@ internal sealed class ChartHitTester
                     && p.Y >= frame.Plot.Top - 2 && p.Y <= frame.Plot.Bottom + 2)
                     return (d, DrawingHitPart.Body);
             }
-            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse || d.Kind == DrawTool.Circle)
+            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse)
             {
                 float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);
                 float x2 = frame.TimeToPixelX(d.T2), y2 = frame.HitPriceToPixelY(d.P2);
                 if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
-                var rect = ChartGeometry.ShapeRect(d.Kind == DrawTool.Circle, x1, y1, x2, y2);
+                var rect = ChartGeometry.ShapeRect(false, x1, y1, x2, y2);
                 // Body = on the border (within tolerance) or anywhere inside a filled shape.
                 bool onBorder =
                     p.X >= rect.Left - DrawHitTol && p.X <= rect.Right + DrawHitTol &&
@@ -152,6 +152,18 @@ internal sealed class ChartHitTester
                      Math.Abs(p.Y - rect.Top) <= DrawHitTol || Math.Abs(p.Y - rect.Bottom) <= DrawHitTol);
                 bool inside = d.Style.Fill is not null && rect.Contains(p);
                 if (onBorder || inside) return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.Circle)
+            {
+                // Centre + radius: anchor1 = centre, anchor2 = a ring point. Body = on the ring or inside a fill.
+                float cx = frame.TimeToPixelX(d.T1), cy = frame.HitPriceToPixelY(d.P1);
+                float ex = frame.TimeToPixelX(d.T2), ey = frame.HitPriceToPixelY(d.P2);
+                if (ChartGeometry.Dist(p.X, p.Y, cx, cy) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, ex, ey) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                float r = ChartGeometry.Dist(cx, cy, ex, ey);
+                float dc = ChartGeometry.Dist(p.X, p.Y, cx, cy);
+                if (Math.Abs(dc - r) <= DrawHitTol || (d.Style.Fill is not null && dc <= r))
+                    return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.Triangle)
             {

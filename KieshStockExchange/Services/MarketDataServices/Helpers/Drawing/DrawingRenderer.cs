@@ -198,13 +198,13 @@ internal sealed class DrawingRenderer
                     DrawHandle(canvas, t, x2, y2, color);
                 }
             }
-            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse || d.Kind == DrawTool.Circle)
+            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse)
             {
                 // Two-corner shape: optional translucent fill (Fill + FillOpacity) then a border stroke.
-                // Corners' vertical mapping routes through the scale seam. Circle = a square-constrained ellipse.
+                // Corners' vertical mapping routes through the scale seam.
                 float x1 = X(d.T1), y1 = f.ScaleY(d.P1);
                 float x2 = X(d.T2), y2 = f.ScaleY(d.P2);
-                var rect = ChartGeometry.ShapeRect(d.Kind == DrawTool.Circle, x1, y1, x2, y2);
+                var rect = ChartGeometry.ShapeRect(false, x1, y1, x2, y2);
 
                 if (d.Style.Fill is Color fill)
                 {
@@ -220,6 +220,29 @@ internal sealed class DrawingRenderer
                 {
                     DrawHandle(canvas, t, x1, y1, color);
                     DrawHandle(canvas, t, x2, y2, color);
+                }
+            }
+            else if (d.Kind == DrawTool.Circle)
+            {
+                // Centre + radius: anchor1 = centre, anchor2 = a point on the ring. Drawn round on screen
+                // (radius = pixel distance centre→ring); same fill/opacity + stroke as the ellipse.
+                float cx = X(d.T1), cy = f.ScaleY(d.P1);
+                float ex = X(d.T2), ey = f.ScaleY(d.P2);
+                float r = ChartGeometry.Dist(cx, cy, ex, ey);
+                var rect = new RectF(cx - r, cy - r, r * 2f, r * 2f);
+                if (d.Style.Fill is Color fill)
+                {
+                    canvas.FillColor = fill.WithAlpha(Math.Clamp(d.Style.FillOpacity, 0f, 1f));
+                    canvas.FillEllipse(rect);
+                }
+                canvas.StrokeColor = color;
+                canvas.StrokeSize = stroke;
+                canvas.StrokeDashPattern = dashPattern;
+                canvas.DrawEllipse(rect);
+                if (selected)
+                {
+                    DrawHandle(canvas, t, cx, cy, color);
+                    DrawHandle(canvas, t, ex, ey, color);
                 }
             }
             else if (d.Kind == DrawTool.Triangle)

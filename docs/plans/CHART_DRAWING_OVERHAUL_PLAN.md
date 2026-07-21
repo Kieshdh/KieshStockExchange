@@ -317,3 +317,40 @@ REMAINING (unbuilt tools + behaviors, roughly easiest→hardest):
 - Alert-as-message: persisted server Message + centered popup + chart deep-link (SPANS client+server — owner-gated).
 - Icon pass: tool_crossline / tool_circle / tool_triangle / tool_delete / tool_comment .png (placeholders reuse siblings).
 - Axis polish (denser x time labels, smaller Y-autofit padding + a +/- control), remove ✕ close glyph, Escape/Delete keys, crosshair cursor.
+
+## 2026-07-21 — text-drawing rework + Circle (owner ask + COUNCIL verdict)
+**Circle (DONE this session):** now CENTRE + RADIUS — anchor1 = centre, anchor2 = a ring point; drawn round on
+screen (r = pixel dist), same fill/opacity+stroke as ellipse. (Was a square bbox.) Dedicated render + hit
+branches in DrawingRenderer/ChartHitTester; ShapeRect(square) param now always false (Rect/Ellipse/Triangle bbox).
+
+**Owner requirements (Text label / Comment / Price label) — LEFT IN THE PLAN (harder, council-guided):**
+- Text label: place a DOT at the anchor, text starts to the RIGHT of the dot (offset); type INLINE on the chart
+  (no modal popup); auto-delete if empty.
+- Comment: rounded bubble (colour border + fill+opacity + text, same text settings as Text) with a DYNAMIC tail
+  ("<") that auto-positions toward the anchor and adjusts as you type; auto-forms from an origin + a second point.
+- Price label: same bubble look but auto-DISPLAYS the price at its anchor (not typed text).
+
+**COUNCIL VERDICT (4 advisors — Contrarian/First-Principles/Executor/Outsider, near-unanimous):**
+1. DROP the user-placed "second point / opposite corner" — it contradicts grow-to-fit text. The ANCHOR (dot) is
+   the one real input; the box AUTO-SIZES to the text; the "second point" is at most a DIRECTION/QUADRANT hint
+   (which way the bubble opens off the anchor), derived from the release direction — NOT a dragged corner.
+2. UNIFY into ONE model — "AnchoredText" { Anchor, Offset/quadrant, Text, RenderMode∈{Plain,Bubble,PriceBubble},
+   ShowTail, Style }. Text label = Plain + right-offset; Comment = Bubble + tail; Price label = PriceBubble (text =
+   formatted price at anchor.Y, computed at render). Three rail tools arm the same model via presets.
+3. INLINE typing = a transparent/chromeless Entry overlay at the anchor owning focus+IME+caret; its TextChanged
+   pushes into the draft DrawingObject.Text and Invalidates the GraphicsView (Entry = pure keystroke/caret sink).
+   Commit on Enter/focus-loss; discard draft on Escape/empty. SPIKE the WinUI transparent-Entry caret/IME FIRST
+   (Contrarian: riskiest piece; if it janks, fall back to a "modal-lite" inline editor).
+4. DON'T jitter: LOCK the bubble position once typing starts; the dynamic tail SNAPS to the box edge nearest the
+   anchor, re-solved on settle (NOT per-keystroke).
+5. AUTO-DELETE only on explicit commit with zero chars (Enter/Escape/focus-loss) — NEVER on stray blur/mid-edit
+   (data-loss trap).
+6. BUILD ORDER: Text-label inline FIRST (the overlay + focus/commit lifecycle is the reusable core) → Comment
+   (bubble+tail) → Price label (computed text).
+**Divergence from the owner's literal spec to confirm:** (a) second point = direction hint, not a dragged corner;
+(b) tail snaps + settles, not per-keystroke jitter; (c) auto-delete only on explicit commit, never on blur.
+
+**Placement (when built):** the AnchoredText model = DrawStyle/DrawingObject (append-only new fields RenderMode/
+ShowTail); render/hit in DrawingRenderer/ChartHitTester; inline-Entry overlay = a NEW control hosted in ChartView
+(+ ChartView.Windows.cs for placement/focus/commit); rail/draft state in Rail.cs. Replaces the modal
+PromptTextLabelAsync path.
