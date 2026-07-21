@@ -97,6 +97,22 @@ internal sealed class ChartHitTester
                 var r = new RectF(ax - bw / 2f, ay - tail - bh, bw, bh);
                 if (r.Contains(p)) return (d, DrawingHitPart.Body);
             }
+            else if (d.Kind == DrawTool.PriceLabel)
+            {
+                // Price callout: hit the pill beside the anchor OR the anchor dot itself. Mirror the
+                // renderer's PriceLabel arm; the pill width is ESTIMATED from the raw price length (the
+                // hit-tester has no currency, so this is a couple px loose — fine for a click target).
+                float ax = frame.TimeToPixelX(d.T1), ay = frame.HitPriceToPixelY(d.P1);
+                if (ax < frame.Plot.Left || ax > frame.Plot.Right || ay < frame.Plot.Top || ay > frame.Plot.Bottom) continue;
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                const float padX = 6f, padY = 4f, gap = 8f;
+                int estLen = d.P1.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture).Length + 2;
+                float bw = Math.Max(TextMinW, estLen * fontSize * TextGlyphWFactor) + padX * 2f;
+                float bh = fontSize + padY * 2f;
+                var r = new RectF(ax + gap, ay - bh / 2f, bw, bh);
+                if (r.Contains(p) || ChartGeometry.Dist(p.X, p.Y, ax, ay) <= DrawHandleR + DrawHitTol)
+                    return (d, DrawingHitPart.Body);
+            }
             else if (d.Kind == DrawTool.HRay)
             {
                 float x1 = frame.TimeToPixelX(d.T1), y = frame.HitPriceToPixelY(d.P1);

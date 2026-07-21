@@ -405,6 +405,15 @@
                         </Label.GestureRecognizers>
                     </Label>
                 </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_text.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PriceLabel}" />
+                    <Label Text="Price label" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PriceLabel}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
             </VerticalStackLayout>
         </Border>
 
@@ -437,6 +446,19 @@
 
         <!-- Pen tray + colour pickers (Z-order top). Bound to the child Drawing VM. -->
         <local:ChartPenPanelView Grid.Column="1" BindingContext="{Binding Drawing}" />
+
+        <!-- Inline text-editing overlay (Z-order topmost): a transparent Entry positioned at the Text/Comment
+             anchor while editing. Enter/blur commit, Escape cancels (see ChartView.TextEditing.cs). -->
+        <Entry x:Name="InlineTextEntry" Grid.Column="1"
+               IsVisible="{Binding Drawing.InlineEditActive}"
+               Text="{Binding Drawing.InlineEditText, Mode=TwoWay}"
+               TranslationX="{Binding Drawing.InlineEditX}"
+               TranslationY="{Binding Drawing.InlineEditY}"
+               HorizontalOptions="Start" VerticalOptions="Start"
+               WidthRequest="180" BackgroundColor="Transparent"
+               Placeholder="Type…" ReturnType="Done"
+               Completed="OnInlineEntryCompleted" Unfocused="OnInlineEntryUnfocused"
+               Loaded="OnInlineEntryLoaded" />
 
         </Grid>
     </Grid>

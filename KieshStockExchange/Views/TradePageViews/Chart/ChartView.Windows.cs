@@ -118,6 +118,16 @@ public partial class ChartView
         // Any fresh press cancels an in-flight inertial coast (user grabbed the chart again).
         StopInertia();
 
+        // An inline text edit is open — this click commits it (Enter/blur semantics) and is consumed, so
+        // it never falls through to place a second label or start a pan. Blur would commit anyway; doing it
+        // here first avoids the same click also re-arming the still-Text tool.
+        if (_vm.Drawing.InlineEditActive)
+        {
+            _vm.Drawing.CommitInlineEditCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         var p = PlatformPointerToControl(el, e);
 
         // Priority 0: Shift-drag starts the measure ruler and owns the gesture, so it
@@ -245,10 +255,11 @@ public partial class ChartView
             }
             if (_vm.Drawing.DrawTool == DrawTool.HLine || _vm.Drawing.DrawTool == DrawTool.HRay
                 || _vm.Drawing.DrawTool == DrawTool.VLine || _vm.Drawing.DrawTool == DrawTool.Alert
-                || _vm.Drawing.DrawTool == DrawTool.Crossline)
+                || _vm.Drawing.DrawTool == DrawTool.Crossline || _vm.Drawing.DrawTool == DrawTool.PriceLabel)
             {
-                // One-click lines (HLine/HRay/Alert at a price, VLine at a time, Crossline at both). After placing: revert to the
-                // cursor tool + auto-select the new line so its settings pop up (TradingView one-shot flow).
+                // One-click commits: HLine/HRay/Alert at a price, VLine at a time, Crossline at both, PriceLabel a
+                // price pill at the anchor. After placing: revert to the cursor tool + auto-select so its settings
+                // pop up (TradingView one-shot flow). PriceLabel needs no typing — the pill shows the anchor price.
                 _vm.Drawing.AddDrawing(new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
                 FinishPlacement(id);
                 e.Handled = true;
@@ -256,11 +267,11 @@ public partial class ChartView
             }
             if (_vm.Drawing.DrawTool == DrawTool.Text || _vm.Drawing.DrawTool == DrawTool.Comment)
             {
-                // Text label / Comment callout: one-click anchor, then an async prompt for the text (fire-and-
-                // forget, since this handler is void). A cancelled/blank prompt removes the placeholder. The Kind
-                // is the armed tool so a Comment persists as Comment (bubble render) and Text as Text.
+                // Text label / Comment callout: one-click anchor, then INLINE typing in an on-chart Entry overlay
+                // (no modal popup). The Kind is the armed tool so a Comment persists as Comment (bubble render) and
+                // Text as Text. An empty label auto-deletes on commit (Enter/blur) — see StartInlineTextEdit.
                 _vm.Drawing.AddDrawing(new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
-                _ = PromptTextLabelAsync(id);
+                StartInlineTextEdit(id, p);
                 e.Handled = true;
                 return;
             }

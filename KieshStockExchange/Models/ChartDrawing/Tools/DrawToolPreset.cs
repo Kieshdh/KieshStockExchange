@@ -64,6 +64,14 @@ public static class DrawToolPresets
                 ShowEnding: false, ShowHead: false, ShowText: true, ShowPosition: false,
                 ShowSize: true, ShowSmoothing: false),
 
+        // Price callout: a filled bubble showing the anchor PRICE (never typed) — border colour + fill colour +
+        // fill opacity + font size. No width/dash/ending/head, and no Text section (the price is auto-computed).
+        DrawTool.PriceLabel =>
+            new(ShapeStyle,
+                ShowStroke: true, ShowWidth: false, ShowFillColor: true, ShowOpacity: true, ShowDash: false,
+                ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: false,
+                ShowSize: true, ShowSmoothing: false),
+
         // Long/short risk-reward box: entry-line stroke + the Position section (numeric legs; no width tiles).
         // The Long/Short/Manual arming tools share the row so the panel shows while arming, not just when selected.
         DrawTool.Position or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual =>

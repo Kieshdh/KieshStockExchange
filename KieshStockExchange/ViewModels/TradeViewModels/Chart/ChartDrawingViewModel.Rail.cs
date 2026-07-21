@@ -57,7 +57,8 @@ public partial class ChartDrawingViewModel
         or DrawTool.Polyline or DrawTool.Crossline;
     private static bool ShapesGroupContains(DrawTool t) => t is DrawTool.Arrow or DrawTool.Rectangle
         or DrawTool.Ellipse or DrawTool.Circle or DrawTool.Triangle;
-    private static bool DrawingGroupContains(DrawTool t) => t is DrawTool.Freehand or DrawTool.Text or DrawTool.Comment;
+    private static bool DrawingGroupContains(DrawTool t) => t is DrawTool.Freehand or DrawTool.Text
+        or DrawTool.Comment or DrawTool.PriceLabel;
     private static bool PositionGroupContains(DrawTool t) => t is DrawTool.Position
         or DrawTool.PositionLong or DrawTool.PositionShort or DrawTool.PositionManual or DrawTool.FibRetracement;
     private static bool MeasureGroupContains(DrawTool t) => t is DrawTool.Measure or DrawTool.Magnifier;
@@ -75,6 +76,7 @@ public partial class ChartDrawingViewModel
         DrawTool.Alert => "tool_alert.png",
         DrawTool.Text => "tool_text.png",
         DrawTool.Comment => "tool_text.png",   // TODO: dedicated tool_comment.png asset
+        DrawTool.PriceLabel => "tool_text.png",   // TODO: dedicated tool_pricelabel.png asset
         DrawTool.FibRetracement => "tool_fib.png",
         DrawTool.Rectangle => "tool_rectangle.png",
         DrawTool.Ellipse => "tool_ellipse.png",

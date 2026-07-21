@@ -423,6 +423,34 @@ internal sealed class DrawingRenderer
                     HorizontalAlignment.Left, VerticalAlignment.Center);
                 if (selected) DrawHandle(canvas, t, ax, ay, color);
             }
+            else if (d.Kind == DrawTool.PriceLabel)
+            {
+                // Price callout: a rounded bubble beside the (T1,P1) anchor showing the PRICE at that point
+                // (auto-formatted, never typed). Filled with the style's Fill+opacity; text + border in the pen
+                // colour. A small dot marks the exact anchor. Off-plot anchors are clipped like Text/Comment.
+                float ax = X(d.T1), ay = Y((double)d.P1);
+                if (ax < plot.Left || ax > plot.Right || ay < plot.Top || ay > plot.Bottom)
+                { canvas.StrokeDashPattern = null; continue; }
+                string priceText = CurrencyHelper.Format(d.P1, cur);
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                const float padX = 6f, padY = 4f, gap = 8f, dotR = 2.5f;
+                float bw = Math.Max(TextMinW, priceText.Length * fontSize * TextGlyphWFactor) + padX * 2f;
+                float bh = fontSize + padY * 2f;
+                var bubble = new RectF(ax + gap, ay - bh / 2f, bw, bh);
+                canvas.StrokeDashPattern = null;
+                // Fill with the style tint (fall back to the readable pill bg when the style carries no fill).
+                canvas.FillColor = d.Style.Fill is Color fc ? fc.WithAlpha(d.Style.FillOpacity) : LabelPillBg;
+                canvas.FillRoundedRectangle(bubble, 5f);
+                canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
+                canvas.DrawRoundedRectangle(bubble, 5f);
+                canvas.FillColor = color;
+                canvas.FillCircle(ax, ay, dotR);
+                canvas.FontColor = color;
+                canvas.FontSize = fontSize;
+                canvas.DrawString(priceText, new RectF(bubble.X + padX, bubble.Y, bubble.Width - padX * 2f, bubble.Height),
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                if (selected) DrawHandle(canvas, t, ax, ay, color);
+            }
             else if (d.Kind == DrawTool.FibRetracement)
             {
                 // Fibonacci retracement grid: the two time anchors bound a box; each ratio level draws a
