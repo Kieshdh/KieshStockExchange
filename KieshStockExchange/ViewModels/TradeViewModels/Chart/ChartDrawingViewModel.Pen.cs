@@ -38,6 +38,9 @@ public partial class ChartDrawingViewModel
         // Group active-highlight tracks the armed tool; arming anything closes an open group flyout.
         OnPropertyChanged(nameof(IsLinesGroupActive));
         OnPropertyChanged(nameof(IsShapesGroupActive));
+        OnPropertyChanged(nameof(IsDrawingGroupActive));
+        OnPropertyChanged(nameof(IsPositionGroupActive));
+        OnPropertyChanged(nameof(IsTextGroupActive));
         OpenToolGroup = null;
         // With no selection, EditingKind == the armed tool, so arming a tool flips every Show* gate.
         // RefreshPenTiles raises EditingKind + the Show* notifications (nothing else calls it on this path).
@@ -60,26 +63,50 @@ public partial class ChartDrawingViewModel
     // tools. Picking one arms it + becomes the group's icon. The group icon itself arms its current tool.
     [ObservableProperty] private DrawTool _linesGroupTool = DrawTool.Trend;
     [ObservableProperty] private DrawTool _shapesGroupTool = DrawTool.Rectangle;
-    [ObservableProperty] private string? _openToolGroup;   // "lines" | "shapes" | null (only one open)
+    [ObservableProperty] private DrawTool _drawingGroupTool = DrawTool.Freehand;
+    [ObservableProperty] private DrawTool _positionGroupTool = DrawTool.Position;
+    [ObservableProperty] private DrawTool _textGroupTool = DrawTool.Text;
+    [ObservableProperty] private string? _openToolGroup;   // "lines"|"shapes"|"drawing"|"position"|"text"|null (one open)
 
     partial void OnLinesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(LinesGroupIcon));
     partial void OnShapesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(ShapesGroupIcon));
+    partial void OnDrawingGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(DrawingGroupIcon));
+    partial void OnPositionGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(PositionGroupIcon));
+    partial void OnTextGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(TextGroupIcon));
     partial void OnOpenToolGroupChanged(string? value)
     {
         OnPropertyChanged(nameof(IsLinesGroupOpen));
         OnPropertyChanged(nameof(IsShapesGroupOpen));
+        OnPropertyChanged(nameof(IsDrawingGroupOpen));
+        OnPropertyChanged(nameof(IsPositionGroupOpen));
+        OnPropertyChanged(nameof(IsTextGroupOpen));
     }
 
     public string LinesGroupIcon => ToolIcon(LinesGroupTool);
     public string ShapesGroupIcon => ToolIcon(ShapesGroupTool);
+    public string DrawingGroupIcon => ToolIcon(DrawingGroupTool);
+    public string PositionGroupIcon => ToolIcon(PositionGroupTool);
+    public string TextGroupIcon => ToolIcon(TextGroupTool);
     public bool IsLinesGroupActive => LinesGroupContains(DrawTool);
-    public bool IsShapesGroupActive => DrawTool is DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow or DrawTool.Position;
+    public bool IsShapesGroupActive => ShapesGroupContains(DrawTool);
+    public bool IsDrawingGroupActive => DrawingGroupContains(DrawTool);
+    public bool IsPositionGroupActive => PositionGroupContains(DrawTool);
+    public bool IsTextGroupActive => TextGroupContains(DrawTool);
     public bool IsLinesGroupOpen => OpenToolGroup == "lines";
     public bool IsShapesGroupOpen => OpenToolGroup == "shapes";
+    public bool IsDrawingGroupOpen => OpenToolGroup == "drawing";
+    public bool IsPositionGroupOpen => OpenToolGroup == "position";
+    public bool IsTextGroupOpen => OpenToolGroup == "text";
 
+    // Group membership — the rail's designed groups. Alert lives on the top toolbar (not a rail group);
+    // Comment (Text group) + Long/Short/Manual (Position group) join their predicates in later commits.
     private static bool LinesGroupContains(DrawTool t) => t is DrawTool.Trend or DrawTool.Ray
         or DrawTool.ExtendedLine or DrawTool.HLine or DrawTool.HRay or DrawTool.VLine
-        or DrawTool.Polyline or DrawTool.Alert or DrawTool.Text or DrawTool.FibRetracement;
+        or DrawTool.Polyline or DrawTool.FibRetracement;
+    private static bool ShapesGroupContains(DrawTool t) => t is DrawTool.Rectangle or DrawTool.Ellipse;
+    private static bool DrawingGroupContains(DrawTool t) => t is DrawTool.Freehand or DrawTool.Arrow;
+    private static bool PositionGroupContains(DrawTool t) => t is DrawTool.Position;
+    private static bool TextGroupContains(DrawTool t) => t is DrawTool.Text;
 
     private static string ToolIcon(DrawTool t) => t switch
     {
@@ -109,7 +136,10 @@ public partial class ChartDrawingViewModel
     private void PickGroupTool(DrawTool tool)
     {
         if (LinesGroupContains(tool)) LinesGroupTool = tool;
-        else if (tool is DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow or DrawTool.Position) ShapesGroupTool = tool;
+        else if (ShapesGroupContains(tool)) ShapesGroupTool = tool;
+        else if (DrawingGroupContains(tool)) DrawingGroupTool = tool;
+        else if (PositionGroupContains(tool)) PositionGroupTool = tool;
+        else if (TextGroupContains(tool)) TextGroupTool = tool;
         SelectDrawTool(tool);
         OpenToolGroup = null;
     }

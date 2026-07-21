@@ -61,6 +61,51 @@
                         Command="{Binding ToggleToolGroupCommand}" CommandParameter="shapes" />
             </Grid>
 
+            <!-- DRAWING group: Freehand · Arrow. -->
+            <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="2" HorizontalOptions="Start">
+                <Button Grid.Column="0" ImageSource="{Binding DrawingGroupIcon}" Style="{StaticResource PenToolTile}"
+                        Command="{Binding SelectDrawToolCommand}" CommandParameter="{Binding DrawingGroupTool}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding IsDrawingGroupActive}" Value="True">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Grid.Column="1" Style="{StaticResource ToolGroupStrip}"
+                        Command="{Binding ToggleToolGroupCommand}" CommandParameter="drawing" />
+            </Grid>
+
+            <!-- POSITION group: Position (→ Long/Short/Manual). -->
+            <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="2" HorizontalOptions="Start">
+                <Button Grid.Column="0" ImageSource="{Binding PositionGroupIcon}" Style="{StaticResource PenToolTile}"
+                        Command="{Binding SelectDrawToolCommand}" CommandParameter="{Binding PositionGroupTool}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding IsPositionGroupActive}" Value="True">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Grid.Column="1" Style="{StaticResource ToolGroupStrip}"
+                        Command="{Binding ToggleToolGroupCommand}" CommandParameter="position" />
+            </Grid>
+
+            <!-- TEXT group: Text · Comment. -->
+            <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="2" HorizontalOptions="Start">
+                <Button Grid.Column="0" ImageSource="{Binding TextGroupIcon}" Style="{StaticResource PenToolTile}"
+                        Command="{Binding SelectDrawToolCommand}" CommandParameter="{Binding TextGroupTool}">
+                    <Button.Triggers>
+                        <DataTrigger TargetType="Button" Binding="{Binding IsTextGroupActive}" Value="True">
+                            <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                            <Setter Property="BorderColor"     Value="{StaticResource White}" />
+                        </DataTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Button Grid.Column="1" Style="{StaticResource ToolGroupStrip}"
+                        Command="{Binding ToggleToolGroupCommand}" CommandParameter="text" />
+            </Grid>
+
             <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" HorizontalOptions="Start" WidthRequest="42" />
 
             <!-- Measure (single) -->
@@ -76,18 +121,6 @@
                 </Button.Triggers>
             </Button>
 
-            <!-- Freehand brush (standalone drawing tool). -->
-            <Button ImageSource="tool_freehand.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
-                    Command="{Binding SelectDrawToolCommand}"
-                    CommandParameter="{x:Static tools:DrawTool.Freehand}">
-                <Button.Triggers>
-                    <DataTrigger TargetType="Button" Binding="{Binding DrawTool}"
-                                 Value="{x:Static tools:DrawTool.Freehand}">
-                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
-                        <Setter Property="BorderColor"     Value="{StaticResource White}" />
-                    </DataTrigger>
-                </Button.Triggers>
-            </Button>
             <!-- Magnifier box-zoom IN (standalone, one-shot: drag a box, release zooms to it). -->
             <Button ImageSource="tool_magnifier.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
                     Command="{Binding SelectDrawToolCommand}"

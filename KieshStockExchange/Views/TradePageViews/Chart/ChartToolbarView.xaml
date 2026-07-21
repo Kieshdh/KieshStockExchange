@@ -2,6 +2,7 @@
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:models="clr-namespace:KieshStockExchange.Models;assembly=KieshStockExchange.Shared"
+             xmlns:tools="clr-namespace:KieshStockExchange.Models.ChartDrawing.Tools"
              xmlns:vm="clr-namespace:KieshStockExchange.ViewModels.TradeViewModels"
              x:Class="KieshStockExchange.Views.TradePageViews.ChartToolbarView"
              x:DataType="vm:ChartViewModel">
@@ -166,18 +167,33 @@
                 </DataTrigger>
             </Button.Triggers>
         </Button>
-        <!-- MA settings toggle -->
-        <Button Grid.Column="3" Text="MA"
-                Style="{StaticResource ChartLiveButton.Off}"
-                Command="{Binding ToggleMaSettingsCommand}">
-            <Button.Triggers>
-                <DataTrigger TargetType="Button"
-                             Binding="{Binding IsMaSettingsOpen}" Value="True">
-                    <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
-                    <Setter Property="TextColor"       Value="{StaticResource White}" />
-                </DataTrigger>
-            </Button.Triggers>
-        </Button>
+        <!-- MA settings toggle + Alert tool (Alert moved off the drawing rail to a top-row button, next to MA). -->
+        <HorizontalStackLayout Grid.Column="3" Spacing="2" VerticalOptions="Center">
+            <Button Text="MA"
+                    Style="{StaticResource ChartLiveButton.Off}"
+                    Command="{Binding ToggleMaSettingsCommand}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding IsMaSettingsOpen}" Value="True">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+            <Button Text="🔔"
+                    Style="{StaticResource ChartLiveButton.Off}"
+                    Command="{Binding Drawing.SelectDrawToolCommand}"
+                    CommandParameter="{x:Static tools:DrawTool.Alert}">
+                <Button.Triggers>
+                    <DataTrigger TargetType="Button"
+                                 Binding="{Binding Drawing.DrawTool}"
+                                 Value="{x:Static tools:DrawTool.Alert}">
+                        <Setter Property="BackgroundColor" Value="{StaticResource ChartGrid}" />
+                        <Setter Property="TextColor"       Value="{StaticResource White}" />
+                    </DataTrigger>
+                </Button.Triggers>
+            </Button>
+        </HorizontalStackLayout>
         <!-- Zoom out -->
         <Button Grid.Column="4" Text="−"
                 Style="{StaticResource ChartIconButton}"
