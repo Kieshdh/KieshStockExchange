@@ -298,3 +298,22 @@ lives in **`ChartDrawingViewModel.Pen.cs`**, not a `.Rail.cs` — this plan uses
 "the rail partial." A clean move would split those members into a new `ChartDrawingViewModel.Rail.cs` partial
 (the VM is already partial across `.cs`/`.Pen.cs`/`.Undo.cs`/`.Colors.cs`/`.Persistence.cs`); Undo/Redo
 commands live in **`ChartDrawingViewModel.Undo.cs`**.
+
+## Build status (2026-07-21, autonomous batch)
+BUILT + committed this session (branch feature/bot-market-realism-v2, tip after `6b0f6c3`):
+- Rail regroup v2 (Fib→Position, Arrow→Shapes-first, Drawing+Text→Draw), Alert→top toolbar.
+- A scrollable rail; C Measure+Magnifier combine (−(zoom-out) standalone, pops up on CanZoomOut);
+  D+E Delete-all rail button → 3-choice action sheet (Delete last/all/Cancel, spares locked, undoable);
+  F draw-while-hidden auto-show.
+- New tools: Text rework (plain + font-size), Comment callout, Position Long/Short/Manual + panel,
+  Cross line (H+V, Lines group), Circle + Triangle (Shapes group).
+- Rail order Lines·Shapes·Position·Draw | Measure·(−) | Delete·Undo·Redo·Hide; both dividers width 42.
+- Shared ChartGeometry.ShapeRect(square,...) so render + hit agree (Circle=square, others=bbox).
+
+REMAINING (unbuilt tools + behaviors, roughly easiest→hardest):
+- Shapes: Rotated-rect (2pt + width), Arc (curved). Draw: Highlighter (Freehand at high alpha), Price label (Text variant).
+- Magnet (snap mode off/weak/strong — placement-path snap to nearest OHLC). Lock toggle in panel + enforce.
+- B dynamic rail sizing [0.6,1.0] (LAST/optional; guard the SizeChanged loop per the council plan).
+- Alert-as-message: persisted server Message + centered popup + chart deep-link (SPANS client+server — owner-gated).
+- Icon pass: tool_crossline / tool_circle / tool_triangle / tool_delete / tool_comment .png (placeholders reuse siblings).
+- Axis polish (denser x time labels, smaller Y-autofit padding + a +/- control), remove ✕ close glyph, Escape/Delete keys, crosshair cursor.
