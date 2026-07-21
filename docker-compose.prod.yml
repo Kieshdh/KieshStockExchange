@@ -53,11 +53,12 @@ services:
       Bots__Mood__MMWiden: "true"
       # Random-walk main driver: softer medium-term reversion so moves stick (2026-07-16).
       Bots__RecentAnchor__Strength: "0.05"
-      # More random-walk character (2026-07-16): halve the per-stock persistent trend (RegimeDrift
-      # 1.0→0.5 = choppier, less smooth trend) + 10% less taker flow (MarketProbMult 1.5→1.35 =
-      # calmer, deeper book, smaller moves). Both reversible env; delete a line to roll back.
-      Bots__Sentiment__RegimeDrift__Strength: "0.5"
-      Bots__MarketProbMult: "1.35"
+      # Pin-unstick test (2026-07-21): the 2026-07-16 over-damping (RegimeDrift 1.0→0.5, MarketProbMult
+      # 1.5→1.35) left the market pinned flat ~20% below seed (MSFT stuck ~511, CV ~0.1%). Restore energy:
+      # RegimeDrift 0.5→0.8 (more persistent trend) + MarketProbMult 1.35→1.4 (more taker flow). Direct prod
+      # test (a 45-min fresh soak can't reproduce the long-horizon pin). Reversible env; delete a line to roll back.
+      Bots__Sentiment__RegimeDrift__Strength: "0.8"
+      Bots__MarketProbMult: "1.4"
       # NEWS system — 3-tier jump-diffusion + variable-permanence coupling (2026-07-16).
       # Individual (per-stock, dominant) + global tier; MeanIntervalMinutes=60 is a MODERATE
       # review frequency (per-stock ~hourly) so events are catchable — a 1-line dial, tune to taste.
@@ -79,3 +80,7 @@ services:
       Bots__ExogShock__GlobalCoFireNotionalFrac: "0.1"
       # Variable-permanence coupling (docs/NEWS_PERMANENCE_COUPLING.md); rest = appsettings defaults.
       Bots__ExogShock__Permanence__Enabled: "true"
+      # Pin-unstick test (2026-07-21): longer news ease-back + more permanent re-rating so breakouts stick
+      # (TauMedianSec 1500→2000, AlphaMin 0.30→0.40). Reversible; delete to fall back to appsettings defaults.
+      Bots__ExogShock__Permanence__TauMedianSec: "2000"
+      Bots__ExogShock__Permanence__AlphaMin: "0.40"
