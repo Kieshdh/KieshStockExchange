@@ -360,6 +360,15 @@
                         </Label.GestureRecognizers>
                     </Label>
                 </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_text.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Comment}" />
+                    <Label Text="Comment" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Comment}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
             </VerticalStackLayout>
         </Border>
 

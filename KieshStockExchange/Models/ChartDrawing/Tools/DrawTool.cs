@@ -20,4 +20,5 @@ public enum DrawTool
     ExtendedLine,   // a trend line extended to infinity in BOTH directions
     // UP-CORE appends (reserved for post-ship UI; unreachable without UI this patch does not add):
     RotatedRect, Triangle, Arc, FibRetracement,
+    Comment,   // Text-group callout: text in a rounded bubble with a downward tail to its anchor
 }

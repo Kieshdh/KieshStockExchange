@@ -56,8 +56,9 @@ public static class DrawToolPresets
                 ShowEnding: true, ShowHead: true, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
 
-        // Anchored label: colour + font size + content ONLY — no width, no dash, no ending.
-        DrawTool.Text =>
+        // Anchored label / callout: colour + font size + content ONLY — no width/dash/ending. Comment is a
+        // Text variant (bubble render) sharing the same panel sections.
+        DrawTool.Text or DrawTool.Comment =>
             new(DrawStyle.Default,
                 ShowStroke: true, ShowWidth: false, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
                 ShowEnding: false, ShowHead: false, ShowText: true, ShowPosition: false,

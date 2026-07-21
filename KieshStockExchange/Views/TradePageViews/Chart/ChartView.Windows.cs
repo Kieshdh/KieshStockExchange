@@ -253,11 +253,12 @@ public partial class ChartView
                 e.Handled = true;
                 return;
             }
-            if (_vm.Drawing.DrawTool == DrawTool.Text)
+            if (_vm.Drawing.DrawTool == DrawTool.Text || _vm.Drawing.DrawTool == DrawTool.Comment)
             {
-                // Text label: one-click anchor, then an async prompt for the text (fire-and-forget, since this
-                // handler is void). A cancelled/blank prompt removes the placeholder — see PromptTextLabelAsync.
-                _vm.Drawing.AddDrawing(new DrawingObject(id, DrawTool.Text, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
+                // Text label / Comment callout: one-click anchor, then an async prompt for the text (fire-and-
+                // forget, since this handler is void). A cancelled/blank prompt removes the placeholder. The Kind
+                // is the armed tool so a Comment persists as Comment (bubble render) and Text as Text.
+                _vm.Drawing.AddDrawing(new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
                 _ = PromptTextLabelAsync(id);
                 e.Handled = true;
                 return;

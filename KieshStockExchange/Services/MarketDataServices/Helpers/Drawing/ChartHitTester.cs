@@ -74,6 +74,19 @@ internal sealed class ChartHitTester
                 var r = new RectF(ax, ay - fontSize, w, fontSize * 2f);
                 if (r.Contains(p)) return (d, DrawingHitPart.Body);
             }
+            else if (d.Kind == DrawTool.Comment)
+            {
+                // Callout: hit inside the bubble rect above the anchor (mirror DrawingRenderer's Comment arm).
+                if (string.IsNullOrEmpty(d.Text)) continue;
+                float ax = frame.TimeToPixelX(d.T1), ay = frame.HitPriceToPixelY(d.P1);
+                if (ax < frame.Plot.Left || ax > frame.Plot.Right || ay < frame.Plot.Top || ay > frame.Plot.Bottom) continue;
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                const float padX = 6f, padY = 4f, tail = 7f;
+                float bw = Math.Max(TextMinW, d.Text.Length * fontSize * TextGlyphWFactor) + padX * 2f;
+                float bh = fontSize + padY * 2f;
+                var r = new RectF(ax - bw / 2f, ay - tail - bh, bw, bh);
+                if (r.Contains(p)) return (d, DrawingHitPart.Body);
+            }
             else if (d.Kind == DrawTool.HRay)
             {
                 float x1 = frame.TimeToPixelX(d.T1), y = frame.HitPriceToPixelY(d.P1);

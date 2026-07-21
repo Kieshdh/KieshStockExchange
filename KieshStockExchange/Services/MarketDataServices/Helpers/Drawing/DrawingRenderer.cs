@@ -329,6 +329,40 @@ internal sealed class DrawingRenderer
                     HorizontalAlignment.Left, VerticalAlignment.Center);
                 if (selected) DrawHandle(canvas, t, ax, ay, color);
             }
+            else if (d.Kind == DrawTool.Comment)
+            {
+                // Callout bubble: text in a rounded rect with a downward "v" tail pointing at the (T1,P1)
+                // anchor. Bubble sits ABOVE the anchor; text in the pen colour. Blank/off-plot clipped like Text.
+                if (string.IsNullOrEmpty(d.Text)) { canvas.StrokeDashPattern = null; continue; }
+                float ax = X(d.T1), ay = Y((double)d.P1);
+                if (ax < plot.Left || ax > plot.Right || ay < plot.Top || ay > plot.Bottom)
+                { canvas.StrokeDashPattern = null; continue; }
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                const float padX = 6f, padY = 4f, tail = 7f;
+                float bw = Math.Max(TextMinW, d.Text.Length * fontSize * TextGlyphWFactor) + padX * 2f;
+                float bh = fontSize + padY * 2f;
+                var bubble = new RectF(ax - bw / 2f, ay - tail - bh, bw, bh);
+                canvas.StrokeDashPattern = null;
+                canvas.FillColor = LabelPillBg;
+                canvas.FillRoundedRectangle(bubble, 5f);
+                canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
+                canvas.DrawRoundedRectangle(bubble, 5f);
+                // Downward "v" tail — filled over the bubble bg, its two edges stroked in the border colour.
+                var tailPath = new PathF();
+                tailPath.MoveTo(ax - 5f, bubble.Bottom);
+                tailPath.LineTo(ax + 5f, bubble.Bottom);
+                tailPath.LineTo(ax, ay);
+                tailPath.Close();
+                canvas.FillColor = LabelPillBg;
+                canvas.FillPath(tailPath);
+                canvas.DrawLine(ax - 5f, bubble.Bottom, ax, ay);
+                canvas.DrawLine(ax + 5f, bubble.Bottom, ax, ay);
+                canvas.FontColor = color;
+                canvas.FontSize = fontSize;
+                canvas.DrawString(d.Text, new RectF(bubble.X + padX, bubble.Y, bubble.Width - padX * 2f, bubble.Height),
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                if (selected) DrawHandle(canvas, t, ax, ay, color);
+            }
             else if (d.Kind == DrawTool.FibRetracement)
             {
                 // Fibonacci retracement grid: the two time anchors bound a box; each ratio level draws a

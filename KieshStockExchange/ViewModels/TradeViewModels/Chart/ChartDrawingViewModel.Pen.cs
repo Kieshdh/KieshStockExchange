@@ -106,7 +106,7 @@ public partial class ChartDrawingViewModel
     private static bool ShapesGroupContains(DrawTool t) => t is DrawTool.Rectangle or DrawTool.Ellipse;
     private static bool DrawingGroupContains(DrawTool t) => t is DrawTool.Freehand or DrawTool.Arrow;
     private static bool PositionGroupContains(DrawTool t) => t is DrawTool.Position;
-    private static bool TextGroupContains(DrawTool t) => t is DrawTool.Text;
+    private static bool TextGroupContains(DrawTool t) => t is DrawTool.Text or DrawTool.Comment;
 
     private static string ToolIcon(DrawTool t) => t switch
     {
@@ -119,6 +119,7 @@ public partial class ChartDrawingViewModel
         DrawTool.Polyline => "tool_polyline.png",
         DrawTool.Alert => "tool_alert.png",
         DrawTool.Text => "tool_text.png",
+        DrawTool.Comment => "tool_text.png",   // TODO: dedicated tool_comment.png asset
         DrawTool.FibRetracement => "tool_fib.png",
         DrawTool.Rectangle => "tool_rectangle.png",
         DrawTool.Ellipse => "tool_ellipse.png",
