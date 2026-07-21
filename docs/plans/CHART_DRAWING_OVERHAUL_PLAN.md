@@ -368,3 +368,55 @@ direction hint, not a dragged corner; (b) tail snaps + settles, not per-keystrok
 - **PriceLabel optional annotation** (a typed note alongside the auto price) — v1 shows price only.
 - Rotated-rect, Arc, Magnet (snap), Lock toggle UI, **B dynamic rail sizing (LAST)**, axis polish, real tool icons
   (Comment/Crossline/Circle/Triangle/PriceLabel still use placeholder PNGs).
+
+---
+
+## ★ 2026-07-21 SESSION CLOSE — full status, working protocol, placement rules (READ FIRST on resume)
+
+Branch `feature/bot-market-realism-v2` in worktree `C:\Users\kjden\source\repos\Kieshdh\KieshStockExchange-chart`.
+All work below is COMMITTED (working tree clean, tip `b3eca3b`). Still LOCAL — Kiesh's history force-push outstanding.
+
+### Everything Kiesh specified this session + its status
+| Feature | Owner spec | Status | Commit / where |
+|---|---|---|---|
+| **Circle** | 1st click = centre, 2nd = a ring point (radius); same fill/opacity+stroke as ellipse | ✅ DONE | `63c5bea` — render + hit branches, `r = ChartGeometry.Dist(cx,cy,ex,ey)` |
+| **Text label** | place a dot, type INLINE on chart (no popup), text offset right of dot, auto-delete if empty | ✅ DONE | `bd36cb7` inline Entry overlay; `7cbe41f` focus-fix |
+| ↳ delete timing | delete ONLY on clicking outside + empty; NOT on mouse-leave | ✅ FIXED | `7cbe41f` — chart no longer steals focus from the Entry on pointer-enter while editing (`ChartView.Windows.cs OnPlatformPointerEntered`) |
+| ↳ no dot shown | anchor dot is DB-only, not drawn | ✅ DONE | `7cbe41f` — removed the drawn dot |
+| **Comment** | rounded bubble (colour border + fill + text) with tail to anchor | ✅ DONE (v1) | bubble + downward tail; dynamic quadrant tail DEFERRED |
+| **Price label** | bubble showing the PRICE at the anchor; centred text; `<` tail bottom-left with a bit of distance; colour+fill+opacity; no typing | ✅ DONE | `bd36cb7` tool; `7cbe41f` centred text + bottom-left `<` tail + no dot (matches Kiesh's screenshot) |
+| **Fib anchor order** | first dot = the `1` level (left), second auto-adjusts to `0` (right) | ✅ FIXED | `7cbe41f` — `FibonacciLevels.Levels(d.P2, d.P1)` |
+| **Fib colours** | a different colour per line; add a RAINBOW (spectrum) option; single-colour also possible; last-used = first/default | ✅ DONE | `b3eca3b` — `DrawStyle.FibRainbow` (append-only), 12-colour spectrum, pen-panel Rainbow/Single toggle, persisted last-used seeds new Fibs |
+| **Fib band fill** | low-opacity fill BETWEEN lines; NO slider (fixed) | ✅ DONE | `b3eca3b` — `FibBandOpacity = 0.10f` tint between adjacent levels |
+| **Fib tags** | delete the boxes; price in brackets, right-aligned directly left of the value | ✅ DONE | `b3eca3b` — plain `"{ratio} ({price})"` right-aligned in the line's colour, no pill |
+
+### DEFERRED (the harder polish — in the tables above + the DEFERRED list ↑)
+Drag direction-hint quadrant · Comment tail snap+settle · PriceLabel typed annotation · Rotated-rect · Arc ·
+Magnet(snap) · Lock toggle UI · **B dynamic rail sizing (LAST)** · axis polish · real tool icons · Fib active-mode
+highlight polish (the Rainbow/Single toggle works; the highlight uses a `DynamicResource Primary` trigger).
+OWNER-GATED: **Alert-as-message** (server-spanning: persisted Message + centred popup + chart deep-link).
+
+### ★ HOW WE WORK THIS ARC (duo protocol — keep doing this on resume)
+- **Duo loop:** Claude IMPLEMENTS features autonomously (easiest→hardest, correct placement first); Kiesh TESTS live in
+  parallel and sends directions/feedback mid-flight. Claude adjusts on the next iteration. Don't batch-wait — ship, Kiesh
+  reacts, iterate.
+- **Per-feature build cycle:** when a feature is finished → **close the running client, rebuild the client csproj
+  (disk-gate <70%, Idle), then relaunch it** (exactly as done today) so Kiesh eyeballs the new build. Commit per feature.
+  - Kill: `Stop-Process -Name KieshStockExchange`. Build: `dotnet build KieshStockExchange/KieshStockExchange.csproj
+    -f net9.0-windows10.0.19041.0 -clp:ErrorsOnly`. Relaunch: `dotnet run … --no-build`.
+  - The running client LOCKS `KieshStockExchange.Shared.dll` — always kill BEFORE building.
+- **Local test env:** master server on **port 5090** (DB `kse_soak_exp_ab`, has candles+mood); client
+  `Resources/Raw/appsettings.json` BaseUrl→`http://localhost:5090` is UNCOMMITTED, test-only (committed value = prod
+  duckdns; do NOT commit the localhost BaseUrl).
+
+### ★ CODE PLACEMENT IS LOAD-BEARING (we ran a whole splitting/dedup arc — do NOT undo it)
+The repo was deliberately split by responsibility; new code MUST keep that structure and **create new files when a new
+responsibility appears** rather than fattening an existing partial. Precedent set this session:
+- New edit-mode VM state → **new** `ChartDrawingViewModel.TextEdit.cs`; new Fib colour-mode state → **new**
+  `ChartDrawingViewModel.Fib.cs` (NOT dumped into the already-large `Pen.cs`).
+- View inline-typing wiring → **new** `ChartView.TextEditing.cs` (NOT into the gesture SM `ChartView.Windows.cs`).
+- Every drawing tool is wired at its **4 dispatch sites**: render (`DrawingRenderer`), hit-test (`ChartHitTester`),
+  placement (`ChartView.Windows.cs`), body-drag (`ChartView.Drawing.cs`). Shared geometry → `Helpers/ChartGeometry`.
+- Rail/group state → `Rail.cs`; pen STYLE panel → `Pen.cs`; core/delete → the core VM partial.
+- Model fields (`DrawTool`, `DrawStyle`, `DrawingObject`) are **APPEND-ONLY** (persisted JSON must still load).
+See memory `feedback_code_placement_respect_split`. Before writing, INSPECT where it belongs; match the surrounding idiom.
