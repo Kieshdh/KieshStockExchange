@@ -137,13 +137,13 @@ internal sealed class ChartHitTester
                     && p.Y >= frame.Plot.Top - 2 && p.Y <= frame.Plot.Bottom + 2)
                     return (d, DrawingHitPart.Body);
             }
-            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse)
+            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse || d.Kind == DrawTool.Circle)
             {
                 float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);
                 float x2 = frame.TimeToPixelX(d.T2), y2 = frame.HitPriceToPixelY(d.P2);
                 if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
-                var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
+                var rect = ChartGeometry.ShapeRect(d.Kind == DrawTool.Circle, x1, y1, x2, y2);
                 // Body = on the border (within tolerance) or anywhere inside a filled shape.
                 bool onBorder =
                     p.X >= rect.Left - DrawHitTol && p.X <= rect.Right + DrawHitTol &&

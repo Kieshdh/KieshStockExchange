@@ -198,13 +198,13 @@ internal sealed class DrawingRenderer
                     DrawHandle(canvas, t, x2, y2, color);
                 }
             }
-            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse)
+            else if (d.Kind == DrawTool.Rectangle || d.Kind == DrawTool.Ellipse || d.Kind == DrawTool.Circle)
             {
                 // Two-corner shape: optional translucent fill (Fill + FillOpacity) then a border stroke.
-                // Corners' vertical mapping routes through the scale seam.
+                // Corners' vertical mapping routes through the scale seam. Circle = a square-constrained ellipse.
                 float x1 = X(d.T1), y1 = f.ScaleY(d.P1);
                 float x2 = X(d.T2), y2 = f.ScaleY(d.P2);
-                var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
+                var rect = ChartGeometry.ShapeRect(d.Kind == DrawTool.Circle, x1, y1, x2, y2);
 
                 if (d.Style.Fill is Color fill)
                 {

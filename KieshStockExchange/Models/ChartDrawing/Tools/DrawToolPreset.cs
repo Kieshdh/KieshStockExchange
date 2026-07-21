@@ -42,7 +42,7 @@ public static class DrawToolPresets
 
         // Filled shapes: border stroke + width + fill colour + fill opacity + dash. Arrow is a filled block-
         // arrow shape (2 anchors = tail/head, fixed aspect), so it takes the same panel sections as Rectangle.
-        DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow
+        DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Circle or DrawTool.Arrow
             or DrawTool.RotatedRect or DrawTool.Triangle or DrawTool.Arc =>
             new(ShapeStyle,
                 ShowStroke: true, ShowWidth: true, ShowFillColor: true, ShowOpacity: true, ShowDash: true,

@@ -25,4 +25,5 @@ public enum DrawTool
     // Long/Short = two-anchor drag (entry→target); Manual = one-click drop then edit the legs in the panel.
     PositionLong, PositionShort, PositionManual,
     Crossline,   // Lines group: a combined horizontal (at P1) + vertical (at T1) cross line, one-click
+    Circle,      // Shapes group: a perfect circle (2-corner drag; a square-constrained ellipse)
 }
