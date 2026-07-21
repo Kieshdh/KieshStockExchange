@@ -40,7 +40,6 @@ public partial class ChartDrawingViewModel
         OnPropertyChanged(nameof(IsShapesGroupActive));
         OnPropertyChanged(nameof(IsDrawingGroupActive));
         OnPropertyChanged(nameof(IsPositionGroupActive));
-        OnPropertyChanged(nameof(IsTextGroupActive));
         OpenToolGroup = null;
         // With no selection, EditingKind == the armed tool, so arming a tool flips every Show* gate.
         // RefreshPenTiles raises EditingKind + the Show* notifications (nothing else calls it on this path).
