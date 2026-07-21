@@ -347,10 +347,24 @@ branches in DrawingRenderer/ChartHitTester; ShapeRect(square) param now always f
    (data-loss trap).
 6. BUILD ORDER: Text-label inline FIRST (the overlay + focus/commit lifecycle is the reusable core) → Comment
    (bubble+tail) → Price label (computed text).
-**Divergence from the owner's literal spec to confirm:** (a) second point = direction hint, not a dragged corner;
-(b) tail snaps + settles, not per-keystroke jitter; (c) auto-delete only on explicit commit, never on blur.
+**Divergence from the owner's literal spec — OWNER ACCEPTED the council model (2026-07-21):** (a) second point =
+direction hint, not a dragged corner; (b) tail snaps + settles, not per-keystroke; (c) auto-delete only on commit.
 
-**Placement (when built):** the AnchoredText model = DrawStyle/DrawingObject (append-only new fields RenderMode/
-ShowTail); render/hit in DrawingRenderer/ChartHitTester; inline-Entry overlay = a NEW control hosted in ChartView
-(+ ChartView.Windows.cs for placement/focus/commit); rail/draft state in Rail.cs. Replaces the modal
-PromptTextLabelAsync path.
+### BUILT (2026-07-21, commit bd36cb7 — build clean, 0 errors)
+- **Text / Comment inline typing** — one-click anchor → a MAUI **`Entry` overlay** at the click point (NOT a raw
+  WinUI TextBox: MAUI Entry gives native caret/IME on Windows, killing the exact spike risk the council flagged).
+  Enter/blur commit, Escape cancels, empty label auto-deletes ON COMMIT only. The pointer-press path commits an
+  open edit first so a stray click never places a 2nd label. Modal `PromptTextLabelAsync` DELETED.
+- **PriceLabel tool** — one-click filled bubble (colour border + fill+opacity) showing the anchor price via
+  `CurrencyHelper.Format`; no typing. New `DrawTool.PriceLabel` (append-only), in the Draw group + its own preset.
+- **Placement (respects the split arc):** edit-state + commit/cancel = NEW `ChartDrawingViewModel.TextEdit.cs`;
+  view focus/commit wiring = NEW `ChartView.TextEditing.cs`; render = DrawingRenderer; hit = ChartHitTester;
+  body-drag = ChartView.Drawing.cs; placement = ChartView.Windows.cs; overlay `Entry` = ChartView.xaml (topmost).
+
+### STILL DEFERRED (the genuinely harder polish — build when picked up)
+- **Drag direction-hint quadrant** (release direction → which way the box/bubble opens off the anchor). v1 uses
+  fixed defaults (Text right, Comment above). The T2/P2 fields are free to carry the hint (sign(P2−P1),sign(T2−T1)).
+- **Comment tail snap-to-nearest-edge + settle** (currently a fixed downward tail). Tied to the quadrant hint above.
+- **PriceLabel optional annotation** (a typed note alongside the auto price) — v1 shows price only.
+- Rotated-rect, Arc, Magnet (snap), Lock toggle UI, **B dynamic rail sizing (LAST)**, axis polish, real tool icons
+  (Comment/Crossline/Circle/Triangle/PriceLabel still use placeholder PNGs).
