@@ -37,6 +37,10 @@ internal sealed class DrawingRenderer
     private const float TextPillMinW = 26f;
     private const float TextPillH = 16f;
 
+    // Fixed Fib tag width so every level's pill lines up in one clean column (ratio flush-left,
+    // price flush-right). Variable-width tags made the price digits ragged across levels.
+    private const float FibTagW = 104f;
+
     /// <summary>
     /// Draw the user's horizontal lines + trendlines. HLine spans the plot at its price with a
     /// right-gutter price tag; Trend is a segment with a draggable handle at each end. Both carry a
@@ -534,8 +538,7 @@ internal sealed class DrawingRenderer
     private void DrawFibLevelTag(ICanvas canvas, ChartTheme theme, RectF plot, float x, float y,
         double ratio, decimal price, Color color, CurrencyType cur)
     {
-        string text = $"{ratio:0.###}  {CurrencyHelper.Format(price, cur)}";
-        float w = Math.Max(64f, text.Length * 6.3f);
+        float w = FibTagW;
         float lx = Math.Clamp(x - w - 4f, plot.Left, Math.Max(plot.Left, plot.Right - w));
         float ly = Math.Clamp(y - 8f, plot.Top, Math.Max(plot.Top, plot.Bottom - 16f));
         var r = new RectF(lx, ly, w, 16f);
@@ -546,8 +549,10 @@ internal sealed class DrawingRenderer
         canvas.DrawRectangle(r);
         canvas.FontColor = Colors.White;
         canvas.FontSize = theme.PriceTagFont;
-        canvas.DrawString(text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
-            HorizontalAlignment.Left, VerticalAlignment.Center);
+        // Ratio flush-left, price flush-right in the same fixed rect so the columns align across levels.
+        var textRect = new RectF(r.X + 3, r.Y, r.Width - 6, r.Height);
+        canvas.DrawString($"{ratio:0.###}", textRect, HorizontalAlignment.Left, VerticalAlignment.Center);
+        canvas.DrawString(CurrencyHelper.Format(price, cur), textRect, HorizontalAlignment.Right, VerticalAlignment.Center);
     }
 
     // Position readout: ONE pill with the reward:risk ratio + (when a live price exists) the unrealized
