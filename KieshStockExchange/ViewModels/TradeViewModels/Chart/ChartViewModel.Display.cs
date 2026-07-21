@@ -154,11 +154,38 @@ public partial class ChartViewModel
     [RelayCommand]
     private void ToggleMoodPane() => ShowMoodPane = !ShowMoodPane;
 
-    // Live-accumulated mood series (there's no stored history server-side; we fill forward from open).
-    // Timestamps are UTC-now so they land on the same time axis as the candles. Reset on stock change.
+    // Live-polled mood TAIL only — the current/forming-bar mood, filled forward every MoodPollInterval.
+    // The historical pane is projected from the loaded candles directly (MoodSeries), so mood is not lost
+    // to this list's cap or to a one-time seed. Reset on stock change.
     private readonly List<(DateTime Time, double Value)> _moodSamples = new();
-    private const int MoodSamplesMax = 2000;
-    public IReadOnlyList<(DateTime Time, double Value)> MoodSeries => _moodSamples;
+    private const int MoodSamplesMax = 256;   // just the live tail; history comes from the candles
+
+    // §mood-history: the pane renders from the LOADED CANDLES (per-candle server-stamped MarketMood, or a
+    // momentum reconstruction for candles predating the composite), PLUS any live-poll samples newer than the
+    // last candle. Projected from _candleBuffer on read, so scrolling older history in extends the pane and
+    // there is no fixed back-history cap — the mood always covers exactly the loaded candle range.
+    public IReadOnlyList<(DateTime Time, double Value)> MoodSeries
+    {
+        get
+        {
+            var candles = _candleBuffer;
+            if (!ShowMoodPane || candles.Count == 0) return _moodSamples;
+            var series = new List<(DateTime, double)>(candles.Count + _moodSamples.Count);
+            double ema = (double)candles[0].Close;
+            const double emaAlpha = 0.1;  // ~20-bar EMA of close = the reconstruction anchor
+            foreach (var c in candles)
+            {
+                double close = (double)c.Close;
+                ema += emaAlpha * (close - ema);
+                series.Add((c.OpenTime, c.MarketMood ?? ChartMath.ReconstructMood(close, ema)));
+            }
+            // Append live-tail samples newer than the last closed candle (the in-progress bar's current mood).
+            var lastTime = candles[^1].OpenTime;
+            foreach (var s in _moodSamples)
+                if (s.Time > lastTime) series.Add(s);
+            return series;
+        }
+    }
 
     private static readonly TimeSpan MoodPollInterval = TimeSpan.FromSeconds(4);
     private CancellationTokenSource? _moodCts;
@@ -173,32 +200,10 @@ public partial class ChartViewModel
         _moodSamples.Clear();
         if (!ShowMoodPane || !Selected.HasSelectedStock) { RequestRedraw(); return; }
 
-        SeedMoodFromCandles();   // fill a back-history so the pane isn't empty before the live poll accumulates
-
+        // No seed needed — MoodSeries projects the back-history straight from the loaded candles now.
         var cts = new CancellationTokenSource();
         _moodCts = cts;
         _ = MoodPollLoopAsync(Selected.StockId!.Value, cts.Token);
-    }
-
-    // §mood-history: seed the mood series from the already-loaded candles so the pane shows a back-history
-    // the instant it opens (the live poll only fills forward from now). Uses the server-stamped per-candle
-    // MarketMood where present; older candles predating the composite fall back to a momentum reconstruction
-    // (ChartMath.ReconstructMood) — a believable stand-in so the gauge has shape rather than a flat gap.
-    private void SeedMoodFromCandles()
-    {
-        var candles = _candleBuffer;
-        if (candles.Count == 0) return;
-        double ema = (double)candles[0].Close;
-        const double emaAlpha = 0.1;  // ~20-bar EMA of close = the reconstruction anchor
-        foreach (var c in candles)
-        {
-            double close = (double)c.Close;
-            ema += emaAlpha * (close - ema);
-            double mood = c.MarketMood ?? ChartMath.ReconstructMood(close, ema);
-            _moodSamples.Add((c.OpenTime, mood));
-        }
-        if (_moodSamples.Count > MoodSamplesMax)
-            _moodSamples.RemoveRange(0, _moodSamples.Count - MoodSamplesMax);
     }
 
     private async Task MoodPollLoopAsync(int stockId, CancellationToken ct)
