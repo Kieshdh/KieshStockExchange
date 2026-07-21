@@ -79,8 +79,8 @@
 
                     <!-- Row 0: WIDTH (dots) | DASH -->
                     <Label Grid.Row="0" Grid.Column="0" Text="Width" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" Margin="0,0,4,0" IsVisible="{Binding ShowStroke}" />
-                    <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowStroke}">
+                           VerticalOptions="Center" Margin="0,0,4,0" IsVisible="{Binding ShowWidth}" />
+                    <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowWidth}">
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding PenWidthTiles[0].Command}"
                                                   CommandParameter="{Binding PenWidthTiles[0].Thickness}" />
@@ -92,7 +92,7 @@
                             </DataTrigger>
                         </Border.Triggers>
                     </Border>
-                    <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowStroke}">
+                    <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowWidth}">
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding PenWidthTiles[1].Command}"
                                                   CommandParameter="{Binding PenWidthTiles[1].Thickness}" />
@@ -104,7 +104,7 @@
                             </DataTrigger>
                         </Border.Triggers>
                     </Border>
-                    <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowStroke}">
+                    <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowWidth}">
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding PenWidthTiles[2].Command}"
                                                   CommandParameter="{Binding PenWidthTiles[2].Thickness}" />
@@ -244,6 +244,19 @@
                             </DataTrigger>
                         </Border.Triggers>
                     </Border>
+                </Grid>
+
+                <!-- SIZE (Text): standard font-size dropdown + ▲/▼ steppers that jump to the next/prev size. -->
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6" IsVisible="{Binding ShowSize}">
+                    <Label Grid.Column="0" Text="Size" Style="{StaticResource ChartOhlcKey}"
+                           VerticalOptions="Center" Margin="0,0,4,0" />
+                    <Picker Grid.Column="1" VerticalOptions="Center"
+                            ItemsSource="{x:Static vm:ChartDrawingViewModel.StandardFontSizes}"
+                            SelectedItem="{Binding PenFontSize}" />
+                    <Button Grid.Column="2" Text="▲" Style="{StaticResource ChartIconButton}"
+                            Command="{Binding StepFontSizeUpCommand}" />
+                    <Button Grid.Column="3" Text="▼" Style="{StaticResource ChartIconButton}"
+                            Command="{Binding StepFontSizeDownCommand}" />
                 </Grid>
 
                 <!-- Footer: default mode = add a line; selected mode = set-as-default + delete -->

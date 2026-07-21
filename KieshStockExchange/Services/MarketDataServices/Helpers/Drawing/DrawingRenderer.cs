@@ -31,11 +31,12 @@ internal sealed class DrawingRenderer
     // on any theme. The line's colour is kept as a thin border so the tag still identifies its drawing.
     private static readonly Color LabelPillBg = Color.FromArgb("#2A2E39");
 
-    // Text-label pill metrics — width sizes to the label length. MUST match ChartHitTester's Text arm so
-    // the clickable zone tracks the drawn pill exactly (there's no shared home across the two collaborators).
-    private const float TextPillCharW = 7f;
-    private const float TextPillMinW = 26f;
-    private const float TextPillH = 16f;
+    // Plain-text metrics — MUST match ChartHitTester's Text arm so the clickable zone tracks the drawn
+    // glyphs (no shared home across the two collaborators). FontSize==0 (legacy/unset) renders at
+    // TextDefaultFont; the run width estimates as chars × fontSize × TextGlyphWFactor.
+    private const float TextMinW = 26f;
+    private const float TextDefaultFont = 12f;
+    private const float TextGlyphWFactor = 0.6f;
 
     // Fixed Fib tag width so every level's pill lines up in one clean column (ratio flush-left,
     // price flush-right). Variable-width tags made the price digits ragged across levels.
@@ -312,24 +313,19 @@ internal sealed class DrawingRenderer
             }
             else if (d.Kind == DrawTool.Text)
             {
-                // Anchored label: a readable pill (dark slate + white text + thin colour border) with its
-                // LEFT edge at the (T1,P1) anchor, vertically centred. Reuses the DrawEndpointPriceTag pill
-                // mechanics. Blank text draws nothing; an off-plot anchor is clipped like the level kinds.
-                // Pill metrics MUST mirror ChartHitTester's Text arm so the clickable zone tracks the paint.
+                // Anchored PLAIN label: text drawn in the PEN COLOUR at the (T1,P1) anchor, LEFT edge at the
+                // anchor, vertically centred. No pill/box. Blank text draws nothing; an off-plot anchor is
+                // clipped like the level kinds. Font-size metrics MUST mirror ChartHitTester's Text arm.
                 if (string.IsNullOrEmpty(d.Text)) { canvas.StrokeDashPattern = null; continue; }
                 float ax = X(d.T1), ay = Y((double)d.P1);
                 if (ax < plot.Left || ax > plot.Right || ay < plot.Top || ay > plot.Bottom)
                 { canvas.StrokeDashPattern = null; continue; }
-                float w = Math.Max(TextPillMinW, d.Text.Length * TextPillCharW);
-                var r = new RectF(ax, ay - TextPillH / 2f, w, TextPillH);
-                canvas.FillColor = LabelPillBg;
-                canvas.FillRectangle(r);
-                canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
-                canvas.StrokeDashPattern = null;   // the pill border is never dashed (pen dash is for the line kinds)
-                canvas.DrawRectangle(r);
-                canvas.FontColor = Colors.White;
-                canvas.FontSize = t.PriceTagFont + 1f;   // a touch larger than the axis tags so labels read
-                canvas.DrawString(d.Text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                float w = Math.Max(TextMinW, d.Text.Length * fontSize * TextGlyphWFactor);
+                canvas.StrokeDashPattern = null;
+                canvas.FontColor = color;
+                canvas.FontSize = fontSize;
+                canvas.DrawString(d.Text, new RectF(ax, ay - fontSize, w, fontSize * 2f),
                     HorizontalAlignment.Left, VerticalAlignment.Center);
                 if (selected) DrawHandle(canvas, t, ax, ay, color);
             }

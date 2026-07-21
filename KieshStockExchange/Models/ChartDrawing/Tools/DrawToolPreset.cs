@@ -10,7 +10,7 @@ namespace KieshStockExchange.Models.ChartDrawing.Tools;
 // no UI reaches them this patch.
 public readonly record struct DrawToolPreset(
     DrawStyle Style,
-    bool ShowStroke, bool ShowFillColor, bool ShowOpacity, bool ShowDash,
+    bool ShowStroke, bool ShowWidth, bool ShowFillColor, bool ShowOpacity, bool ShowDash,
     bool ShowEnding, bool ShowHead, bool ShowText, bool ShowPosition,
     bool ShowSize, bool ShowSmoothing);
 
@@ -23,57 +23,57 @@ public static class DrawToolPresets
 
     public static DrawToolPreset For(DrawTool tool) => tool switch
     {
-        // Open two-anchor segments that "stop": stroke + dash + ending/head.
+        // Open two-anchor segments that "stop": stroke + width + dash + ending/head.
         DrawTool.Trend or DrawTool.Polyline =>
             new(DrawStyle.Default,
-                ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
+                ShowStroke: true, ShowWidth: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
                 ShowEnding: true, ShowHead: true, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
 
-        // Straight lines with NO directional ending (they don't "stop" at a second anchor): stroke + dash
-        // only. Ray + HRay run to infinity ONE way and ExtendedLine BOTH ways, so — like H/V lines — none
+        // Straight lines with NO directional ending (they don't "stop" at a second anchor): stroke + width +
+        // dash only. Ray + HRay run to infinity ONE way and ExtendedLine BOTH ways, so — like H/V lines — none
         // carry a head/arrow at a terminus that isn't there.
         DrawTool.HLine or DrawTool.HRay or DrawTool.Ray or DrawTool.VLine or DrawTool.ExtendedLine
             or DrawTool.Alert or DrawTool.FibRetracement =>
             new(DrawStyle.Default,
-                ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
+                ShowStroke: true, ShowWidth: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
                 ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
 
-        // Filled shapes: border stroke + fill colour + fill opacity + dash. Arrow is a filled block-arrow
-        // shape (2 anchors = tail/head, fixed aspect), so it takes the same panel sections as Rectangle.
+        // Filled shapes: border stroke + width + fill colour + fill opacity + dash. Arrow is a filled block-
+        // arrow shape (2 anchors = tail/head, fixed aspect), so it takes the same panel sections as Rectangle.
         DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow
             or DrawTool.RotatedRect or DrawTool.Triangle or DrawTool.Arc =>
             new(ShapeStyle,
-                ShowStroke: true, ShowFillColor: true, ShowOpacity: true, ShowDash: true,
+                ShowStroke: true, ShowWidth: true, ShowFillColor: true, ShowOpacity: true, ShowDash: true,
                 ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
 
         // Free-drawn path: stroke (colour/width) + dash + an optional ending arrow + its head shape.
         DrawTool.Freehand =>
             new(DrawStyle.Default,
-                ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
+                ShowStroke: true, ShowWidth: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
                 ShowEnding: true, ShowHead: true, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
 
-        // Anchored label: text + colour + size.
+        // Anchored label: colour + font size + content ONLY — no width, no dash, no ending.
         DrawTool.Text =>
             new(DrawStyle.Default,
-                ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
+                ShowStroke: true, ShowWidth: false, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
                 ShowEnding: false, ShowHead: false, ShowText: true, ShowPosition: false,
                 ShowSize: true, ShowSmoothing: false),
 
         // Long/short risk-reward box: stroke + the Position section.
         DrawTool.Position =>
             new(ShapeStyle,
-                ShowStroke: true, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
+                ShowStroke: true, ShowWidth: true, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
                 ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: true,
                 ShowSize: false, ShowSmoothing: false),
 
         // None / Measure / Magnifier and anything else: transient modes with no persistent style panel.
         _ =>
             new(DrawStyle.Default,
-                ShowStroke: false, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
+                ShowStroke: false, ShowWidth: false, ShowFillColor: false, ShowOpacity: false, ShowDash: false,
                 ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: false,
                 ShowSize: false, ShowSmoothing: false),
     };

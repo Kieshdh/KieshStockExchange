@@ -150,6 +150,7 @@ public partial class ChartDrawingViewModel
     // Panel-section gates driven by the preset table. Split ShowFillColor/ShowOpacity so a shape can
     // show both while a line shows neither.
     public bool ShowStroke    => EditingPreset.ShowStroke;
+    public bool ShowWidth     => EditingPreset.ShowWidth;   // split from ShowStroke so Text shows colour but no width
     public bool ShowFillColor => EditingPreset.ShowFillColor;
     public bool ShowOpacity   => EditingPreset.ShowOpacity;
     public bool ShowDash      => EditingPreset.ShowDash;
@@ -284,6 +285,39 @@ public partial class ChartDrawingViewModel
         ApplyPenStyle(s => s with { Head = head });
     }
 
+    // --- Text font size (standard sizes + ▲/▼ steppers) ---------------------------------------------
+    // The universal standard sizes the Text SIZE dropdown offers; steppers snap to these.
+    public static readonly int[] StandardFontSizes =
+        { 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72 };
+    private const int DefaultFontSize = 12;   // Style.FontSize == 0 (unset/legacy) resolves to this
+
+    // Bound by the SIZE dropdown. Edits the selected Text else the default pen; re-synced from the effective
+    // style in RefreshPenTiles (guarded by _syncingPenFromStyle so the push-back doesn't re-enter the setter).
+    [ObservableProperty] private int _penFontSize = DefaultFontSize;
+
+    partial void OnPenFontSizeChanged(int value)
+    {
+        if (_syncingPenFromStyle || value <= 0) return;
+        ApplyPenStyle(s => s with { FontSize = value });
+    }
+
+    [RelayCommand] private void StepFontSizeUp() => StepFontSize(+1);
+    [RelayCommand] private void StepFontSizeDown() => StepFontSize(-1);
+
+    // Snap the current size to the nearest standard size, then move one standard step in dir.
+    private void StepFontSize(int dir)
+    {
+        int cur = PenFontSize > 0 ? PenFontSize : DefaultFontSize;
+        int idx = Array.IndexOf(StandardFontSizes, cur);
+        if (idx < 0)   // not exactly a standard size ⇒ snap to the nearest
+        {
+            idx = 0;
+            for (int i = 1; i < StandardFontSizes.Length; i++)
+                if (Math.Abs(StandardFontSizes[i] - cur) < Math.Abs(StandardFontSizes[idx] - cur)) idx = i;
+        }
+        PenFontSize = StandardFontSizes[Math.Clamp(idx + dir, 0, StandardFontSizes.Length - 1)];
+    }
+
     // "Set as default ✓": copy the selected line's style to the default pen.
     [RelayCommand]
     private void SetSelectedAsDefault()
@@ -321,6 +355,7 @@ public partial class ChartDrawingViewModel
         // selection/armed-tool, so re-raise them here — the one place every changing path routes through.
         OnPropertyChanged(nameof(EditingKind));
         OnPropertyChanged(nameof(ShowStroke));
+        OnPropertyChanged(nameof(ShowWidth));
         OnPropertyChanged(nameof(ShowFillColor));
         OnPropertyChanged(nameof(ShowOpacity));
         OnPropertyChanged(nameof(ShowDash));
@@ -369,6 +404,7 @@ public partial class ChartDrawingViewModel
         foreach (var t in PenFillTiles)
             t.IsSelected = s.Fill is not null && t.Color.ToArgbHex(true) == fillHex;
         _syncingPenFromStyle = true;
+        PenFontSize = s.FontSize > 0 ? s.FontSize : DefaultFontSize;
         PenFillOpacity = Math.Clamp(s.FillOpacity, 0f, 1f);
         _syncingPenFromStyle = false;
     }
