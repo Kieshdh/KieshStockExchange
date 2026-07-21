@@ -153,6 +153,20 @@ internal sealed class ChartHitTester
                 bool inside = d.Style.Fill is not null && rect.Contains(p);
                 if (onBorder || inside) return (d, DrawingHitPart.Body);
             }
+            else if (d.Kind == DrawTool.Triangle)
+            {
+                float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);
+                float x2 = frame.TimeToPixelX(d.T2), y2 = frame.HitPriceToPixelY(d.P2);
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                var rect = ChartGeometry.ShapeRect(false, x1, y1, x2, y2);
+                float ax = rect.Center.X, ay = rect.Top, blx = rect.Left, bly = rect.Bottom, brx = rect.Right, bry = rect.Bottom;
+                bool near = ChartGeometry.PointSegDist(p.X, p.Y, ax, ay, blx, bly) <= DrawHitTol
+                    || ChartGeometry.PointSegDist(p.X, p.Y, ax, ay, brx, bry) <= DrawHitTol
+                    || ChartGeometry.PointSegDist(p.X, p.Y, blx, bly, brx, bry) <= DrawHitTol;
+                bool inside = d.Style.Fill is not null && rect.Contains(p);
+                if (near || inside) return (d, DrawingHitPart.Body);
+            }
             else if (d.Kind == DrawTool.Arrow)
             {
                 float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);

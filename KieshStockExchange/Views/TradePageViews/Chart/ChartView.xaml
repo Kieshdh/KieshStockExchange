@@ -315,6 +315,15 @@
                         </Label.GestureRecognizers>
                     </Label>
                 </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_rectangle.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Triangle}" />
+                    <Label Text="Triangle" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Triangle}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
             </VerticalStackLayout>
         </Border>
 

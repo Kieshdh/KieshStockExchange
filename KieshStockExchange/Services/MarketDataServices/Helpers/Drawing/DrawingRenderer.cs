@@ -222,6 +222,32 @@ internal sealed class DrawingRenderer
                     DrawHandle(canvas, t, x2, y2, color);
                 }
             }
+            else if (d.Kind == DrawTool.Triangle)
+            {
+                // Two-corner triangle: apex at the top-centre of the drag bbox, base along the bottom edge.
+                float x1 = X(d.T1), y1 = f.ScaleY(d.P1);
+                float x2 = X(d.T2), y2 = f.ScaleY(d.P2);
+                var rect = ChartGeometry.ShapeRect(false, x1, y1, x2, y2);
+                var tri = new PathF();
+                tri.MoveTo(rect.Center.X, rect.Top);
+                tri.LineTo(rect.Left, rect.Bottom);
+                tri.LineTo(rect.Right, rect.Bottom);
+                tri.Close();
+                if (d.Style.Fill is Color fill)
+                {
+                    canvas.FillColor = fill.WithAlpha(Math.Clamp(d.Style.FillOpacity, 0f, 1f));
+                    canvas.FillPath(tri);
+                }
+                canvas.StrokeColor = color;
+                canvas.StrokeSize = stroke;
+                canvas.StrokeDashPattern = dashPattern;
+                canvas.DrawPath(tri);
+                if (selected)
+                {
+                    DrawHandle(canvas, t, x1, y1, color);
+                    DrawHandle(canvas, t, x2, y2, color);
+                }
+            }
             else if (d.Kind == DrawTool.Freehand)
             {
                 // Free-drawn brush: a captured point path rounded by the pen's Smoothing, in the pen's width
