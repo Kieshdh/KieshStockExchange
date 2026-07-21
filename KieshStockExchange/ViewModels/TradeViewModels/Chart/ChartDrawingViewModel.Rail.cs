@@ -54,7 +54,7 @@ public partial class ChartDrawingViewModel
     // Shapes; the combined Draw group ("drawing" key) holds the brush + text tools. Alert lives on the toolbar.
     private static bool LinesGroupContains(DrawTool t) => t is DrawTool.Trend or DrawTool.Ray
         or DrawTool.ExtendedLine or DrawTool.HLine or DrawTool.HRay or DrawTool.VLine
-        or DrawTool.Polyline;
+        or DrawTool.Polyline or DrawTool.Crossline;
     private static bool ShapesGroupContains(DrawTool t) => t is DrawTool.Arrow or DrawTool.Rectangle or DrawTool.Ellipse;
     private static bool DrawingGroupContains(DrawTool t) => t is DrawTool.Freehand or DrawTool.Text or DrawTool.Comment;
     private static bool PositionGroupContains(DrawTool t) => t is DrawTool.Position
@@ -69,6 +69,7 @@ public partial class ChartDrawingViewModel
         DrawTool.HLine => "tool_hline.png",
         DrawTool.HRay => "tool_hray.png",
         DrawTool.VLine => "tool_vline.png",
+        DrawTool.Crossline => "tool_hline.png",   // TODO: dedicated tool_crossline.png asset
         DrawTool.Polyline => "tool_polyline.png",
         DrawTool.Alert => "tool_alert.png",
         DrawTool.Text => "tool_text.png",

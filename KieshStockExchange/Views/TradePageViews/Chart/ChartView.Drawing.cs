@@ -89,8 +89,9 @@ public partial class ChartView
             _ when d.Kind == DrawTool.HLine => d with { P1 = price },
             // Alert is a horizontal level like HLine — a body-drag moves its price only.
             _ when d.Kind == DrawTool.Alert => d with { P1 = price },
-            // Text/Comment are single-anchor — a body-drag moves the whole anchor (both time + price).
-            _ when d.Kind == DrawTool.Text || d.Kind == DrawTool.Comment => d with { T1 = time, P1 = price },
+            // Text/Comment/Crossline are single-anchor — a body-drag moves the whole anchor (time + price).
+            _ when d.Kind == DrawTool.Text || d.Kind == DrawTool.Comment || d.Kind == DrawTool.Crossline
+                => d with { T1 = time, P1 = price },
             _ when d.Kind == DrawTool.VLine => d with { T1 = time },
             _ when d.Kind == DrawTool.Polyline || d.Kind == DrawTool.Freehand
                 => ShiftPoints(d, time - _drawDragStartTime, price - _drawDragStartPrice),

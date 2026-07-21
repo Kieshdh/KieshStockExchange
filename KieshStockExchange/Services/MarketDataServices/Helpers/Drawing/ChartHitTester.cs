@@ -61,6 +61,16 @@ internal sealed class ChartHitTester
                 if (p.X >= frame.Plot.Left && p.X <= frame.Plot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }
+            else if (d.Kind == DrawTool.Crossline)
+            {
+                // Cross: hit if near the horizontal (at P1) OR the vertical (at T1).
+                float cy = frame.HitPriceToPixelY(d.P1), cx = frame.TimeToPixelX(d.T1);
+                bool onH = cy >= frame.Plot.Top && cy <= frame.Plot.Bottom
+                    && p.X >= frame.Plot.Left && p.X <= frame.Plot.Right && Math.Abs(p.Y - cy) <= DrawHitTol;
+                bool onV = cx >= frame.Plot.Left && cx <= frame.Plot.Right
+                    && p.Y >= frame.Plot.Top && p.Y <= frame.Plot.Bottom && Math.Abs(p.X - cx) <= DrawHitTol;
+                if (onH || onV) return (d, DrawingHitPart.Body);
+            }
             else if (d.Kind == DrawTool.Text)
             {
                 // Text label: hit anywhere inside the plain-text bounds at the anchor. The rect MUST mirror

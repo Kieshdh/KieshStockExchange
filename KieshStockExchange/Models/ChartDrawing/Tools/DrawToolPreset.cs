@@ -34,7 +34,7 @@ public static class DrawToolPresets
         // dash only. Ray + HRay run to infinity ONE way and ExtendedLine BOTH ways, so — like H/V lines — none
         // carry a head/arrow at a terminus that isn't there.
         DrawTool.HLine or DrawTool.HRay or DrawTool.Ray or DrawTool.VLine or DrawTool.ExtendedLine
-            or DrawTool.Alert or DrawTool.FibRetracement =>
+            or DrawTool.Alert or DrawTool.FibRetracement or DrawTool.Crossline =>
             new(DrawStyle.Default,
                 ShowStroke: true, ShowWidth: true, ShowFillColor: false, ShowOpacity: false, ShowDash: true,
                 ShowEnding: false, ShowHead: false, ShowText: false, ShowPosition: false,

@@ -116,15 +116,15 @@
                     IsVisible="{Binding CanZoomOut}"
                     Command="{Binding ZoomOutViewportCommand}" />
 
-            <!-- Undo / redo / eye — actions (undo/redo grey out on empty history; eye highlights while hidden). -->
-            <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" HorizontalOptions="Start" WidthRequest="32" />
+            <!-- Delete-all · undo · redo — actions; then Hide (eye). Divider width matches the first splitter. -->
+            <BoxView HeightRequest="1" Color="{StaticResource ChartGrid}" Margin="2,1" HorizontalOptions="Start" WidthRequest="42" />
+            <!-- Delete-all — opens a Delete last / Delete all / Cancel sheet (spares locked). TODO tool_delete.png icon. -->
+            <Button Text="🗑" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
+                    Command="{Binding DeleteAllCommand}" />
             <Button ImageSource="tool_undo.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
                     Command="{Binding UndoCommand}" />
             <Button ImageSource="tool_redo.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
                     Command="{Binding RedoCommand}" />
-            <!-- Delete-all — opens a Delete last / Delete all / Cancel sheet (spares locked). TODO tool_delete.png icon. -->
-            <Button Text="🗑" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
-                    Command="{Binding DeleteAllCommand}" />
             <Button ImageSource="tool_eye.png" Style="{StaticResource PenToolTile}" HorizontalOptions="Start"
                     Command="{Binding ToggleDrawingsHiddenCommand}">
                 <Button.Triggers>

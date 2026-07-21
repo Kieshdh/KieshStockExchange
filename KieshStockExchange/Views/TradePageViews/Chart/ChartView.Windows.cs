@@ -244,9 +244,10 @@ public partial class ChartView
                 return;
             }
             if (_vm.Drawing.DrawTool == DrawTool.HLine || _vm.Drawing.DrawTool == DrawTool.HRay
-                || _vm.Drawing.DrawTool == DrawTool.VLine || _vm.Drawing.DrawTool == DrawTool.Alert)
+                || _vm.Drawing.DrawTool == DrawTool.VLine || _vm.Drawing.DrawTool == DrawTool.Alert
+                || _vm.Drawing.DrawTool == DrawTool.Crossline)
             {
-                // One-click lines (HLine/HRay/Alert at a price, VLine at a time). After placing: revert to the
+                // One-click lines (HLine/HRay/Alert at a price, VLine at a time, Crossline at both). After placing: revert to the
                 // cursor tool + auto-select the new line so its settings pop up (TradingView one-shot flow).
                 _vm.Drawing.AddDrawing(new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
                 FinishPlacement(id);

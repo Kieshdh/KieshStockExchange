@@ -311,6 +311,17 @@ internal sealed class DrawingRenderer
                 DrawGutterPriceTag(canvas, t, plot, y, d.P1, alertColor, cur);
                 if (selected) DrawHandle(canvas, t, plot.Left + 1f, y, alertColor);
             }
+            else if (d.Kind == DrawTool.Crossline)
+            {
+                // Combined cross: a horizontal line at P1 across the plot + a vertical line at T1 down it.
+                float cy = Y((double)d.P1), cx = X(d.T1);
+                canvas.StrokeColor = color; canvas.StrokeSize = stroke; canvas.StrokeDashPattern = dashPattern;
+                if (cy >= plot.Top && cy <= plot.Bottom) canvas.DrawLine(plot.Left, cy, plot.Right, cy);
+                if (cx >= plot.Left && cx <= plot.Right) canvas.DrawLine(cx, plot.Top, cx, plot.Bottom);
+                canvas.StrokeDashPattern = null;
+                if (cy >= plot.Top && cy <= plot.Bottom) DrawGutterPriceTag(canvas, t, plot, cy, d.P1, color, cur);
+                if (selected) DrawHandle(canvas, t, cx, cy, color);
+            }
             else if (d.Kind == DrawTool.Text)
             {
                 // Anchored PLAIN label: text drawn in the PEN COLOUR at the (T1,P1) anchor, LEFT edge at the
