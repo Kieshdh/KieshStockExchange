@@ -1,5 +1,14 @@
 # Deploy runbook — Phase 7e
 
+> **★ STANDING PROD-PUSH AUTHORIZATION (Kiesh, 2026-07-22).** Claude has Kiesh's **full standing permission to push anything
+> to production** — deploy code, flip config/env levers, run migrations, restart the server — **on ONE condition: the llm-council
+> must green-light that specific change first** (the council's agreement IS the go; Kiesh does not need to approve each push
+> individually). With a council green light, proceed autonomously: push to prod, monitor, and run local A/B soaks as needed.
+> Non-negotiable guardrails that still apply every time: **CK = 0 is a HARD gate** (never ship an unvalidated change — CK-soak a
+> combined branch first); **always deploy with `--env-file .env.production`** (without it the secrets blank → SigningKey error →
+> crash-loop); prefer reversible env-override changes and keep a backup of the live compose for instant rollback; and any change
+> the council does NOT bless is NOT authorized. This note exists so Kiesh doesn't have to restate the permission each time.
+
 Host-agnostic steps for a Linux VM. Primary target: Oracle Cloud Always Free ARM
 (Ampere A1), Ubuntu 24.04; documented fallback if its network storage throttles the
 write path: Hetzner CAX31 (same arm64 image, local NVMe). Self-hosted Postgres +
