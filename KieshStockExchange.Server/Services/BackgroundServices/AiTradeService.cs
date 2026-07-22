@@ -858,6 +858,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         trendTakerCoupling:       _configuration.GetValue("Bots:TrendFollower:TakerCoupling", false),
                         trendTakerThreshold:      _configuration.GetValue("Bots:TrendFollower:TakerThreshold", 0.05m),
                         trendSharedChaseWeight:   _configuration.GetValue("Bots:TrendFollower:SharedChaseWeight", 0m),
+                        // §regime-taker (Change 3): route the RegimeDrift walk to taker flow. Default-off = byte-identical.
+                        regimeTakerCoupling:      _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerCoupling", false),
+                        regimeTakerThreshold:     _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerThreshold", 0.15m),
+                        regimeTakerStrength:      _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerStrength", 0m),
+                        regimeTakerCohortFraction:      _configuration.GetValue("Bots:Sentiment:RegimeDrift:CohortFraction", 0.3m),
+                        regimeTakerContrarianFraction:  _configuration.GetValue("Bots:Sentiment:RegimeDrift:ContrarianFraction", 0.2m),
                         dipBuyStrength:      _configuration.GetValue("Bots:DipBuyStrength", 0m),
                         valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
                         overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),

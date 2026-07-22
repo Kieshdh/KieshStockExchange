@@ -536,6 +536,11 @@ internal sealed class BotSentimentService
     /// </summary>
     internal decimal GlobalSignal() => (decimal)(_globalSum + _globalShock);
 
+    // §regime-taker (Change 3): the per-stock RegimeDrift walk value in [-Cap,Cap] (~±0.5), exposed so the
+    // decision path can route it to TAKER flow (positive regime → buy takers → price up; negative → sell) rather
+    // than only the book-absorbed buyProb tilt at line 372. Lock-free dict read; advances NO RNG (like GlobalSignal).
+    internal decimal RegimeSignal(int stockId) => (decimal)_regime.GetValueOrDefault(stockId);
+
     /// <summary>
     /// Sentiment-dynamics §: the EWMA slope ds = d(sentiment)/dt for a stock — fast timescale when
     /// <paramref name="fast"/> is true, slow otherwise. 0 when the feature is disabled or the stock is

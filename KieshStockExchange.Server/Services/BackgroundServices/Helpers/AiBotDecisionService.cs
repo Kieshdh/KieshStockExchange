@@ -167,6 +167,13 @@ internal sealed class AiBotDecisionService
     private readonly decimal _trendContrarianFraction;
     private readonly bool    _trendTakerCoupling;
     private readonly decimal _trendTakerThreshold;
+    // §regime-taker (Change 3): route the per-stock RegimeDrift walk to TAKER flow (mirror the trend taker
+    // coupling, post-pick per-stock). Coupling off / Strength 0 ⇒ no draw ⇒ byte-identical + RNG-stream-identical.
+    private readonly bool    _regimeTakerCoupling;
+    private readonly decimal _regimeTakerThreshold;
+    private readonly decimal _regimeTakerStrength;
+    private readonly decimal _regimeTakerCohortFraction;
+    private readonly decimal _regimeTakerContrarianFraction;
     // §shared-factor taker chase (cross-stock correlation): the same taker-flow idea on the SHARED global signal —
     // when it is strong, cohort members across ALL stocks aggress the same direction at once ⇒ fleet-wide correlated
     // flow. Weight 0 ⇒ off ⇒ byte-identical.
@@ -288,6 +295,9 @@ internal sealed class AiBotDecisionService
     private const int TrendSalt           = 0x7A3D;
     private const int TrendContrarianSalt = 0x3C9E;
     private const int TrendStaggerSalt    = 0x1B57;
+    // §regime-taker (Change 3): independent salts for the cohort-membership + contrarian draws.
+    private const int RegimeTakerCohortSalt = 0x5D21;
+    private const int RegimeContrarianSalt  = 0x6E4F;
     // §reaction-persistence: distinct salt for the per-bot persistence half-life draw (call-order-independent
     // HashUnit01, advances no RNG), so the persistence clock is uncorrelated with any cohort membership / cadence.
     private const int PersistHalfLifeSalt = 0x2F6B;
@@ -400,6 +410,9 @@ internal sealed class AiBotDecisionService
         decimal trendStrength = 0m, decimal trendContrarianFraction = 0.2m,
         bool trendTakerCoupling = false, decimal trendTakerThreshold = 0.05m,
         decimal trendSharedChaseWeight = 0m,
+        bool regimeTakerCoupling = false, decimal regimeTakerThreshold = 0.15m,
+        decimal regimeTakerStrength = 0m, decimal regimeTakerCohortFraction = 0.3m,
+        decimal regimeTakerContrarianFraction = 0.2m,
         decimal dipBuyStrength = 0m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal absoluteCapMax = 0m,
@@ -559,6 +572,11 @@ internal sealed class AiBotDecisionService
         _trendTakerCoupling      = trendTakerCoupling;
         _trendTakerThreshold     = Math.Max(0m, trendTakerThreshold);
         _trendSharedChaseWeight  = Math.Max(0m, trendSharedChaseWeight);
+        _regimeTakerCoupling          = regimeTakerCoupling;
+        _regimeTakerThreshold         = Math.Max(0m, regimeTakerThreshold);
+        _regimeTakerStrength          = Math.Max(0m, regimeTakerStrength);
+        _regimeTakerCohortFraction    = Clamp01(regimeTakerCohortFraction);
+        _regimeTakerContrarianFraction = Clamp01(regimeTakerContrarianFraction);
         _valueTargetSelection = valueTargetSelection;
         _overheatCap        = Math.Max(0m, overheatCap);
         _absoluteCapMax     = Math.Max(0m, absoluteCapMax);
@@ -835,6 +853,30 @@ internal sealed class AiBotDecisionService
             {
                 type = IsBuyOrder(type) ? OrderType.LimitBuy : OrderType.LimitSell;
                 ActivityCompositionProbe.RecordDowngrade();
+            }
+        }
+
+        // §regime-taker override (Change 3): route the per-stock RegimeDrift walk to TAKER flow. POST-PICK (the chosen
+        // stock is known here; pre-pick watchlist-mean dilutes the INDEPENDENT per-stock walk to ~1/√N noise). With prob
+        // ∝ Strength·|regime| a cohort member CROSSES THE SPREAD in the regime direction (positive → buy taker → price up;
+        // negative → sell) — the buyProb tilt at BotSentimentService:372 is KEPT (the "combination"). A sell flip with no
+        // inventory degrades to a SKIP (no naked short, mirrors ApplyExtremeReaction). Value-band veto below is the per-tick
+        // over-extension brake. Gate short-circuits before ctx.Decimal01 ⇒ off = byte-identical + RNG-stream-identical.
+        if (!isChase && _regimeTakerCoupling && _regimeTakerStrength > 0m && user.Strategy != AiStrategy.MarketMaker)
+        {
+            var rsig = _sentiment.RegimeSignal(stockId);
+            if (Math.Abs(rsig) >= _regimeTakerThreshold &&
+                BotMath.HashUnit01(user.AiUserId ^ RegimeTakerCohortSalt) < (double)_regimeTakerCohortFraction)
+            {
+                var contrarian = BotMath.HashUnit01(user.AiUserId ^ RegimeContrarianSalt) < (double)_regimeTakerContrarianFraction;
+                var (over, _, buy) = TrendTakerDecision(rsig, _regimeTakerStrength, contrarian,
+                                                        ctx.Decimal01(user.AiUserId), _regimeTakerThreshold);
+                if (over)
+                {
+                    if (buy) type = OrderType.SlippageMarketBuy;
+                    else if ((_accounts.GetPosition(user.UserId, stockId)?.Quantity ?? 0) > 0)
+                        type = OrderType.SlippageMarketSell;   // no inventory ⇒ leave type as-is (skip the sell flip)
+                }
             }
         }
 
