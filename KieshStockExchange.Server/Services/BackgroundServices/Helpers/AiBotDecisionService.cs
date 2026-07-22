@@ -174,6 +174,11 @@ internal sealed class AiBotDecisionService
     private readonly decimal _regimeTakerStrength;
     private readonly decimal _regimeTakerCohortFraction;
     private readonly decimal _regimeTakerContrarianFraction;
+    // §μ-engine B (nominal-growth updrift): a small POSITIVE bias added to the regime signal the taker gate sees, so the
+    // spread-crossing cohort skews net-BUY (more buy-takers, fewer sell-takers) = a persistent taker imbalance = the μ term
+    // of P=P+μ+σε. Applied to the TAKER decision only (the buyProb sentiment at BotSentimentService:372 is untouched, so σ
+    // and mean-reversion are unchanged). 0 ⇒ byte-identical. Tunable = the drift-rate dial.
+    private readonly decimal _regimeTakerBias;
     // §shared-factor taker chase (cross-stock correlation): the same taker-flow idea on the SHARED global signal —
     // when it is strong, cohort members across ALL stocks aggress the same direction at once ⇒ fleet-wide correlated
     // flow. Weight 0 ⇒ off ⇒ byte-identical.
@@ -412,7 +417,7 @@ internal sealed class AiBotDecisionService
         decimal trendSharedChaseWeight = 0m,
         bool regimeTakerCoupling = false, decimal regimeTakerThreshold = 0.15m,
         decimal regimeTakerStrength = 0m, decimal regimeTakerCohortFraction = 0.3m,
-        decimal regimeTakerContrarianFraction = 0.2m,
+        decimal regimeTakerContrarianFraction = 0.2m, decimal regimeTakerBias = 0m,
         decimal dipBuyStrength = 0m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal absoluteCapMax = 0m,
@@ -577,6 +582,7 @@ internal sealed class AiBotDecisionService
         _regimeTakerStrength          = Math.Max(0m, regimeTakerStrength);
         _regimeTakerCohortFraction    = Clamp01(regimeTakerCohortFraction);
         _regimeTakerContrarianFraction = Clamp01(regimeTakerContrarianFraction);
+        _regimeTakerBias              = regimeTakerBias;   // signed; + = net-up μ (no clamp — a small positive value)
         _valueTargetSelection = valueTargetSelection;
         _overheatCap        = Math.Max(0m, overheatCap);
         _absoluteCapMax     = Math.Max(0m, absoluteCapMax);
@@ -864,7 +870,9 @@ internal sealed class AiBotDecisionService
         // over-extension brake. Gate short-circuits before ctx.Decimal01 ⇒ off = byte-identical + RNG-stream-identical.
         if (!isChase && _regimeTakerCoupling && _regimeTakerStrength > 0m && user.Strategy != AiStrategy.MarketMaker)
         {
-            var rsig = _sentiment.RegimeSignal(stockId);
+            // §μ-engine B: shift the signal up by the bias so the gate/direction skew net-BUY (promotes buy-takers just
+            // over the +threshold, suppresses sell-takers just under −threshold) = persistent net-up taker imbalance. 0 = no-op.
+            var rsig = _sentiment.RegimeSignal(stockId) + _regimeTakerBias;
             if (Math.Abs(rsig) >= _regimeTakerThreshold &&
                 BotMath.HashUnit01(user.AiUserId ^ RegimeTakerCohortSalt) < (double)_regimeTakerCohortFraction)
             {

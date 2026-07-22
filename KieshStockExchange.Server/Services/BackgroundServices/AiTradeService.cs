@@ -864,6 +864,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         regimeTakerStrength:      _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerStrength", 0m),
                         regimeTakerCohortFraction:      _configuration.GetValue("Bots:Sentiment:RegimeDrift:CohortFraction", 0.3m),
                         regimeTakerContrarianFraction:  _configuration.GetValue("Bots:Sentiment:RegimeDrift:ContrarianFraction", 0.2m),
+                        regimeTakerBias:  _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerBias", 0m),
                         dipBuyStrength:      _configuration.GetValue("Bots:DipBuyStrength", 0m),
                         valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
                         overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),
