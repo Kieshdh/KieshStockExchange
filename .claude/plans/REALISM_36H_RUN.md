@@ -74,7 +74,12 @@ an on-target market (burst-council lesson).
 ## ★★★★ PORTFOLIO BUILD+TEST PLAN — GREEN-LIT (Kiesh: "build all of them, you test it, THEN I look" + portfolio council 2026-07-23)
 Council (5-lens→chairman, 6 agents): **BUILD ALL 5.** F1/F2/F4/F5 sign off BY METRICS ALONE; **F3 needs Kiesh's ONE eyeball** (cosmetic — a
 wick-ratio gate proves "no harm", never "prettier"). **BUILD + A/B ORDER (attribution — never co-enable F1/F2/F5 during their solo soaks):**
-1. **F1 StockProfile** (sector+size 5-knob) — ✅ **BUILT + GREEN + COMMITTED `0835aa7`** (748 tests, OFF==legacy byte-identical PROVEN, CK=0 by construction; flag `Bots:Personality:SectorSizeModel` default false). 5 files: StockProfileService.cs (model), AiTradeService:381 (ctor), AiBotDecision:2074 (VolumeMult line), ExogShock:129+NewsRepeats (NewsFreq thinning), appsettings. NEXT = **solo A/B** vs fresh OFF (arm sets SectorSizeModel=true; gates in the METRIC GATES row below).
+1. **F1 StockProfile** (sector+size 5-knob) — ✅ **BUILT + GREEN + COMMITTED `0835aa7`+`25fc08f`** (749 tests, OFF==legacy byte-identical PROVEN, CK=0 by
+  construction; flag `Bots:Personality:SectorSizeModel` default false). 5 files: StockProfileService.cs, AiTradeService:381, AiBotDecision:2074
+  (VolumeMult line), ExogShock:129+NewsRepeats, appsettings. **★ FINDING: `SharesOutstanding=0` fleet-wide (prod AND soak seed — migrated, never
+  seeded)** → size axis was inert; FIXED to rank by **SeedPrice** (`×max(shares,1)`, auto-upgrades to marketcap if shares ever seeded). SURFACE TO
+  KIESH: size = seed-price proxy (high=blue-chip). **A/B SOAK RUNNING** (45m, launched ~20:15 local): OFF=legacy personality (port 5080 kse_soak_f1off)
+  vs ON=SectorSizeModel (port 5083 kse_soak_f1on), news ON both, arms in scratchpad/arm-f1-{off,on}.ps1. Analyze on completion: gates in METRIC row below.
 2. **F5 MarketPulse** (already coded `6ba7650`, flag `...:MarketPulse:Enabled`, needs TakerCoupling+TakerStrength>0) — **solo A/B** vs fresh OFF (isolate the momentum lever).
 3. **F2 VolumeRotation** — BUILD default-off, A/B with **F1 held ON as baseline** (measure the delta F2 adds; it redistributes F1's size coupling).
 4. **F1+F5 combined** confirmation soak — sole job = ret_acf (stacking momentum on a livelier tape can drag lag-1 toward 0 while still in-band; gate ret_acf within OFF ±0.05, NOT just band-pass).
@@ -142,9 +147,9 @@ now confirms Q7 stays 0 + phantom clears. NOTE: MarketPulse + log-sym suite + §
   ret_acf = per-min VWAP from Transactions (Close-basis reads more negative). TUNE TRIGGERS if a REAL high emerges: Close/VWAP ret_acf → −0.4 (too
   mean-reverting/bouncy) ⇒ small trend-follower/momentum nudge; moves systemically >3-4% or any >5% creeping ⇒ small RegimeTaker-strength trim.
   CALIBRATION Q for Kiesh: which readout/basis/stock shows "high"? (VWAP −0.04 vs Close −0.24 differ.)
-- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET, drift STABLE near 0:** @19:32 drift 6h **+0.096** (flat; trend −0.502→+0.014→+0.096 = the dip fully
-  recovered, now 2 positive cycles, stable ~0 with a slight positive lean). ret_acf VWAP **−0.056** (on-target band). Moves calm (45m max 2.31, zero
-  >4/>5% 3h). Healthy, Q7=0. ⇒ HOLD (0 consecutive negative; no trigger). |ret_acf|<0.2, moves calm — do NOT tune. Focus = F1 build (portfolio green-lit).
+- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET, drift oscillating ~0:** @20:13 drift 6h **−0.061** (flat; trend +0.014→+0.096→−0.061 = bouncing around 0,
+  1 slightly-neg after 2 pos, no consecutive negatives). ret_acf VWAP **−0.006** (near 0, well within |ret_acf|<0.2; not >+0.05 so no cut-trigger). Moves
+  calm (45m max 2.96, zero >4/>5% 3h). Healthy, Q7=0. ⇒ HOLD, no trigger. Focus = BUILD (F1 ✅ built+green `0835aa7`; next = F1 solo A/B soak).
 - **★ (prior) CLEAN DRIFT + ret_acf — ON-TARGET, HOLDING; ret_acf is NOISY not trending:** drift 6h +0.109→+0.003→+0.054→**−0.014** (@13:27, oscillating ~0,
   dispersion alive). **ret_acf VWAP −0.044→−0.016→+0.012→−0.150** = NOISY/oscillating in [−0.15,+0.01], centered near the §1 −0.1 target, NO real trend
   (last cycle's +0.012 "climb" was noise — 2h/35-stock estimates bounce ±0.1/cycle; correctly did NOT tune on it). Tape very calm (45m max 1.97, zero
