@@ -1,4 +1,10 @@
-# VOLUME / HOT-STOCK ROTATION PLAN — different hot stocks every day / 4h window
+# VOLUME / HOT-STOCK ROTATION PLAN (F2) — different hot stocks every day / 4h window
+
+**★ STATUS (2026-07-24): F2 = NEXT REALISM BUILD. DESIGNED (see CORRECTED section) → AUTHORIZED to build+test+A/B+council+PROD
+(Kiesh full authorization; NOT F3 so prod OK after council). Design of record = the "CORRECTED design" below (rotation STAYS +
+weak HTF-sentiment TILT; combine the two systems, use sentiment a bit, WEAK; direction-neutral SIZE coupling; default-off flag
+`Bots:Activity:HotRotation:Enabled`). Build default-off → local A/B (F1×F2 attribution: F2 baseline = F1-ON; compound-cap
+VolumeMult×H≤SIZE cap) → council → prod. The hash-rotation design further below STANDS as the base mechanism the tilt rides on.**
 
 ## ★★★ KIESH REDIRECT (2026-07-23) — WEAK + SENTIMENT-DRIVEN + UNIFY (supersedes the hash-rotation design below)
 Kiesh: "VolumeRotation is not as important as the others — make its effect pretty WEAK. Sentiment should be the MAIN

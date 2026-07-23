@@ -1,7 +1,12 @@
 # STOCKPROFILE — SECTOR-DRIVEN + SIZE-DERIVED personality (5 knobs) — ULTRADESIGN fire prompt
 
-**Status: ULTRADESIGN COMPLETE (feasibility → 3 architects → 5-lens council → chairman, 2026-07-23). Design-of-record below.
-BUILD held for Kiesh's final say (he invoked `/ultradesign` = design first). Default-OFF + local A/B soak are pre-authorized
+**★★ STATUS (2026-07-24): F1 BUILT + A/B PASSED + COUNCIL-CLEARED (6/6 ship-as-built) → PROD-ELIGIBLE (Kiesh full authorization).**
+Commits `0835aa7` (feature) + `25fc08f` (SeedPrice size fix — SharesOutstanding=0 fleet-wide). 749 tests, OFF==legacy byte-identical
+PROVEN, CK=0. Flag `Bots:Personality:SectorSizeModel` (default false). A/B soak result: dispersion +50%, volume≠move (corr 0.124≤0.15),
+size↔notional-vol ρ 0.287 ON vs 0.105 OFF (2.7× control; κVol FROZEN at 0.35 — council: bumping spends volume≠move for a non-gate),
+tech news 3.49× vs 1.63× (λ-conserved), ret_acf −0.033→−0.108 (toward §1 target). PROD WATCH-NOTE: confirm corr(notional,|ret|)<0.15 +
+ret_acf tracks VolumeMult on live batch. NEXT: F1+F5 combined ret_acf confirm soak → deploy default-off + reversible-env prod A/B flip.
+The design-of-record below is AS-BUILT. — (historical) Default-OFF + local A/B soak were pre-authorized
 ("design it, default off, soaktest it"); PROD needs a council green-light. This SUPERSEDES the earlier hash-only 4th-knob draft.**
 
 Owner intent (Kiesh, 2026-07-23): *"Give sectors some of this data, then let individual stocks derive their value randomly

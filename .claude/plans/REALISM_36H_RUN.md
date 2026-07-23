@@ -1,5 +1,28 @@
 # REALISM 36-HOUR AUTONOMOUS A/B RUN — async hub (STATUS = crash-recovery anchor, read FIRST)
 
+## ★★★★★ CHECKPOINT — FEATURE ARCS & PLANNING (2026-07-24, SOURCE OF TRUTH; read this block FIRST)
+**KIESH FULL AUTHORIZATION (2026-07-24):** build+test EVERYTHING autonomously → local test/soak → **council decides → PUSH TO
+PROD**, for EVERYTHING **EXCEPT F3**. F3 = build+test+council+**SHOW CHARTS IN THIS CHAT**, then **HOLD prod for his EYEBALL**
+(he's back at his PC "tomorrow or the day after"). Standing processes: council after EVERY soak ([[feedback_council_after_each_soak]]);
+council green-light = his green-light ([[feedback_prod_push_council_authorization]]); iteration calls are mine; ALWAYS
+`--env-file .env.production`; CK=0 HARD gate. Prod deploy recipe = cherry-pick→master→box: backup compose → git checkout compose →
+git pull --ff-only → RESTORE compose byte-identical → `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up -d --build server` → verify.
+
+**FEATURE ARCS — status + arc file + next (each arc file is self-contained; this table is the index):**
+| Arc | Arc file (docs/plans/) | Status | Next |
+|---|---|---|---|
+| **F1 StockProfile** (sector×size×jitter, 5 knobs) | `STOCKPROFILE_VOLUME_KNOB_PLAN.md` | ✅ BUILT+CLEARED (council 6/6 ship-as-built) `0835aa7`+`25fc08f`, 749 tests, CK=0, default-off `Bots:Personality:SectorSizeModel` | prod-eligible (deploy default-off + flip for live A/B; do F1+F5 combined ret_acf confirm first) |
+| **F5 MarketPulse** (taker-rate step oscillator) | *(no plan file — coded `6ba7650`)* | ✅ CLEARED-on-metrics default-off (council+code-check: drift=noise). Flag `Bots:Sentiment:RegimeDrift:MarketPulse:Enabled` | prod-eligible; Kiesh EYEBALL for "breathe" feel; 3-seed amplitude check gated to any default-ON flip |
+| **F2 VolumeRotation** | `VOLUME_ROTATION_PLAN.md` (CORRECTED section) | 📐 DESIGNED (rotation STAYS + weak HTF-sentiment tilt; combine, use sentiment a bit, WEAK; direction-neutral SIZE coupling) | BUILD default-off → A/B → council → prod |
+| **F4 MVVM restructure** | `MVVM_FOLDER_RESTRUCTURE_PLAN.md` | 📐 DESIGNED (pure refactor; gate=build+tests+launch, no soak) | BUILD → council → prod (after realism features) |
+| **F3 Candle naturalization** | `CANDLE_NATURALIZATION_PLAN.md` | 📐 DESIGNED + Kiesh spec (follow old price + new-economies texture + trim + recompute mood/F&G + continuity) | ★ LAST. build+test+council+CHARTS-IN-CHAT, **HOLD prod for Kiesh eyeball** |
+| **Candle cache/loading** (NOT an F arc — separate live-bug fix) | `CANDLE_CACHE_PLAN.md` (+ `EXCHANGE_CANDLE_RESEARCH.md`) | 🔨 step1 fillGaps-default BUILT `b5a90ae` (held, not deployed); steps 2-7 designed | BUILD steps 2-7 (interior-hole, serve-stale, client CandleCache, live-merge, reconnect, seam-fix) → council → prod |
+
+**BUILD ORDER (autonomous):** candle steps 2-3 (+ validate) → F2 (build→A/B→council→prod) → F1+F5 combined ret_acf confirm → deploy F1+F5 to prod → client candle cache steps 4-6 + seam step7 → F4 → **F3 LAST** (charts-in-chat, hold). Attribution rule: never co-enable F1/F2/F5 during a solo soak; F1×F2 compound-cap `VolumeMult×H≤SIZE cap`; F1+F5 combined ret_acf must stay OFF±0.05.
+**BATCH-EYEBALL WATCH-NOTES for prod:** F1 — confirm corr(notional,|ret|)<0.15 + ret_acf tracks VolumeMult; F5 — 3-seed drift check before default-ON.
+---
+
+
 **Goal:** unpin the simulated market (prices frozen ~20% below seed; MSFT ~510 vs seed 639) and give it realistic
 **persistent** price movement. Window: started **2026-07-21 23:36 (+0200)**, **EXTENDED (Kiesh 2026-07-23 02:42) to ~Sat/Sun
 2026-07-25/26 13:00 (~81h; Kiesh said "Saturday 13:00 ~81h" — Sat 13:00=~58h vs 81h=Sun 07-26 11:42, took the LATER; the
@@ -165,9 +188,10 @@ now confirms Q7 stays 0 + phantom clears. NOTE: MarketPulse + log-sym suite + §
   ret_acf = per-min VWAP from Transactions (Close-basis reads more negative). TUNE TRIGGERS if a REAL high emerges: Close/VWAP ret_acf → −0.4 (too
   mean-reverting/bouncy) ⇒ small trend-follower/momentum nudge; moves systemically >3-4% or any >5% creeping ⇒ small RegimeTaker-strength trim.
   CALIBRATION Q for Kiesh: which readout/basis/stock shows "high"? (VWAP −0.04 vs Close −0.24 differ.)
-- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET, drift stable positive-lean:** @22:14 drift 6h **+0.235** (flat positive; trend +0.118→+0.090→+0.235, stable
-  positive, no consecutive negatives). ret_acf VWAP **−0.059** (in-band). Moves VERY calm (45m max 2.43, zero >3% 3h). Healthy, Q7=0. ⇒ HOLD, no trigger.
-  ★ F1 ✅ + F5 ✅ both CLEARED (councils). Next BUILD = candle-cache steps 1-3 (live prod bug fixes) + F2 (rotation+HTF-sentiment tilt, default-off).
+- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET, drift oscillating ~0:** @22:54 drift 6h **−0.032** (flat; trend +0.090→+0.235→−0.032, 1 slight-neg after 2 pos,
+  no consecutive negatives). ret_acf VWAP **−0.084** (in-band). Moves VERY calm (45m max 1.38, zero >3% 3h). Healthy, Q7=0. ⇒ HOLD, no trigger.
+  ★★ KIESH FULL AUTHORIZATION (2026-07-24): BUILD+TEST all autonomously → soak → council → PUSH TO PROD (council decides) for EVERYTHING EXCEPT F3.
+  F3 = build+test+council+SHOW-CHARTS-IN-CHAT, HOLD prod for his EYEBALL (back at PC tomorrow/day-after). Next BUILD = candle steps 2-3 + F2.
 - **★ (prior) CLEAN DRIFT + ret_acf — ON-TARGET, HOLDING; ret_acf is NOISY not trending:** drift 6h +0.109→+0.003→+0.054→**−0.014** (@13:27, oscillating ~0,
   dispersion alive). **ret_acf VWAP −0.044→−0.016→+0.012→−0.150** = NOISY/oscillating in [−0.15,+0.01], centered near the §1 −0.1 target, NO real trend
   (last cycle's +0.012 "climb" was noise — 2h/35-stock estimates bounce ±0.1/cycle; correctly did NOT tune on it). Tape very calm (45m max 1.97, zero

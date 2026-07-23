@@ -1,6 +1,13 @@
 # CANDLE CACHE + SUBSCRIPTION — council design (research→explore→5-lens→chairman, 2026-07-23)
 
-**Status: DESIGN — council-approved, buildable. Owner (Kiesh) asked for this: client candle data 'often not loaded correctly', slow timeframe switches, rare missing candles + close[t]!=open[t+1]. Root cause = NO client cache + fillGaps ignored + seam bugs. Pairs with EXCHANGE_CANDLE_RESEARCH.md (Heikin-Ashi overlay = the 'average smooths' answer) and CANDLE_NATURALIZATION_PLAN.md (F3 — server aggregator is the ONE seam authority; F3 nudges Close, cache is transport-only).**
+**★ STATUS (2026-07-24): council-approved, buildable → AUTHORIZED to build+test+council+PROD (Kiesh; this is NOT F3 so prod OK after
+council). BUILD PROGRESS: step 1 (fillGaps default TRUE end-to-end) BUILT `b5a90ae` (CandleController by-stock-range now defaults
+fillGaps=true → flat-doji gaps; server compiles) — HELD, not deployed (needs local validation of the right-edge/live-bar interaction +
+council before prod). Steps 2-7 (interior-hole rebuild, serve-stale-not-blank, client CandleCache read-path, live-merge-all-resolutions =
+the "subscription", reconnect tail-refetch, seam source-fix) TODO — see Build order below.** Owner (Kiesh) asked for this: client candle
+data 'often not loaded correctly', slow timeframe switches, rare missing candles + close[t]!=open[t+1]. Root cause = NO client cache +
+fillGaps ignored + seam bugs. Pairs with EXCHANGE_CANDLE_RESEARCH.md (Heikin-Ashi overlay = the 'average smooths' answer) and
+CANDLE_NATURALIZATION_PLAN.md (F3 — server aggregator is the ONE seam authority; F3 nudges Close, cache is transport-only).**
 
 ## Current state (2-4 lines, from the maps)
 Server already caches 500 closed candles per `(stock,currency,resolution)` in the hot ring `_recent` (`CandleService.cs:40-41`) and pre-materializes all 7 resolutions at boot (`Program.cs:463-491`), so a second server cache buys nothing. The client has **no** history cache: one flat `List<Candle> _candleBuffer` (`ChartViewModel.Viewport.cs:20-21`) that is `Clear()`ed and fully re-fetched over HTTP on every stock/timeframe switch (`ChartViewModel.Stream.cs:94-96`, `SignalRCandleService.cs:152-170`). The wire already broadcasts *every* resolution's closes to the `quotes:` group but the client discards non-active ones (`MarketHubBroadcaster.cs:71`, `SignalRCandleService.cs:53-64`). `fillGaps` is silently dropped end-to-end (`SignalRCandleService.cs:161`, `CandleController.cs:42`), and failed HTTP fetches blank the chart (`SignalRCandleService.cs:168` → `Stream.cs:94`).

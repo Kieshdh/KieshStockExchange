@@ -1,7 +1,10 @@
 # MVVM FOLDER RESTRUCTURE PLAN — even + coherent file distribution
 
-**Status: DESIGN ONLY — awaiting Kiesh's final say. Do NOT move any files yet.** Produced by an independent
-MVVM-structure specialist + a 5-advisor council review. Owner ask: files are unevenly distributed (some
+**★ STATUS (2026-07-24): DESIGNED → AUTHORIZED to build+test+council+PROD (Kiesh full authorization; F4 is NOT F3 so prod push OK
+after council).** Pure behavior-neutral refactor; gate = build + full test suite (749) green + app launches + byte-identical candle
+diff on a fixed seed (NO market soak). Build order = one folder per commit, launch-verify each. Slot AFTER the realism features
+(F2, F1+F5 combined) per the runbook build order — F4 is disk-heavy + low-realism-value, so it clears the deck last-ish, not first.
+Produced by an independent MVVM-structure specialist + a 5-advisor council review. Owner ask: files are unevenly distributed (some
 folders near-empty, some 10+); make it more even AND idiomatic. Nothing under `/Tools` is touched.
 
 ---

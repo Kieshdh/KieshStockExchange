@@ -1,7 +1,12 @@
 # CANDLE NATURALIZATION PLAN — make the candle history flow more naturally
 
-**Status: DESIGN — BUILD LAST (Kiesh 2026-07-23: "do the changing of the old candle data last, so the current
-[new] model can show what the older candle flow should look like"). Produced via ultradesign (feasibility →
+**★★ STATUS (2026-07-24): F3 = THE ONE PROD EXCEPTION. Build + test + council + SHOW CHARTS IN CHAT — but HOLD the prod push for
+Kiesh's EYEBALL (he decides when back at his PC "tomorrow or the day after").** Kiesh: everything else can go to prod after council;
+F3 needs his eyes first because it's cosmetic/taste (a wick-ratio metric proves "no harm", never "prettier"). BUILD LAST (Kiesh: "do
+the changing of the old candle data last, so the current [new] model can show what the older candle flow should look like") — so its
+target texture is defined by the live F1/F2/F5 flow. Coordinate with `CANDLE_CACHE_PLAN.md` (server aggregator = the ONE open/close
+seam authority; F3 nudges Close then next Open re-seeds → continuity by construction) + `EXCHANGE_CANDLE_RESEARCH.md` (Heikin-Ashi
+overlay = the "average smooths" answer; keep raw OHLC authoritative; flat-doji no-trade minutes). Produced via ultradesign (feasibility →
 3 architects → 5-advisor council). Owner ask: some instances in the candle history look "ugly"; clean old
 candle data + make new candles born cleaner; "don't aggregate the bigger candles fully — use a different
 aggregation method." An existing wick-trimmer (v1) already ships.
