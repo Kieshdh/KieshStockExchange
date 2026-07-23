@@ -83,7 +83,11 @@ wick-ratio gate proves "no harm", never "prettier"). **BUILD + A/B ORDER (attrib
   0.35 but realistically diluted by sector — ACCEPTED, κVol↑ would threaten volume≠move) · tech news 3.49× staples vs 1.63× OFF with TOTAL conserved
   (708≈702, λ-norm works) · ret_acf −0.108 (from −0.033, TOWARD §1 target) · drift/move parity. NOT prod-pushed (Kiesh reviews whole batch at end). NEXT=F5.
   (soak exit-49 = cosmetic python-missing candle export; data fully intact.)
-2. **F5 MarketPulse** (already coded `6ba7650`, flag `...:MarketPulse:Enabled`, needs TakerCoupling+TakerStrength>0) — **solo A/B** vs fresh OFF (isolate the momentum lever).
+2. **F5 MarketPulse** (already coded `6ba7650`, flag `Bots:Sentiment:RegimeDrift:MarketPulse:Enabled`) — **★ A/B SOAK RUNNING** (45m, launched ~21:15 local):
+  OFF port 5080 kse_soak_f5off vs ON port 5083 kse_soak_f5on, BOTH with prod-like RegimeTaker (TakerCoupling=true, TakerStrength=0.12, TakerThreshold=0.20,
+  Strength=0.4, CohortFraction=0.03, Mood__TakerCoupling=true, ExogShock on) so MarketPulse has a live taker rate to modulate; same-seed pair. Arms in
+  scratchpad/arm-f5-{off,on}.ps1. GATES: ret_acf in [−0.43,−0.10] + no shift toward 0 >0.05 vs OFF (the step-glide must not kill mean-reversion); move p99
+  Δ≤10%; drift ±0.5σ; CK=0. Analyze on completion → report YES/NO → then F2 (VolumeRotation, needs BUILD) on top of F1-ON.
 3. **F2 VolumeRotation** — BUILD default-off, A/B with **F1 held ON as baseline** (measure the delta F2 adds; it redistributes F1's size coupling).
 4. **F1+F5 combined** confirmation soak — sole job = ret_acf (stacking momentum on a livelier tape can drag lag-1 toward 0 while still in-band; gate ret_acf within OFF ±0.05, NOT just band-pass).
 5. **F4 MVVM restructure** — pure refactor, gate = build + 739 green + launch + byte-identical candle diff (NO soak). [MY DEVIATION from council "F4 first": doing realism features FIRST since that's the run's purpose + F4 is disk-heavy/low-realism-value; F4's "clean diff" benefit is cosmetic. Slot it as a focused pass.]
