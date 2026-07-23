@@ -90,7 +90,11 @@ wick-ratio gate proves "no harm", never "prettier"). **BUILD + A/B ORDER (attrib
   CK=0 both. ret_acf lag1 +0.044→−0.011 (ON MORE mean-reverting — the "drag toward 0" trap did NOT happen), lag2 −0.005→−0.068, vol ~parity, p99 move
   parity (−1.4%), drift −0.316→−0.520 (0.2% more neg = noise? council judging). ★ INTENDED stepping is SUB-MINUTE (osc τ30-90s) so 1-min metrics can't
   see "breathe" = KIESH EYEBALL residual (soak servers now STOPPED → 5083 client dead; relaunch standalone MarketPulse-ON server if he wants to keep looking).
-  F5 council `w45ca0e2m` running. — original: **★ A/B SOAK RUNNING** (45m, launched ~21:15 local):
+  **★★ F5 CLEARED-ON-METRICS (council `w45ca0e2m`): safe to keep merged DEFAULT-OFF + hand to Kiesh eyeball (stepping is sub-min = his taste call).**
+  CODE-CHECK settled the drift: `MarketPulse.cs:91` correction = E[Mult]≈1 (ARITHMETIC/linear space) — CORRECT for the additive taker-rate→summed-impact
+  coupling ⇒ no 1st-order drift. Clamp (z∈[−1,1]) makes true E[Mult] slightly <1 = small SYMMETRIC rate cut ⇒ predicts the ON vol dip we SAW (0.00095→
+  0.00084), no directional bias ⇒ −0.2% drift = 45m noise. GUARD (deferred, only matters at a default-ON flip): 3-seed amplitude-scaling drift check
+  (A 0.35→0.5, does drift-Δ scale with A²?). Default-off NOW = nothing to flip. — original: **★ A/B SOAK RUNNING** (45m, launched ~21:15 local):
   OFF port 5080 kse_soak_f5off vs ON port 5083 kse_soak_f5on, BOTH with prod-like RegimeTaker (TakerCoupling=true, TakerStrength=0.12, TakerThreshold=0.20,
   Strength=0.4, CohortFraction=0.03, Mood__TakerCoupling=true, ExogShock on) so MarketPulse has a live taker rate to modulate; same-seed pair. Arms in
   scratchpad/arm-f5-{off,on}.ps1. GATES: ret_acf in [−0.43,−0.10] + no shift toward 0 >0.05 vs OFF (the step-glide must not kill mean-reversion); move p99
