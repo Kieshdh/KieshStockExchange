@@ -155,6 +155,24 @@ public class MarketShortBatchFillEquivalenceTests
             return maker;
         }
 
+        // A resting SELL-limit maker (mirror of SeedBuyMaker) — lets a taker BUY cross it. The owner must
+        // already hold the shares (seed a long via SeedPosition) so the settle is a plain long-sale.
+        public Order SeedSellMaker(int userId, int qty, decimal price, int stockId = StockA, CurrencyType ccy = Usd)
+        {
+            var maker = new Order
+            {
+                OrderId = _nextMakerId++, UserId = userId, StockId = stockId, Quantity = qty, Price = price,
+                CurrencyType = ccy, Side = OrderSide.Sell, Entry = EntryType.Limit, Stop = StopKind.None,
+            };
+            Registry.Register(maker);
+            BookFor(stockId, ccy).UpsertOrder(maker);
+            if (!OpenOrdersByUser.TryGetValue(userId, out var list))
+                OpenOrdersByUser[userId] = list = new List<Order>();
+            list.Add(maker);
+            if (!Funds.ContainsKey((userId, ccy))) SeedFund(userId, ccy: ccy);
+            return maker;
+        }
+
         // Load every seeded fund-owner into the cache BEFORE any fill, exactly like a live session
         // hydrates all bot users at startup — so a maker's buy reservation is seeded off its FULL
         // unfilled RemainingQuantity, and the settler's later EnsureLoadedAsync is a no-op.
@@ -348,6 +366,56 @@ public class MarketShortBatchFillEquivalenceTests
 
         Assert.Equal(SortedRows(a.InsertedRows), SortedRows(b.InsertedRows));
         AssertLedgerEqual(a, b);
+    }
+
+    // =========================================================================================
+    // Regression: CROSS-CURRENCY short close must release the collateral in its OWN currency.
+    // The FX-desk house shorts collateralized in EUR then covers with a USD fill. The buggy path
+    // only handled collateral==fill-ccy and stranded the EUR collateral on a now-flat position,
+    // tripping the Q7 DB invariant (a non-negative position may not carry collateral) in a stuck
+    // loop. The fix releases the collateral from the EUR fund regardless of the fill currency.
+    // =========================================================================================
+    [Fact]
+    public async Task Cross_currency_short_close_releases_collateral_in_collateral_currency()
+    {
+        const CurrencyType Eur = CurrencyType.EUR;
+        const int Shorter = 1, LongMaker = 2;
+        var w = NewWorld();
+
+        // Shorter holds a 10-share short on StockA collateralized in EUR (1000 EUR reserved) — the
+        // state the FX house is in after an EUR short open. Its USD fund funds the buy-to-close.
+        var shortPos = w.SeedPosition(Shorter, StockA, qty: -10, positionId: 5001);
+        shortPos.TakeShortCollateral(1000m, Eur);
+        var eurFund = w.SeedFund(Shorter, total: 1_000_000m, ccy: Eur);
+        eurFund.ReserveFunds(1000m);                       // the collateral lock
+        w.SeedFund(Shorter, total: 1_000_000m, ccy: Usd);  // cash to buy-to-close in USD
+
+        // A USD sell maker (owned by a long holder) for the close-buy to cross.
+        w.SeedPosition(LongMaker, StockA, qty: 10, positionId: 5002);
+        w.SeedSellMaker(LongMaker, qty: 10, price: 100m, stockId: StockA, ccy: Usd);
+
+        await w.PreloadAsync();
+
+        // Shorter buys 10 @ 100 in USD → covers the EUR-collateralized short (cross-currency close).
+        var closeBuy = new Order
+        {
+            UserId = Shorter, StockId = StockA, Quantity = 10, Price = 100m,
+            CurrencyType = Usd, Side = OrderSide.Buy, Entry = EntryType.Limit, Stop = StopKind.None,
+        };
+        var res = await w.Engine.PlaceAndMatchAsync(closeBuy);
+
+        Assert.True(res.PlacedSuccessfully);
+        Assert.Equal(10, res.TotalFilledQuantity);
+
+        // Position is flat and — critically — carries NO stranded collateral (the invariant Q7 enforces).
+        var pos = w.Accounts.GetPosition(Shorter, StockA)!;
+        Assert.Equal(0, pos.Quantity);
+        Assert.Equal(0m, pos.ShortCollateral);
+
+        // The 1000 EUR collateral was UNRESERVED from the EUR fund (not the USD fill fund), conserving money.
+        var eur = w.Accounts.GetFund(Shorter, Eur)!;
+        Assert.Equal(0m, eur.ReservedBalance);
+        Assert.Equal(1_000_000m, eur.TotalBalance);        // collateral is a reservation, never a debit
     }
 
     // =========================================================================================
