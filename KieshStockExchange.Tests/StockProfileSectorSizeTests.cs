@@ -76,6 +76,21 @@ public class StockProfileSectorSizeTests
     }
 
     [Fact]
+    public void SizeSignal_FallsBackToSeedPrice_WhenSharesUnseeded()
+    {
+        // The current universe has SharesOutstanding=0 everywhere, so size must fall back to SEED PRICE:
+        // higher seed ⇒ "bigger" ⇒ calmer + higher-volume (same sector isolates the size axis).
+        var (stocks, map) = Build(
+            (1, "Semiconductors", 0, 500m),  // high seed = big
+            (2, "Semiconductors", 0, 5m));   // low seed = small
+        var svc = new StockProfileService(true, true, stocks, map);
+        var big = svc.Get(1);
+        var small = svc.Get(2);
+        Assert.True(big.SentimentAmplitudeMult < small.SentimentAmplitudeMult);
+        Assert.True(big.VolumeMult > small.VolumeMult);
+    }
+
+    [Fact]
     public void TechSector_IsNewsier_ThanStaples()
     {
         var (stocks, map) = Build(

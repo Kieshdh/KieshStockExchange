@@ -99,15 +99,18 @@ internal sealed class StockProfileService
         if (!enabled || !sectorSizeModel || !_hasRealSectors || stocks is null || sectors is null)
             return; // legacy path — nothing precomputed, Get() returns the id-hash class
 
-        // 1) SIZE signal s ∈ [−1,+1] from marketcap percentile rank (SeedPrice × SharesOutstanding). Rank only
-        //    stocks with a real cap; missing seed/shares ⇒ absent ⇒ s=0 (identity, safe).
+        // 1) SIZE signal s ∈ [−1,+1] from a percentile rank of each stock's size proxy. True marketcap is
+        //    SeedPrice × SharesOutstanding, but SharesOutstanding is currently UNSEEDED (0) across the universe,
+        //    so fall back to SeedPrice alone (in this sim seed price IS the size/tier scale — high = blue-chip,
+        //    low = penny). `× max(shares,1)` ⇒ SeedPrice-rank today, auto-upgrades to marketcap if shares are
+        //    ever seeded. Missing seed ⇒ absent ⇒ s=0 (identity, safe).
         var ranked = new List<(int id, double cap)>();
         foreach (var id in stocks.ById.Keys)
         {
             var stk = stocks.ById[id];
             double seed = (double)PrimarySeedPrice(stocks, id);
-            if (seed > 0.0 && stk.SharesOutstanding > 0)
-                ranked.Add((id, seed * stk.SharesOutstanding));
+            if (seed > 0.0)
+                ranked.Add((id, seed * (stk.SharesOutstanding > 0 ? stk.SharesOutstanding : 1)));
         }
         ranked.Sort((a, b) => a.cap != b.cap ? a.cap.CompareTo(b.cap) : a.id.CompareTo(b.id));
         var sizeSignal = new Dictionary<int, double>(ranked.Count);
