@@ -2,9 +2,17 @@
 
 **★ STATUS (2026-07-24): council-approved, buildable → AUTHORIZED to build+test+council+PROD (Kiesh; this is NOT F3 so prod OK after
 council). BUILD PROGRESS: step 1 (fillGaps default TRUE end-to-end) BUILT `b5a90ae` (CandleController by-stock-range now defaults
-fillGaps=true → flat-doji gaps; server compiles) — HELD, not deployed (needs local validation of the right-edge/live-bar interaction +
-council before prod). Steps 2-7 (interior-hole rebuild, serve-stale-not-blank, client CandleCache read-path, live-merge-all-resolutions =
-the "subscription", reconnect tail-refetch, seam source-fix) TODO — see Build order below.** Owner (Kiesh) asked for this: client candle
+fillGaps=true → flat-doji gaps; server compiles) — HELD, not deployed. **Step 3 (serve-stale-on-fault) BUILT** (SignalRCandleService.cs:
+client GetHistoricalCandlesAsync now try/catches the HTTP fetch, caches the last NON-EMPTY result per key in `_lastGood`, and on a fault
+serves that stale snapshot instead of blanking — a legit-empty response is still passed through unchanged so young stocks are not faked).
+**Step 2 (interior-hole rebuild) DEFERRED** — the plan's literal "expected-vs-actual bucket count" gate is WRONG for a sparse market: no-
+trade buckets are indistinguishable from lost candles without replaying ticks, so that gate would replay ALL ticks on every cold deep-history
+read (>~8h back = common on week/month charts + LoadOlderAsync scroll-back) = a real perf regression. Meanwhile step 1's fillGaps=true already
+masks the VISIBLE hole (flat doji) and background maintenance (`FindMissingAndPersist`, replay+set-difference-by-key) already repairs the
+PERSISTED data correctly. A principled cheap gate needs a new provider-specific "distinct trade-bucket count" query (SQLite+Postgres) that just
+duplicates maintenance. Net = negative EV on the read path now; revisit only if prod shows holes maintenance is not catching. Steps 4-7 (client
+CandleCache read-path, live-merge-all-resolutions = the "subscription", reconnect tail-refetch, seam source-fix) TODO — see Build order below.**
+Owner (Kiesh) asked for this: client candle
 data 'often not loaded correctly', slow timeframe switches, rare missing candles + close[t]!=open[t+1]. Root cause = NO client cache +
 fillGaps ignored + seam bugs. Pairs with EXCHANGE_CANDLE_RESEARCH.md (Heikin-Ashi overlay = the 'average smooths' answer) and
 CANDLE_NATURALIZATION_PLAN.md (F3 — server aggregator is the ONE seam authority; F3 nudges Close, cache is transport-only).**

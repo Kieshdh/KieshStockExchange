@@ -31,6 +31,12 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
     private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), int> _subRefs = new();
     private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), Channel<Candle>> _streams = new();
 
+    // Last non-empty history result per key — served on a fetch FAULT so a
+    // transient network blip never blanks a chart that was already populated
+    // (candle-cache plan step 3, "serve-stale-on-fault"). Not a general cache:
+    // a legitimately-empty response is passed through unchanged.
+    private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), IReadOnlyList<Candle>> _lastGood = new();
+
     public ConcurrentDictionary<(int, CurrencyType, CandleResolution), CandleAggregator> Aggregators =>
         throw new NotSupportedException("Candle aggregators live server-side after Phase 3.");
 
@@ -165,8 +171,31 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
                   $"?resolution={Uri.EscapeDataString(span.ToString())}" +
                   $"&from={Uri.EscapeDataString(fromUtc.ToString("o"))}" +
                   $"&to={Uri.EscapeDataString(toUtc.ToString("o"))}";
-        var list = await http.GetFromJsonAsync<List<Candle>>(url, ApiJsonOptions.Default, ct).ConfigureAwait(false);
-        return list ?? new List<Candle>();
+
+        var key = (stockId, currency, resolution);
+        try
+        {
+            var list = await http.GetFromJsonAsync<List<Candle>>(url, ApiJsonOptions.Default, ct).ConfigureAwait(false);
+            // Remember the last non-empty result so a later fault can serve it. An
+            // empty result is passed through as-is (young stock / no data in range)
+            // and never overwrites a good snapshot.
+            if (list is { Count: > 0 }) _lastGood[key] = list;
+            return list ?? new List<Candle>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Serve-stale-on-fault: a transient fetch failure must not blank a chart
+            // that was already showing data. Fall back to the last good snapshot for
+            // this key; if we have none yet, there is nothing to show but empty.
+            if (_lastGood.TryGetValue(key, out var stale))
+            {
+                _logger.LogWarning(ex, "Candle history fetch failed for {Key}; serving {Count} stale candles.",
+                    key, stale.Count);
+                return stale;
+            }
+            _logger.LogWarning(ex, "Candle history fetch failed for {Key}; no stale cache to serve.", key);
+            return new List<Candle>();
+        }
     }
 
     public Task<CandleFixReport> FixCandlesAsync(int stockId, CurrencyType currency, CandleResolution resolution,
