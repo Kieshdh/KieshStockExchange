@@ -154,9 +154,9 @@ now confirms Q7 stays 0 + phantom clears. NOTE: MarketPulse + log-sym suite + §
   ret_acf = per-min VWAP from Transactions (Close-basis reads more negative). TUNE TRIGGERS if a REAL high emerges: Close/VWAP ret_acf → −0.4 (too
   mean-reverting/bouncy) ⇒ small trend-follower/momentum nudge; moves systemically >3-4% or any >5% creeping ⇒ small RegimeTaker-strength trim.
   CALIBRATION Q for Kiesh: which readout/basis/stock shows "high"? (VWAP −0.04 vs Close −0.24 differ.)
-- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET, drift oscillating ~0:** @20:53 drift 6h **+0.118** (flat positive; trend +0.096→−0.061→+0.118 = bouncing
-  around 0, no consecutive negatives). ret_acf VWAP **−0.045** (in-band). Moves VERY calm (45m max 1.83, zero >3% 3h). Healthy, Q7=0. ⇒ HOLD, no trigger.
-  Focus = BUILD (F1 ✅ built+green; F1 A/B soak RUNNING ~20:15→21:00, analyze on completion → then F5).
+- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET, drift stable ~0:** @21:33 drift 6h **+0.090** (flat positive; trend −0.061→+0.118→+0.090, stable, no
+  consecutive negatives). ret_acf VWAP **−0.039** (in-band). Moves VERY calm (45m max 2.42, zero >3% 3h). Healthy, Q7=0. ⇒ HOLD, no trigger. Focus =
+  BUILD: F1 ✅ PASSED A/B (dashboard delivered to Kiesh + live client on 5083 for MarketPulse eyeball). F5 A/B soaking (~t=23m). Next = F5 verdict → F2 build.
 - **★ (prior) CLEAN DRIFT + ret_acf — ON-TARGET, HOLDING; ret_acf is NOISY not trending:** drift 6h +0.109→+0.003→+0.054→**−0.014** (@13:27, oscillating ~0,
   dispersion alive). **ret_acf VWAP −0.044→−0.016→+0.012→−0.150** = NOISY/oscillating in [−0.15,+0.01], centered near the §1 −0.1 target, NO real trend
   (last cycle's +0.012 "climb" was noise — 2h/35-stock estimates bounce ±0.1/cycle; correctly did NOT tune on it). Tape very calm (45m max 1.97, zero
