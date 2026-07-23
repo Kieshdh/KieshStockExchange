@@ -850,6 +850,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         anchorElastic:         _configuration.GetValue("Bots:ValueAnchor:Elastic", false),
                         anchorElasticDeadband: _configuration.GetValue("Bots:ValueAnchor:ElasticDeadbandPrc", 0.20m),
                         anchorElasticPower:    _configuration.GetValue("Bots:ValueAnchor:ElasticPower", 3.0m),
+                        geometricAnchorGap:    _configuration.GetValue("Bots:ValueAnchor:GeometricGap", false),
                         // §trend-follower (chartist) cohort. Enabled=false / fraction 0 ⇒ byte-identical.
                         trendFollowerEnabled:     _configuration.GetValue("Bots:TrendFollower:Enabled", false),
                         trendCohortFraction:      _configuration.GetValue("Bots:TrendFollower:CohortFraction", 0m),

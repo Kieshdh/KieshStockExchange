@@ -95,6 +95,11 @@ internal sealed class AiBotDecisionService
     private readonly bool    _anchorElastic;
     private readonly decimal _anchorElasticDeadband;
     private readonly decimal _anchorElasticPower;
+    // §log-symmetric anchor gap (audit finding): the value/recent gap (f−p)/f is asymmetric in ratio space — an up-move
+    // (p=F·f) yields a stronger sell-pull (F−1) than the mirror down-move (p=f/F) yields a buy-pull (1−1/F=(F−1)/F), a
+    // built-in DOWN-bias in the main restoring spring. ln(f/p) is exactly symmetric (up log-distance = down log-distance).
+    // false ⇒ the linear (f−p)/f path, byte-identical. Removes a hidden down-drift contributor; A/B-gated.
+    private readonly bool    _geometricAnchorGap;
     private readonly bool    _valueTargetSelection; // concentrate the anchor via stock selection (destabilizing at high gain)
     private readonly decimal _overheatCap;          // refuse to buy above / sell below fundamental by more than this (0 = off)
     // Defensive ceiling on the effective per-stock cap (after OverheatCapMult and AnchorFastSlack).
@@ -410,6 +415,7 @@ internal sealed class AiBotDecisionService
         decimal distanceMult = 1m, decimal marketProbMult = 1m,
         decimal valueAnchorStrength = 0m, decimal valueAnchorScale = 0.15m,
         bool anchorElastic = false, decimal anchorElasticDeadband = 0.20m, decimal anchorElasticPower = 3.0m,
+        bool geometricAnchorGap = false,
         // §trend-follower (chartist) cohort; all-default 0 ⇒ no tilt ⇒ byte-identical.
         bool trendFollowerEnabled = false, decimal trendCohortFraction = 0m,
         decimal trendStrength = 0m, decimal trendContrarianFraction = 0.2m,
@@ -568,6 +574,7 @@ internal sealed class AiBotDecisionService
         _dipBuyStrength      = Math.Max(0m, dipBuyStrength);
         _valueAnchorScale    = valueAnchorScale <= 0m ? 0.15m : valueAnchorScale;
         _anchorElastic         = anchorElastic;
+        _geometricAnchorGap    = geometricAnchorGap;
         _anchorElasticDeadband = anchorElasticDeadband < 0m ? 0m : anchorElasticDeadband;
         _anchorElasticPower    = anchorElasticPower <= 0m ? 1m : anchorElasticPower;
         _trendFollowerEnabled    = trendFollowerEnabled;
@@ -2775,7 +2782,9 @@ internal sealed class AiBotDecisionService
             // fundamental target f is unchanged ⇒ the multi-minute restoring force (runaway guard) survives.
             // Off ⇒ ReactionRefOr returns p ⇒ byte-identical.
             p = ctx.ReactionRefOr((sid, currency), p);
-            sum += (f - p) / f;
+            // §log-symmetric gap: ln(f/p) is ratio-symmetric (up log-distance == down log-distance), removing the
+            // (f−p)/f down-bias. f,p > 0 here ⇒ f/p > 0 ⇒ Log defined. Off ⇒ the exact linear path.
+            sum += _geometricAnchorGap ? (decimal)System.Math.Log((double)(f / p)) : (f - p) / f;
             count++;
         }
         return count > 0 ? sum / count : 0m;
@@ -2798,7 +2807,8 @@ internal sealed class AiBotDecisionService
             // §impact-decouple A: gap against the >1-min reference, not the 1s-tracking smoothed price (the
             // recent-EWMA target r is unchanged, so medium-term mean-reversion survives). Off ⇒ p unchanged.
             p = ctx.ReactionRefOr((sid, currency), p);
-            sum += (r - p) / r;
+            // §log-symmetric gap (mirror of the value-gap): ln(r/p), ratio-symmetric. Off ⇒ exact linear path.
+            sum += _geometricAnchorGap ? (decimal)System.Math.Log((double)(r / p)) : (r - p) / r;
             count++;
         }
         return count > 0 ? sum / count : 0m;
