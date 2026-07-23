@@ -28,6 +28,12 @@ internal sealed class FundamentalService
 
     private readonly bool _enabled;
     private readonly decimal _band;        // max fractional excursion from seed (e.g. 0.12)
+    // §log-sym #2/#3 (audit down-bias fix): interpret the band/excursion caps as GEOMETRIC (log-symmetric)
+    // rather than linear. Linear [s(1−cap), s(1+cap)] lets the fundamental drift further DOWN (÷) than UP (×) for
+    // the same cap = a hidden down-bias in the anchor; and the READ-time span adds the fractions (under-reporting
+    // the true stacked band). Geometric [s/F, s·F] with F=∏(1+capᵢ) is ratio-symmetric + composes correctly.
+    // Default false ⇒ exact legacy linear path ⇒ byte-identical. Sibling of Bots:ValueAnchor:GeometricGap (#1).
+    private readonly bool    _geometricBand;
     private readonly double  _theta;       // mean-reversion pull per drift step (small → slow)
     private readonly double  _sigma;       // per-step shock as a fraction of seed
     private readonly double  _driftIntervalSec;
@@ -69,7 +75,7 @@ internal sealed class FundamentalService
         double theta = 0.02, double sigma = 0.004, double driftIntervalSec = 60.0,
         Func<int, double>? exogShock = null, Func<bool>? anyShockActive = null, decimal shockCap = 0m,
         Func<int, double>? coMoveShift = null, decimal coMoveShiftCap = 0m,
-        Func<int, double>? bankTarget = null)
+        Func<int, double>? bankTarget = null, bool geometricBand = false)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -85,6 +91,7 @@ internal sealed class FundamentalService
         _coMoveShift = coMoveShift;
         _coMoveShiftCap = Math.Max(0m, coMoveShiftCap);
         _bankTarget = bankTarget;
+        _geometricBand = geometricBand;
     }
 
     /// <summary>Seed every (stock,currency) fundamental at its listing seed price and arm the clock.</summary>
@@ -144,9 +151,20 @@ internal sealed class FundamentalService
             // diffusion magnitude is independent of where the estimate has moved the target.
             f += _theta * (target - f) + _sigma * sigmaMult * s * Gaussian();
 
-            // Hard band clamp so the fundamental itself can never run away.
-            var lo = s * (1.0 - (double)_band);
-            var hi = s * (1.0 + (double)_band);
+            // Hard band clamp so the fundamental itself can never run away. §log-sym #2: geometric [s/F, s·F]
+            // (F=1+band) is ratio-symmetric; the legacy linear [s(1−band), s(1+band)] lets it drift further DOWN
+            // than UP for the same band. Off ⇒ the exact linear path ⇒ byte-identical.
+            double lo, hi;
+            if (_geometricBand)
+            {
+                double fac = 1.0 + (double)_band;
+                lo = s / fac; hi = s * fac;
+            }
+            else
+            {
+                lo = s * (1.0 - (double)_band);
+                hi = s * (1.0 + (double)_band);
+            }
             f = Math.Clamp(f, lo, hi);
 
             _current[key] = (decimal)f;
@@ -181,9 +199,21 @@ internal sealed class FundamentalService
             }
             if (target == f) return f;                          // nothing composed ⇒ legacy OU value
             var seed = _seed[key];
-            var span = _band + _shockCap + _coMoveShiftCap;      // total allowed excursion from seed
-            var lo = seed * (1m - span);
-            var hi = seed * (1m + span);
+            // §log-sym #3: geometric compose F=(1+band)(1+shockCap)(1+coMoveShiftCap), band [seed/F, seed·F] —
+            // the correct stacked bound. Legacy = linear additive span (down-biased + under-reports the true band
+            // per PriceBandMath's warning). Off ⇒ the exact linear path ⇒ byte-identical.
+            decimal lo, hi;
+            if (_geometricBand)
+            {
+                decimal f2 = PriceBandMath.Factor(_band) * PriceBandMath.Factor(_shockCap) * PriceBandMath.Factor(_coMoveShiftCap);
+                (lo, hi) = PriceBandMath.Band(seed, f2);
+            }
+            else
+            {
+                var span = _band + _shockCap + _coMoveShiftCap; // total allowed excursion from seed
+                lo = seed * (1m - span);
+                hi = seed * (1m + span);
+            }
             return target < lo ? lo : target > hi ? hi : target;
         }
         return _seed.TryGetValue(key, out var s) ? s : 0m;

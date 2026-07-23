@@ -99,4 +99,22 @@ public class PriceBandMathTests
         var (_, hi) = PriceBandMath.Band(anchor, PriceBandMath.Factor(cap));
         Assert.Equal(anchor * (1m + cap), hi);
     }
+
+    [Fact]
+    public void FundamentalService_read_band_geometric_removes_the_additive_span_down_bias()
+    {
+        // §log-sym #3 (FundamentalService read-time excursion band): the legacy floor is the LINEAR ADDITIVE span
+        // seed·(1 − (Band+ShockCap+CoMoveShiftCap)); the fix uses the geometric compose F=(1+Band)(1+ShockCap)
+        // (1+CoMoveShiftCap), floor seed/F. At the live dials the geometric floor sits ABOVE the linear one (less
+        // down-room = the down-bias removed) and is ratio-symmetric with the ceiling.
+        const decimal seed = 100m, band = 0.12m, shockCap = 0.25m, coMoveCap = 0.08m;
+        var f = PriceBandMath.Factor(band) * PriceBandMath.Factor(shockCap) * PriceBandMath.Factor(coMoveCap);
+        var (lo, hi) = PriceBandMath.Band(seed, f);
+
+        decimal linearSpan = band + shockCap + coMoveCap;              // 0.45
+        decimal linearLo = seed * (1m - linearSpan);                  // 55
+        Assert.True(lo > linearLo, $"geometric floor {lo} should sit above the linear floor {linearLo}");
+        Assert.Equal(seed * seed, lo * hi);                          // ratio-symmetric (up log-dist == down log-dist)
+        Assert.Equal(seed * f, hi);                                  // ceiling = seed·F (the binding up side)
+    }
 }

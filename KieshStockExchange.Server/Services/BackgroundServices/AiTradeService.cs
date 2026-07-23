@@ -508,7 +508,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         coMoveShiftCap:   _configuration.GetValue("Bots:Sentiment:CoMovement:ShiftCap", 0.08m),
                         // §bank-estimate: pivot the OU reversion target to the bank estimate (lazy field ref, _bank
                         // assigned below). null when off ⇒ target stays the seed ⇒ byte-identical.
-                        bankTarget:       _bankEstimateEnabled ? (Func<int, double>)(sid => _bank?.BankTarget(sid) ?? 0.0) : null);
+                        bankTarget:       _bankEstimateEnabled ? (Func<int, double>)(sid => _bank?.BankTarget(sid) ?? 0.0) : null,
+                        // §log-sym #2/#3: interpret the fundamental band/excursion caps as geometric (log-symmetric)
+                        // instead of linear ⇒ removes the anchor's down-bias. Default false ⇒ byte-identical.
+                        geometricBand:    _configuration.GetValue("Bots:Fundamental:GeometricBand", false));
         // Sentiment-dynamics §: the master flag gates BOTH the EWMA slope (here) and the directional phase
         // model (in AiBotDecisionService). Off ⇒ no slope compute and byte-identical decisions.
         var sentimentDynamics = _configuration.GetValue("Bots:SentimentDynamics:Enabled", false);
