@@ -32,14 +32,16 @@ public sealed class CandleController : ControllerBase
     [HttpGet("by-stock-range/{stockId:int}/{currency}")]
     public async Task<List<Candle>> GetByStockIdAndTimeRange(int stockId, CurrencyType currency,
         [FromQuery] TimeSpan resolution, [FromQuery] DateTime from, [FromQuery] DateTime to,
-        CancellationToken ct)
+        CancellationToken ct, [FromQuery] bool fillGaps = true)
     {
         // Route through the candle service so the hot-ring fast path runs.
         // Falls through to _db on misses, then to a transaction replay if the
-        // range was never persisted.
+        // range was never persisted. fillGaps defaults TRUE so no-trade minutes
+        // render as carry-forward flat dojis (the exchange-standard "quiet market"
+        // look) instead of missing bars — clients may pass fillGaps=false for raw.
         if (!Candle.TryFromTimeSpan(resolution, out var res))
             return await _db.GetCandlesByStockIdAndTimeRange(stockId, currency, resolution, from, to, ct);
-        var list = await _candles.GetHistoricalCandlesAsync(stockId, currency, res, from, to, ct);
+        var list = await _candles.GetHistoricalCandlesAsync(stockId, currency, res, from, to, ct, fillGaps);
         return list as List<Candle> ?? new List<Candle>(list);
     }
 
