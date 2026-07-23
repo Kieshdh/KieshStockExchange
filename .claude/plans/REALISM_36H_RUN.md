@@ -78,8 +78,11 @@ wick-ratio gate proves "no harm", never "prettier"). **BUILD + A/B ORDER (attrib
   construction; flag `Bots:Personality:SectorSizeModel` default false). 5 files: StockProfileService.cs, AiTradeService:381, AiBotDecision:2074
   (VolumeMult line), ExogShock:129+NewsRepeats, appsettings. **★ FINDING: `SharesOutstanding=0` fleet-wide (prod AND soak seed — migrated, never
   seeded)** → size axis was inert; FIXED to rank by **SeedPrice** (`×max(shares,1)`, auto-upgrades to marketcap if shares ever seeded). SURFACE TO
-  KIESH: size = seed-price proxy (high=blue-chip). **A/B SOAK RUNNING** (45m, launched ~20:15 local): OFF=legacy personality (port 5080 kse_soak_f1off)
-  vs ON=SectorSizeModel (port 5083 kse_soak_f1on), news ON both, arms in scratchpad/arm-f1-{off,on}.ps1. Analyze on completion: gates in METRIC row below.
+  KIESH: size = seed-price proxy (high=blue-chip). **★ A/B SOAK 45m DONE → F1 PASSES (metrics-only sign-off):** CK=0 both · vol-dispersion +50%
+  (0.00068→0.00102 = distinct personalities) · volume≠move corr(vol,|ret|) 0.124≤0.15 · size↔notional-vol ρ 0.287 ON vs 0.105 OFF (2.7× control; under
+  0.35 but realistically diluted by sector — ACCEPTED, κVol↑ would threaten volume≠move) · tech news 3.49× staples vs 1.63× OFF with TOTAL conserved
+  (708≈702, λ-norm works) · ret_acf −0.108 (from −0.033, TOWARD §1 target) · drift/move parity. NOT prod-pushed (Kiesh reviews whole batch at end). NEXT=F5.
+  (soak exit-49 = cosmetic python-missing candle export; data fully intact.)
 2. **F5 MarketPulse** (already coded `6ba7650`, flag `...:MarketPulse:Enabled`, needs TakerCoupling+TakerStrength>0) — **solo A/B** vs fresh OFF (isolate the momentum lever).
 3. **F2 VolumeRotation** — BUILD default-off, A/B with **F1 held ON as baseline** (measure the delta F2 adds; it redistributes F1's size coupling).
 4. **F1+F5 combined** confirmation soak — sole job = ret_acf (stacking momentum on a livelier tape can drag lag-1 toward 0 while still in-band; gate ret_acf within OFF ±0.05, NOT just band-pass).
