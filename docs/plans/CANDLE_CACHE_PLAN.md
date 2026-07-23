@@ -1,0 +1,56 @@
+# CANDLE CACHE + SUBSCRIPTION — council design (research→explore→5-lens→chairman, 2026-07-23)
+
+**Status: DESIGN — council-approved, buildable. Owner (Kiesh) asked for this: client candle data 'often not loaded correctly', slow timeframe switches, rare missing candles + close[t]!=open[t+1]. Root cause = NO client cache + fillGaps ignored + seam bugs. Pairs with EXCHANGE_CANDLE_RESEARCH.md (Heikin-Ashi overlay = the 'average smooths' answer) and CANDLE_NATURALIZATION_PLAN.md (F3 — server aggregator is the ONE seam authority; F3 nudges Close, cache is transport-only).**
+
+## Current state (2-4 lines, from the maps)
+Server already caches 500 closed candles per `(stock,currency,resolution)` in the hot ring `_recent` (`CandleService.cs:40-41`) and pre-materializes all 7 resolutions at boot (`Program.cs:463-491`), so a second server cache buys nothing. The client has **no** history cache: one flat `List<Candle> _candleBuffer` (`ChartViewModel.Viewport.cs:20-21`) that is `Clear()`ed and fully re-fetched over HTTP on every stock/timeframe switch (`ChartViewModel.Stream.cs:94-96`, `SignalRCandleService.cs:152-170`). The wire already broadcasts *every* resolution's closes to the `quotes:` group but the client discards non-active ones (`MarketHubBroadcaster.cs:71`, `SignalRCandleService.cs:53-64`). `fillGaps` is silently dropped end-to-end (`SignalRCandleService.cs:161`, `CandleController.cs:42`), and failed HTTP fetches blank the chart (`SignalRCandleService.cs:168` → `Stream.cs:94`).
+
+## Recommended architecture
+
+**Client vs server — decision: CLIENT cache. Server-side is explicitly rejected.** The server already holds the authoritative RAM ring; the *only* cost the owner feels is the per-switch HTTP round-trip. A server cache cannot remove that; a client cache does. All four council voices and the maps converge here.
+
+**Cache unit + key.** Add one class, **`CandleCache`** (client, `KieshStockExchange/Services/MarketDataServices/CandleCache.cs`), owned by `SignalRCandleService` beside `_subRefs`/`_streams` (`SignalRCandleService.cs:31-32`) — it already owns both the HTTP fetch and the SignalR fan-out, so reads and live-merge sit in one place.
+- Store: `ConcurrentDictionary<(int stockId, CurrencyType currency, CandleResolution res), CacheEntry>`.
+- `CacheEntry { List<Candle> Candles; long CoveredFromUnix; long CoveredToUnix; long? SealedToOpenTime; }` — candles ascending by `OpenTime`; `[CoveredFrom,CoveredTo)` is the contiguous span this entry can answer without HTTP; `SealedToOpenTime` = the newest bucket confirmed **closed** by a later `CandleClosed` (everything at/after it is dirty tail — see invalidation).
+
+**Timeframe switch = cache-first + range-fetch only the gap.** Rewrite `SignalRCandleService.GetHistoricalCandlesAsync` (`SignalRCandleService.cs:152-170`):
+1. Look up key. If `CoveredFrom <= from && CoveredTo >= to` and the requested `to` is at/behind `SealedToOpenTime`, slice and return — **zero HTTP** (instant switch-back).
+2. Else fetch only the missing edge(s): `[from, CoveredFrom)` (older, the `LoadOlderAsync` case, `Stream.cs:176-212`) and/or `(SealedToOpenTime, to]` (tail). Merge, extend `CoveredFrom/CoveredTo`. Never re-fetch the covered interior.
+This replaces the unconditional round-trip that causes "re-fetches too often." `ChartViewModel.StartStreamingCandles` stays thin — it still fills `_candleBuffer` from this method, but the method now serves RAM.
+
+**SignalR live-update merge — into ALL resolutions.** Rewrite `SignalRCandleService.OnHubCandleClosed` (`SignalRCandleService.cs:53-64`): instead of filtering by `BucketSeconds` and dropping non-active closes, upsert each closed candle into the matching `CacheEntry` (by `res` = `CandleResolution.FromSeconds(candle.BucketSeconds)`), set `SealedToOpenTime = max(..., candle.OpenTime)`, and extend `CoveredTo`. The wire already delivers all 7 resolutions to the `quotes:` group (`MarketHubBroadcaster.cs:71`), so every backgrounded timeframe stays warm and live-current for free — this **is** the "subscription that holds candle data" the owner asked for, built on existing plumbing (no new server subscription plane). The active resolution additionally re-raises to the VM channel exactly as today so `ChartViewModel.StreamCandlesLoopAsync`→`UpsertCandle` (`Stream.cs:138-156`) is unchanged.
+
+**Invalidation / staleness rules.**
+- **Dirty tail:** the newest bucket is *always* dirty until a `CandleClosed` for a *later* bucket arrives. Cache-hit reads must exclude any bucket `>= SealedToOpenTime` from being treated as final; the client's forming bar (`TrySyncLiveCandle`, `Viewport.cs:207-250`) continues to own the live edge on top of the cache.
+- **Reconnect tail-refetch (mandatory):** on `HubConnection` reconnect, `MarketHubClient.ReplayGroupsAsync` (`MarketHubClient.cs:179-206`) today only re-joins. Add a `Reconnected` event the client subscribes to; on fire, invalidate each entry's tail (drop buckets after `SealedToOpenTime` minus ~2 buckets) and range-fetch `(SealedToOpenTime−2buckets, now]`. This closes the dropped-`CandleClosed` hole (fire-and-forget push, `MarketHubBroadcaster.cs:72`; 64-`DropOldest` channels, `SignalRCandleService.cs:124`).
+- **Never blank on fault:** `GetHistoricalCandlesAsync` currently swallows failure into `new List<Candle>()` (`SignalRCandleService.cs:168`). On empty/fault, **serve stale cache** and surface a retry — do not `Clear()`. This directly fixes "often not loaded correctly."
+- **Stale server ring guard:** the server ring fast-path can serve a frozen snapshot after unsubscribe (`Read.cs:32-40`, `CandleService.cs:110`) — out of client scope, but the reconnect-tail-refetch and dirty-tail rule prevent the client from pinning it.
+
+**MISSING candles + `close[t]≠open[t+1]` — fixed AT THE SOURCE, not in cache or renderer.**
+- *Missing (gaps):* honor `fillGaps` end-to-end — delete `_ = fillGaps;` (`SignalRCandleService.cs:161`) and forward it; pass `fillGaps:true` in `CandleController.GetByStockIdAndTimeRange` (`CandleController.cs:42`). This turns on the server flat-filler `FillGaps` (`Read.cs:72-94`) so absent buckets render as flats (`O=H=L=C=prevClose`), not holes. Then fix the interior-hole gate: `CandleService.Read.cs:48` rebuilds only when `list.Count==0`; change to compare expected vs actual bucket count so partial ranges get repaired, not just empty ones. (Retention-caused unrecoverable old fine gaps, `RetentionService.cs:75-76`, are a separate maintenance concern — flat-fill covers the render.)
+- *Non-connecting bars (real server data, not a cache bug):* two source fixes in the aggregator/aggregation, **not** the client renderer (masking would diverge stored vs drawn data):
+  - `Candle.ApplyTrade` (`Candle.cs:287-292`): on `TradeCount==0` with a `MidPrice`, it overwrites the prev-close `Open` seed. Fix: extend `High/Low` toward the mid but **keep the seeded `Open`** (which `CandleAggregator.cs:110-114` correctly set to `LastClosedPrice`). Removes the traded-boundary break.
+  - `AggregateCandles` (`Aggregation.cs:68-81`): keep `VwapClose=false` for charted resolutions (already the default, `Candle.cs:8`) so aggregate `Close=ordered[^1].Close` chains to the next window's first-child `Open`. If VWAP close is ever wanted, re-seed the next aggregate's `Open` from the prior VWAP close.
+  - *Live-edge display jump:* client forming bar uses `Close=last price` (`Viewport.cs:234-239`) while the server closes with VWAP-eligible logic. Once 2a is fixed and the authoritative `CandleClosed` overwrites promptly via the cache, the seam softens; do not try to "fix" it in the renderer.
+
+## Biggest risks + mandatory invalidation
+1. **Caching the forming bar as closed** — freezes a half-formed candle. *Mandatory:* dirty-tail rule; nothing `>= SealedToOpenTime` is final.
+2. **Dropped/late `CandleClosed` across a disconnect** → permanent cache hole. *Mandatory:* reconnect tail-invalidation + tail-refetch (new `MarketHubClient` reconnect hook; today `:179-206` only re-joins).
+3. **Caching holes** — if `fillGaps` isn't fixed server-side *first*, you cache gaps permanently (today's clear-every-switch accidentally self-heals). *Mandatory:* ship the `fillGaps` pass-through + interior-hole gate **before** enabling cache reuse.
+4. **Silent empty-list overwrite** blanking the chart (`SignalRCandleService.cs:168`). *Mandatory:* serve-stale-on-fault, never `Clear()` on empty.
+5. **Server stale-ring** compounding into client cache. Mitigated by reconnect tail-refetch; note as server follow-up.
+6. **Unbounded client memory** across many stocks × 7 resolutions. Cap each `CacheEntry.Candles` (mirror the server's 500) and LRU-evict cold keys.
+
+## Relationship to F3 candle-naturalization (avoid double-owning open/close/continuity)
+**One authority for the seam, and it is the server aggregator — not the cache, not the renderer, not F3.** The seam-seed lives in `CandleAggregator` (`Open = LastClosedPrice`, `CandleAggregator.cs:114`) and flat-fill lives in `Read.FillGaps`. The two source fixes above (`Candle.cs:287-292`, `Aggregation.cs:74`) belong to that same authority. **F3 must run *after* seam-connection and treat prev-close as the anchor it nudges — it must never overwrite the `Open` seed**, or it reintroduces the exact 2a-style break we're removing. Concretely: F3's open/close perturbation composes on top of a connected series (nudge Close, then let the next Open re-seed from the nudged Close), so continuity is preserved by construction. The client cache is a *transport/latency* layer only — it stores whatever the server produced and never authors or repairs O/H/L/C. This keeps open/close/continuity single-owned server-side and leaves F3 free to shape realism without fighting the cache.
+
+## Build order (smallest shippable first)
+1. **Correctness pre-req (server, no cache yet):** honor `fillGaps` — remove `_ = fillGaps;` (`SignalRCandleService.cs:161`), pass `fillGaps:true` in `CandleController.cs:42`. Ships gap-free charts immediately. *(Kills BUG 1a for everyone.)*
+2. **Interior-hole rebuild:** change `Read.cs:48` gate from `Count==0` to expected-vs-actual bucket count. *(BUG 1b.)*
+3. **Serve-stale-on-fault:** `GetHistoricalCandlesAsync` returns last-good instead of blanking (`SignalRCandleService.cs:168`). Cheap, high-visibility fix to "not loaded correctly."
+4. **`CandleCache` read path:** add the class + keyed store; make `GetHistoricalCandlesAsync` cache-first with gap-only edge fetch. Switch-back becomes instant. *(BUG 3 slow-switch.)*
+5. **Live merge into all resolutions:** rewrite `OnHubCandleClosed` to upsert every resolution into its `CacheEntry` + maintain `SealedToOpenTime`. Backgrounded timeframes stay warm. *(The "subscription" the owner wants.)*
+6. **Reconnect tail-invalidation + refetch:** new reconnect hook off `MarketHubClient` (`:179-206`) → tail invalidate + refetch. *(BUG 1d.)*
+7. **Seam source-fixes (independent, can parallel 4-6):** keep `Open` seed on `TradeCount==0` mid re-anchor (`Candle.cs:287-292`); confirm `VwapClose=false` for charted resolutions (`Aggregation.cs:74`). *(BUG 2.)* Coordinate with F3 ownership per section above.
+
+Steps 1-3 ship value with zero cache risk; 4-6 deliver the cache/subscription; 7 fixes the real disconnect. Do not enable cache reuse (4) before 1-2 land, or you cache holes.

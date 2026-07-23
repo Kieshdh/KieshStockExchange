@@ -1,6 +1,35 @@
 # VOLUME / HOT-STOCK ROTATION PLAN — different hot stocks every day / 4h window
 
-**Status: DESIGN ONLY — awaiting Kiesh's say + a council-advice pass. Do NOT build yet.** Normal design method
+## ★★★ KIESH REDIRECT (2026-07-23) — WEAK + SENTIMENT-DRIVEN + UNIFY (supersedes the hash-rotation design below)
+Kiesh: "VolumeRotation is not as important as the others — make its effect pretty WEAK. Sentiment should be the MAIN
+driver of volume. The rotation can also be influenced by high positive/negative HIGHER-TIMEFRAME sentiment. Think on
+how we can UNIFY the systems if we haven't already."
+
+**★ KEY FINDING — the sentiment→volume path ALREADY EXISTS (no new system needed):** `BotActivityService.cs:137-138`
+`double sentMag = Math.Abs((double)_sentiment.GetSentiment(sid)); if (sentMag > _theta) h += _wSent * (sentMag - _theta);`
+— the Hawkes activity intensity `h` (→ S → composition `act` → the SIZE coupling → notional volume) is ALREADY fed by
+sentiment MAGNITUDE via `_wSent`. Today the SIZE lever `SizeExp` ships **0**, so sentiment→activity drives *taker bursts*
+(directional), NOT volume. So "sentiment = main volume driver" = **turn on + weight the existing seam**, not a bolt-on.
+
+**UNIFIED design (replaces the separate hash-rotation H):**
+1. **Volume driver = SENTIMENT via the existing seam.** Turn on the composition SIZE coupling (`SizeExp>0`, weak) so
+   sentiment-magnitude → activity → bigger orders → more VOLUME (direction-neutral; TakerExp untouched = volume≠move).
+   Weight `_wSent` so sentiment dominates the intensity. This makes volume PRIMARILY sentiment-driven, unified in one path.
+2. **Rotation = WEAK + HIGHER-TF-sentiment-driven, ORGANIC (kill the hash H).** Don't bolt on `H(stockId,window)` from a
+   deterministic hash. Instead the hot/high-volume names EMERGE = stocks with strong HIGHER-TIMEFRAME sentiment magnitude
+   (the slow ring / RegimeDrift component, |slow-sentiment|). As HTF sentiment rotates across stocks over hours/days
+   (organically), the hot set rotates on its own — no window hash, no discontinuity. Add only a WEAK extra hotness term
+   keyed on |HTF sentiment| into the activity intensity (small weight), so it's a texture not a driver.
+3. **Layering (unified):** ONE volume pathway = sentiment→activity→SIZE-coupling→notional; F1 `VolumeMult` = static
+   sector/size modulation on top (already built); F2 = the weak |HTF-sentiment| hotness term. No parallel rotation system.
+4. **Weak by construction:** small SizeExp + small HTF-sentiment weight + median-1 so aggregate volume/drift/ret_acf ~unchanged.
+**Still to do:** council this unification (pressure-test: is riding the sentiment→activity→SIZE seam the right unify? how
+weak? does |HTF-sentiment| hotness stay direction-neutral / CK=0?), THEN build default-off + A/B (F1×F2 attribution).
+The hash-rotation design below is SUPERSEDED (kept for reference / the cosine-blend + per-class-clamp ideas may still apply).
+
+---
+
+**Status: SUPERSEDED by the Kiesh redirect above — original hash-rotation design (for reference).** Normal design method
 (Kiesh's lean; the change is a single bounded lever, not architectural → no full ultradesign). Owner ask:
 "rotate the volume in different days / 4-hour windows so the market has different hot stocks every day."
 
