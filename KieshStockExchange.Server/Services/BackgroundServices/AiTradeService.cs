@@ -655,11 +655,12 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         compGExp:         _configuration.GetValue("Bots:Activity:Composition:GExp", 0.5),
                         compFloor:        _configuration.GetValue("Bots:Activity:Composition:Floor", 0.4),
                         compCap:          _configuration.GetValue("Bots:Activity:Composition:Cap", 3.0),
-                        // §F2 hot-stock rotation (SIZE channel; default-off ⇒ byte-identical).
+                        // §F2 hot-stock rotation (SIZE channel; organic multi-timescale + daily; default-off ⇒ byte-identical).
                         hotEnabled:       _configuration.GetValue("Bots:Activity:HotRotation:Enabled", false),
                         hotBoost:         _configuration.GetValue("Bots:Activity:HotRotation:Boost", 1.5),
-                        hotPeriodMin:     _configuration.GetValue("Bots:Activity:HotRotation:PeriodMinutes", 240.0),
-                        hotBlendFrac:     _configuration.GetValue("Bots:Activity:HotRotation:BlendFraction", 0.2),
+                        hotPeriodMin:     _configuration.GetValue("Bots:Activity:HotRotation:PeriodMinutes", 150.0),
+                        hotDailyMin:      _configuration.GetValue("Bots:Activity:HotRotation:DailyMinutes", 1440.0),
+                        hotDailyWeight:   _configuration.GetValue("Bots:Activity:HotRotation:DailyWeight", 0.4),
                         hotSentTilt:      _configuration.GetValue("Bots:Activity:HotRotation:SentimentTilt", 0.0),
                         hotSentTheta:     _configuration.GetValue("Bots:Activity:HotRotation:SentimentTheta", 0.02),
                         stockClass:       sid => _profiles.Get(sid).Class);

@@ -147,17 +147,23 @@ public class ActivityCompositionTests
 
     #endregion
 
-    #region HotSizeMult (§F2 hot-stock rotation)
+    #region HotSizeMult (§F2 hot-stock rotation — organic multi-timescale)
 
-    private const long HotPeriod = 1_000_000L; // arbitrary window length in ticks for the pure-core tests
+    // Arbitrary tick timescales for the pure-core tests; only the ratios matter.
+    private const long IntraA = 1_000_000L;
+    private const long IntraB = 2_700_000L;   // aperiodic 2.7× harmonic
+    private const long Daily  = 24_000_000L;
+
+    private static double Hot(int sid, string cls, long now, double dailyW, double boost,
+        double tilt = 0.0, double theta = 0.02, double slope = 0.0)
+        => BotActivityService.HotSizeMult(sid, cls, now, IntraA, IntraB, Daily, dailyW, boost, tilt, theta, slope);
 
     [Fact]
     public void Hot_OffWhenBoostAtOrBelowOne_IsExactlyOne()
     {
-        Assert.Equal(1.0, BotActivityService.HotSizeMult(7, "Normal", 12345, HotPeriod,
-            boost: 1.0, blendFrac: 0.2, sentTilt: 0.0, sentTheta: 0.02, slopeAbs: 0.0));
-        Assert.Equal(1.0, BotActivityService.HotSizeMult(7, "Normal", 12345, periodTicks: 0,
-            boost: 1.5, blendFrac: 0.2, sentTilt: 0.0, sentTheta: 0.02, slopeAbs: 0.0));
+        Assert.Equal(1.0, Hot(7, "Normal", 12345, 0.4, boost: 1.0));
+        Assert.Equal(1.0, BotActivityService.HotSizeMult(7, "Normal", 12345, IntraA, IntraB,
+            dailyTicks: 0, dailyWeight: 0.4, boost: 1.5, sentTilt: 0.0, sentTheta: 0.02, slopeAbs: 0.0));
     }
 
     [Fact]
@@ -165,11 +171,7 @@ public class ActivityCompositionTests
     {
         const double boost = 1.5;
         for (int sid = 1; sid <= 300; sid++)
-        {
-            var h = BotActivityService.HotSizeMult(sid, "Meme", sid * 7919L, HotPeriod,
-                boost, 0.2, sentTilt: 0.5, sentTheta: 0.02, slopeAbs: 5.0);
-            Assert.InRange(h, 1.0 / boost, boost);
-        }
+            Assert.InRange(Hot(sid, "Meme", sid * 7919L, 0.4, boost, tilt: 0.5, slope: 5.0), 1.0 / boost, boost);
     }
 
     [Fact]
@@ -178,76 +180,78 @@ public class ActivityCompositionTests
         // Geometric mean across the cross-section ≈ 1 (mean log-hotness ≈ 0) ⇒ aggregate volume preserved.
         const double boost = 1.5;
         double logSum = 0; int n = 0;
-        long now = 42 * HotPeriod + HotPeriod / 3; // mid-window, no blend
-        for (int sid = 1; sid <= 2000; sid++)
-        {
-            logSum += Math.Log(BotActivityService.HotSizeMult(sid, "Normal", now, HotPeriod,
-                boost, 0.2, sentTilt: 0.0, sentTheta: 0.02, slopeAbs: 0.0));
-            n++;
-        }
+        long now = 42 * IntraA + IntraA / 3;
+        for (int sid = 1; sid <= 2000; sid++) { logSum += Math.Log(Hot(sid, "Normal", now, 0.4, boost)); n++; }
         Assert.Equal(0.0, logSum / n, precision: 1); // mean ln(H) ≈ 0 within 0.05
     }
 
     [Fact]
-    public void Hot_RotatesLeadersAcrossWindows()
+    public void Hot_RotatesLeadersOverTime()
     {
-        // The hottest names in one window are largely not the hottest in the next.
+        // The hottest names now are largely not the hottest a while later — leadership drifts, not static.
         const double boost = 1.5;
-        static HashSet<int> TopDecile(long window)
-        {
-            long now = window * HotPeriod + HotPeriod / 2;
-            return Enumerable.Range(1, 200)
-                .OrderByDescending(sid => BotActivityService.HotSizeMult(sid, "Normal", now, HotPeriod, boost, 0.0, 0, 0.02, 0))
-                .Take(20).ToHashSet();
-        }
-        var a = TopDecile(10);
-        var b = TopDecile(11);
+        static HashSet<int> Top(long now) => Enumerable.Range(1, 200)
+            .OrderByDescending(sid => Hot(sid, "Normal", now, 0.4, boost)).Take(20).ToHashSet();
+        var a = Top(3 * IntraA);
+        var b = Top(3 * IntraA + IntraA * 3 / 5);  // ~0.6 of the fast intraday period later
         var overlap = a.Intersect(b).Count() / 20.0;
-        Assert.True(overlap < 0.55, $"leader overlap {overlap:P0} should be loose across windows");
+        Assert.True(overlap < 0.55, $"leader overlap {overlap:P0} should be loose as time advances");
     }
 
     [Fact]
     public void Hot_Deterministic_SameInputsSameOutput()
-    {
-        var a = BotActivityService.HotSizeMult(13, "Volatile", 987654321L, HotPeriod, 1.5, 0.2, 0.3, 0.02, 1.1);
-        var b = BotActivityService.HotSizeMult(13, "Volatile", 987654321L, HotPeriod, 1.5, 0.2, 0.3, 0.02, 1.1);
-        Assert.Equal(a, b);
-    }
+        => Assert.Equal(Hot(13, "Volatile", 987654321L, 0.4, 1.5, 0.3, 0.02, 1.1),
+                        Hot(13, "Volatile", 987654321L, 0.4, 1.5, 0.3, 0.02, 1.1));
 
     [Fact]
     public void Hot_PerClassAmplitude_CalmTighterThanMeme()
     {
-        // Same stock + window: Calm rotates in a narrower band around 1 than Normal < Volatile ≤ Meme.
+        // Averaged over the cross-section, a class with a bigger amplitude rotates through a wider band.
         const double boost = 1.5;
-        long now = 5 * HotPeriod + HotPeriod / 4;
-        double LogDist(string cls) => Math.Abs(Math.Log(
-            BotActivityService.HotSizeMult(29, cls, now, HotPeriod, boost, 0.0, 0, 0.02, 0)));
-        Assert.True(LogDist("Calm") < LogDist("Normal"));
-        Assert.True(LogDist("Normal") < LogDist("Volatile"));
-        Assert.True(LogDist("Volatile") <= LogDist("Meme"));
+        long now = 5 * IntraA + IntraA / 4;
+        double MeanAbsLog(string cls) => Enumerable.Range(1, 500)
+            .Average(sid => Math.Abs(Math.Log(Hot(sid, cls, now, 0.4, boost))));
+        Assert.True(MeanAbsLog("Calm") < MeanAbsLog("Normal"));
+        Assert.True(MeanAbsLog("Normal") < MeanAbsLog("Volatile"));
+        Assert.True(MeanAbsLog("Volatile") < MeanAbsLog("Meme"));
     }
 
     [Fact]
-    public void Hot_CosineBlend_IsContinuousAcrossWindowEdge()
+    public void Hot_IsSmooth_NoStaticStep()
     {
-        // Just before a window boundary (fully eased to the next window) ≈ the start of the next window.
+        // Small time steps ⇒ small hotness changes everywhere (organic drift, no window-edge jump).
         const double boost = 1.5;
-        var justBefore = BotActivityService.HotSizeMult(17, "Normal", 2 * HotPeriod - 1, HotPeriod, boost, 0.2, 0, 0.02, 0);
-        var atStart    = BotActivityService.HotSizeMult(17, "Normal", 2 * HotPeriod,     HotPeriod, boost, 0.2, 0, 0.02, 0);
-        Assert.Equal(atStart, justBefore, precision: 3); // no visible step at the seam
+        long dt = IntraA / 500;  // fine step
+        double maxJump = 0;
+        for (long k = 0; k < 400; k++)
+        {
+            var h0 = Hot(21, "Normal", 7 * IntraA + k * dt,       0.4, boost);
+            var h1 = Hot(21, "Normal", 7 * IntraA + (k + 1) * dt, 0.4, boost);
+            maxJump = Math.Max(maxJump, Math.Abs(h1 - h0));
+        }
+        Assert.True(maxJump < 0.02, $"max step {maxJump:F4} should be tiny (smooth drift, no static edge)");
+    }
+
+    [Fact]
+    public void Hot_DailyLayer_Contributes()
+    {
+        // The daily component genuinely moves the result: pure-intraday vs pure-daily differ at a generic point.
+        const double boost = 1.5;
+        long now = 11 * IntraA + IntraA / 7;
+        Assert.NotEqual(Hot(19, "Normal", now, 0.0, boost), Hot(19, "Normal", now, 1.0, boost));
     }
 
     [Fact]
     public void Hot_SentimentTilt_ZeroMeanAndBounded()
     {
-        // Above the θ baseline nudges hotness up, below it nudges down, vs the no-tilt value; bounded by ±sentTilt.
+        // Above the θ baseline nudges hotness up, below it nudges down, vs the no-tilt value; stays in band.
         const double boost = 1.5, tilt = 0.3, theta = 0.02;
-        long now = 9 * HotPeriod + HotPeriod / 5;
-        var noTilt   = BotActivityService.HotSizeMult(31, "Normal", now, HotPeriod, boost, 0.0, 0.0,  theta, 0.0);
-        var strongUp = BotActivityService.HotSizeMult(31, "Normal", now, HotPeriod, boost, 0.0, tilt, theta, slopeAbs: 1.0);
-        var strongDn = BotActivityService.HotSizeMult(31, "Normal", now, HotPeriod, boost, 0.0, tilt, theta, slopeAbs: 0.0);
-        Assert.True(strongUp >= noTilt);  // high slow-sentiment ⇒ hotter (or clamped equal)
-        Assert.True(strongDn <= noTilt);  // low slow-sentiment ⇒ cooler
+        long now = 9 * IntraA + IntraA / 5;
+        var noTilt   = Hot(31, "Normal", now, 0.4, boost, tilt: 0.0);
+        var strongUp = Hot(31, "Normal", now, 0.4, boost, tilt: tilt, theta: theta, slope: 1.0);
+        var strongDn = Hot(31, "Normal", now, 0.4, boost, tilt: tilt, theta: theta, slope: 0.0);
+        Assert.True(strongUp >= noTilt);
+        Assert.True(strongDn <= noTilt);
         Assert.InRange(strongUp, 1.0 / boost, boost);
         Assert.InRange(strongDn, 1.0 / boost, boost);
     }
