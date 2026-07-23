@@ -15,7 +15,12 @@ The naturalizer must, on OLD candle data:
    gets the SAME character the live market now has. ← This is WHY F3 is last: the new model DEFINES the
    target texture to retrofit; measure the live flow first, then match old data to it.
 3. **TRIM TERRIBLE-LOOKING DATA** — hard-clamp the egregious wicks/gaps/flats (per §0/§2), cap-don't-erase.
-4. **★ ALTER MOOD / FEAR&GREED ACCORDINGLY** — the retextured candles carry `MarketMood, MoodMid, MoodSlow`
+4b. **★ CONTINUITY (Kiesh 2026-07-23): the DISPLAY must be gap-free** — two live bugs the F3 pass must also fix:
+   (a) candles occasionally **MISSING** (rare drop-outs in the series); (b) **close[t] ≠ open[t+1]** — consecutive
+   candles don't connect (the open of bar t+1 should equal the close of bar t for a continuous line). The
+   naturalizer/read path must enforce open[t+1] := close[t] (or surface the true continuous series) AND fill the
+   rare missing bars. NOTE this overlaps the CANDLE-CACHE research (loading correctness) — coordinate the two.
+5b. **★ ALTER MOOD / FEAR&GREED ACCORDINGLY** — the retextured candles carry `MarketMood, MoodMid, MoodSlow`
    (the F&G band, existing columns from AddCandleMarketMood / AddCandleMoodBands migrations). When we retexture
    old bars the stored mood/F&G MUST be recomputed to stay consistent with the new candle shapes — a
    re-derivation step, not left stale. (Open Q for build: recompute mood read-time alongside the naturalizer,

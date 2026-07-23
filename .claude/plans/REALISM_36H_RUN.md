@@ -78,7 +78,10 @@ wick-ratio gate proves "no harm", never "prettier"). **BUILD + A/B ORDER (attrib
   construction; flag `Bots:Personality:SectorSizeModel` default false). 5 files: StockProfileService.cs, AiTradeService:381, AiBotDecision:2074
   (VolumeMult line), ExogShock:129+NewsRepeats, appsettings. **★ FINDING: `SharesOutstanding=0` fleet-wide (prod AND soak seed — migrated, never
   seeded)** → size axis was inert; FIXED to rank by **SeedPrice** (`×max(shares,1)`, auto-upgrades to marketcap if shares ever seeded). SURFACE TO
-  KIESH: size = seed-price proxy (high=blue-chip). **★ A/B SOAK 45m DONE → F1 PASSES (metrics-only sign-off):** CK=0 both · vol-dispersion +50%
+  KIESH: size = seed-price proxy (high=blue-chip). **★★ F1 CLEARED — council 6/6 SHIP-AS-BUILT (Kiesh trusts council verdict).** Accept ρ=0.29 (freeze
+  κVol 0.35 — bumping spends volume≠move for a non-gate); dispersion +50% = right amount, hold. ★ BATCH-EYEBALL WATCH-NOTE: ret_acf shifted −0.033→−0.108
+  on a direction-neutral lever (majority=healthy microstructure toward §1; Contrarian=possible coupling) → on prod batch confirm corr(notional,|ret|)<0.15
+  + ret_acf tracks VolumeMult; ρ-tuning deferred to aggregate batch eyeball. **★ A/B SOAK 45m DONE → F1 PASSES (metrics-only sign-off):** CK=0 both · vol-dispersion +50%
   (0.00068→0.00102 = distinct personalities) · volume≠move corr(vol,|ret|) 0.124≤0.15 · size↔notional-vol ρ 0.287 ON vs 0.105 OFF (2.7× control; under
   0.35 but realistically diluted by sector — ACCEPTED, κVol↑ would threaten volume≠move) · tech news 3.49× staples vs 1.63× OFF with TOTAL conserved
   (708≈702, λ-norm works) · ret_acf −0.108 (from −0.033, TOWARD §1 target) · drift/move parity. NOT prod-pushed (Kiesh reviews whole batch at end). NEXT=F5.
