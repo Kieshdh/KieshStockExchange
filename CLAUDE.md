@@ -5,6 +5,13 @@
 - Primary development target is Windows.
 - Prefer extending the current architecture over replacing it.
 
+## Reference documentation (READ FIRST for settings / tuning / methods)
+- **`docs/reference/` is the canonical, first-class reference bucket** — consult it before tuning the market, changing config, deploying, or running a design method. It holds the SETTINGS/CONFIG references AND the reusable METHOD references:
+  - **`BOT_MECHANICS.md`** — the bot systems + the `Bots:*` config-key index + **§1 "TARGET VALUES" (the "Kiesh target" fine-tuning scorecard)**. **`FINE_TUNING_TARGETS.md`** — the named fine-tuning target/gate-set. **`MARKET_BALANCING_CONFIG.md`** — master `Bots:*` knob/value/state lookup. **`FLAG_REGISTER.md`** — flag lifecycle. **`SERVER_HOST_AND_OPS.md`** — deploy-host + appsettings→env override reference.
+  - **`METHOD_ultradesign.md`, `METHOD_llm_council.md`, `METHOD_autonomous_run_timers.md`, `METHOD_ab_soak_and_gates.md`** — how we design big changes, run councils, chain the autonomous resume timers, and A/B-soak (CK=0 hard gate).
+- **Every `docs/reference/` file also has an auto-memory entry** (indexed in the memory `MEMORY.md`) so its settings/ideas load each session — keep that in sync when adding/removing a reference doc.
+- Gaps still to write (specced): `reference/PROD_ENV_OVERRIDES.md` (live prod `docker-compose.prod.yml` env values — strongest gap), `reference/APPSETTINGS_NONBOTS_KEYS.md`, `reference/SEED_CONFIG_REFERENCE.md`.
+
 ## Build and run
 ```bash
 dotnet build KieshStockExchange/KieshStockExchange.csproj -f net9.0-windows10.0.19041.0
