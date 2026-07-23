@@ -71,6 +71,23 @@ handled bursts; TakerExp 0.5→0.35 is the lever IF Kiesh re-reports; never soak
 VOLUME ≠ PRICE-MOVE (boost SIZE not the directional taker-upgrade); values are fixed constants (add per-stock jitter for variety); don't over-tune
 an on-target market (burst-council lesson).
 
+## ★★★★ PORTFOLIO BUILD+TEST PLAN — GREEN-LIT (Kiesh: "build all of them, you test it, THEN I look" + portfolio council 2026-07-23)
+Council (5-lens→chairman, 6 agents): **BUILD ALL 5.** F1/F2/F4/F5 sign off BY METRICS ALONE; **F3 needs Kiesh's ONE eyeball** (cosmetic — a
+wick-ratio gate proves "no harm", never "prettier"). **BUILD + A/B ORDER (attribution — never co-enable F1/F2/F5 during their solo soaks):**
+1. **F1 StockProfile** (sector+size 5-knob) — BUILD default-off, OFF==legacy byte-identical test + full suite (dotnet test, disk-frugal), then **solo A/B** vs fresh OFF.
+2. **F5 MarketPulse** (already coded `6ba7650`, flag `...:MarketPulse:Enabled`, needs TakerCoupling+TakerStrength>0) — **solo A/B** vs fresh OFF (isolate the momentum lever).
+3. **F2 VolumeRotation** — BUILD default-off, A/B with **F1 held ON as baseline** (measure the delta F2 adds; it redistributes F1's size coupling).
+4. **F1+F5 combined** confirmation soak — sole job = ret_acf (stacking momentum on a livelier tape can drag lag-1 toward 0 while still in-band; gate ret_acf within OFF ±0.05, NOT just band-pass).
+5. **F4 MVVM restructure** — pure refactor, gate = build + 739 green + launch + byte-identical candle diff (NO soak). [MY DEVIATION from council "F4 first": doing realism features FIRST since that's the run's purpose + F4 is disk-heavy/low-realism-value; F4's "clean diff" benefit is cosmetic. Slot it as a focused pass.]
+6. **F3 CANDLE_NATURALIZATION — LAST** (Kiesh: live model shows the target flow first). BUILD + byte-diff/wick gate for "no harm", + Kiesh's ONE end-of-run eyeball. See its plan's ★★ KIESH F3 SPEC (follow old price + add new-economies texture + trim + recompute mood/F&G).
+**METRIC GATES (soak-asserted, 120min or same-seed OFF/ON pairs — 45m under-powered for news-λ/Jaccard/ret_acf-SE; CK=0 hard gate every arm):**
+F1: size↔volume Spearman ρ ≥0.35 (was ~0.2) · corr(volume,|ret|) ≤0.15 (volume≠move) · tech news ≥1.5× industrials · λ conserved ±5% · OverheatCap
+never breached · PARITY drift ±0.15%/6h, ret_acf ±0.05, move>3% ±10%. F2: top-decile-vol Jaccard ≤0.55 across adj 4h windows (Δ≥0.15 vs F1-ON) ·
+agg volume ±2% · **VolumeMult×Boost product ≤ SIZE cap per stock** (compound-cap — F2's clamp doesn't know F1's VolumeMult). F5: ret_acf in
+[−0.43,−0.10] + step-glide lag1-3 acf, no shift toward 0 >0.05 vs OFF · move p99 Δ≤10% · drift ±0.5σ. F4: diff-only. F3: OFF byte-identical + Close
+immutable + wick/body p95 ↓≥15% + drift/ret_acf/move unchanged (read-time cosmetic) + Kiesh eyeball. **Plain-English status for Kiesh:** F1="stocks
+have different personalities Y/N"; F2="different leaders each day, total trading unchanged Y/N"; F5="momentum added without breaking mean-reversion Y/N".
+
 ## ★★★★ COUNCIL VERDICT on the CK-fix deploy (2026-07-23 ~04:35 UTC) = DO NOT deploy unattended; cherry-pick + hand to Kiesh
 5 advisors + 5 peer reviews. Strongest = Contrarian + First-Principles; unanimous blind spot = Expansionist's "ship whole branch".
 **DECISION:** the fix is CORRECT and should ship, but NOT as an autonomous owner-away emergency push. Decisive logic: (1) issue is
@@ -125,10 +142,9 @@ now confirms Q7 stays 0 + phantom clears. NOTE: MarketPulse + log-sym suite + §
   ret_acf = per-min VWAP from Transactions (Close-basis reads more negative). TUNE TRIGGERS if a REAL high emerges: Close/VWAP ret_acf → −0.4 (too
   mean-reverting/bouncy) ⇒ small trend-follower/momentum nudge; moves systemically >3-4% or any >5% creeping ⇒ small RegimeTaker-strength trim.
   CALIBRATION Q for Kiesh: which readout/basis/stock shows "high"? (VWAP −0.04 vs Close −0.24 differ.)
-- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET; drift DIPPED negative (1 cycle, watch):** @18:10 drift 6h **−0.502** (trend +0.333→+0.168→−0.502 = 1st
-  negative after 2 positive, larger dip + downward-skewed p25−1.54/p75+0.85). ret_acf VWAP **−0.100** (EXACTLY at target). Moves VERY calm (45m max
-  1.76, zero >4/>5% 3h). Healthy, Q7=0. ⇒ HOLD (1 negative ≠ trigger; need 3 CONSECUTIVE for log-sym A/B). WATCH: if next 2 cycles also negative ⇒
-  log-sym trigger. Likely oscillation (drift bounces ±0.5), but a deeper dip than usual — track it.
+- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET; drift dip was OSCILLATION, RECOVERED:** @18:51 drift 6h **+0.014** (flat; trend +0.168→−0.502→+0.014 =
+  the negative was a 1-cycle dip, bounced back to ~0 next cycle → confirmed noise, NOT a trend). ret_acf VWAP **−0.070** (on-target band). Moves calm
+  (45m max 2.37, zero >4/>5% 3h). Healthy, Q7=0. ⇒ HOLD (0 consecutive negative; no trigger). Drift oscillates ±0.5 around ~0 as expected — do NOT tune.
 - **★ (prior) CLEAN DRIFT + ret_acf — ON-TARGET, HOLDING; ret_acf is NOISY not trending:** drift 6h +0.109→+0.003→+0.054→**−0.014** (@13:27, oscillating ~0,
   dispersion alive). **ret_acf VWAP −0.044→−0.016→+0.012→−0.150** = NOISY/oscillating in [−0.15,+0.01], centered near the §1 −0.1 target, NO real trend
   (last cycle's +0.012 "climb" was noise — 2h/35-stock estimates bounce ±0.1/cycle; correctly did NOT tune on it). Tape very calm (45m max 1.97, zero

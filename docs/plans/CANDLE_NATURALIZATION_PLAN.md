@@ -1,9 +1,25 @@
 # CANDLE NATURALIZATION PLAN — make the candle history flow more naturally
 
-**Status: DESIGN ONLY — awaiting Kiesh's final say. Do NOT build yet.** Produced via the ultradesign
-pipeline (feasibility → 3 architects → 5-advisor council). Owner ask: some instances in the candle history
-look "ugly"; clean old candle data + make new candles born cleaner; specifically "don't aggregate the bigger
-candles fully — use a different aggregation method." An existing wick-trimmer (v1) already ships.
+**Status: DESIGN — BUILD LAST (Kiesh 2026-07-23: "do the changing of the old candle data last, so the current
+[new] model can show what the older candle flow should look like"). Produced via ultradesign (feasibility →
+3 architects → 5-advisor council). Owner ask: some instances in the candle history look "ugly"; clean old
+candle data + make new candles born cleaner; "don't aggregate the bigger candles fully — use a different
+aggregation method." An existing wick-trimmer (v1) already ships.
+
+## ★★ KIESH F3 SPEC (2026-07-23) — the RETROFIT contract (build after F1/F2/F5 are live)
+The naturalizer must, on OLD candle data:
+1. **FOLLOW THE OLD PRICE** — the historical price PATH stays truthful (Close series immutable; do not rewrite
+   where price went). Retexture around the real trajectory, never replace it.
+2. **ADD THE NEW "ECONOMIES TEXTURE"** — apply the organic texture the NEW live model (F1 sector/size
+   personality + F2 volume rotation + F5 MarketPulse stepping) now produces, onto the old bars, so history
+   gets the SAME character the live market now has. ← This is WHY F3 is last: the new model DEFINES the
+   target texture to retrofit; measure the live flow first, then match old data to it.
+3. **TRIM TERRIBLE-LOOKING DATA** — hard-clamp the egregious wicks/gaps/flats (per §0/§2), cap-don't-erase.
+4. **★ ALTER MOOD / FEAR&GREED ACCORDINGLY** — the retextured candles carry `MarketMood, MoodMid, MoodSlow`
+   (the F&G band, existing columns from AddCandleMarketMood / AddCandleMoodBands migrations). When we retexture
+   old bars the stored mood/F&G MUST be recomputed to stay consistent with the new candle shapes — a
+   re-derivation step, not left stale. (Open Q for build: recompute mood read-time alongside the naturalizer,
+   or as a one-shot backfill? read-time keeps the "never destructive" council rule; confirm at build.)
 
 ---
 
