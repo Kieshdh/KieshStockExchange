@@ -45,6 +45,10 @@ internal sealed class BotPriceMemoryService
     // cap re-centers on, so a genuine move re-rates the level and sticks. Independent half-life from
     // _recent so RecentAnchor's pull is untouched.
     private readonly bool    _adaptiveEnabled;
+    // §log-sym follow-on (audit down-bias fix, sibling of Bots:Fundamental:GeometricBand): interpret the anchor's
+    // band clamps as GEOMETRIC [seed/F, seed·F] (F=1+d) instead of linear [seed(1−d), seed(1+d)] — ratio-symmetric,
+    // no down-bias. Default false ⇒ exact legacy linear path ⇒ byte-identical.
+    private readonly bool    _geometricBand;
     private readonly double  _fastHalfLifeSec;
     private readonly decimal _adaptiveBlendWeight;
     private readonly decimal _maxTotalExcursion;
@@ -76,7 +80,8 @@ internal sealed class BotPriceMemoryService
         bool adaptiveEnabled = false,
         double fastHalfLifeSec = 900.0,
         decimal adaptiveBlendWeight = 0.5m,
-        decimal maxTotalExcursion = 0.35m)
+        decimal maxTotalExcursion = 0.35m,
+        bool geometricBand = false)
     {
         _stocks      = stocks      ?? throw new ArgumentNullException(nameof(stocks));
         _logger      = logger      ?? throw new ArgumentNullException(nameof(logger));
@@ -94,6 +99,7 @@ internal sealed class BotPriceMemoryService
         _fastHalfLifeSec     = Math.Max(MinDtSec, fastHalfLifeSec);
         _adaptiveBlendWeight = Math.Clamp(adaptiveBlendWeight, 0m, 1m);
         _maxTotalExcursion   = Math.Clamp(maxTotalExcursion, 0m, 0.99m);
+        _geometricBand       = geometricBand;
     }
 
     /// <summary>
@@ -234,7 +240,7 @@ internal sealed class BotPriceMemoryService
         if (!_seed.TryGetValue(key, out var seed) || seed <= 0m) return 0m;
         if (!_havePrev || !_dayHistory.TryGetValue(key, out var history) || history.Count == 0) return seed;
         var raw = WeightedAverage(history, _windowDays, seed);
-        return ClampToBand(raw, seed, _maxDailyDrift);
+        return ClampToBand(raw, seed, _maxDailyDrift, _geometricBand);
     }
 
     /// <summary>True when the adaptive (path-dependent) anchor is active.</summary>
@@ -254,7 +260,7 @@ internal sealed class BotPriceMemoryService
         var key = (stockId, currency);
         if (!_seed.TryGetValue(key, out var seed) || seed <= 0m) return 0m;
         if (!_adaptiveEnabled || !_fast.TryGetValue(key, out var fast) || fast <= 0m) return seed;
-        return AdaptiveAnchorValue(seed, fast, _adaptiveBlendWeight, _maxTotalExcursion);
+        return AdaptiveAnchorValue(seed, fast, _adaptiveBlendWeight, _maxTotalExcursion, _geometricBand);
     }
 
     /// <summary>
@@ -263,11 +269,11 @@ internal sealed class BotPriceMemoryService
     /// pure seed (today's CapFromSeed); 1 = fully track the clamped fast EWMA. The result is always
     /// inside seed × [1 ± maxTotalExcursion] because both endpoints are.
     /// </summary>
-    internal static decimal AdaptiveAnchorValue(decimal seed, decimal fast, decimal blendWeight, decimal maxTotalExcursion)
+    internal static decimal AdaptiveAnchorValue(decimal seed, decimal fast, decimal blendWeight, decimal maxTotalExcursion, bool geometric = false)
     {
         if (seed <= 0m) return 0m;
         if (fast <= 0m) return seed;
-        var clampedFast = ClampToBand(fast, seed, maxTotalExcursion);
+        var clampedFast = ClampToBand(fast, seed, maxTotalExcursion, geometric);
         var w = Math.Clamp(blendWeight, 0m, 1m);
         return seed + w * (clampedFast - seed);
     }
@@ -336,13 +342,20 @@ internal sealed class BotPriceMemoryService
     /// returns <paramref name="seed"/> exactly — the escape-hatch knob matching today's
     /// fixed-seed Fundamental behaviour.
     /// </summary>
-    internal static decimal ClampToBand(decimal value, decimal seed, decimal maxDrift)
+    internal static decimal ClampToBand(decimal value, decimal seed, decimal maxDrift, bool geometric = false)
     {
         if (seed <= 0m) return value;
         if (maxDrift <= 0m) return seed;
         var d = Math.Clamp(maxDrift, 0m, 0.99m);
-        var lo = seed * (1m - d);
-        var hi = seed * (1m + d);
+        decimal lo, hi;
+        if (geometric)
+            // §log-sym: geometric [seed/F, seed·F], F=1+d — ratio-symmetric (down ÷ == up ×), no down-bias.
+            (lo, hi) = PriceBandMath.Band(seed, PriceBandMath.Factor(d));
+        else
+        {
+            lo = seed * (1m - d);
+            hi = seed * (1m + d);
+        }
         return value < lo ? lo : value > hi ? hi : value;
     }
 }

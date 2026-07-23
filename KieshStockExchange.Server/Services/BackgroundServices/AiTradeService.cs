@@ -534,7 +534,9 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         adaptiveEnabled:     adaptiveAnchorEnabled,
                         fastHalfLifeSec:     _configuration.GetValue("Bots:ValueAnchor:Adaptive:FastHalfLifeSec", 900.0),
                         adaptiveBlendWeight: _configuration.GetValue("Bots:ValueAnchor:Adaptive:BlendWeight", 0.5m),
-                        maxTotalExcursion:   _configuration.GetValue("Bots:ValueAnchor:Adaptive:MaxTotalExcursion", 0.35m));
+                        maxTotalExcursion:   _configuration.GetValue("Bots:ValueAnchor:Adaptive:MaxTotalExcursion", 0.35m),
+                        // §log-sym follow-on: geometric (log-symmetric) anchor band clamps ⇒ no down-bias. Default false ⇒ byte-identical.
+                        geometricBand:       _configuration.GetValue("Bots:ValueAnchor:GeometricBand", false));
         _sentiment = new BotSentimentService(stocks, _profiles, new SeparatorLogger<BotSentimentService>(loggerFactory, loggerOptions),
                         newsEvents:              _configuration.GetValue("Bots:NewsEvents", true),
                         shockMeanIntervalHours:  _configuration.GetValue("Bots:ShockMeanIntervalHours", 6.0),

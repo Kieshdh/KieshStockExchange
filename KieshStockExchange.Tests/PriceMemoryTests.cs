@@ -77,6 +77,25 @@ public class PriceMemoryTests
         Assert.Equal(100m, BotPriceMemoryService.ClampToBand( 77m, seed: 100m, maxDrift: 0m));
     }
 
+    [Fact]
+    public void ClampToBand_geometric_is_ratio_symmetric_no_down_bias()
+    {
+        // §log-sym follow-on: geometric [seed/F, seed·F], F=1+d. seed 199, d 0.99 ⇒ F 1.99 ⇒ [100, 396.01].
+        // The floor (100) sits FAR above the legacy linear floor (199·0.01 = 1.99) — the down-bias removed — and
+        // lo·hi == seed² (ratio-symmetric: the ÷F down-distance equals the ×F up-distance in log-space).
+        var lo = BotPriceMemoryService.ClampToBand(1m,   seed: 199m, maxDrift: 0.99m, geometric: true);
+        var hi = BotPriceMemoryService.ClampToBand(999m, seed: 199m, maxDrift: 0.99m, geometric: true);
+        Assert.Equal(100m, lo);
+        Assert.Equal(396.01m, hi);
+        Assert.Equal(199m * 199m, lo * hi);
+        Assert.True(lo > 199m * (1m - 0.99m), "geometric floor sits above the linear floor (down-bias removed)");
+        // Legacy linear overload is untouched (byte-identical default): floor = seed·(1−d) = 1.99.
+        Assert.Equal(199m * 0.01m, BotPriceMemoryService.ClampToBand(1m, seed: 199m, maxDrift: 0.99m));
+        // The geometric flag threads through AdaptiveAnchorValue (blendWeight 1 ⇒ the clamped fast = the floor).
+        Assert.Equal(100m, BotPriceMemoryService.AdaptiveAnchorValue(
+            seed: 199m, fast: 1m, blendWeight: 1m, maxTotalExcursion: 0.99m, geometric: true));
+    }
+
     // §weighted-week: linearly-tapered weighted average of the recent N daily TWAPs.
     // Most recent slot weight = WindowDays; oldest slot weight = 1; missing oldest slots route
     // their weight to seed. The whole-cap point of the change is that a single runaway day moves
