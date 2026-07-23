@@ -43,6 +43,11 @@ internal sealed class BotActivityService
     private readonly double _wNews, _wMoveUp, _wMoveDown, _wSent, _theta, _wSelf, _decay;
     private readonly double _bDriftAmp;
     private readonly double _compGExp, _compFloor, _compCap;
+    // §F2 hot-stock rotation (SIZE-channel only; median-1; default-off ⇒ H≡1).
+    private readonly bool   _hotEnabled;
+    private readonly double _hotBoost, _hotBlendFrac, _hotSentTilt, _hotSentTheta;
+    private readonly long   _hotPeriodTicks;
+    private readonly Func<int, string> _stockClass;
     #endregion
 
     #region State
@@ -78,7 +83,10 @@ internal sealed class BotActivityService
         double wNews = 0.6, double wMoveUp = 1.0, double wMoveDown = 2.0,
         double wSent = 0.3, double theta = 0.3, double wSelf = 0.009, double decay = 0.99,
         double bDriftAmp = 0.15,
-        double compGExp = 0.5, double compFloor = 0.4, double compCap = 3.0)
+        double compGExp = 0.5, double compFloor = 0.4, double compCap = 3.0,
+        bool hotEnabled = false, double hotBoost = 1.0, double hotPeriodMin = 240.0,
+        double hotBlendFrac = 0.2, double hotSentTilt = 0.0, double hotSentTheta = 0.02,
+        Func<int, string>? stockClass = null)
     {
         _stocks    = stocks    ?? throw new ArgumentNullException(nameof(stocks));
         _sentiment = sentiment ?? throw new ArgumentNullException(nameof(sentiment));
@@ -95,6 +103,13 @@ internal sealed class BotActivityService
         _bDriftAmp = Math.Max(0.0, bDriftAmp);
         _compGExp = Math.Max(0.0, compGExp);
         _compFloor = Math.Max(0.0, compFloor); _compCap = Math.Max(_compFloor, compCap);
+        _hotEnabled = hotEnabled;
+        _hotBoost = Math.Max(1.0, hotBoost);
+        _hotPeriodTicks = TimeSpan.FromMinutes(Math.Max(1.0, hotPeriodMin)).Ticks;
+        _hotBlendFrac = Math.Clamp(hotBlendFrac, 0.0, 0.5);
+        _hotSentTilt = Math.Max(0.0, hotSentTilt);
+        _hotSentTheta = Math.Max(1e-6, hotSentTheta);
+        _stockClass = stockClass ?? (static _ => "Normal");
     }
 
     #region Tick / Reset
@@ -202,6 +217,77 @@ internal sealed class BotActivityService
     // Pure, testable core of the composition factor.
     internal static double ComposeClamped(double gNorm, double gExp, double s, double floor, double cap)
         => Math.Clamp((gExp == 1.0 ? gNorm : Math.Pow(gNorm, gExp)) * s, floor, cap);
+
+    /// <summary>True when the F2 rotating hot-stock SIZE boost is active. Off / Boost≤1 ⇒ H≡1 ⇒ byte-identical.</summary>
+    internal bool HotRotationEnabled => _hotEnabled && _hotBoost > 1.0;
+
+    /// <summary>
+    /// §F2 rotating hot-stock hotness for the SIZE channel only. Deterministic, RNG-free
+    /// H(stockId, now) ∈ [1/Boost, Boost], median 1, rotating which names trade BIGGER each window
+    /// (cosine-blended across window edges so it drifts, not steps), optionally tilted a little toward names
+    /// with strong slow / higher-timeframe sentiment. Direction-neutral (size, NOT the taker upgrade) ⇒
+    /// volume ≠ price-move. 1.0 when disabled. Cache-read of slow sentiment; no RNG, call-order-independent.
+    /// </summary>
+    internal double CompositionSizeHot(int stockId)
+    {
+        if (!HotRotationEnabled) return 1.0;
+        double slopeAbs = _hotSentTilt > 0.0
+            ? Math.Abs((double)_sentiment.GetSentimentSlope(stockId, fast: false))
+            : 0.0;
+        return HotSizeMult(stockId, _stockClass(stockId), TimeHelper.NowUtc().Ticks, _hotPeriodTicks,
+            _hotBoost, _hotBlendFrac, _hotSentTilt, _hotSentTheta, slopeAbs);
+    }
+
+    /// <summary>
+    /// Pure, testable core of the F2 hot-rotation SIZE factor. Median 1, ∈ [1/Boost, Boost].
+    /// e = (2·hash(stockId,window) − 1)·classScale, cosine-blended toward the next window over the final
+    /// <paramref name="blendFrac"/> of the window, plus a zero-mean sentiment tilt; H = clamp(Boost^e).
+    /// </summary>
+    internal static double HotSizeMult(int stockId, string stockClass, long nowTicks, long periodTicks,
+        double boost, double blendFrac, double sentTilt, double sentTheta, double slopeAbs)
+    {
+        if (boost <= 1.0 || periodTicks <= 0) return 1.0;
+
+        // Epoch-anchored rotating window + fractional position within it (restart-stable: same wall-clock ⇒ same window).
+        long w = nowTicks / periodTicks;
+        long rem = nowTicks % periodTicks;
+        if (rem < 0) { w--; rem += periodTicks; }          // floor for the (unused-in-practice) pre-epoch case
+        double frac = (double)rem / periodTicks;            // [0,1)
+
+        // Per-window signed hotness exponent in [-1,1): median 0 ⇒ median H == 1 (redistributive, not inflationary).
+        double eThis = 2.0 * BotMath.HashUnit01(stockId, unchecked((int)w)) - 1.0;
+
+        // Cosine edge-blend: flat through the window body, easing into the next window's value over the final
+        // blendFrac so a name ramps its hotness smoothly instead of stepping at the boundary.
+        double e = eThis;
+        if (blendFrac > 0.0 && frac > 1.0 - blendFrac)
+        {
+            double eNext = 2.0 * BotMath.HashUnit01(stockId, unchecked((int)(w + 1))) - 1.0;
+            double x  = (frac - (1.0 - blendFrac)) / blendFrac;   // [0,1] across the edge zone
+            double bw = 0.5 * (1.0 - Math.Cos(Math.PI * x));      // cosine ease 0→1
+            e = (1.0 - bw) * eThis + bw * eNext;
+        }
+
+        // Per-class amplitude: rotation modulates WITHIN character — a Calm blue-chip must not become the
+        // window's hottest mover, a Meme name rotates harder.
+        e *= ClassHotScale(stockClass);
+
+        // Weak higher-timeframe sentiment tilt, zero-mean by construction: |slow-sentiment| above the θ baseline
+        // nudges hotness up, below it nudges down ⇒ redistributes rather than inflates. Bounded to ±sentTilt.
+        if (sentTilt > 0.0)
+            e += sentTilt * Math.Tanh((slopeAbs - sentTheta) / sentTheta);
+
+        return Math.Clamp(Math.Pow(boost, e), 1.0 / boost, boost);
+    }
+
+    // Class-aware hot amplitude: the fraction of the global Boost exponent a class may rotate through.
+    private static double ClassHotScale(string stockClass) => stockClass switch
+    {
+        "Calm"     => 0.4,
+        "Volatile" => 1.0,
+        "Meme"     => 1.2,
+        _          => 0.8,   // Normal / Sized / sector names
+    };
 
     /// <summary>Mean S across a watchlist (1 when disabled / empty).</summary>
     internal decimal AverageWatchlistActivity(IReadOnlyCollection<int> watchlist)

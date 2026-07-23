@@ -2080,6 +2080,12 @@ internal sealed class AiBotDecisionService
             // (bigger size cannot cross an extra book level). MM exempt. Model off ⇒ line skipped ⇒ byte-identical.
             if (_profiles.SectorSizeActive && user.Strategy != AiStrategy.MarketMaker)
                 rawTrade *= _profiles.Get(stockId).VolumeMult;
+            // §F2 hot-stock rotation: a rotating per-stock hotness (median-1, per-class-clamped, cosine-blended)
+            // that boosts the SIZE channel ONLY — never the directional taker upgrade — so different names LEAD in
+            // volume each window without welding volume to price-move. Same CK-safe class as the composition size
+            // seam (cash/room/depth clamps hold). MM exempt. Off / Boost≤1 ⇒ H≡1 ⇒ line skipped ⇒ byte-identical.
+            if (_activity.HotRotationEnabled && user.Strategy != AiStrategy.MarketMaker)
+                rawTrade *= (decimal)_activity.CompositionSizeHot(stockId);
         }
 
         var marketPrice = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);

@@ -654,7 +654,15 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         bDriftAmp:        _configuration.GetValue("Bots:Activity:BDriftAmp", 0.15),
                         compGExp:         _configuration.GetValue("Bots:Activity:Composition:GExp", 0.5),
                         compFloor:        _configuration.GetValue("Bots:Activity:Composition:Floor", 0.4),
-                        compCap:          _configuration.GetValue("Bots:Activity:Composition:Cap", 3.0));
+                        compCap:          _configuration.GetValue("Bots:Activity:Composition:Cap", 3.0),
+                        // §F2 hot-stock rotation (SIZE channel; default-off ⇒ byte-identical).
+                        hotEnabled:       _configuration.GetValue("Bots:Activity:HotRotation:Enabled", false),
+                        hotBoost:         _configuration.GetValue("Bots:Activity:HotRotation:Boost", 1.5),
+                        hotPeriodMin:     _configuration.GetValue("Bots:Activity:HotRotation:PeriodMinutes", 240.0),
+                        hotBlendFrac:     _configuration.GetValue("Bots:Activity:HotRotation:BlendFraction", 0.2),
+                        hotSentTilt:      _configuration.GetValue("Bots:Activity:HotRotation:SentimentTilt", 0.0),
+                        hotSentTheta:     _configuration.GetValue("Bots:Activity:HotRotation:SentimentTheta", 0.02),
+                        stockClass:       sid => _profiles.Get(sid).Class);
         // §fear-greed: composite Fear/Greed index (fast layer of the one-axis-three-timescales model). Read-only
         // projection; default-off so the live gauge keeps the v1 sentiment×activity fallback until it is wired +
         // soak-validated. Now a DI singleton (shared with CandleService for flush-time stamping); this ctor only
