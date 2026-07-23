@@ -349,53 +349,69 @@ internal sealed class TradeSettler
             // TotalBalance via the consume above and the original short proceeds.
             if (buyerPosQtyBefore < 0 && buyerPos.ShortCollateral > 0m)
             {
-                if (buyerPos.ShortCollateralCurrency == ccy)
+                // Collateral was reserved in ShortCollateralCurrency at OPEN; the release must UNLOCK that same
+                // currency, INDEPENDENT of this fill's currency. A cross-currency close (the FX-desk house shorts
+                // in one ccy and covers in the other) hits collCcy != ccy — the fill's cash settles in ccy above,
+                // but the collateral unreserve must hit the COLLATERAL ccy's fund. Releasing in the fill ccy (or
+                // not at all, the old behaviour) left a covered position carrying collateral ⇒ the DB invariant
+                // (Q7: a non-negative position may not hold collateral) tripped and rejected every batch touching
+                // it in a stuck loop. collCcy == ccy reduces to the original same-currency path byte-for-byte.
+                var collCcy = buyerPos.ShortCollateralCurrency;
+                var coverQty = Math.Min(t.Quantity, -buyerPosQtyBefore);
+                // Full cover (now flat or long) MUST clear ALL remaining position collateral — the DB invariant
+                // forbids a non-negative position carrying collateral. A partial cover (still short) releases
+                // pro-rata (rounded in the collateral ccy); residual collateral on a still-short position is legal.
+                var posRelease = buyerPos.Quantity >= 0
+                    ? buyerPos.ShortCollateral
+                    : CurrencyHelper.RoundMoney(
+                        buyerPos.ShortCollateral * coverQty / -buyerPosQtyBefore, collCcy);
+                posRelease = Math.Min(posRelease, buyerPos.ShortCollateral);
+                if (posRelease > 0m)
                 {
-                    var coverQty = Math.Min(t.Quantity, -buyerPosQtyBefore);
-                    // Full cover (now flat or long) MUST clear ALL remaining position collateral — the DB
-                    // invariant forbids a non-negative position carrying collateral. A partial cover (still
-                    // short) releases pro-rata; residual collateral on a still-short position is legal.
-                    var posRelease = buyerPos.Quantity >= 0
-                        ? buyerPos.ShortCollateral
-                        : CurrencyHelper.RoundMoney(
-                            buyerPos.ShortCollateral * coverQty / -buyerPosQtyBefore, ccy);
-                    posRelease = Math.Min(posRelease, buyerPos.ShortCollateral);
+                    // Resolve + snapshot the COLLATERAL-ccy fund (== buyerFund when currencies match, so the
+                    // same-currency path is unchanged). Preloaded by EnsureLoadedAsync; add to fundMap +
+                    // fundSnapshots exactly like buyerFund so its unreserve is tracked AND rollback-restorable.
+                    Fund collFund;
+                    if (collCcy == ccy) collFund = buyerFund;
+                    else
+                    {
+                        var collKey = (t.BuyerId, collCcy);
+                        if (!fundMap.TryGetValue(collKey, out collFund!))
+                        {
+                            collFund = _accounts.GetFund(t.BuyerId, collCcy);
+                            if (collFund is null)
+                                return (OrderResultFactory.OperationFailed(
+                                            $"Collateral fund not found for buyer {t.BuyerId} {collCcy}."),
+                                        Array.Empty<RejectedFill>());
+                            fundMap[collKey] = collFund;
+                            if (!fundSnapshots.ContainsKey(collKey))
+                                fundSnapshots[collKey] = (collFund.TotalBalance, collFund.ReservedBalance);
+                        }
+                    }
                     // §P6: decouple the POSITION release from the FUND unreserve. The position release is
                     // authoritative for the invariant and is applied in full; the fund unreserve is clamped to
                     // what's actually reserved. If the fund falls a few units short (SL-pool vs collateral
-                    // rounding when a short-bracket SL fires and covers — its buyback consume and this release
-                    // both draw ReservedBalance), the position is still cleared and the tiny fund
-                    // over-reservation is left for the reconciler to clamp — never hard-fail the settle and
-                    // desync order vs position.
-                    var fundRelease = Math.Min(posRelease, buyerFund.ReservedBalance);
-                    if (posRelease > 0m)
-                    {
-                        var cResB = buyerFund.ReservedBalance;
-                        var cTotB = buyerFund.TotalBalance;
-                        if (fundRelease > 0m) buyerFund.UnreserveFunds(fundRelease);
-                        buyerFund.UpdatedAt = TimeHelper.NowUtc();
-                        buyerPos.ReleaseShortCollateral(posRelease);
-                        _ledger.LogFund(t.BuyerId, ccy, t.BuyOrderId,
-                            "ApplyPass:ShortClose:ReleaseCollateral", -fundRelease,
-                            cResB, buyerFund.ReservedBalance, cTotB, buyerFund.TotalBalance);
-                        _ledger.LogPosition(t.BuyerId, t.StockId, t.BuyOrderId,
-                            "ApplyPass:ShortClose:ReleaseCollateral", 0,
-                            buyerPos.ReservedQuantity, buyerPos.ReservedQuantity,
-                            buyerPos.Quantity, buyerPos.Quantity);
-                        if (fundRelease < posRelease)
-                            _logger.LogWarning(
-                                "Short-close collateral shortfall buyer {Buyer} stock {Stock}: position released " +
-                                "{Pos} but fund had only {Fund} reserved ({Diff} left for reconciler) — likely " +
-                                "SL-pool/collateral rounding on a short-bracket SL fire.",
-                                t.BuyerId, t.StockId, posRelease, fundRelease, posRelease - fundRelease);
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Short-close currency mismatch buyer {Buyer} stock {Stock}: collateral in " +
-                        "{CollCcy}, close in {Ccy}; collateral not released this fill.",
-                        t.BuyerId, t.StockId, buyerPos.ShortCollateralCurrency, ccy);
+                    // rounding when a short-bracket SL fires and covers), the position is still cleared and the
+                    // tiny fund over-reservation is left for the reconciler to clamp — never hard-fail the settle.
+                    var fundRelease = Math.Min(posRelease, collFund.ReservedBalance);
+                    var cResB = collFund.ReservedBalance;
+                    var cTotB = collFund.TotalBalance;
+                    if (fundRelease > 0m) collFund.UnreserveFunds(fundRelease);
+                    collFund.UpdatedAt = TimeHelper.NowUtc();
+                    buyerPos.ReleaseShortCollateral(posRelease);
+                    _ledger.LogFund(t.BuyerId, collCcy, t.BuyOrderId,
+                        "ApplyPass:ShortClose:ReleaseCollateral", -fundRelease,
+                        cResB, collFund.ReservedBalance, cTotB, collFund.TotalBalance);
+                    _ledger.LogPosition(t.BuyerId, t.StockId, t.BuyOrderId,
+                        "ApplyPass:ShortClose:ReleaseCollateral", 0,
+                        buyerPos.ReservedQuantity, buyerPos.ReservedQuantity,
+                        buyerPos.Quantity, buyerPos.Quantity);
+                    if (fundRelease < posRelease)
+                        _logger.LogWarning(
+                            "Short-close collateral shortfall buyer {Buyer} stock {Stock}: position released " +
+                            "{Pos} but {Ccy} fund had only {Fund} reserved ({Diff} left for reconciler) — likely " +
+                            "SL-pool/collateral rounding on a short-bracket SL fire.",
+                            t.BuyerId, t.StockId, posRelease, collCcy, fundRelease, posRelease - fundRelease);
                 }
             }
 
