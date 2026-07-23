@@ -884,7 +884,11 @@ internal sealed class AiBotDecisionService
                 BotMath.HashUnit01(user.AiUserId ^ RegimeTakerCohortSalt) < (double)_regimeTakerCohortFraction)
             {
                 var contrarian = BotMath.HashUnit01(user.AiUserId ^ RegimeContrarianSalt) < (double)_regimeTakerContrarianFraction;
-                var (over, _, buy) = TrendTakerDecision(rsig, _regimeTakerStrength, contrarian,
+                // §market-pulse: BREATHE the taker firing rate by the per-stock pulse (slow envelope × fast jitter,
+                // E[·]≈1) so a directional move STEPS (up-slow-up) instead of gliding. Mult≡1.0 when the pulse is
+                // disabled ⇒ strength unchanged ⇒ byte-identical. Re-shapes the RATE only, never the direction.
+                var pulseStrength = _regimeTakerStrength * (decimal)_sentiment.TakerPulseMult(stockId);
+                var (over, _, buy) = TrendTakerDecision(rsig, pulseStrength, contrarian,
                                                         ctx.Decimal01(user.AiUserId), _regimeTakerThreshold);
                 if (over)
                 {

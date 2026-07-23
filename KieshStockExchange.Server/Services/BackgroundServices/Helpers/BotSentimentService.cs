@@ -169,6 +169,16 @@ internal sealed class BotSentimentService
     private readonly double _globalShockDownBias;           // P(event is bearish); ~0.85 = correlated fear
     private double _globalShock;
     private Random _globalShockRng = new(RngSeed ^ 0x6B6B);
+
+    // §market-pulse: TWO instances of the universal MarketPulse oscillator (own file) breathe the REGIME-TAKER
+    // firing rate so a directional move STEPS (up-slow-up) instead of gliding uniformly. SLOW osc (τ 30-90s, A≈0.35)
+    // = the momentum ENVELOPE; FAST jitter (τ 2-5s, A≈0.12) = tick-scale roughness. Read at the decision path via
+    // TakerPulseMult = osc.Mult × jitter.Mult (E[·]≈1, log-symmetric ⇒ VARIANCE-not-mean = no net price bias).
+    // Distinct salts ⇒ distinct τ-phase + RNG streams. Both disabled ⇒ Mult≡1.0 ⇒ byte-identical + no RNG divergence.
+    private readonly MarketPulse _pulseOsc;
+    private readonly MarketPulse _pulseJitter;
+    private const int PulseOscSalt    = 0x7A11;
+    private const int PulseJitterSalt = 0x3C0D;
     #endregion
 
     #region Services and Constructor
@@ -204,7 +214,12 @@ internal sealed class BotSentimentService
         double globalShockDownBias = 0.85,
         // §sentiment-ring amplitude multipliers = the cross-stock CORRELATION lever. Lower per-stock + raise global
         // ⇒ the shared common-mode dominates the idiosyncratic ⇒ higher cross-stock corr. 1.0/1.0 ⇒ byte-identical.
-        double perStockSigmaMult = 1.0, double globalSigmaMult = 1.0)
+        double perStockSigmaMult = 1.0, double globalSigmaMult = 1.0,
+        // §market-pulse: two-instance oscillator on the regime-taker rate (slow envelope + fast jitter). One master
+        // gate; each instance its own amplitude/σ/τ-range. Enabled=false (or A=0) ⇒ Mult≡1 ⇒ byte-identical.
+        bool pulseEnabled = false,
+        double pulseOscA = 0.35, double pulseOscSigmaZ = 0.60, double pulseOscTauMinSec = 30.0, double pulseOscTauMaxSec = 90.0,
+        double pulseJitterA = 0.12, double pulseJitterSigmaZ = 0.70, double pulseJitterTauMinSec = 2.0, double pulseJitterTauMaxSec = 6.0)
     {
         _stocks = stocks ?? throw new ArgumentNullException(nameof(stocks));
         _profiles = profiles ?? throw new ArgumentNullException(nameof(profiles));
@@ -260,6 +275,13 @@ internal sealed class BotSentimentService
         _globalShockDecayPerTick       = (double)globalShockDecayPerTick;
         _globalShockArrivalProbPerTick = 1.0 / (Math.Max(0.0001, globalShockMeanIntervalHours) * 3600.0);
         _globalShockDownBias           = Math.Clamp(globalShockDownBias, 0.0, 1.0);
+
+        // §market-pulse: the slow envelope + fast jitter share one master gate but get distinct amplitude/σ/τ + salt
+        // (⇒ independent τ-phase & RNG stream). Master gate off ⇒ both inert ⇒ TakerPulseMult≡1.0 ⇒ byte-identical.
+        _pulseOsc    = new MarketPulse(pulseEnabled, pulseOscA, pulseOscSigmaZ,
+                                       pulseOscTauMinSec, pulseOscTauMaxSec, RngSeed, PulseOscSalt);
+        _pulseJitter = new MarketPulse(pulseEnabled, pulseJitterA, pulseJitterSigmaZ,
+                                       pulseJitterTauMinSec, pulseJitterTauMaxSec, RngSeed, PulseJitterSalt);
 
         _store = new RingBufferStore<SentimentSample>("data/telemetry/bot_sentiment.ndjson");
 
@@ -371,6 +393,12 @@ internal sealed class BotSentimentService
                 _regime[sid] = rg;
                 sum += _regimeStrength * rg;
             }
+
+            // §market-pulse: advance both oscillators for this stock (no-op + no RNG draw when disabled ⇒
+            // byte-identical). Only the DECISION path reads TakerPulseMult; Tick never touches `sum` here — the
+            // pulse re-shapes the taker RATE downstream, it does NOT enter the buyProb-tilt sentiment sum.
+            _pulseOsc.Step(sid, dt);
+            _pulseJitter.Step(sid, dt);
 
             _combined[sid] = (decimal)sum;
 
@@ -541,6 +569,11 @@ internal sealed class BotSentimentService
     // than only the book-absorbed buyProb tilt at line 372. Lock-free dict read; advances NO RNG (like GlobalSignal).
     internal decimal RegimeSignal(int stockId) => (decimal)_regime.GetValueOrDefault(stockId);
 
+    // §market-pulse: the combined slow-envelope × fast-jitter multiplier (E[·]≈1) for the regime-taker firing rate,
+    // so a directional move STEPS instead of gliding. Exactly 1.0 when the pulse is disabled ⇒ the decision path is
+    // byte-identical off. Loop-thread read; advances NO RNG (Step in Tick does that, like RegimeSignal vs the walk).
+    internal double TakerPulseMult(int stockId) => _pulseOsc.Mult(stockId) * _pulseJitter.Mult(stockId);
+
     /// <summary>
     /// Sentiment-dynamics §: the EWMA slope ds = d(sentiment)/dt for a stock — fast timescale when
     /// <paramref name="fast"/> is true, slow otherwise. 0 when the feature is disabled or the stock is
@@ -631,6 +664,8 @@ internal sealed class BotSentimentService
         _coMoveFactor = 0.0;
         _coMoveRng = new Random(RngSeed ^ 0x5C5C);
         _coMoveBeta.Clear();
+        _pulseOsc.Reset(RngSeed);      // §market-pulse: clear per-stock OU + reseed each instance's dedicated stream
+        _pulseJitter.Reset(RngSeed);
         lock (_samples) _samples.Clear();
 
         _globalSum = 0.0;

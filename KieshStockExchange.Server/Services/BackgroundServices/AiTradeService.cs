@@ -569,6 +569,17 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         coMoveSoftWallK:         _configuration.GetValue("Bots:Sentiment:CoMovement:SoftWallK", 0.1),
                         coMoveStrength:          _configuration.GetValue("Bots:Sentiment:CoMovement:Strength", 0.5),
                         coMoveBetaSpread:        _configuration.GetValue("Bots:Sentiment:CoMovement:BetaSpread", 0.4),
+                        // §market-pulse: two-instance oscillator (slow envelope + fast jitter) breathing the regime-taker
+                        // firing rate ⇒ stepped/jagged directional moves. One master gate; Enabled=false ⇒ byte-identical.
+                        pulseEnabled:            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:Enabled", false),
+                        pulseOscA:               _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscA", 0.35),
+                        pulseOscSigmaZ:          _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscSigmaZ", 0.60),
+                        pulseOscTauMinSec:       _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscTauMinSec", 30.0),
+                        pulseOscTauMaxSec:       _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscTauMaxSec", 90.0),
+                        pulseJitterA:            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:JitterA", 0.12),
+                        pulseJitterSigmaZ:       _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:JitterSigmaZ", 0.70),
+                        pulseJitterTauMinSec:    _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:JitterTauMinSec", 2.0),
+                        pulseJitterTauMaxSec:    _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:JitterTauMaxSec", 6.0),
                         // §impact-decouple A: wire the >1-min-decoupled return ONLY when the flag is on; null ⇒
                         // the price-reaction term uses the legacy ~1s return ⇒ byte-identical.
                         reactionReturn:          _reactionRef ? ReactionReturnForSentiment : (Func<int, double>?)null,
