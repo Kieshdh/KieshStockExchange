@@ -1080,6 +1080,24 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             "(needs Enabled + GlobalFraction>0 to fire; SectorCount>1 & SectorFraction>0 ⇒ sector-scoped; off ⇒ byte-identical)",
             exogEnabled && exogGlobalCoFire, exogGlobalCoFireFraction, exogGlobalCoFireNotionalFrac,
             _configuration.GetValue("Bots:ExogShock:GlobalFraction", 0.0), exogSectorCount, exogSectorFraction);
+        // §regime-taker + §market-pulse arm marker: lets an A/B soak operator confirm the taker-coupling + pulse
+        // knobs took effect (MarketPulse is INERT unless coupling=true + strength>0, since it modulates the taker rate).
+        _logger.LogInformation(
+            "CONFIGCHECK RegimeTaker coupling={Tc} strength={Ts} threshold={Th} cohortFraction={Cf} bias={Bi} | " +
+            "MarketPulse enabled={Mp} oscA={Oa} oscTau=[{OtMin},{OtMax}] jitterA={Ja} jitterTau=[{JtMin},{JtMax}] " +
+            "(pulse modulates the regime-taker rate; needs coupling+strength>0 to bite; off ⇒ byte-identical)",
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerCoupling", false),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerStrength", 0m),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerThreshold", 0.15m),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:CohortFraction", 0.3m),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerBias", 0m),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:Enabled", false),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscA", 0.35),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscTauMinSec", 30.0),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscTauMaxSec", 90.0),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:JitterA", 0.12),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:JitterTauMinSec", 2.0),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:JitterTauMaxSec", 6.0));
         // Microstructure bounce arm marker: lets an A/B soak operator confirm OFF (0) vs ON from the log.
         _logger.LogInformation("CONFIGCHECK TouchTighten touchTighten={TouchTighten} (absent ⇒ 0 ⇒ byte-identical)",
             _configuration.GetValue("Bots:TouchTightenPrc", 0m));
