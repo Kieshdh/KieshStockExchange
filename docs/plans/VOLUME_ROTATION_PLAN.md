@@ -1,10 +1,22 @@
 # VOLUME / HOT-STOCK ROTATION PLAN (F2) — different hot stocks every day / 4h window
 
-**★ STATUS (2026-07-24): F2 = NEXT REALISM BUILD. DESIGNED (see CORRECTED section) → AUTHORIZED to build+test+A/B+council+PROD
-(Kiesh full authorization; NOT F3 so prod OK after council). Design of record = the "CORRECTED design" below (rotation STAYS +
-weak HTF-sentiment TILT; combine the two systems, use sentiment a bit, WEAK; direction-neutral SIZE coupling; default-off flag
-`Bots:Activity:HotRotation:Enabled`). Build default-off → local A/B (F1×F2 attribution: F2 baseline = F1-ON; compound-cap
-VolumeMult×H≤SIZE cap) → council → prod. The hash-rotation design further below STANDS as the base mechanism the tilt rides on.**
+**★ STATUS (2026-07-24): F2 BUILT default-off + A/B SOAK RUNNING. Commits `b1a41da` (initial hash-window) → `07eca8a` (ORGANIC
+rework per Kiesh steer). 759 tests green, CK=0 by construction, byte-identical off. ★ KIESH STEER (2026-07-24): "make the 4 hours
+not so static, use a more dynamic time and a daily one" ⇒ replaced the single discrete 4h window+cosine-blend with a SMOOTH
+multi-timescale drift: `e = [(1−DailyWeight)·intraday + DailyWeight·daily]·classScale + sentimentTilt`, where intraday =
+0.6·sin(PeriodMinutes) + 0.4·sin(2.7×PeriodMinutes) (aperiodic ⇒ no static window edge) and daily = sin(DailyMinutes), each
+per-stock hash-phased so leaders EMERGE and FADE at different times (this IS the council's 'organic drift v2', promoted to v1).
+Applied to the SIZE channel ONLY (`AiBotDecisionService` size seam, 3rd MM-exempt multiply after F1's VolumeMult), median-1,
+bounded [1/Boost,Boost], epoch-anchored (restart-stable). Config `Bots:Activity:HotRotation:{Enabled(false), Boost(1.5),
+PeriodMinutes(150), DailyMinutes(1440), DailyWeight(0.4), SentimentTilt(0.0), SentimentTheta(0.02)}`. HTF-sentiment tilt shipped
+default-0 (rotation-first attribution; soak it separately if rotation passes). **A/B SOAK (launched 2026-07-24 ~01:29 local, 45m):**
+OFF port 5080 kse_soak_f2off vs ON port 5083 kse_soak_f2on, BOTH F1-ON + prod-like RegimeTaker, same seed; ON uses COMPRESSED
+timescales (Period 8min / Daily 30min) so 45m sees several cycles (mechanism is period-scale-invariant; prod=150/1440). Arms in
+scratchpad/arm-f2-{off,on}.ps1. GATES: CK=0 hard · top-vol Jaccard ≤0.55 across adjacent windows (rotation real, Δ≥0.15 vs OFF) ·
+agg volume ±2% (redistributive) · corr(volume,|ret|) LOOSE (volume≠move) · drift/ret_acf/move parity. Analyze → council → prod.
+★ NOTE for council: with F1-ON, StockProfile.Class = 'Sized'/sector ⇒ F2's per-class clamp falls to the uniform 0.8 default
+(Calm/Meme differentiation is a latent legacy-mode feature); prod runs F1-ON so the soak is representative. Design-of-record below
+(CORRECTED section) stands; the discrete-window base it referenced is superseded by this organic model.**
 
 ## ★★★ KIESH REDIRECT (2026-07-23) — WEAK + SENTIMENT-DRIVEN + UNIFY (supersedes the hash-rotation design below)
 Kiesh: "VolumeRotation is not as important as the others — make its effect pretty WEAK. Sentiment should be the MAIN
