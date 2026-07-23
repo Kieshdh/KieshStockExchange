@@ -86,7 +86,11 @@ wick-ratio gate proves "no harm", never "prettier"). **BUILD + A/B ORDER (attrib
   0.35 but realistically diluted by sector — ACCEPTED, κVol↑ would threaten volume≠move) · tech news 3.49× staples vs 1.63× OFF with TOTAL conserved
   (708≈702, λ-norm works) · ret_acf −0.108 (from −0.033, TOWARD §1 target) · drift/move parity. NOT prod-pushed (Kiesh reviews whole batch at end). NEXT=F5.
   (soak exit-49 = cosmetic python-missing candle export; data fully intact.)
-2. **F5 MarketPulse** (already coded `6ba7650`, flag `Bots:Sentiment:RegimeDrift:MarketPulse:Enabled`) — **★ A/B SOAK RUNNING** (45m, launched ~21:15 local):
+2. **F5 MarketPulse** (already coded `6ba7650`, flag `Bots:Sentiment:RegimeDrift:MarketPulse:Enabled`) — **★ A/B SOAK 45m DONE → SAFE on metrics; council debating.**
+  CK=0 both. ret_acf lag1 +0.044→−0.011 (ON MORE mean-reverting — the "drag toward 0" trap did NOT happen), lag2 −0.005→−0.068, vol ~parity, p99 move
+  parity (−1.4%), drift −0.316→−0.520 (0.2% more neg = noise? council judging). ★ INTENDED stepping is SUB-MINUTE (osc τ30-90s) so 1-min metrics can't
+  see "breathe" = KIESH EYEBALL residual (soak servers now STOPPED → 5083 client dead; relaunch standalone MarketPulse-ON server if he wants to keep looking).
+  F5 council `w45ca0e2m` running. — original: **★ A/B SOAK RUNNING** (45m, launched ~21:15 local):
   OFF port 5080 kse_soak_f5off vs ON port 5083 kse_soak_f5on, BOTH with prod-like RegimeTaker (TakerCoupling=true, TakerStrength=0.12, TakerThreshold=0.20,
   Strength=0.4, CohortFraction=0.03, Mood__TakerCoupling=true, ExogShock on) so MarketPulse has a live taker rate to modulate; same-seed pair. Arms in
   scratchpad/arm-f5-{off,on}.ps1. GATES: ret_acf in [−0.43,−0.10] + no shift toward 0 >0.05 vs OFF (the step-glide must not kill mean-reversion); move p99
