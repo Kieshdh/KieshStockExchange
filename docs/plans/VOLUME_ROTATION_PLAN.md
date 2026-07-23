@@ -27,9 +27,18 @@ Add a deterministic, time-varying hotness `H(stockId, now) ∈ [1/Boost, Boost]`
 - **Smooth transitions (no hard jump at window edges):** blend `H` across the boundary over `BlendSec` (e.g. 1800s) via a cosine ease between window `w` and `w+1` values — a stock ramps up as it becomes hot, cools gradually. This is what makes it look organic, not a step.
 - Deterministic + reproducible (same t → same H, no RNG stream) so it's soak-comparable and CK-clean.
 
-**Where it hooks (recommended A):**
-- **A. Multiply the composition activity:** in `AiBotDecisionService` where `CompositionActivity(stockId)` is consumed (or inside a new `BotActivityService.CompositionActivity(stockId)` wrapper), return `H(stockId, now) · act`. Hot names get higher `act` → more taker upgrades + bigger size + more bursts = more VOLUME; cool names quieter. Directly the "hot stock" channel, and it rides the existing CK-safe composition clamps (Floor/Cap still bound it). **This is the cleanest volume lever.**
-- **B. (or additionally) rotate the StockProfile amplitude:** scale `SentimentAmplitudeMult` by `H` so the hot set is also more VOLATILE, not just higher-volume. Layer on top of the static class (a Meme stock stays characterful; rotation picks the current movers). Optional — do A first (volume), add B if Kiesh wants the hot names to also swing more.
+**★ CORE PRINCIPLE (Kiesh 2026-07-23): VOLUME ≠ PRICE-MOVE. Decouple them.** Higher volume must NOT imply a
+price move — a hot name should often churn at HIGH VOLUME while staying roughly FLAT (heavy balanced two-sided
+trading), and MOVE only when a directional driver (sentiment/regime/news imbalance) coincides. The composition
+`act` feeds THREE channels: **TakerExp** (limits→slippage takers = DIRECTIONAL, crosses the spread, MOVES price),
+**SizeExp** (bigger orders = VOLUME/notional, direction-neutral), **DistExp** (limit band). Boosting the WHOLE
+`act` (the naïve "Hook A") raises the directional TakerExp too ⇒ volume welded to move — exactly what Kiesh says
+is wrong. **So the hotness boost must drive the VOLUME channels, not the directional one.**
+
+**Where it hooks (revised — volume-only, direction-neutral):**
+- **★ A′ (recommended): boost the composition SIZE coupling only.** Apply `H` to the `SizeExp` path (`CompositionSizeMult`, `AiBotDecisionService.cs:2075`) so hot names trade BIGGER (more volume/notional) — but do NOT scale the `TakerExp` taker-upgrade, so a hot name's buy/sell taker MIX and spread-crossing rate are unchanged. Result: high volume, direction-neutral. Price moves only if the existing sentiment/regime flow is imbalanced at that moment → "high volume, sometimes flat, sometimes moving." (Note: `SizeExp` currently ships OFF (0) — this feature both turns it on for hot names AND makes it rotate; the load-scaler pins order COUNT, so SIZE is the intended volume-CV lever per its own `_size_comment`.) Runaway-safe: `WSelf 0` severs the fills→size Hawkes loop; `SizeCap` bounds one order; cash/room/depth clamps hold CK=0. Balanced size ⇒ balanced notional ⇒ flat.
+- **A (rejected as the primary): boost the whole `act`** — raises TakerExp too ⇒ couples volume to directional move (the thing Kiesh is correcting). Only acceptable if we WANT hot names to also be directionally punchier, which is a separate choice (see B).
+- **B. (deferred) rotate the StockProfile amplitude / TakerExp** — makes hot names also more VOLATILE/directional, not just higher-volume. A different claim; layer on top later behind its own flag if desired.
 
 **Config** `Bots:Activity:HotRotation:{ Enabled(false), WindowSec(14400), HotFraction(0.2), Boost(2.0), BlendSec(1800), DailyLayer(false) }`. `Enabled=false ⇒ H≡1 ⇒ byte-identical` (early-return 1.0, no hash drawn). `Boost=1 ⇒ H≡1` too.
 
@@ -38,7 +47,7 @@ A market-wide volume boost would just inflate everything (and stress the load-sc
 
 ## 5. CK-safety + acceptance
 - **CK=0 by construction:** `H` only scales the composition activity multiplier, which changes order composition/size within existing Floor/Cap and downstream cash/room/depth clamps — no orders/balances created. Same class as the shipped composition seam (CK-clean).
-- **Acceptance (A/B soak, autonomous):** ON vs OFF arms; verify (a) the top-volume/top-|ret| stock SET differs across 4h windows on the ON arm and is STATIC on OFF; (b) rotation is smooth (no volume discontinuity at window edges); (c) aggregate drift/ret_acf/move-freq ≈ unchanged (redistributive); (d) CK=0. Owner eyeballs the client: does a different name lead each day?
+- **Acceptance (A/B soak, autonomous):** ON vs OFF arms; verify (a) the top-VOLUME stock SET differs across 4h windows on the ON arm, static on OFF; (b) rotation smooth (no volume discontinuity at window edges); (c) aggregate drift/ret_acf/move-freq ≈ unchanged (redistributive — MEASURED not assumed); (d) CK=0; **(e) ★ VOLUME↔MOVE DECOUPLING: hot (high-volume) stocks show high-volume-FLAT occasions — the per-stock correlation between (volume) and (|ret|) stays LOOSE (a hot name can 2×+ its volume with |ret| ≈ baseline), NOT tight.** If boosting a hot name reliably moves it, the size-only hook leaked into direction — investigate. Owner eyeballs the client: does a different name LEAD (in volume/activity) each day, and does a busy name sometimes sit flat?
 
 ## 6. ★ COUNCIL ADVICE (5-lens, 2026-07-23) — AGREE, ship a NARROWER v1
 - **Hook A ONLY, not both.** Hook A (composition activity) *is* the volume channel — it delivers "hot = high-volume/bursty" directly. Hook B (profile amplitude) couples hotness to price VOLATILITY = a different claim and the main threat to drift/ret_acf/§1. Keep them separable; **ship A first, defer B** to its own flag once A's soak proves CK=0 + targets hold.
