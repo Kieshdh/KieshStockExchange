@@ -2074,6 +2074,12 @@ internal sealed class AiBotDecisionService
             if (_activityEnabled && _compSizeExp > 0.0 && user.Strategy != AiStrategy.MarketMaker)
                 rawTrade *= (decimal)CompositionSizeMult(
                     _activity.CompositionActivity(stockId), _compSizeExp, _compSizeCap);
+            // §F1 sector-size VOLUME knob: per-stock notional churn — a DEDICATED post-clamp multiply on quantity
+            // ONLY (never the directional taker-upgrade), so volume ≠ price-move. Independent of the composition
+            // size path above (does NOT activate _compSizeExp). Downstream cash/room/depth clamps keep it CK-safe
+            // (bigger size cannot cross an extra book level). MM exempt. Model off ⇒ line skipped ⇒ byte-identical.
+            if (_profiles.SectorSizeActive && user.Strategy != AiStrategy.MarketMaker)
+                rawTrade *= _profiles.Get(stockId).VolumeMult;
         }
 
         var marketPrice = await GetStockPriceAsync(ctx, stockId, currency, ct).ConfigureAwait(false);

@@ -379,7 +379,10 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // §P6 liveliness: per-stock personality + slowly-drifting fundamentals. Built before the
         // sentiment + decision services because both consume them.
         _profiles  = new StockProfileService(
-                        enabled: _configuration.GetValue("Bots:Personality:Enabled", true));
+                        enabled:         _configuration.GetValue("Bots:Personality:Enabled", true),
+                        sectorSizeModel: _configuration.GetValue("Bots:Personality:SectorSizeModel", false),
+                        stocks:          stocks,
+                        sectors:         _sectorMap);
         // §exogenous-information: the news-shock bus + its random source. Built before _funds and _decisions
         // because both consume it. Default-OFF ⇒ GetShock≡0 and Tick is a no-op ⇒ byte-identical.
         var exogEnabled        = _configuration.GetValue("Bots:ExogShock:Enabled", false);

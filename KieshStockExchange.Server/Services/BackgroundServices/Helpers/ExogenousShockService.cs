@@ -72,6 +72,19 @@ internal sealed class ExogenousShockService
     internal bool AnyActive => _activeCount > 0;
 
     private double Mult(int stockId) => _difficultyMult * (double)_profiles.Get(stockId).FundamentalSigmaMult;
+
+    // §F1 news-frequency: how many times THIS tick's impulse for a stock is applied — 0 (thinned), 1 (baseline),
+    // or 2 (a boosted second arrival). r = NewsFreqMult × NewsFreqNorm (λ-conserved, mean ≈ 1). RNG-free: the two
+    // draws use order-swapped 2-arg hashes so they're independent. Model inactive ⇒ always 1 ⇒ byte-identical.
+    private int NewsRepeats(int stockId)
+    {
+        if (!_profiles.SectorSizeActive) return 1;
+        double r = (double)(_profiles.Get(stockId).NewsFreqMult * _profiles.NewsFreqNorm);
+        int tick = unchecked((int)_simTick);
+        if (r <= 1.0)
+            return BotMath.HashUnit01(tick, stockId) < r ? 1 : 0;            // thin: keep with prob r
+        return 1 + (BotMath.HashUnit01(stockId, tick) < (r - 1.0) ? 1 : 0); // boost: sometimes a 2nd arrival
+    }
     #endregion
 
     internal ExogenousShockService(IStockService stocks, StockProfileService profiles,
@@ -129,31 +142,37 @@ internal sealed class ExogenousShockService
         foreach (var imp in _source.Poll(_simTick, dt))
         {
             int sid = imp.StockId;
-            bool wasAtRest = !_shock.TryGetValue(sid, out var e);
-            double prevTotal = e.Transient + e.Residual; // 0 when at rest (default struct)
-            double next = BotMath.SoftWallStep(prevTotal, imp.SignedMagnitude * Mult(sid), _cap, _softWallK);
-            if (Math.Abs(next) < _floor) continue; // negligible after the wall — ignore
-            if (imp.DecayHalfLifeSec <= 0.0)
+            // §F1 news-FREQUENCY knob: deterministically thin (drop) or duplicate arrivals per stock so tech
+            // sectors are newsier and staples quieter, λ-conserved (NewsFreqNorm) so TOTAL arrivals ≈ OFF. RNG-free
+            // (hash of tick+sid). Inactive ⇒ repeats≡1 ⇒ each impulse processed exactly once ⇒ byte-identical.
+            for (int rep = NewsRepeats(sid); rep > 0; rep--)
             {
-                // Legacy sentinel: the WHOLE clamped step is transient at the global half-life — EXACT pre-permanence
-                // assignment (next, not prevTotal+applied) so there is no floating-point round-trip ⇒ byte-identical.
-                e.Transient = next;
-                e.TauSec    = _decayHalfLifeSec;
-            }
-            else
-            {
-                double applied = next - prevTotal; // the effective step after the joint soft-wall
-                e.Residual  += imp.PermanentFraction * applied;        // α·M → permanent floor
-                e.Transient += (1.0 - imp.PermanentFraction) * applied; // (1−α)·M → transient overshoot
-                e.TauSec     = imp.DecayHalfLifeSec;                    // newer event wins (refractory: no parallel floor)
-            }
-            _shock[sid] = e;
-            if (wasAtRest) _shockId[sid] = _shockId.GetValueOrDefault(sid) + 1;
-            _arrivalsSinceLog++;
-            if (_logger.IsEnabled(LogLevel.Information))
-            {
-                var sym = _stocks.TryGetSymbol(sid, out var s) ? s : sid.ToString(CultureInfo.InvariantCulture);
-                _logger.LogInformation("ExogShock: {Symbol} {Delta:+0.000;-0.000}", sym, next);
+                bool wasAtRest = !_shock.TryGetValue(sid, out var e);
+                double prevTotal = e.Transient + e.Residual; // 0 when at rest (default struct)
+                double next = BotMath.SoftWallStep(prevTotal, imp.SignedMagnitude * Mult(sid), _cap, _softWallK);
+                if (Math.Abs(next) < _floor) continue; // negligible after the wall — ignore
+                if (imp.DecayHalfLifeSec <= 0.0)
+                {
+                    // Legacy sentinel: the WHOLE clamped step is transient at the global half-life — EXACT pre-permanence
+                    // assignment (next, not prevTotal+applied) so there is no floating-point round-trip ⇒ byte-identical.
+                    e.Transient = next;
+                    e.TauSec    = _decayHalfLifeSec;
+                }
+                else
+                {
+                    double applied = next - prevTotal; // the effective step after the joint soft-wall
+                    e.Residual  += imp.PermanentFraction * applied;        // α·M → permanent floor
+                    e.Transient += (1.0 - imp.PermanentFraction) * applied; // (1−α)·M → transient overshoot
+                    e.TauSec     = imp.DecayHalfLifeSec;                    // newer event wins (refractory: no parallel floor)
+                }
+                _shock[sid] = e;
+                if (wasAtRest) _shockId[sid] = _shockId.GetValueOrDefault(sid) + 1;
+                _arrivalsSinceLog++;
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    var sym = _stocks.TryGetSymbol(sid, out var s) ? s : sid.ToString(CultureInfo.InvariantCulture);
+                    _logger.LogInformation("ExogShock: {Symbol} {Delta:+0.000;-0.000}", sym, next);
+                }
             }
         }
 
