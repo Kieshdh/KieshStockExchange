@@ -49,11 +49,20 @@ Keep this split straight: **the anchor damps the tilt; the book absorbs the limi
 *This table is the acceptance scorecard graded against a soak run — reference/tooling, skip on a first read.*
 **Realism** = real-market norm · **Kiesh** = the owner's chosen target · **P** = priority 1 (high) – 5 (low).
 
+**★ REVISION 2026-07-23 (Kiesh sign-off steer) — RANDOM-WALK-FIRST, less news-dependent.** The prior "typical ±5% /
+>10% NEWS-ONLY" targets were TOO STRONG: they made the charts too DEPENDENT ON NEWS EVENTS for movement and too little
+random-walk-like. New north star = **NATURAL + RANDOM-WALK-LIKE**: (a) DECREASE the typical-move target (smaller everyday
+moves, **~±2–3%** not ±5%); (b) reduce NEWS strength + dependence (news = a *contributor*, not the main mover — see the
+news-strength cut in §methods / `FINE_TUNING_TARGETS.md`); (c) INCREASE **organic** random-walk texture so price wanders on
+its own (MarketPulse osc+jitter breathing the regime-taker rate + base taker flow), and relax ">10% = news-only" (rare
+ORGANIC >10% moves are fine too). Movement rows below carry the revised targets; the pre-revision values are struck through.
+
 | Group | Metric | Realism | Kiesh target | P |
 |---|---|---|---|---|
-| **Movement** | typical intraday move | ±1–3% most days | most ±5% | 2 |
+| **Movement** | typical intraday move | ±1–3% most days | **~±2–3%, random-walk-driven** (was ~±5%) | 1 |
 | | active / best movers (daily) | 5–10% | 5–10% | 1 |
-| | >10% moves | news-driven, rare | NEWS-ONLY, rare | 1 |
+| | source of movement | mixed | **ORGANIC random-walk FIRST; news a contributor, not the main mover** | 1 |
+| | >10% moves | news-driven, rare | rare — **organic OR news** (was NEWS-ONLY) | 2 |
 | | biggest movers | 10–20% on news | 15–25% on news | 2 |
 | | big-news frequency | occasional | very rare — ~once per stock per WEEK | 1 |
 | | rise vs crash shape | crashes sharper (leverage) | stairs-up (slow +drift) + elevator-down (RARE global crash events override the buy-floor) | 3 |

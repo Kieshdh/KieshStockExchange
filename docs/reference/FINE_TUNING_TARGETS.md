@@ -22,9 +22,17 @@ Grade a 45m A/B soak against these (see [`METHOD_ab_soak_and_gates.md`](METHOD_a
 | cross-sectional dispersion | > 0.002 | not lockstep |
 | pairwise corr | 0–0.25 | ≥0.2 is ASPIRATIONAL (≈0.13 factorR² ceiling with bot levers alone; judged over PROD days, not a 45m soak) |
 
-## Owner's headline targets (from §1, the "Kiesh target" column)
-- **Movement:** most moves ±5%; best movers 5–10%/day; >10% is NEWS-ONLY and rare (~once per stock per week);
-  biggest movers 15–25% on news.
+## ★ REVISION 2026-07-23 (Kiesh) — RANDOM-WALK-FIRST, less news-dependent
+The prior "typical ±5% / >10% NEWS-ONLY" targets were too strong — too news-dependent, too little random-walk. New
+north star = **NATURAL + RANDOM-WALK-LIKE**: smaller everyday moves (~±2–3%, not ±5%), **organic random-walk movement
+FIRST** (MarketPulse osc+jitter + base taker flow) with **news a CONTRIBUTOR, not the main mover**, and rare >10% moves
+may be organic OR news (was news-only). Live lever: the news-strength cut (`ExogShock:MaxMagnitude`↓ / `MagnitudeExponent`↑
+⇒ news mostly tiny, rare bigger). Grade the tape toward calmer 1-min moves (p95 well under the old bounds) + a still-alive
+organic dispersion (NOT frozen/re-pinned). See [`BOT_MECHANICS.md`](BOT_MECHANICS.md) §1 (revised Movement rows).
+
+## Owner's headline targets (from §1, the "Kiesh target" column — REVISED 2026-07-23)
+- **Movement:** typical ~±2–3% (random-walk-driven); best movers 5–10%/day; >10% rare (organic OR news);
+  biggest movers 15–25% on news. **Source of movement = ORGANIC random-walk first; news a contributor.**
 - **Shape:** stairs-up (slow positive drift) + elevator-down (rare global crash events override the buy-floor).
 - **Returns:** random-walk on every timeframe (`ret_acf` → −0.1 VWAP); damp SLOW trends, keep the FAST 1-min walk.
 - **Drift:** POSITIVE + low over a WEEK (intraday can dip on crashes); price runaway bounded (band + cap).
