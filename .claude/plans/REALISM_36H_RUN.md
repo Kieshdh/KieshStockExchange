@@ -188,8 +188,8 @@ now confirms Q7 stays 0 + phantom clears. NOTE: MarketPulse + log-sym suite + §
   ret_acf = per-min VWAP from Transactions (Close-basis reads more negative). TUNE TRIGGERS if a REAL high emerges: Close/VWAP ret_acf → −0.4 (too
   mean-reverting/bouncy) ⇒ small trend-follower/momentum nudge; moves systemically >3-4% or any >5% creeping ⇒ small RegimeTaker-strength trim.
   CALIBRATION Q for Kiesh: which readout/basis/stock shows "high"? (VWAP −0.04 vs Close −0.24 differ.)
-- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET, drift oscillating ~0:** @01:35 drift 6h **+0.0004** (flat; trend +0.235→−0.032→+0.0004, back positive, 0 consec-neg;
-  p25/p75 −0.005/+0.004). ret_acf VWAP **−0.075** (in-band). Moves VERY calm (45m p95 0.26%/max 1.27%, zero >5%; 3h zero >3%, p99 0.58%). CK=0. ⇒ HOLD, no trigger.
+- **★ CLEAN DRIFT + ret_acf — §1 ON-TARGET, drift oscillating ~0:** @02:18 drift 6h **−0.0006** (flat noise; trend −0.032→+0.0004→−0.0006, 1 marginal consec-neg [−0.06%];
+  p25/p75 −0.006/+0.003). ret_acf VWAP **−0.1025** (dead on §1 −0.1 target). Moves VERY calm (45m p95 0.25%/max 1.21%, zero >5%; 3h zero >3%, p99 0.60%). CK=0. ⇒ HOLD, no trigger.
   ★★ KIESH FULL AUTHORIZATION (2026-07-24): BUILD+TEST all autonomously → soak → council → PUSH TO PROD (council decides) for EVERYTHING EXCEPT F3.
   F3 = build+test+council+SHOW-CHARTS-IN-CHAT, HOLD prod for his EYEBALL (back at PC tomorrow/day-after). Next BUILD = candle steps 2-3 + F2.
 - **★ (prior) CLEAN DRIFT + ret_acf — ON-TARGET, HOLDING; ret_acf is NOISY not trending:** drift 6h +0.109→+0.003→+0.054→**−0.014** (@13:27, oscillating ~0,
