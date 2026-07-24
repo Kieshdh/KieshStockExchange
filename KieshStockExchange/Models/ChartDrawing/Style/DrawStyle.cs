@@ -12,11 +12,15 @@ namespace KieshStockExchange.Models.ChartDrawing.Style;
 // the non-zero ones via DrawingBackCompat.ApplyLegacyTrailingDefaults:
 //   Fill        — shape interior colour; null = no fill (a null Fill round-trips as JSON null).
 //   FillOpacity — 0..1 alpha applied to Fill when a shape is filled (0.15 = the subtle default tint).
-//   Size        — Text/handle sizing bucket (see SizeKind).
+//   Size        — Text/handle sizing bucket (see SizeKind); superseded by FontSize for Text, kept for back-compat.
+//   FontSize    — numeric Text/Comment font size in px; 0 = "use the default" (so legacy Text loads unchanged).
+//   FibRainbow  — Fib-only: true = each level line a different spectrum colour + a tinted band between levels;
+//                 false = the single stroke Colour for every line. Default false so legacy Fibs load single-colour.
 public readonly record struct DrawStyle(
     Color Color, float Thickness, DashKind Dash, bool Arrow = false, LineEnding Ending = LineEnding.None,
     ArrowHeadStyle Head = ArrowHeadStyle.FilledTriangle,
-    Color? Fill = null, float FillOpacity = 0.15f, SizeKind Size = SizeKind.Medium)
+    Color? Fill = null, float FillOpacity = 0.15f, SizeKind Size = SizeKind.Medium, int FontSize = 0,
+    bool FibRainbow = false)
 {
     public static readonly DrawStyle Default = new(Color.FromArgb("#4C9AFF"), 1.5f, DashKind.Solid);
 }

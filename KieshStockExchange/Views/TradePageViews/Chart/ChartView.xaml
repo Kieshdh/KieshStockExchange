@@ -264,29 +264,11 @@
                     </Label>
                 </HorizontalStackLayout>
                 <HorizontalStackLayout Spacing="6">
-                    <Button ImageSource="tool_alert.png" Style="{StaticResource PenToolTile}"
-                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Alert}" />
-                    <Label Text="Alert" Style="{StaticResource ToolFlyoutLabel}">
+                    <Button ImageSource="tool_hline.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Crossline}" />
+                    <Label Text="Cross line" Style="{StaticResource ToolFlyoutLabel}">
                         <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Alert}" />
-                        </Label.GestureRecognizers>
-                    </Label>
-                </HorizontalStackLayout>
-                <HorizontalStackLayout Spacing="6">
-                    <Button ImageSource="tool_text.png" Style="{StaticResource PenToolTile}"
-                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Text}" />
-                    <Label Text="Text" Style="{StaticResource ToolFlyoutLabel}">
-                        <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Text}" />
-                        </Label.GestureRecognizers>
-                    </Label>
-                </HorizontalStackLayout>
-                <HorizontalStackLayout Spacing="6">
-                    <Button ImageSource="tool_fib.png" Style="{StaticResource PenToolTile}"
-                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.FibRetracement}" />
-                    <Label Text="Fib retracement" Style="{StaticResource ToolFlyoutLabel}">
-                        <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.FibRetracement}" />
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Crossline}" />
                         </Label.GestureRecognizers>
                     </Label>
                 </HorizontalStackLayout>
@@ -297,6 +279,15 @@
                 BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
                 StrokeThickness="1" StrokeShape="RoundRectangle 6" Padding="4">
             <VerticalStackLayout Spacing="3">
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_arrow.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Arrow}" />
+                    <Label Text="Arrow" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Arrow}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
                 <HorizontalStackLayout Spacing="6">
                     <Button ImageSource="tool_rectangle.png" Style="{StaticResource PenToolTile}"
                             Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Rectangle}" />
@@ -316,20 +307,137 @@
                     </Label>
                 </HorizontalStackLayout>
                 <HorizontalStackLayout Spacing="6">
-                    <Button ImageSource="tool_arrow.png" Style="{StaticResource PenToolTile}"
-                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Arrow}" />
-                    <Label Text="Arrow" Style="{StaticResource ToolFlyoutLabel}">
+                    <Button ImageSource="tool_ellipse.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Circle}" />
+                    <Label Text="Circle" Style="{StaticResource ToolFlyoutLabel}">
                         <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Arrow}" />
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Circle}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_rectangle.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Triangle}" />
+                    <Label Text="Triangle" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Triangle}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- POSITION group flyout: Long · Short · Manual · Fib (Long/Short/Manual commit Kind=Position). -->
+        <Border Grid.Column="1" IsVisible="{Binding Drawing.IsPositionGroupOpen}"
+                HorizontalOptions="Start" VerticalOptions="Center" Margin="2,0,0,0"
+                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1" StrokeShape="RoundRectangle 6" Padding="4">
+            <VerticalStackLayout Spacing="3">
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_position.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PositionLong}" />
+                    <Label Text="Long" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PositionLong}" />
                         </Label.GestureRecognizers>
                     </Label>
                 </HorizontalStackLayout>
                 <HorizontalStackLayout Spacing="6">
                     <Button ImageSource="tool_position.png" Style="{StaticResource PenToolTile}"
-                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Position}" />
-                    <Label Text="Position" Style="{StaticResource ToolFlyoutLabel}">
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PositionShort}" />
+                    <Label Text="Short" Style="{StaticResource ToolFlyoutLabel}">
                         <Label.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Position}" />
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PositionShort}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_position.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PositionManual}" />
+                    <Label Text="Manual" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PositionManual}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_fib.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.FibRetracement}" />
+                    <Label Text="Fib retracement" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.FibRetracement}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- DRAW group flyout (combined Drawing + Text): Freehand · Text · Comment -->
+        <Border Grid.Column="1" IsVisible="{Binding Drawing.IsDrawingGroupOpen}"
+                HorizontalOptions="Start" VerticalOptions="Center" Margin="2,0,0,0"
+                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1" StrokeShape="RoundRectangle 6" Padding="4">
+            <VerticalStackLayout Spacing="3">
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_freehand.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Freehand}" />
+                    <Label Text="Freehand" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Freehand}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_text.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Text}" />
+                    <Label Text="Text" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Text}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_text.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Comment}" />
+                    <Label Text="Comment" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Comment}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_text.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PriceLabel}" />
+                    <Label Text="Price label" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.PriceLabel}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Border>
+
+        <!-- MEASURE group flyout: Measure · Magnifier(+) (zoom-out(−) is the standalone rail button) -->
+        <Border Grid.Column="1" IsVisible="{Binding Drawing.IsMeasureGroupOpen}"
+                HorizontalOptions="Start" VerticalOptions="Center" Margin="2,0,0,0"
+                BackgroundColor="{DynamicResource ChartPanel}" Stroke="{DynamicResource ChartGrid}"
+                StrokeThickness="1" StrokeShape="RoundRectangle 6" Padding="4">
+            <VerticalStackLayout Spacing="3">
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_measure.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Measure}" />
+                    <Label Text="Measure" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Measure}" />
+                        </Label.GestureRecognizers>
+                    </Label>
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Spacing="6">
+                    <Button ImageSource="tool_magnifier.png" Style="{StaticResource PenToolTile}"
+                            Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Magnifier}" />
+                    <Label Text="Magnifier" Style="{StaticResource ToolFlyoutLabel}">
+                        <Label.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Drawing.PickGroupToolCommand}" CommandParameter="{x:Static tools:DrawTool.Magnifier}" />
                         </Label.GestureRecognizers>
                     </Label>
                 </HorizontalStackLayout>
@@ -338,6 +446,19 @@
 
         <!-- Pen tray + colour pickers (Z-order top). Bound to the child Drawing VM. -->
         <local:ChartPenPanelView Grid.Column="1" BindingContext="{Binding Drawing}" />
+
+        <!-- Inline text-editing overlay (Z-order topmost): a transparent Entry positioned at the Text/Comment
+             anchor while editing. Enter/blur commit, Escape cancels (see ChartView.TextEditing.cs). -->
+        <Entry x:Name="InlineTextEntry" Grid.Column="1"
+               IsVisible="{Binding Drawing.InlineEditActive}"
+               Text="{Binding Drawing.InlineEditText, Mode=TwoWay}"
+               TranslationX="{Binding Drawing.InlineEditX}"
+               TranslationY="{Binding Drawing.InlineEditY}"
+               HorizontalOptions="Start" VerticalOptions="Start"
+               WidthRequest="180" BackgroundColor="Transparent"
+               Placeholder="Type…" ReturnType="Done"
+               Completed="OnInlineEntryCompleted" Unfocused="OnInlineEntryUnfocused"
+               Loaded="OnInlineEntryLoaded" />
 
         </Grid>
     </Grid>

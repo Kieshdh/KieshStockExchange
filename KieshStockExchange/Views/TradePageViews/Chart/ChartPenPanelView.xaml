@@ -72,6 +72,30 @@
                            Style="{StaticResource ChartOhlcValue}" WidthRequest="42" VerticalOptions="Center" />
                 </Grid>
 
+                <!-- FIB colour mode (Fib only): Single pen colour vs Rainbow (a colour per level + tinted bands).
+                     No opacity slider — the band tint is fixed. Last-used mode becomes the default for new Fibs. -->
+                <Grid ColumnDefinitions="Auto,*,*" ColumnSpacing="6" IsVisible="{Binding ShowFibPalette}">
+                    <Label Grid.Column="0" Text="Colours" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                    <Button Grid.Column="1" Text="🌈 Rainbow" FontSize="12" Padding="6,2" CornerRadius="4"
+                            Command="{Binding SetFibRainbowCommand}">
+                        <Button.CommandParameter><x:Boolean>True</x:Boolean></Button.CommandParameter>
+                        <Button.Triggers>
+                            <DataTrigger TargetType="Button" Binding="{Binding IsFibRainbow}" Value="True">
+                                <Setter Property="BackgroundColor" Value="{DynamicResource Primary}" />
+                            </DataTrigger>
+                        </Button.Triggers>
+                    </Button>
+                    <Button Grid.Column="2" Text="Single" FontSize="12" Padding="6,2" CornerRadius="4"
+                            Command="{Binding SetFibRainbowCommand}">
+                        <Button.CommandParameter><x:Boolean>False</x:Boolean></Button.CommandParameter>
+                        <Button.Triggers>
+                            <DataTrigger TargetType="Button" Binding="{Binding IsFibRainbow}" Value="False">
+                                <Setter Property="BackgroundColor" Value="{DynamicResource Primary}" />
+                            </DataTrigger>
+                        </Button.Triggers>
+                    </Button>
+                </Grid>
+
                 <!-- WIDTH | DASH (row 0) and END | HEAD (row 1) — the compact 2×8 grid. Row 1 collapses for
                      tools with no directional ending (shapes / H·V lines) via the ShowEnding/ShowHead gates. -->
                 <Grid ColumnDefinitions="Auto,*,*,*,Auto,*,*,*"
@@ -79,8 +103,8 @@
 
                     <!-- Row 0: WIDTH (dots) | DASH -->
                     <Label Grid.Row="0" Grid.Column="0" Text="Width" Style="{StaticResource ChartOhlcKey}"
-                           VerticalOptions="Center" Margin="0,0,4,0" IsVisible="{Binding ShowStroke}" />
-                    <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowStroke}">
+                           VerticalOptions="Center" Margin="0,0,4,0" IsVisible="{Binding ShowWidth}" />
+                    <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowWidth}">
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding PenWidthTiles[0].Command}"
                                                   CommandParameter="{Binding PenWidthTiles[0].Thickness}" />
@@ -92,7 +116,7 @@
                             </DataTrigger>
                         </Border.Triggers>
                     </Border>
-                    <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowStroke}">
+                    <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowWidth}">
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding PenWidthTiles[1].Command}"
                                                   CommandParameter="{Binding PenWidthTiles[1].Thickness}" />
@@ -104,7 +128,7 @@
                             </DataTrigger>
                         </Border.Triggers>
                     </Border>
-                    <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowStroke}">
+                    <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource PenSpecimenTile}" IsVisible="{Binding ShowWidth}">
                         <Border.GestureRecognizers>
                             <TapGestureRecognizer Command="{Binding PenWidthTiles[2].Command}"
                                                   CommandParameter="{Binding PenWidthTiles[2].Thickness}" />
@@ -246,6 +270,38 @@
                     </Border>
                 </Grid>
 
+                <!-- SIZE (Text): standard font-size dropdown + ▲/▼ steppers that jump to the next/prev size. -->
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6" IsVisible="{Binding ShowSize}">
+                    <Label Grid.Column="0" Text="Size" Style="{StaticResource ChartOhlcKey}"
+                           VerticalOptions="Center" Margin="0,0,4,0" />
+                    <Picker Grid.Column="1" VerticalOptions="Center"
+                            ItemsSource="{x:Static vm:ChartDrawingViewModel.StandardFontSizes}"
+                            SelectedItem="{Binding PenFontSize}" />
+                    <Button Grid.Column="2" Text="▲" Style="{StaticResource ChartIconButton}"
+                            Command="{Binding StepFontSizeUpCommand}" />
+                    <Button Grid.Column="3" Text="▼" Style="{StaticResource ChartIconButton}"
+                            Command="{Binding StepFontSizeDownCommand}" />
+                </Grid>
+
+                <!-- POSITION: numeric Entry/Target/Stop legs + Risk% + read-only R:R. Zones are fixed bull/bear
+                     (opacity-only, no per-zone colour). Editing a leg repositions that leg of the selected box. -->
+                <VerticalStackLayout Spacing="4" IsVisible="{Binding ShowPosition}">
+                    <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6" RowDefinitions="Auto,Auto" RowSpacing="4">
+                        <Label Grid.Row="0" Grid.Column="0" Text="Entry" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Entry Grid.Row="0" Grid.Column="1" Keyboard="Numeric" Text="{Binding PositionEntry, Mode=TwoWay}" />
+                        <Label Grid.Row="0" Grid.Column="2" Text="Target" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Entry Grid.Row="0" Grid.Column="3" Keyboard="Numeric" Text="{Binding PositionTarget, Mode=TwoWay}" />
+                        <Label Grid.Row="1" Grid.Column="0" Text="Stop" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Entry Grid.Row="1" Grid.Column="1" Keyboard="Numeric" Text="{Binding PositionStop, Mode=TwoWay}" />
+                        <Label Grid.Row="1" Grid.Column="2" Text="Risk %" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Entry Grid.Row="1" Grid.Column="3" Keyboard="Numeric" Text="{Binding PositionRiskPct, Mode=TwoWay}" />
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                        <Label Grid.Column="0" Text="R:R" Style="{StaticResource ChartOhlcKey}" VerticalOptions="Center" />
+                        <Label Grid.Column="1" Text="{Binding PositionRiskReward}" Style="{StaticResource ChartOhlcValue}" VerticalOptions="Center" />
+                    </Grid>
+                </VerticalStackLayout>
+
                 <!-- Footer: default mode = add a line; selected mode = set-as-default + delete -->
                 <Button Text="+ Line at current price"
                         IsVisible="{Binding IsDefaultPenMode}"
@@ -253,6 +309,7 @@
                         Command="{Binding AddHLineAtCurrentCommand}" />
                 <HorizontalStackLayout Spacing="6" IsVisible="{Binding HasSelectedDrawing}">
                     <Button Text="Set as default ✓"
+                            IsVisible="{Binding CanSetAsDefault}"
                             Style="{StaticResource ChartLiveButton.Off}"
                             Command="{Binding SetSelectedAsDefaultCommand}" />
                     <Button Text="🗑 Delete"

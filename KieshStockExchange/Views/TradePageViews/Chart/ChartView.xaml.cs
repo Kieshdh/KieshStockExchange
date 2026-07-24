@@ -267,6 +267,7 @@ public partial class ChartView : ContentView
             _vm.PropertyChanged -= OnVmCanvasPropertyChanged;
             _vm.Drawing.PropertyChanged -= OnVmPropertyChanged;
             _vm.Drawing.Drawings.CollectionChanged -= OnVmDrawingsChanged;
+            _vm.Drawing.InlineEditRequested -= OnInlineEditRequested;
         }
 
         // A VM swap abandons any half-built polyline (its vertices belong to the old context).
@@ -279,6 +280,7 @@ public partial class ChartView : ContentView
         _vm.PropertyChanged += OnVmCanvasPropertyChanged;
         _vm.Drawing.PropertyChanged += OnVmPropertyChanged;
         _vm.Drawing.Drawings.CollectionChanged += OnVmDrawingsChanged;
+        _vm.Drawing.InlineEditRequested += OnInlineEditRequested;
         UpdateDrawable();
         Chart.Invalidate();
     }

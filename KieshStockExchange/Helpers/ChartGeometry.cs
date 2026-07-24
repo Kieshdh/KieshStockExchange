@@ -13,6 +13,16 @@ internal static class ChartGeometry
     public static float Dist(float ax, float ay, float bx, float by)
         => (float)Math.Sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
 
+    // Bounding rect of two corners. When square (a perfect Circle), the box is forced square — side = the
+    // larger dimension, anchored at the top-left of the drag bbox — so render + hit-test agree.
+    public static RectF ShapeRect(bool square, float x1, float y1, float x2, float y2)
+    {
+        float left = Math.Min(x1, x2), top = Math.Min(y1, y2);
+        float w = Math.Abs(x2 - x1), h = Math.Abs(y2 - y1);
+        if (square) { float s = Math.Max(w, h); w = s; h = s; }
+        return new RectF(left, top, w, h);
+    }
+
     // Shortest distance from point (px,py) to the segment (ax,ay)-(bx,by).
     public static float PointSegDist(float px, float py, float ax, float ay, float bx, float by)
     {

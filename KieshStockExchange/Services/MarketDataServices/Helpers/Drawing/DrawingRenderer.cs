@@ -31,11 +31,29 @@ internal sealed class DrawingRenderer
     // on any theme. The line's colour is kept as a thin border so the tag still identifies its drawing.
     private static readonly Color LabelPillBg = Color.FromArgb("#2A2E39");
 
-    // Text-label pill metrics — width sizes to the label length. MUST match ChartHitTester's Text arm so
-    // the clickable zone tracks the drawn pill exactly (there's no shared home across the two collaborators).
-    private const float TextPillCharW = 7f;
-    private const float TextPillMinW = 26f;
-    private const float TextPillH = 16f;
+    // Plain-text metrics — MUST match ChartHitTester's Text arm so the clickable zone tracks the drawn
+    // glyphs (no shared home across the two collaborators). FontSize==0 (legacy/unset) renders at
+    // TextDefaultFont; the run width estimates as chars × fontSize × TextGlyphWFactor.
+    private const float TextMinW = 26f;
+    private const float TextDefaultFont = 12f;
+    private const float TextGlyphWFactor = 0.6f;
+
+    // Fib band tint opacity — the fixed (no-slider) fill between adjacent levels.
+    private const float FibBandOpacity = 0.10f;
+
+    // Fib rainbow palette: a distinct colour per level, sweeping red→violet. Indexed by level position
+    // (wraps if a custom ratio set has more than 12 levels). Single-colour mode ignores this.
+    private static readonly Color[] FibSpectrum =
+    {
+        Color.FromArgb("#F23645"), Color.FromArgb("#FF6D00"), Color.FromArgb("#FF9800"),
+        Color.FromArgb("#FFD54F"), Color.FromArgb("#AEEA00"), Color.FromArgb("#00C853"),
+        Color.FromArgb("#00BFA5"), Color.FromArgb("#00B8D4"), Color.FromArgb("#2962FF"),
+        Color.FromArgb("#5E35B1"), Color.FromArgb("#8E24AA"), Color.FromArgb("#D500F9"),
+    };
+
+    // The colour for Fib level i: its spectrum swatch in rainbow mode, else the single pen colour.
+    private static Color FibLineColor(int i, bool rainbow, Color single)
+        => rainbow ? FibSpectrum[i % FibSpectrum.Length] : single;
 
     /// <summary>
     /// Draw the user's horizontal lines + trendlines. HLine spans the plot at its price with a
@@ -199,7 +217,7 @@ internal sealed class DrawingRenderer
                 // Corners' vertical mapping routes through the scale seam.
                 float x1 = X(d.T1), y1 = f.ScaleY(d.P1);
                 float x2 = X(d.T2), y2 = f.ScaleY(d.P2);
-                var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
+                var rect = ChartGeometry.ShapeRect(false, x1, y1, x2, y2);
 
                 if (d.Style.Fill is Color fill)
                 {
@@ -211,6 +229,55 @@ internal sealed class DrawingRenderer
                 canvas.StrokeDashPattern = dashPattern;
                 if (d.Kind == DrawTool.Rectangle) canvas.DrawRectangle(rect); else canvas.DrawEllipse(rect);
 
+                if (selected)
+                {
+                    DrawHandle(canvas, t, x1, y1, color);
+                    DrawHandle(canvas, t, x2, y2, color);
+                }
+            }
+            else if (d.Kind == DrawTool.Circle)
+            {
+                // Centre + radius: anchor1 = centre, anchor2 = a point on the ring. Drawn round on screen
+                // (radius = pixel distance centre→ring); same fill/opacity + stroke as the ellipse.
+                float cx = X(d.T1), cy = f.ScaleY(d.P1);
+                float ex = X(d.T2), ey = f.ScaleY(d.P2);
+                float r = ChartGeometry.Dist(cx, cy, ex, ey);
+                var rect = new RectF(cx - r, cy - r, r * 2f, r * 2f);
+                if (d.Style.Fill is Color fill)
+                {
+                    canvas.FillColor = fill.WithAlpha(Math.Clamp(d.Style.FillOpacity, 0f, 1f));
+                    canvas.FillEllipse(rect);
+                }
+                canvas.StrokeColor = color;
+                canvas.StrokeSize = stroke;
+                canvas.StrokeDashPattern = dashPattern;
+                canvas.DrawEllipse(rect);
+                if (selected)
+                {
+                    DrawHandle(canvas, t, cx, cy, color);
+                    DrawHandle(canvas, t, ex, ey, color);
+                }
+            }
+            else if (d.Kind == DrawTool.Triangle)
+            {
+                // Two-corner triangle: apex at the top-centre of the drag bbox, base along the bottom edge.
+                float x1 = X(d.T1), y1 = f.ScaleY(d.P1);
+                float x2 = X(d.T2), y2 = f.ScaleY(d.P2);
+                var rect = ChartGeometry.ShapeRect(false, x1, y1, x2, y2);
+                var tri = new PathF();
+                tri.MoveTo(rect.Center.X, rect.Top);
+                tri.LineTo(rect.Left, rect.Bottom);
+                tri.LineTo(rect.Right, rect.Bottom);
+                tri.Close();
+                if (d.Style.Fill is Color fill)
+                {
+                    canvas.FillColor = fill.WithAlpha(Math.Clamp(d.Style.FillOpacity, 0f, 1f));
+                    canvas.FillPath(tri);
+                }
+                canvas.StrokeColor = color;
+                canvas.StrokeSize = stroke;
+                canvas.StrokeDashPattern = dashPattern;
+                canvas.DrawPath(tri);
                 if (selected)
                 {
                     DrawHandle(canvas, t, x1, y1, color);
@@ -306,46 +373,142 @@ internal sealed class DrawingRenderer
                 DrawGutterPriceTag(canvas, t, plot, y, d.P1, alertColor, cur);
                 if (selected) DrawHandle(canvas, t, plot.Left + 1f, y, alertColor);
             }
+            else if (d.Kind == DrawTool.Crossline)
+            {
+                // Combined cross: a horizontal line at P1 across the plot + a vertical line at T1 down it.
+                float cy = Y((double)d.P1), cx = X(d.T1);
+                canvas.StrokeColor = color; canvas.StrokeSize = stroke; canvas.StrokeDashPattern = dashPattern;
+                if (cy >= plot.Top && cy <= plot.Bottom) canvas.DrawLine(plot.Left, cy, plot.Right, cy);
+                if (cx >= plot.Left && cx <= plot.Right) canvas.DrawLine(cx, plot.Top, cx, plot.Bottom);
+                canvas.StrokeDashPattern = null;
+                if (cy >= plot.Top && cy <= plot.Bottom) DrawGutterPriceTag(canvas, t, plot, cy, d.P1, color, cur);
+                if (selected) DrawHandle(canvas, t, cx, cy, color);
+            }
             else if (d.Kind == DrawTool.Text)
             {
-                // Anchored label: a readable pill (dark slate + white text + thin colour border) with its
-                // LEFT edge at the (T1,P1) anchor, vertically centred. Reuses the DrawEndpointPriceTag pill
-                // mechanics. Blank text draws nothing; an off-plot anchor is clipped like the level kinds.
-                // Pill metrics MUST mirror ChartHitTester's Text arm so the clickable zone tracks the paint.
+                // Anchored PLAIN label: text drawn in the PEN COLOUR at the (T1,P1) anchor, LEFT edge at the
+                // anchor, vertically centred. No pill/box. Blank text draws nothing; an off-plot anchor is
+                // clipped like the level kinds. Font-size metrics MUST mirror ChartHitTester's Text arm.
                 if (string.IsNullOrEmpty(d.Text)) { canvas.StrokeDashPattern = null; continue; }
                 float ax = X(d.T1), ay = Y((double)d.P1);
                 if (ax < plot.Left || ax > plot.Right || ay < plot.Top || ay > plot.Bottom)
                 { canvas.StrokeDashPattern = null; continue; }
-                float w = Math.Max(TextPillMinW, d.Text.Length * TextPillCharW);
-                var r = new RectF(ax, ay - TextPillH / 2f, w, TextPillH);
-                canvas.FillColor = LabelPillBg;
-                canvas.FillRectangle(r);
-                canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
-                canvas.StrokeDashPattern = null;   // the pill border is never dashed (pen dash is for the line kinds)
-                canvas.DrawRectangle(r);
-                canvas.FontColor = Colors.White;
-                canvas.FontSize = t.PriceTagFont + 1f;   // a touch larger than the axis tags so labels read
-                canvas.DrawString(d.Text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                float w = Math.Max(TextMinW, d.Text.Length * fontSize * TextGlyphWFactor);
+                canvas.StrokeDashPattern = null;
+                canvas.FontColor = color;
+                canvas.FontSize = fontSize;
+                canvas.DrawString(d.Text, new RectF(ax, ay - fontSize, w, fontSize * 2f),
                     HorizontalAlignment.Left, VerticalAlignment.Center);
+                if (selected) DrawHandle(canvas, t, ax, ay, color);
+            }
+            else if (d.Kind == DrawTool.Comment)
+            {
+                // Callout bubble: text in a rounded rect with a downward "v" tail pointing at the (T1,P1)
+                // anchor. Bubble sits ABOVE the anchor; text in the pen colour. Blank/off-plot clipped like Text.
+                if (string.IsNullOrEmpty(d.Text)) { canvas.StrokeDashPattern = null; continue; }
+                float ax = X(d.T1), ay = Y((double)d.P1);
+                if (ax < plot.Left || ax > plot.Right || ay < plot.Top || ay > plot.Bottom)
+                { canvas.StrokeDashPattern = null; continue; }
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                const float padX = 6f, padY = 4f, tail = 7f;
+                float bw = Math.Max(TextMinW, d.Text.Length * fontSize * TextGlyphWFactor) + padX * 2f;
+                float bh = fontSize + padY * 2f;
+                var bubble = new RectF(ax - bw / 2f, ay - tail - bh, bw, bh);
+                canvas.StrokeDashPattern = null;
+                canvas.FillColor = LabelPillBg;
+                canvas.FillRoundedRectangle(bubble, 5f);
+                canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
+                canvas.DrawRoundedRectangle(bubble, 5f);
+                // Downward "v" tail — filled over the bubble bg, its two edges stroked in the border colour.
+                var tailPath = new PathF();
+                tailPath.MoveTo(ax - 5f, bubble.Bottom);
+                tailPath.LineTo(ax + 5f, bubble.Bottom);
+                tailPath.LineTo(ax, ay);
+                tailPath.Close();
+                canvas.FillColor = LabelPillBg;
+                canvas.FillPath(tailPath);
+                canvas.DrawLine(ax - 5f, bubble.Bottom, ax, ay);
+                canvas.DrawLine(ax + 5f, bubble.Bottom, ax, ay);
+                canvas.FontColor = color;
+                canvas.FontSize = fontSize;
+                canvas.DrawString(d.Text, new RectF(bubble.X + padX, bubble.Y, bubble.Width - padX * 2f, bubble.Height),
+                    HorizontalAlignment.Left, VerticalAlignment.Center);
+                if (selected) DrawHandle(canvas, t, ax, ay, color);
+            }
+            else if (d.Kind == DrawTool.PriceLabel)
+            {
+                // Price callout (speech-bubble look): a rounded bubble sitting UP-RIGHT of the exact price point
+                // (T1,P1), with a "<" tail dropping from its bottom-left corner DOWN-LEFT to that point (a bit of
+                // distance so it reads as a pointer). Price is CENTRED; filled with the style Fill+opacity; text +
+                // border in the pen colour. NO anchor dot (the point is DB-only). Off-plot anchors clip like Text.
+                float ax = X(d.T1), ay = Y((double)d.P1);
+                if (ax < plot.Left || ax > plot.Right || ay < plot.Top || ay > plot.Bottom)
+                { canvas.StrokeDashPattern = null; continue; }
+                string priceText = CurrencyHelper.Format(d.P1, cur);
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                const float padX = 8f, padY = 4f, tailGap = 8f;
+                float bw = Math.Max(TextMinW, priceText.Length * fontSize * TextGlyphWFactor) + padX * 2f;
+                float bh = fontSize + padY * 2f;
+                var bubble = new RectF(ax + tailGap, ay - bh - tailGap, bw, bh);
+                var fill = d.Style.Fill is Color fc ? fc.WithAlpha(d.Style.FillOpacity) : LabelPillBg;
+                canvas.StrokeDashPattern = null;
+                canvas.FillColor = fill;
+                canvas.FillRoundedRectangle(bubble, 5f);
+                canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
+                canvas.DrawRoundedRectangle(bubble, 5f);
+                // "<" tail: two base points at the bubble's bottom-left corner, apex at the price point.
+                float b1x = bubble.Left + 6f, b1y = bubble.Bottom;
+                float b2x = bubble.Left, b2y = bubble.Bottom - 6f;
+                var tailPath = new PathF();
+                tailPath.MoveTo(b1x, b1y);
+                tailPath.LineTo(b2x, b2y);
+                tailPath.LineTo(ax, ay);
+                tailPath.Close();
+                canvas.FillColor = fill;
+                canvas.FillPath(tailPath);
+                canvas.DrawLine(b1x, b1y, ax, ay);
+                canvas.DrawLine(b2x, b2y, ax, ay);
+                canvas.FontColor = color;
+                canvas.FontSize = fontSize;
+                canvas.DrawString(priceText, new RectF(bubble.X + padX, bubble.Y, bubble.Width - padX * 2f, bubble.Height),
+                    HorizontalAlignment.Center, VerticalAlignment.Center);
                 if (selected) DrawHandle(canvas, t, ax, ay, color);
             }
             else if (d.Kind == DrawTool.FibRetracement)
             {
                 // Fibonacci retracement grid: the two time anchors bound a box; each ratio level draws a
-                // horizontal line across it with a left-edge "{ratio}  {price}" tag. The 0/0.5/1 lines paint
-                // a touch thicker so the move's ends + midpoint read at a glance. Zone fills deferred (v2).
+                // horizontal line across it with a right-aligned "{ratio} ({price})" tag just left of the grid.
+                // The 0/0.5/1 lines paint a touch thicker. Each ADJACENT pair of levels gets a tinted band fill
+                // (fixed low opacity). Rainbow mode gives every line its own spectrum colour (band = that line's
+                // colour); single mode uses the pen colour for all. First anchor (P1) = 1.0, second (P2) = 0.0.
                 float xa = X(d.T1), xb = X(d.T2);
                 float left = Math.Min(xa, xb), right = Math.Max(xa, xb);
-                foreach (var lvl in FibonacciLevels.Levels(d.P1, d.P2))
+                bool rainbow = d.Style.FibRainbow;
+                var levels = FibonacciLevels.Levels(d.P2, d.P1);
+                canvas.StrokeDashPattern = null;
+                // Band fills first (behind the lines): tint the zone between each consecutive level pair.
+                for (int bi = 0; bi < levels.Count - 1; bi++)
                 {
-                    float y = Y((double)lvl.Price);
+                    float y0 = Y((double)levels[bi].Price), y1 = Y((double)levels[bi + 1].Price);
+                    float top = Math.Max(Math.Min(y0, y1), plot.Top);
+                    float bot = Math.Min(Math.Max(y0, y1), plot.Bottom);
+                    if (bot <= top) continue;
+                    canvas.FillColor = FibLineColor(bi, rainbow, color).WithAlpha(FibBandOpacity);
+                    canvas.FillRectangle(left, top, right - left, bot - top);
+                }
+                // Level lines + tags on top, each in its own colour.
+                for (int li = 0; li < levels.Count; li++)
+                {
+                    float y = Y((double)levels[li].Price);
                     if (y < plot.Top || y > plot.Bottom) continue;
-                    bool key = lvl.Ratio is 0.0 or 0.5 or 1.0;   // move start / midpoint / end
-                    canvas.StrokeColor = color;
+                    var lc = FibLineColor(li, rainbow, color);
+                    bool key = levels[li].Ratio is 0.0 or 0.5 or 1.0;   // move start / midpoint / end
+                    canvas.StrokeColor = lc;
                     canvas.StrokeSize = key ? stroke + 0.75f : stroke;
                     canvas.StrokeDashPattern = dashPattern;
                     canvas.DrawLine(left, y, right, y);
-                    DrawFibLevelTag(canvas, t, plot, left, y, lvl.Ratio, lvl.Price, color, cur);
+                    DrawFibLevelTag(canvas, t, plot, left, y, levels[li].Ratio, levels[li].Price, lc, cur);
                 }
                 canvas.StrokeDashPattern = null;
                 if (selected)
@@ -529,25 +692,18 @@ internal sealed class DrawingRenderer
             HorizontalAlignment.Left, VerticalAlignment.Center);
     }
 
-    // A Fib level tag: a "{ratio}  {price}" pill anchored just LEFT of the grid's left edge (clamped to
-    // the plot). Same readable pill mechanics as DrawEndpointPriceTag, but labels the ratio + level price.
+    // A Fib level tag: PLAIN "{ratio} ({price})" text (no pill/box) in the level's colour, RIGHT-ALIGNED so it
+    // ends just left of the grid's left edge. Right-aligning keeps the bracketed prices in one clean column.
     private void DrawFibLevelTag(ICanvas canvas, ChartTheme theme, RectF plot, float x, float y,
         double ratio, decimal price, Color color, CurrencyType cur)
     {
-        string text = $"{ratio:0.###}  {CurrencyHelper.Format(price, cur)}";
-        float w = Math.Max(64f, text.Length * 6.3f);
-        float lx = Math.Clamp(x - w - 4f, plot.Left, Math.Max(plot.Left, plot.Right - w));
-        float ly = Math.Clamp(y - 8f, plot.Top, Math.Max(plot.Top, plot.Bottom - 16f));
-        var r = new RectF(lx, ly, w, 16f);
-        canvas.FillColor = LabelPillBg;
-        canvas.FillRectangle(r);
-        canvas.StrokeColor = color; canvas.StrokeSize = 1.5f;
-        canvas.StrokeDashPattern = null;   // the pill border is never dashed (pen dash is for the level lines)
-        canvas.DrawRectangle(r);
-        canvas.FontColor = Colors.White;
+        canvas.StrokeDashPattern = null;   // text only — never inherit the level line's dash
+        string text = $"{ratio:0.###} ({CurrencyHelper.Format(price, cur)})";
+        float rightX = Math.Max(plot.Left + 40f, x - 4f);
+        var textRect = new RectF(plot.Left, y - 8f, rightX - plot.Left, 16f);
+        canvas.FontColor = color;
         canvas.FontSize = theme.PriceTagFont;
-        canvas.DrawString(text, new RectF(r.X + 3, r.Y, r.Width - 6, r.Height),
-            HorizontalAlignment.Left, VerticalAlignment.Center);
+        canvas.DrawString(text, textRect, HorizontalAlignment.Right, VerticalAlignment.Center);
     }
 
     // Position readout: ONE pill with the reward:risk ratio + (when a live price exists) the unrealized

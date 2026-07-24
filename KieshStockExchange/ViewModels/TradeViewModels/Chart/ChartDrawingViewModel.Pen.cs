@@ -38,6 +38,9 @@ public partial class ChartDrawingViewModel
         // Group active-highlight tracks the armed tool; arming anything closes an open group flyout.
         OnPropertyChanged(nameof(IsLinesGroupActive));
         OnPropertyChanged(nameof(IsShapesGroupActive));
+        OnPropertyChanged(nameof(IsDrawingGroupActive));
+        OnPropertyChanged(nameof(IsPositionGroupActive));
+        OnPropertyChanged(nameof(IsMeasureGroupActive));
         OpenToolGroup = null;
         // With no selection, EditingKind == the armed tool, so arming a tool flips every Show* gate.
         // RefreshPenTiles raises EditingKind + the Show* notifications (nothing else calls it on this path).
@@ -53,66 +56,14 @@ public partial class ChartDrawingViewModel
     {
         DrawTool = tool;
         Preferences.Default.Set(DrawToolLastPrefKey, tool.ToString());
+        // Auto-show: arming a drawing-placing tool while drawings are hidden flips back to SHOW so the placed
+        // drawing is visible. Cursor/Measure/Magnifier place nothing, so they leave the hidden state alone.
+        if (DrawingsHidden && tool is not (DrawTool.None or DrawTool.Measure or DrawTool.Magnifier))
+            DrawingsHidden = false;
     }
 
-    // --- Left-rail tool GROUPS (TradingView-style) ----------------------------------------------------
-    // Each group shows its LAST-PICKED tool as the rail icon; the ">" opens a named flyout of the group's
-    // tools. Picking one arms it + becomes the group's icon. The group icon itself arms its current tool.
-    [ObservableProperty] private DrawTool _linesGroupTool = DrawTool.Trend;
-    [ObservableProperty] private DrawTool _shapesGroupTool = DrawTool.Rectangle;
-    [ObservableProperty] private string? _openToolGroup;   // "lines" | "shapes" | null (only one open)
-
-    partial void OnLinesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(LinesGroupIcon));
-    partial void OnShapesGroupToolChanged(DrawTool value) => OnPropertyChanged(nameof(ShapesGroupIcon));
-    partial void OnOpenToolGroupChanged(string? value)
-    {
-        OnPropertyChanged(nameof(IsLinesGroupOpen));
-        OnPropertyChanged(nameof(IsShapesGroupOpen));
-    }
-
-    public string LinesGroupIcon => ToolIcon(LinesGroupTool);
-    public string ShapesGroupIcon => ToolIcon(ShapesGroupTool);
-    public bool IsLinesGroupActive => LinesGroupContains(DrawTool);
-    public bool IsShapesGroupActive => DrawTool is DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow or DrawTool.Position;
-    public bool IsLinesGroupOpen => OpenToolGroup == "lines";
-    public bool IsShapesGroupOpen => OpenToolGroup == "shapes";
-
-    private static bool LinesGroupContains(DrawTool t) => t is DrawTool.Trend or DrawTool.Ray
-        or DrawTool.ExtendedLine or DrawTool.HLine or DrawTool.HRay or DrawTool.VLine
-        or DrawTool.Polyline or DrawTool.Alert or DrawTool.Text or DrawTool.FibRetracement;
-
-    private static string ToolIcon(DrawTool t) => t switch
-    {
-        DrawTool.Trend => "tool_trend.png",
-        DrawTool.Ray => "tool_ray.png",
-        DrawTool.ExtendedLine => "tool_extendedline.png",
-        DrawTool.HLine => "tool_hline.png",
-        DrawTool.HRay => "tool_hray.png",
-        DrawTool.VLine => "tool_vline.png",
-        DrawTool.Polyline => "tool_polyline.png",
-        DrawTool.Alert => "tool_alert.png",
-        DrawTool.Text => "tool_text.png",
-        DrawTool.FibRetracement => "tool_fib.png",
-        DrawTool.Rectangle => "tool_rectangle.png",
-        DrawTool.Ellipse => "tool_ellipse.png",
-        DrawTool.Arrow => "tool_arrow.png",
-        DrawTool.Position => "tool_position.png",
-        DrawTool.Freehand => "tool_freehand.png",
-        DrawTool.Magnifier => "tool_magnifier.png",
-        _ => "tool_cursor.png",
-    };
-
-    [RelayCommand] private void ToggleToolGroup(string key) => OpenToolGroup = OpenToolGroup == key ? null : key;
-
-    // Pick a tool from a group flyout: it becomes that group's current tool, is armed, and the flyout closes.
-    [RelayCommand]
-    private void PickGroupTool(DrawTool tool)
-    {
-        if (LinesGroupContains(tool)) LinesGroupTool = tool;
-        else if (tool is DrawTool.Rectangle or DrawTool.Ellipse or DrawTool.Arrow or DrawTool.Position) ShapesGroupTool = tool;
-        SelectDrawTool(tool);
-        OpenToolGroup = null;
-    }
+    // (Left-rail tool GROUPS moved to ChartDrawingViewModel.Rail.cs — a distinct responsibility from the
+    // pen STYLE panel below. This partial owns the default pen, panel-section gates, tiles, and style editing.)
 
     // --- Default pen + panel-section gates ----------------------------------------------------------
     // The default pen: the style a freshly-placed drawing gets. Persisted as JSON (Color via the same
@@ -150,6 +101,7 @@ public partial class ChartDrawingViewModel
     // Panel-section gates driven by the preset table. Split ShowFillColor/ShowOpacity so a shape can
     // show both while a line shows neither.
     public bool ShowStroke    => EditingPreset.ShowStroke;
+    public bool ShowWidth     => EditingPreset.ShowWidth;   // split from ShowStroke so Text shows colour but no width
     public bool ShowFillColor => EditingPreset.ShowFillColor;
     public bool ShowOpacity   => EditingPreset.ShowOpacity;
     public bool ShowDash      => EditingPreset.ShowDash;
@@ -159,6 +111,8 @@ public partial class ChartDrawingViewModel
     public bool ShowPosition  => EditingPreset.ShowPosition;
     public bool ShowSize      => EditingPreset.ShowSize;
     public bool ShowSmoothing => EditingPreset.ShowSmoothing;
+    // Position is Delete-only (a default entry/target price is incoherent) — hide "Set as default" for it.
+    public bool CanSetAsDefault => !EditingPreset.ShowPosition;
 
     // The live specimen of the current pen (or selected line), bound by the toolbar pen button and the
     // panel preview. Rebuilt as a fresh instance on every effective-style change so its hosts repaint.
@@ -284,6 +238,58 @@ public partial class ChartDrawingViewModel
         ApplyPenStyle(s => s with { Head = head });
     }
 
+    // --- Text font size (standard sizes + ▲/▼ steppers) ---------------------------------------------
+    // The universal standard sizes the Text SIZE dropdown offers; steppers snap to these.
+    public static readonly int[] StandardFontSizes =
+        { 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72 };
+    private const int DefaultFontSize = 12;   // Style.FontSize == 0 (unset/legacy) resolves to this
+
+    // Bound by the SIZE dropdown. Edits the selected Text else the default pen; re-synced from the effective
+    // style in RefreshPenTiles (guarded by _syncingPenFromStyle so the push-back doesn't re-enter the setter).
+    [ObservableProperty] private int _penFontSize = DefaultFontSize;
+
+    partial void OnPenFontSizeChanged(int value)
+    {
+        if (_syncingPenFromStyle || value <= 0) return;
+        ApplyPenStyle(s => s with { FontSize = value });
+    }
+
+    [RelayCommand] private void StepFontSizeUp() => StepFontSize(+1);
+    [RelayCommand] private void StepFontSizeDown() => StepFontSize(-1);
+
+    // Snap the current size to the nearest standard size, then move one standard step in dir.
+    private void StepFontSize(int dir)
+    {
+        int cur = PenFontSize > 0 ? PenFontSize : DefaultFontSize;
+        int idx = Array.IndexOf(StandardFontSizes, cur);
+        if (idx < 0)   // not exactly a standard size ⇒ snap to the nearest
+        {
+            idx = 0;
+            for (int i = 1; i < StandardFontSizes.Length; i++)
+                if (Math.Abs(StandardFontSizes[i] - cur) < Math.Abs(StandardFontSizes[idx] - cur)) idx = i;
+        }
+        PenFontSize = StandardFontSizes[Math.Clamp(idx + dir, 0, StandardFontSizes.Length - 1)];
+    }
+
+    // --- Position panel (numeric legs + Risk% + read-only R:R) --------------------------------------
+    // The three legs edit the SELECTED Position through the SetSelected*Price seams; Risk% is a single
+    // global Preferences scalar (per the design — not per-drawing); R:R is derived |Target−Entry|/|Entry−Stop|.
+    // All re-synced from the selected drawing in RefreshPenTiles (guarded so the push-back doesn't re-enter).
+    private const string PositionRiskPctPrefKey = "chart_position_risk_pct";
+    [ObservableProperty] private decimal _positionEntry;
+    [ObservableProperty] private decimal _positionTarget;
+    [ObservableProperty] private decimal _positionStop;
+    [ObservableProperty] private double _positionRiskPct = Preferences.Default.Get(PositionRiskPctPrefKey, 1.0);
+    [ObservableProperty] private string _positionRiskReward = "—";
+
+    partial void OnPositionEntryChanged(decimal value)  { if (!_syncingPenFromStyle) SetSelectedEntryPrice(value); }
+    partial void OnPositionTargetChanged(decimal value) { if (!_syncingPenFromStyle) SetSelectedTargetPrice(value); }
+    partial void OnPositionStopChanged(decimal value)   { if (!_syncingPenFromStyle) SetSelectedStopPrice(value); }
+    partial void OnPositionRiskPctChanged(double value)
+    {
+        if (!_syncingPenFromStyle) Preferences.Default.Set(PositionRiskPctPrefKey, value);
+    }
+
     // "Set as default ✓": copy the selected line's style to the default pen.
     [RelayCommand]
     private void SetSelectedAsDefault()
@@ -321,6 +327,7 @@ public partial class ChartDrawingViewModel
         // selection/armed-tool, so re-raise them here — the one place every changing path routes through.
         OnPropertyChanged(nameof(EditingKind));
         OnPropertyChanged(nameof(ShowStroke));
+        OnPropertyChanged(nameof(ShowWidth));
         OnPropertyChanged(nameof(ShowFillColor));
         OnPropertyChanged(nameof(ShowOpacity));
         OnPropertyChanged(nameof(ShowDash));
@@ -328,8 +335,11 @@ public partial class ChartDrawingViewModel
         OnPropertyChanged(nameof(ShowHead));
         OnPropertyChanged(nameof(ShowText));
         OnPropertyChanged(nameof(ShowPosition));
+        OnPropertyChanged(nameof(CanSetAsDefault));
         OnPropertyChanged(nameof(ShowSize));
         OnPropertyChanged(nameof(ShowSmoothing));
+        OnPropertyChanged(nameof(ShowFibPalette));   // Fib colour-mode row (single vs rainbow)
+        OnPropertyChanged(nameof(IsFibRainbow));
         // Colour-picker swatches + fill state track the effective style too.
         OnPropertyChanged(nameof(CurrentStrokeColor));
         OnPropertyChanged(nameof(CurrentFillColor));
@@ -369,7 +379,16 @@ public partial class ChartDrawingViewModel
         foreach (var t in PenFillTiles)
             t.IsSelected = s.Fill is not null && t.Color.ToArgbHex(true) == fillHex;
         _syncingPenFromStyle = true;
+        PenFontSize = s.FontSize > 0 ? s.FontSize : DefaultFontSize;
         PenFillOpacity = Math.Clamp(s.FillOpacity, 0f, 1f);
+        // Position legs + R:R — only meaningful when a Position drawing is selected.
+        if (EditingKind == DrawTool.Position && SelectedDrawingId is Guid posId
+            && Drawings.FirstOrDefault(d => d.Id == posId) is { Kind: DrawTool.Position } pos)
+        {
+            PositionEntry = pos.P1; PositionTarget = pos.P2; PositionStop = pos.P3;
+            decimal reward = Math.Abs(pos.P2 - pos.P1), risk = Math.Abs(pos.P1 - pos.P3);
+            PositionRiskReward = risk > 0m ? $"{(double)(reward / risk):0.00}" : "—";
+        }
         _syncingPenFromStyle = false;
     }
 }

@@ -20,11 +20,11 @@ internal sealed class ChartHitTester
     private readonly float DrawHitTol;
     private readonly float RightAxisW;
 
-    // Text-label pill metrics — kept in lockstep with DrawingRenderer's TextPill* consts so the pill's
-    // clickable zone matches the drawn pill exactly.
-    private const float TextPillCharW = 7f;
-    private const float TextPillMinW = 26f;
-    private const float TextPillH = 16f;
+    // Plain-text metrics — kept in lockstep with DrawingRenderer's Text* consts so the clickable zone
+    // matches the drawn glyphs. FontSize==0 (legacy/unset) uses TextDefaultFont.
+    private const float TextMinW = 26f;
+    private const float TextDefaultFont = 12f;
+    private const float TextGlyphWFactor = 0.6f;
 
     public ChartHitTester(float drawHandleR, float drawHitTol, float rightAxisW)
     {
@@ -61,17 +61,57 @@ internal sealed class ChartHitTester
                 if (p.X >= frame.Plot.Left && p.X <= frame.Plot.Right && Math.Abs(p.Y - y) <= DrawHitTol)
                     return (d, DrawingHitPart.Body);
             }
+            else if (d.Kind == DrawTool.Crossline)
+            {
+                // Cross: hit if near the horizontal (at P1) OR the vertical (at T1).
+                float cy = frame.HitPriceToPixelY(d.P1), cx = frame.TimeToPixelX(d.T1);
+                bool onH = cy >= frame.Plot.Top && cy <= frame.Plot.Bottom
+                    && p.X >= frame.Plot.Left && p.X <= frame.Plot.Right && Math.Abs(p.Y - cy) <= DrawHitTol;
+                bool onV = cx >= frame.Plot.Left && cx <= frame.Plot.Right
+                    && p.Y >= frame.Plot.Top && p.Y <= frame.Plot.Bottom && Math.Abs(p.X - cx) <= DrawHitTol;
+                if (onH || onV) return (d, DrawingHitPart.Body);
+            }
             else if (d.Kind == DrawTool.Text)
             {
-                // Text label: hit anywhere inside the pill rect at the anchor. The rect MUST mirror the
-                // renderer's Text arm — left edge at the anchor X, vertically centred on the anchor Y, width
-                // from the label length (metrics kept in lockstep with DrawingRenderer's TextPill* consts).
+                // Text label: hit anywhere inside the plain-text bounds at the anchor. The rect MUST mirror
+                // the renderer's Text arm — left edge at the anchor X, vertically centred on the anchor Y,
+                // width from the label length × the effective font size (lockstep with DrawingRenderer's Text* consts).
                 if (string.IsNullOrEmpty(d.Text)) continue;
                 float ax = frame.TimeToPixelX(d.T1), ay = frame.HitPriceToPixelY(d.P1);
                 if (ax < frame.Plot.Left || ax > frame.Plot.Right || ay < frame.Plot.Top || ay > frame.Plot.Bottom) continue;
-                float w = Math.Max(TextPillMinW, d.Text.Length * TextPillCharW);
-                var r = new RectF(ax, ay - TextPillH / 2f, w, TextPillH);
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                float w = Math.Max(TextMinW, d.Text.Length * fontSize * TextGlyphWFactor);
+                var r = new RectF(ax, ay - fontSize, w, fontSize * 2f);
                 if (r.Contains(p)) return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.Comment)
+            {
+                // Callout: hit inside the bubble rect above the anchor (mirror DrawingRenderer's Comment arm).
+                if (string.IsNullOrEmpty(d.Text)) continue;
+                float ax = frame.TimeToPixelX(d.T1), ay = frame.HitPriceToPixelY(d.P1);
+                if (ax < frame.Plot.Left || ax > frame.Plot.Right || ay < frame.Plot.Top || ay > frame.Plot.Bottom) continue;
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                const float padX = 6f, padY = 4f, tail = 7f;
+                float bw = Math.Max(TextMinW, d.Text.Length * fontSize * TextGlyphWFactor) + padX * 2f;
+                float bh = fontSize + padY * 2f;
+                var r = new RectF(ax - bw / 2f, ay - tail - bh, bw, bh);
+                if (r.Contains(p)) return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.PriceLabel)
+            {
+                // Price callout: hit the pill beside the anchor OR the anchor dot itself. Mirror the
+                // renderer's PriceLabel arm; the pill width is ESTIMATED from the raw price length (the
+                // hit-tester has no currency, so this is a couple px loose — fine for a click target).
+                float ax = frame.TimeToPixelX(d.T1), ay = frame.HitPriceToPixelY(d.P1);
+                if (ax < frame.Plot.Left || ax > frame.Plot.Right || ay < frame.Plot.Top || ay > frame.Plot.Bottom) continue;
+                float fontSize = d.Style.FontSize > 0 ? d.Style.FontSize : TextDefaultFont;
+                const float padX = 8f, padY = 4f, tailGap = 8f;
+                int estLen = d.P1.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture).Length + 2;
+                float bw = Math.Max(TextMinW, estLen * fontSize * TextGlyphWFactor) + padX * 2f;
+                float bh = fontSize + padY * 2f;
+                var r = new RectF(ax + tailGap, ay - bh - tailGap, bw, bh);   // bubble sits up-right of the anchor
+                if (r.Contains(p) || ChartGeometry.Dist(p.X, p.Y, ax, ay) <= DrawHandleR + DrawHitTol)
+                    return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.HRay)
             {
@@ -119,7 +159,7 @@ internal sealed class ChartHitTester
                 float x2 = frame.TimeToPixelX(d.T2), y2 = frame.HitPriceToPixelY(d.P2);
                 if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
                 if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
-                var rect = new RectF(Math.Min(x1, x2), Math.Min(y1, y2), Math.Abs(x2 - x1), Math.Abs(y2 - y1));
+                var rect = ChartGeometry.ShapeRect(false, x1, y1, x2, y2);
                 // Body = on the border (within tolerance) or anywhere inside a filled shape.
                 bool onBorder =
                     p.X >= rect.Left - DrawHitTol && p.X <= rect.Right + DrawHitTol &&
@@ -128,6 +168,32 @@ internal sealed class ChartHitTester
                      Math.Abs(p.Y - rect.Top) <= DrawHitTol || Math.Abs(p.Y - rect.Bottom) <= DrawHitTol);
                 bool inside = d.Style.Fill is not null && rect.Contains(p);
                 if (onBorder || inside) return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.Circle)
+            {
+                // Centre + radius: anchor1 = centre, anchor2 = a ring point. Body = on the ring or inside a fill.
+                float cx = frame.TimeToPixelX(d.T1), cy = frame.HitPriceToPixelY(d.P1);
+                float ex = frame.TimeToPixelX(d.T2), ey = frame.HitPriceToPixelY(d.P2);
+                if (ChartGeometry.Dist(p.X, p.Y, cx, cy) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, ex, ey) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                float r = ChartGeometry.Dist(cx, cy, ex, ey);
+                float dc = ChartGeometry.Dist(p.X, p.Y, cx, cy);
+                if (Math.Abs(dc - r) <= DrawHitTol || (d.Style.Fill is not null && dc <= r))
+                    return (d, DrawingHitPart.Body);
+            }
+            else if (d.Kind == DrawTool.Triangle)
+            {
+                float x1 = frame.TimeToPixelX(d.T1), y1 = frame.HitPriceToPixelY(d.P1);
+                float x2 = frame.TimeToPixelX(d.T2), y2 = frame.HitPriceToPixelY(d.P2);
+                if (ChartGeometry.Dist(p.X, p.Y, x1, y1) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor1);
+                if (ChartGeometry.Dist(p.X, p.Y, x2, y2) <= DrawHandleR + DrawHitTol) return (d, DrawingHitPart.Anchor2);
+                var rect = ChartGeometry.ShapeRect(false, x1, y1, x2, y2);
+                float ax = rect.Center.X, ay = rect.Top, blx = rect.Left, bly = rect.Bottom, brx = rect.Right, bry = rect.Bottom;
+                bool near = ChartGeometry.PointSegDist(p.X, p.Y, ax, ay, blx, bly) <= DrawHitTol
+                    || ChartGeometry.PointSegDist(p.X, p.Y, ax, ay, brx, bry) <= DrawHitTol
+                    || ChartGeometry.PointSegDist(p.X, p.Y, blx, bly, brx, bry) <= DrawHitTol;
+                bool inside = d.Style.Fill is not null && rect.Contains(p);
+                if (near || inside) return (d, DrawingHitPart.Body);
             }
             else if (d.Kind == DrawTool.Arrow)
             {

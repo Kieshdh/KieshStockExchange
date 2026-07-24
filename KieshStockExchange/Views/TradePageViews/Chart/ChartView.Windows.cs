@@ -118,6 +118,16 @@ public partial class ChartView
         // Any fresh press cancels an in-flight inertial coast (user grabbed the chart again).
         StopInertia();
 
+        // An inline text edit is open — this click commits it (Enter/blur semantics) and is consumed, so
+        // it never falls through to place a second label or start a pan. Blur would commit anyway; doing it
+        // here first avoids the same click also re-arming the still-Text tool.
+        if (_vm.Drawing.InlineEditActive)
+        {
+            _vm.Drawing.CommitInlineEditCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         var p = PlatformPointerToControl(el, e);
 
         // Priority 0: Shift-drag starts the measure ruler and owns the gesture, so it
@@ -244,21 +254,37 @@ public partial class ChartView
                 return;
             }
             if (_vm.Drawing.DrawTool == DrawTool.HLine || _vm.Drawing.DrawTool == DrawTool.HRay
-                || _vm.Drawing.DrawTool == DrawTool.VLine || _vm.Drawing.DrawTool == DrawTool.Alert)
+                || _vm.Drawing.DrawTool == DrawTool.VLine || _vm.Drawing.DrawTool == DrawTool.Alert
+                || _vm.Drawing.DrawTool == DrawTool.Crossline || _vm.Drawing.DrawTool == DrawTool.PriceLabel)
             {
-                // One-click lines (HLine/HRay/Alert at a price, VLine at a time). After placing: revert to the
-                // cursor tool + auto-select the new line so its settings pop up (TradingView one-shot flow).
+                // One-click commits: HLine/HRay/Alert at a price, VLine at a time, Crossline at both, PriceLabel a
+                // price pill at the anchor. After placing: revert to the cursor tool + auto-select so its settings
+                // pop up (TradingView one-shot flow). PriceLabel needs no typing — the pill shows the anchor price.
                 _vm.Drawing.AddDrawing(new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
                 FinishPlacement(id);
                 e.Handled = true;
                 return;
             }
-            if (_vm.Drawing.DrawTool == DrawTool.Text)
+            if (_vm.Drawing.DrawTool == DrawTool.Text || _vm.Drawing.DrawTool == DrawTool.Comment)
             {
-                // Text label: one-click anchor, then an async prompt for the text (fire-and-forget, since this
-                // handler is void). A cancelled/blank prompt removes the placeholder — see PromptTextLabelAsync.
-                _vm.Drawing.AddDrawing(new DrawingObject(id, DrawTool.Text, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
-                _ = PromptTextLabelAsync(id);
+                // Text label / Comment callout: one-click anchor, then INLINE typing in an on-chart Entry overlay
+                // (no modal popup). The Kind is the armed tool so a Comment persists as Comment (bubble render) and
+                // Text as Text. An empty label auto-deletes on commit (Enter/blur) — see StartInlineTextEdit.
+                _vm.Drawing.AddDrawing(new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle));
+                StartInlineTextEdit(id, p);
+                e.Handled = true;
+                return;
+            }
+            if (_vm.Drawing.DrawTool == DrawTool.PositionManual)
+            {
+                // Manual position: one-click drop of a default LONG box (entry at click, target/stop at ±2%,
+                // ~80px wide), then auto-select so the numeric legs open for editing — no drag (docs spec).
+                decimal off = newPrice * 0.02m;
+                var t2 = _drawable.PixelToTime(p.X + 80f);
+                var box = new DrawingObject(id, DrawTool.Position, t, newPrice, t2, newPrice + off,
+                    _vm.Drawing.DefaultDrawStyle) with { P3 = newPrice - off, Direction = 1, Qty = 1 };
+                _vm.Drawing.AddDrawing(box);
+                FinishPlacement(id);
                 e.Handled = true;
                 return;
             }
@@ -277,9 +303,16 @@ public partial class ChartView
                 e.Handled = true;
                 return;
             }
-            // Trend / Ray / shapes (Rectangle / Ellipse / the block-Arrow): a two-anchor drag; the second
-            // anchor follows the release point (Arrow: anchor1 = tail, anchor2 = head).
-            var seg = new DrawingObject(id, _vm.Drawing.DrawTool, t, newPrice, t, newPrice, _vm.Drawing.DefaultDrawStyle);
+            // Trend / Ray / shapes (Rectangle / Ellipse / the block-Arrow) + Position Long/Short: a two-anchor
+            // drag; the second anchor follows the release point (Arrow: anchor1 = tail, anchor2 = head). The
+            // Position Long/Short arming tools persist as Kind=Position (Direction is fixed on release, below).
+            var placeKind = _vm.Drawing.DrawTool is DrawTool.PositionLong or DrawTool.PositionShort
+                ? DrawTool.Position : _vm.Drawing.DrawTool;
+            // A new Fib inherits the last-used colour mode (single vs rainbow); everything else takes the pen.
+            var placeStyle = placeKind == DrawTool.FibRetracement
+                ? _vm.Drawing.DefaultDrawStyle with { FibRainbow = _vm.Drawing.FibRainbowDefault }
+                : _vm.Drawing.DefaultDrawStyle;
+            var seg = new DrawingObject(id, placeKind, t, newPrice, t, newPrice, placeStyle);
             _vm.Drawing.AddDrawing(seg);
             // No auto-select — the drag below positions anchor2; the tool row stays visible for the next line.
             BeginDrawingDrag(seg, DrawingHitPart.Anchor2, p, isNew: true);
@@ -639,15 +672,16 @@ public partial class ChartView
             // A NEW drawing that was dragged out & kept → revert to cursor + select it (settings pop up).
             else if (_drawDragIsNew && _drawDragMoved && _draggingDrawingId is Guid kid)
             {
-                // A Position derives its Stop leg ONCE here (mirror of the target across entry), sets its
-                // long/short Direction from target-vs-entry (never re-inferred later, or the box would flip
-                // mid-edit), and defaults to a 1-share size. Every other two-anchor tool finalizes as-is.
+                // A Position derives its Stop leg ONCE here (mirror of the target across entry), fixes its
+                // long/short Direction from the CHOSEN arming tool (PositionShort ⇒ short; Long/else ⇒ long —
+                // never inferred from drag direction, so a down-drag Long stays long), and defaults to 1 share.
+                // Every other two-anchor tool finalizes as-is.
                 if (_vm != null
                     && _vm.Drawing.Drawings.FirstOrDefault(x => x.Id == kid) is { Kind: DrawTool.Position } pos)
                     _vm.Drawing.UpdateDrawing(pos with
                     {
                         P3 = pos.P1 - (pos.P2 - pos.P1),
-                        Direction = pos.P2 >= pos.P1 ? 1 : -1,
+                        Direction = _vm.Drawing.DrawTool == DrawTool.PositionShort ? -1 : 1,
                         Qty = 1,
                     });
                 FinishPlacement(kid);
@@ -757,6 +791,10 @@ public partial class ChartView
 
     private void OnPlatformPointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
+        // While an inline text edit is open, DON'T pull focus back to the chart — doing so would blur the
+        // overlay Entry the moment the pointer moves over the chart, which reads as a premature commit/delete.
+        // The label commits only on Enter or a genuine click elsewhere (the press handler), never on hover.
+        if (_vm?.Drawing.InlineEditActive == true) return;
         if (sender is Microsoft.UI.Xaml.Controls.Control ctrl)
             ctrl.Focus(Microsoft.UI.Xaml.FocusState.Programmatic);
     }
