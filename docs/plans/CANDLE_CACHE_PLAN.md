@@ -10,8 +10,12 @@ trade buckets are indistinguishable from lost candles without replaying ticks, s
 read (>~8h back = common on week/month charts + LoadOlderAsync scroll-back) = a real perf regression. Meanwhile step 1's fillGaps=true already
 masks the VISIBLE hole (flat doji) and background maintenance (`FindMissingAndPersist`, replay+set-difference-by-key) already repairs the
 PERSISTED data correctly. A principled cheap gate needs a new provider-specific "distinct trade-bucket count" query (SQLite+Postgres) that just
-duplicates maintenance. Net = negative EV on the read path now; revisit only if prod shows holes maintenance is not catching. Steps 4-7 (client
-CandleCache read-path, live-merge-all-resolutions = the "subscription", reconnect tail-refetch, seam source-fix) TODO — see Build order below.**
+duplicates maintenance. Net = negative EV on the read path now; revisit only if prod shows holes maintenance is not catching. **Step 7 (seam source-fix) BUILT**
+`6b873f7`: continuous-open behind default-off `Candles:ContinuousOpen` — the bounce-path first-mid-trade KEEPS the prev-close Open seed
+instead of re-anchoring to the mid ⇒ open[t]==close[t-1]; invariant preserved (SeedEligibleRange-from-Open + High/Low envelope). Prod runs
+BounceReference=mid so this is a REAL live-candle change ⇒ default-off + HOLD-for-Kiesh-eyeball flip (chart appearance, like F3); VwapClose
+already false in prod so step-7 half-2 needs no change; client forming-bar wiring deferred to flip-time; 761 tests. Steps 4-6 (client
+CandleCache read-path, live-merge-all-resolutions = the "subscription", reconnect tail-refetch) TODO — see Build order below.**
 Owner (Kiesh) asked for this: client candle
 data 'often not loaded correctly', slow timeframe switches, rare missing candles + close[t]!=open[t+1]. Root cause = NO client cache +
 fillGaps ignored + seam bugs. Pairs with EXCHANGE_CANDLE_RESEARCH.md (Heikin-Ashi overlay = the 'average smooths' answer) and
