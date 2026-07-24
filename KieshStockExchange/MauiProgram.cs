@@ -291,6 +291,13 @@ public static class MauiProgram
                 minFill.TryGetInt32(out var mf))
                 KieshStockExchange.Models.Candle.HLMinFillSize = mf;
 
+            // §client candle cache (steps 4-5, default-off): serve fully-covered sealed ranges from RAM
+            // instead of re-fetching over HTTP on every timeframe switch. Absent ⇒ false ⇒ today's behaviour.
+            if (doc.RootElement.TryGetProperty("Candles", out var candlesC) &&
+                candlesC.TryGetProperty("ClientCache", out var cc) &&
+                (cc.ValueKind == System.Text.Json.JsonValueKind.True || cc.ValueKind == System.Text.Json.JsonValueKind.False))
+                KieshStockExchange.Services.MarketDataServices.CandleCache.Enabled = cc.GetBoolean();
+
             if (doc.RootElement.TryGetProperty("Server", out var server) &&
                 server.TryGetProperty("BaseUrl", out var url) &&
                 url.GetString() is { Length: > 0 } s)

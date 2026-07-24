@@ -37,6 +37,11 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
     // a legitimately-empty response is passed through unchanged.
     private readonly ConcurrentDictionary<(int, CurrencyType, CandleResolution), IReadOnlyList<Candle>> _lastGood = new();
 
+    // Client history cache (candle-cache plan steps 4-5): cache-first serve of fully-covered sealed ranges,
+    // kept warm by live closes. Gated by CandleCache.Enabled (default off ⇒ populated-but-never-served ⇒
+    // byte-identical). Owns both the HTTP fetch and the hub fan-out, so read + live-merge sit in one place.
+    private readonly CandleCache _cache = new();
+
     public ConcurrentDictionary<(int, CurrencyType, CandleResolution), CandleAggregator> Aggregators =>
         throw new NotSupportedException("Candle aggregators live server-side after Phase 3.");
 
@@ -60,6 +65,12 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
     {
         var resolution = (CandleResolution)candle.BucketSeconds;
         var key = (candle.StockId, candle.CurrencyType, resolution);
+
+        // §client cache: fold every closed candle (all resolutions the hub delivers) into the cache so
+        // backgrounded timeframes stay warm — this is the "subscription" of the cache plan (step 5). No-op
+        // for uncached keys / when disabled.
+        if (CandleCache.Enabled)
+            _cache.MergeClosed(candle.StockId, candle.CurrencyType, resolution, candle);
 
         // Fan out to anyone streaming this key.
         if (_streams.TryGetValue(key, out var stream))
@@ -165,21 +176,42 @@ public sealed class SignalRCandleService : ICandleService, IAsyncDisposable
         // the DB directly. If gap-fill becomes a chart requirement, add a
         // /historical endpoint that proxies through ICandleService server-side.
         _ = fillGaps;
-        var http = _httpFactory.CreateClient("KSE.Server");
         var span = TimeSpan.FromSeconds((int)resolution);
+        var key = (stockId, currency, resolution);
+
+        // §client cache (steps 4-5): align the request to bucket boundaries exactly as the server does, then
+        // try to serve the whole [from,to) from RAM — a fully-covered range at/behind the sealed frontier is
+        // an instant switch-back with zero HTTP. A miss (or disabled) falls through to the fetch below.
+        var fromAligned = TimeHelper.FloorToBucketUtc(fromUtc, span);
+        var toAligned = TimeHelper.NextBucketBoundaryUtc(toUtc, span);
+        if (CandleCache.Enabled)
+        {
+            var cached = _cache.TryServe(stockId, currency, resolution, fromAligned, toAligned);
+            if (cached is { Count: > 0 }) return cached;
+        }
+
+        var http = _httpFactory.CreateClient("KSE.Server");
         var url = $"api/candles/by-stock-range/{stockId}/{currency}" +
                   $"?resolution={Uri.EscapeDataString(span.ToString())}" +
                   $"&from={Uri.EscapeDataString(fromUtc.ToString("o"))}" +
                   $"&to={Uri.EscapeDataString(toUtc.ToString("o"))}";
 
-        var key = (stockId, currency, resolution);
         try
         {
             var list = await http.GetFromJsonAsync<List<Candle>>(url, ApiJsonOptions.Default, ct).ConfigureAwait(false);
             // Remember the last non-empty result so a later fault can serve it. An
             // empty result is passed through as-is (young stock / no data in range)
             // and never overwrites a good snapshot.
-            if (list is { Count: > 0 }) _lastGood[key] = list;
+            if (list is { Count: > 0 })
+            {
+                _lastGood[key] = list;
+                // Warm the cache with the sealed portion of this fetch (buckets before the still-forming one).
+                if (CandleCache.Enabled)
+                {
+                    var forming = TimeHelper.FloorToBucketUtc(TimeHelper.NowUtc(), span);
+                    _cache.MergeFetched(stockId, currency, resolution, fromAligned, toAligned, list, forming);
+                }
+            }
             return list ?? new List<Candle>();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

@@ -21,6 +21,12 @@ namespace KieshStockExchange.Services.MarketDataServices;
 /// </summary>
 public sealed class CandleCache
 {
+    // Client cache-first read path (candle-cache plan steps 4-5). Set once at client startup from
+    // Candles:ClientCache (MauiProgram). Default false ⇒ SignalRCandleService always fetches over HTTP
+    // exactly as before (byte-identical) — the cache is populated but never served, so flipping it on is a
+    // reversible, low-risk switch once verified on a running client.
+    public static bool Enabled = false;
+
     private sealed class Entry
     {
         public readonly List<Candle> Candles = new();   // ascending by OpenTime, distinct, closed-only
