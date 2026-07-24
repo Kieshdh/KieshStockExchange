@@ -894,6 +894,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
                         regimeTakerCohortFraction:      _configuration.GetValue("Bots:Sentiment:RegimeDrift:CohortFraction", 0.3m),
                         regimeTakerContrarianFraction:  _configuration.GetValue("Bots:Sentiment:RegimeDrift:ContrarianFraction", 0.2m),
                         regimeTakerBias:  _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerBias", 0m),
+                        regimeTakerBiasSpread:  _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerBiasSpread", 0m),
                         dipBuyStrength:      _configuration.GetValue("Bots:DipBuyStrength", 0m),
                         valueTargetSelection: _configuration.GetValue("Bots:ValueAnchor:TargetSelection", false),
                         overheatCap:         _configuration.GetValue("Bots:ValueAnchor:OverheatCap", 0m),
@@ -1095,7 +1096,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
         // §regime-taker + §market-pulse arm marker: lets an A/B soak operator confirm the taker-coupling + pulse
         // knobs took effect (MarketPulse is INERT unless coupling=true + strength>0, since it modulates the taker rate).
         _logger.LogInformation(
-            "CONFIGCHECK RegimeTaker coupling={Tc} strength={Ts} threshold={Th} cohortFraction={Cf} bias={Bi} | " +
+            "CONFIGCHECK RegimeTaker coupling={Tc} strength={Ts} threshold={Th} cohortFraction={Cf} bias={Bi} biasSpread={Bs} | " +
             "MarketPulse enabled={Mp} oscA={Oa} oscTau=[{OtMin},{OtMax}] jitterA={Ja} jitterTau=[{JtMin},{JtMax}] " +
             "(pulse modulates the regime-taker rate; needs coupling+strength>0 to bite; off ⇒ byte-identical)",
             _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerCoupling", false),
@@ -1103,6 +1104,7 @@ public class AiTradeService : IAiTradeService, IAsyncDisposable
             _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerThreshold", 0.15m),
             _configuration.GetValue("Bots:Sentiment:RegimeDrift:CohortFraction", 0.3m),
             _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerBias", 0m),
+            _configuration.GetValue("Bots:Sentiment:RegimeDrift:TakerBiasSpread", 0m),
             _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:Enabled", false),
             _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscA", 0.35),
             _configuration.GetValue("Bots:Sentiment:RegimeDrift:MarketPulse:OscTauMinSec", 30.0),

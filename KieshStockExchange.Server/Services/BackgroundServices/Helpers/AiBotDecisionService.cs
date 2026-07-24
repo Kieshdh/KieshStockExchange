@@ -182,8 +182,13 @@ internal sealed class AiBotDecisionService
     // §μ-engine B (nominal-growth updrift): a small POSITIVE bias added to the regime signal the taker gate sees, so the
     // spread-crossing cohort skews net-BUY (more buy-takers, fewer sell-takers) = a persistent taker imbalance = the μ term
     // of P=P+μ+σε. Applied to the TAKER decision only (the buyProb sentiment at BotSentimentService:372 is untouched, so σ
-    // and mean-reversion are unchanged). 0 ⇒ byte-identical. Tunable = the drift-rate dial.
+    // and mean-reversion are unchanged). 0 ⇒ byte-identical. Tunable = the drift-rate dial (the cross-sectional MEAN μ).
     private readonly decimal _regimeTakerBias;
+    // §μ-engine B per-stock SPREAD: a deterministic per-stock signed dispersion added on top of the mean bias, so the
+    // effective drift is bias ± spread·hash(stock) — the AGGREGATE stays at the mean (E[hash]=0, small-positive/near-zero)
+    // while individual stocks VARY (some net-up trenders, some net-down where spread·z < −bias). Bounded by the same
+    // value-band veto + CapFromSeed hard cap as the mean, so it's stairs-up-per-stock, not runaway. 0 ⇒ mean-only.
+    private readonly decimal _regimeTakerBiasSpread;
     // §shared-factor taker chase (cross-stock correlation): the same taker-flow idea on the SHARED global signal —
     // when it is strong, cohort members across ALL stocks aggress the same direction at once ⇒ fleet-wide correlated
     // flow. Weight 0 ⇒ off ⇒ byte-identical.
@@ -308,6 +313,7 @@ internal sealed class AiBotDecisionService
     // §regime-taker (Change 3): independent salts for the cohort-membership + contrarian draws.
     private const int RegimeTakerCohortSalt = 0x5D21;
     private const int RegimeContrarianSalt  = 0x6E4F;
+    private const int RegimeTakerBiasSpreadSalt = 0x4C8A; // §μ-engine B per-stock drift dispersion
     // §reaction-persistence: distinct salt for the per-bot persistence half-life draw (call-order-independent
     // HashUnit01, advances no RNG), so the persistence clock is uncorrelated with any cohort membership / cadence.
     private const int PersistHalfLifeSalt = 0x2F6B;
@@ -424,6 +430,7 @@ internal sealed class AiBotDecisionService
         bool regimeTakerCoupling = false, decimal regimeTakerThreshold = 0.15m,
         decimal regimeTakerStrength = 0m, decimal regimeTakerCohortFraction = 0.3m,
         decimal regimeTakerContrarianFraction = 0.2m, decimal regimeTakerBias = 0m,
+        decimal regimeTakerBiasSpread = 0m,
         decimal dipBuyStrength = 0m,
         bool valueTargetSelection = false, decimal overheatCap = 0m,
         decimal absoluteCapMax = 0m,
@@ -590,6 +597,7 @@ internal sealed class AiBotDecisionService
         _regimeTakerCohortFraction    = Clamp01(regimeTakerCohortFraction);
         _regimeTakerContrarianFraction = Clamp01(regimeTakerContrarianFraction);
         _regimeTakerBias              = regimeTakerBias;   // signed; + = net-up μ (no clamp — a small positive value)
+        _regimeTakerBiasSpread        = Math.Max(0m, regimeTakerBiasSpread); // per-stock dispersion half-width (≥0)
         _valueTargetSelection = valueTargetSelection;
         _overheatCap        = Math.Max(0m, overheatCap);
         _absoluteCapMax     = Math.Max(0m, absoluteCapMax);
@@ -877,9 +885,9 @@ internal sealed class AiBotDecisionService
         // over-extension brake. Gate short-circuits before ctx.Decimal01 ⇒ off = byte-identical + RNG-stream-identical.
         if (!isChase && _regimeTakerCoupling && _regimeTakerStrength > 0m && user.Strategy != AiStrategy.MarketMaker)
         {
-            // §μ-engine B: shift the signal up by the bias so the gate/direction skew net-BUY (promotes buy-takers just
-            // over the +threshold, suppresses sell-takers just under −threshold) = persistent net-up taker imbalance. 0 = no-op.
-            var rsig = _sentiment.RegimeSignal(stockId) + _regimeTakerBias;
+            // §μ-engine B: shift the signal by a per-stock effective bias = mean (net-up μ) ± spread·hash(stock), so the
+            // gate/direction skews net-BUY on average while each stock leans its own way (some net-up, some net-down). 0/0 = no-op.
+            var rsig = _sentiment.RegimeSignal(stockId) + EffectiveRegimeBias(stockId, _regimeTakerBias, _regimeTakerBiasSpread);
             if (Math.Abs(rsig) >= _regimeTakerThreshold &&
                 BotMath.HashUnit01(user.AiUserId ^ RegimeTakerCohortSalt) < (double)_regimeTakerCohortFraction)
             {
@@ -2622,6 +2630,19 @@ internal sealed class AiBotDecisionService
         var chaseUp = momentumSignal > 0m;
         if (contrarian) chaseUp = !chaseUp;
         return (true, true, chaseUp);
+    }
+
+    /// <summary>
+    /// §μ-engine B per-stock effective drift bias = <paramref name="mean"/> + <paramref name="spread"/>·z(stock), where
+    /// z ∈ [-1,1) is a deterministic per-stock hash. The cross-section MEAN is <paramref name="mean"/> (E[z]=0) so the
+    /// aggregate drift stays where the mean puts it (small-positive/near-zero), while each stock leans its own way — some
+    /// net-up, some net-down (where spread·z &lt; −mean). spread ≤ 0 ⇒ returns mean unchanged (byte-identical). Pure/deterministic.
+    /// </summary>
+    internal static decimal EffectiveRegimeBias(int stockId, decimal mean, decimal spread)
+    {
+        if (spread <= 0m) return mean;
+        double z = 2.0 * BotMath.HashUnit01(stockId ^ RegimeTakerBiasSpreadSalt) - 1.0; // [-1,1)
+        return mean + spread * (decimal)z;
     }
 
     /// <summary>

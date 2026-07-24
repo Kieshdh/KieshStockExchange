@@ -119,4 +119,56 @@ public class TrendFollowTiltTests
         Assert.True(AiBotDecisionService.TrendTakerDecision(0.3m, 2.0m, false, draw: 0.5m, threshold: Thr).over);
         Assert.False(AiBotDecisionService.TrendTakerDecision(0.3m, 2.0m, false, draw: 0.7m, threshold: Thr).over);
     }
+
+    // ---- §μ-engine B per-stock effective bias = mean ± spread·hash(stock) --------------------------
+
+    [Fact]
+    public void EffectiveBias_spreadOff_returns_mean_exactly()
+    {
+        // spread ≤ 0 ⇒ mean unchanged for every stock (byte-identical to the mean-only μ-engine B).
+        for (int sid = 1; sid <= 50; sid++)
+        {
+            Assert.Equal(0.03m, AiBotDecisionService.EffectiveRegimeBias(sid, 0.03m, 0m));
+            Assert.Equal(0.03m, AiBotDecisionService.EffectiveRegimeBias(sid, 0.03m, -0.1m));
+        }
+    }
+
+    [Fact]
+    public void EffectiveBias_deterministic_and_within_band()
+    {
+        const decimal mean = 0.03m, spread = 0.06m;
+        for (int sid = 1; sid <= 200; sid++)
+        {
+            var a = AiBotDecisionService.EffectiveRegimeBias(sid, mean, spread);
+            Assert.Equal(a, AiBotDecisionService.EffectiveRegimeBias(sid, mean, spread)); // deterministic
+            Assert.InRange(a, mean - spread, mean + spread);                              // bounded
+        }
+    }
+
+    [Fact]
+    public void EffectiveBias_crossSection_mean_is_the_mean_dispersion_from_spread()
+    {
+        // Aggregate drift = the MEAN (E[z]=0); dispersion comes from the SPREAD ⇒ stocks vary.
+        const decimal mean = 0.03m, spread = 0.06m;
+        var vals = Enumerable.Range(1, 3000)
+            .Select(sid => AiBotDecisionService.EffectiveRegimeBias(sid, mean, spread)).ToList();
+        var avg = vals.Average();
+        Assert.True(Math.Abs(avg - mean) < 0.004m, $"cross-section mean {avg} should ≈ {mean}");
+        // Spread ≳ mean ⇒ a meaningful fraction of stocks are net-NEGATIVE (down-trenders), not a lockstep climb.
+        var netDown = vals.Count(v => v < 0m);
+        Assert.InRange(netDown, 1, vals.Count - 1);
+        // and some are clearly above the mean (up-trenders) ⇒ genuine dispersion.
+        Assert.Contains(vals, v => v > mean + spread * 0.5m);
+    }
+
+    [Fact]
+    public void EffectiveBias_zeroMean_positiveSpread_is_zeroMean_dispersion()
+    {
+        // mean 0 + spread>0 ⇒ pure per-stock variety, aggregate ≈ 0 (stocks vary, net-flat market).
+        var vals = Enumerable.Range(1, 3000)
+            .Select(sid => AiBotDecisionService.EffectiveRegimeBias(sid, 0m, 0.06m)).ToList();
+        Assert.True(Math.Abs(vals.Average()) < 0.004m);
+        Assert.Contains(vals, v => v > 0.02m);
+        Assert.Contains(vals, v => v < -0.02m);
+    }
 }
