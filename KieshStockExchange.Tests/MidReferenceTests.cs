@@ -24,8 +24,16 @@ namespace KieshStockExchange.Tests;
 [Collection("MidReferenceSerial")]
 public sealed class MidReferenceTests : IDisposable
 {
-    public MidReferenceTests() => MidReference.ConfigureForTests(MidRefMode.Off);
-    public void Dispose() => MidReference.ConfigureForTests(MidRefMode.Off);
+    public MidReferenceTests()
+    {
+        MidReference.ConfigureForTests(MidRefMode.Off);
+        Candle.ContinuousOpenSeed = false;
+    }
+    public void Dispose()
+    {
+        MidReference.ConfigureForTests(MidRefMode.Off);
+        Candle.ContinuousOpenSeed = false;
+    }
 
     private const int StockId = 42;
     private const CurrencyType Ccy = CurrencyType.USD;
@@ -177,6 +185,39 @@ public sealed class MidReferenceTests : IDisposable
         Assert.Equal(54m, candle.Low);
         Assert.Equal(54m, candle.Close);  // last mid
         Assert.True(candle.IsValid());    // Low ≤ Open ≤ High holds
+    }
+
+    [Fact]
+    public void ApplyTrade_with_mid_continuousOpen_keeps_seed_and_stays_continuous()
+    {
+        // §continuous open: the seeded Open (prior close) is KEPT so open[t]==close[t-1]; the extreme
+        // seed-above-mid case still holds the invariant because High/Low envelope the seed.
+        Candle.ContinuousOpenSeed = true;
+        var candle = PastMinuteCandle(seed: 99m);
+        candle.ApplyTrade(Tick(price: 52m, mid: 55m, txId: 1, secOffset: 1));
+        candle.ApplyTrade(Tick(price: 48m, mid: 54m, txId: 2, secOffset: 2));
+
+        Assert.Equal(99m, candle.Open);   // KEPT — continuous with the prior bar's close, not the mid
+        Assert.Equal(99m, candle.High);   // High envelopes the seed
+        Assert.Equal(54m, candle.Low);    // Low tracks the mid series
+        Assert.Equal(54m, candle.Close);  // last mid
+        Assert.True(candle.IsValid());    // Low ≤ Open ≤ High still holds
+    }
+
+    [Fact]
+    public void ApplyTrade_with_mid_continuousOpen_normal_seed_within_range()
+    {
+        // Common case: seed sits inside the mid series ⇒ a clean continuous bar (Open=seed, body to the mids).
+        Candle.ContinuousOpenSeed = true;
+        var candle = PastMinuteCandle(seed: 54.5m);
+        candle.ApplyTrade(Tick(price: 55m, mid: 55m, txId: 1, secOffset: 1));
+        candle.ApplyTrade(Tick(price: 54m, mid: 54m, txId: 2, secOffset: 2));
+
+        Assert.Equal(54.5m, candle.Open); // seed kept ⇒ open[t]==close[t-1]
+        Assert.Equal(55m, candle.High);
+        Assert.Equal(54m, candle.Low);
+        Assert.Equal(54m, candle.Close);
+        Assert.True(candle.IsValid());
     }
 }
 

@@ -62,6 +62,10 @@ KieshStockExchange.Helpers.CurrencyHelper.PriceTickExtraDecimals =
 // volume-only for the candle range — the consolidated-tape odd-lot rule. Read once at startup.
 KieshStockExchange.Models.Candle.HLMinFillSize =
     builder.Configuration.GetValue("Candles:HLMinFillSize", 0);
+// §continuous open (candle-cache seam step 7, Candles:ContinuousOpen, default false ⇒ byte-identical):
+// on the bounce path, keep the prev-close Open seed instead of re-anchoring to the mid ⇒ open[t]==close[t-1].
+KieshStockExchange.Models.Candle.ContinuousOpenSeed =
+    builder.Configuration.GetValue("Candles:ContinuousOpen", false);
 
 // FX realism (Bots:Fx:* — damp the AR(1) mid-rate walker toward a mean-reverting bounded walk at
 // ~1% intraday vol). Defaults = the historical consts ⇒ byte-identical when the section is absent.

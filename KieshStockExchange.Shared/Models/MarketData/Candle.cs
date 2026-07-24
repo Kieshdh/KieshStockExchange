@@ -7,6 +7,13 @@ public class Candle : IValidatable
     // §bounce vwap: set once at startup by MidReference.Configure — the Shared model can't read server config.
     public static bool VwapClose = false;
 
+    // §continuous open (candle-cache seam step 7): when true, the first mid/bounce trade in a bar KEEPS the
+    // seeded Open (= prior bar's Close) instead of re-anchoring Open to the mid series — so open[t]==close[t-1]
+    // (no traded-boundary gap). The Low<=Open<=High invariant is preserved because the eligible H/L range is
+    // seeded from Open and the final High/Low envelope it. Set once at startup from Candles:ContinuousOpen.
+    // Default false ⇒ the legacy re-anchor ⇒ byte-identical. Only affects the MidPrice-present (bounce) path.
+    public static bool ContinuousOpenSeed = false;
+
     // §filtered-tape H/L (the SIP odd-lot / TradingView analog): fills below this size still count toward
     // volume/close/vwap but do NOT set High/Low — tiny prints sweeping thin levels are non-representative
     // of the accessible market and real consolidated tapes exclude them from the official range. 0 = off
@@ -281,11 +288,14 @@ public class Candle : IValidatable
         {
             // §bounce: when the trade carries a bounce-free reference (mid/micro), the candle is built off
             // it instead of the last-trade price. The bar is seeded (NewCandle) with Open from the prior
-            // last-trade close, so on the FIRST mid trade we re-anchor Open=High=Low to the mid series too,
-            // otherwise a seed above the mid range would break the Low<=Open<=High invariant. Gated on
-            // MidPrice.HasValue so the off arm (px == tick.Price) is byte-identical to the legacy branch.
+            // last-trade close. LEGACY (ContinuousOpenSeed off): on the FIRST mid trade re-anchor
+            // Open=High=Low to the mid series, otherwise a seed above the mid range would break the
+            // Low<=Open<=High invariant — but this drops the prev-close continuity (open[t]!=close[t-1]).
+            // CONTINUOUS (ContinuousOpenSeed on): KEEP the Open seed; SeedEligibleRange seeds the eligible
+            // range from Open and the final High/Low envelope it, so the invariant holds AND open[t]==close[t-1].
+            // Gated on MidPrice.HasValue so the off arm (px == tick.Price) is byte-identical to the legacy branch.
             var px = tick.MidPrice ?? tick.Price;
-            if (tick.MidPrice.HasValue && TradeCount == 0)
+            if (tick.MidPrice.HasValue && TradeCount == 0 && !ContinuousOpenSeed)
             {
                 Open = px; High = px; Low = px;
                 _hlEligHigh = px; _hlEligLow = px;   // re-anchor resets the eligible range too
