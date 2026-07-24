@@ -14,6 +14,25 @@ OFF port 5080 kse_soak_f2off vs ON port 5083 kse_soak_f2on, BOTH F1-ON + prod-li
 timescales (Period 8min / Daily 30min) so 45m sees several cycles (mechanism is period-scale-invariant; prod=150/1440). Arms in
 scratchpad/arm-f2-{off,on}.ps1. GATES: CK=0 hard · top-vol Jaccard ≤0.55 across adjacent windows (rotation real, Δ≥0.15 vs OFF) ·
 agg volume ±2% (redistributive) · corr(volume,|ret|) LOOSE (volume≠move) · drift/ret_acf/move parity. Analyze → council → prod.
+
+**★★ SOAK RESULT + COUNCIL VERDICT (2026-07-24) = PARKED, size-channel is the WRONG axle; do NOT prod. FORK for Kiesh.**
+SOAK (45m A/B, F1-ON baseline both arms, compressed 8/30min): CK=0 both · price PARITY (drift −0.014/−0.012, ret_acf −0.097/−0.109,
+move p99 parity) — F2 does NOT break the market · **ROTATION FAILED on 3 independent measures** (leader Jaccard 0.80→0.76 [wanted ≤0.55],
+per-stock temporal vol-CV 0.524→0.490 [ON LOWER — no vol time-variation added], cross-window rank-stability 0.861→0.858 [identical]) ·
+only measurable effect = **+3.9% net notional LIFT** (Jensen convexity of median-1 Boost^e; gate was ±2%). DIAGNOSIS: H is absorbed —
+(a) order size is bound by downstream cash/room/depth/position CLAMPS not the pre-clamp rawTrade, so a ×1.5 nudge clamps back; (b) ±1.5×
+is negligible vs ~10× intrinsic per-stock volume dispersion, so mega-caps stay biggest. COUNCIL (5 advisors + 3 peer reviews): **the SIZE
+channel is the wrong mechanism** — "leader rotation" is a RANK operation; an absolute median-1 multiplier on a 10× spread moves magnitude
+(the +3.9% lift) not rank. **Kill bigger-Boost** (just clamps harder + inflates worse). **Ship-subtle-texture = negative value** (imperceptible
+default-off knob = pure maintenance surface). **Rank-normalize (C) = "scoreboard rigger"** (artificially suppresses mega-caps, reads FAKE).
+**Arrival-RATE / cadence (B) is the ONLY mechanism that could truly rotate leaders** — naturally price-neutral + visible — but it fights the
+load-scaler that pins order COUNT ⇒ a REAL multi-hour build, not a soak-tune. **Unanimous peer-review blind spot: measure the BASELINE first.**
+PROD BASELINE (measured, `scratchpad/prod_daily_rotation.sql`): day-to-day top-8-by-notional Jaccard = 0.778 / 1.000 / 0.600 (mean ~0.79) —
+leaders barely rotate; same 5-6 big names (stocks 1,2,3,7,13) anchor the top every day. So the ask is REAL but a WEAK lever can't meet it.
+**DECISION: PARK F2** (code stays default-off/byte-identical, NOT prod-bound). **★ FORK FOR KIESH** (genuine taste call, only he can settle):
+do you want VISIBLY different volume leaders each day even if that means NOT weak? and should it be (B) a real arrival-rate engine redesign,
+or a read-only "most-active" PRESENTATION-layer board over existing flow (guaranteed weak, zero price risk)? — until he answers, F2 stays parked
+and the run keeps moving to the next queue item.
 ★ NOTE for council: with F1-ON, StockProfile.Class = 'Sized'/sector ⇒ F2's per-class clamp falls to the uniform 0.8 default
 (Calm/Meme differentiation is a latent legacy-mode feature); prod runs F1-ON so the soak is representative. Design-of-record below
 (CORRECTED section) stands; the discrete-window base it referenced is superseded by this organic model.**
